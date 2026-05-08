@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778211529621,
+  "lastUpdate": 1778247951978,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8397,6 +8397,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2600aba417dc85f544c437648371d025d6b0a719",
+          "message": "docs: add ci and crates badges",
+          "timestamp": "2026-05-08T15:33:50+02:00",
+          "tree_id": "3f54bfc5d5403c879be5a6b13a50202baacc8fdc",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/2600aba417dc85f544c437648371d025d6b0a719"
+        },
+        "date": 1778247950700,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48,
             "unit": "MiB"
           }
         ]
