@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778345161667,
+  "lastUpdate": 1778352241031,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8839,6 +8839,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "kirnevartem30@gmail.com",
+            "name": "Artyom Kirnev",
+            "username": "AbyssWaIker"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2a7e33556aa712dbef8cb69f09e613a1234775d6",
+          "message": "Add find references and rename for PHPDoc @property/@method",
+          "timestamp": "2026-05-09T20:31:54+02:00",
+          "tree_id": "c9b2c48a55439bd50ab6ec8227f26060b866ef4d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/2a7e33556aa712dbef8cb69f09e613a1234775d6"
+        },
+        "date": 1778352239815,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.8,
             "unit": "MiB"
           }
         ]
