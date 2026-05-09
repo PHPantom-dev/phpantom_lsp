@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778345098481,
+  "lastUpdate": 1778345161667,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8805,6 +8805,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "479a6669d68fae6b549d0e167233cb7008544095",
+          "message": "Deduplicate scope map helpers for extract-function, extract-variable,\nand inline-variable",
+          "timestamp": "2026-05-09T18:33:17+02:00",
+          "tree_id": "a94e812c00262224c07c174ff55e90f2522184b4",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/479a6669d68fae6b549d0e167233cb7008544095"
+        },
+        "date": 1778345160277,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.7,
             "unit": "MiB"
           }
         ]
