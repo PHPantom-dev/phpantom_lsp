@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778295013005,
+  "lastUpdate": 1778301950984,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8499,6 +8499,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "94ad9f0e00a5468610cc5e58b3e3941d0fa6a7e7",
+          "message": "Rename ast_map and classmap to uri_classes_index and fqn_uri_index",
+          "timestamp": "2026-05-09T06:33:19+02:00",
+          "tree_id": "2e9735b7fbde132a9198d139e5a139ec71edca93",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/94ad9f0e00a5468610cc5e58b3e3941d0fa6a7e7"
+        },
+        "date": 1778301949253,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.4,
             "unit": "MiB"
           }
         ]
