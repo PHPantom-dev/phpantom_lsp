@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778301950984,
+  "lastUpdate": 1778303002335,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8533,6 +8533,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8e7bbaec80f63adb5e33b636e0740c99b08e29c9",
+          "message": "Remove shadow chain resolver and redundant hover fallback",
+          "timestamp": "2026-05-09T06:51:38+02:00",
+          "tree_id": "aa70bb52cf2f95a4a632279419d85cbfed399089",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/8e7bbaec80f63adb5e33b636e0740c99b08e29c9"
+        },
+        "date": 1778303001625,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.1,
             "unit": "MiB"
           }
         ]
