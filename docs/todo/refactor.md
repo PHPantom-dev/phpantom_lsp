@@ -258,15 +258,6 @@ only during diagnostic/analyse passes. Completion and hover re-resolve callable
 targets and re-parse files from scratch. Extending these to all consumers would
 avoid redundant work.
 
-### `MIXIN_CACHE` never invalidated
-
-`src/virtual_members/phpdoc.rs` `MIXIN_CACHE` is a thread-local
-`HashMap<String, Arc<ClassInfo>>` that caches resolved mixin classes. It is used
-by all consumers (completion, hover, diagnostics) but is never cleared during
-normal LSP operation. If a mixin class definition changes (e.g. a method is added
-to `Illuminate\Database\Eloquent\Builder`), the cache serves stale data until the
-thread dies. Needs content-hash or generation-counter invalidation.
-
 ---
 
 ## Redundant backwards text walkers

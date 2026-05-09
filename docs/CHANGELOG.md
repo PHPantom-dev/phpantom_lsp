@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stale mixin members after editing.** Mixin class resolution (e.g. `@mixin Builder`) is now invalidated when any file changes, so newly added or removed methods on mixin targets appear immediately without restarting the server.
 - **Version-gated stub constants now filtered.** Constants with `@removed` tags (e.g. `MCRYPT_ENCRYPT`, removed in PHP 7.2) are now excluded from completion and resolution when the project targets a newer PHP version. Previously only classes and functions were filtered.
 - **Go-to-definition.** Fixed a potential deadlock when navigating to a vendor class that hadn't been parsed yet.
 - **LSP no longer freezes under heavy editor activity.** Server-to-client requests (diagnostic refresh, progress token creation) could deadlock the service loop when the editor was simultaneously sending bursts of open/close/hover messages. All server-to-client requests are now either fire-and-forget or time-bounded, long-running handlers are cancellation-safe, and the process exits cleanly if the service loop ever terminates unexpectedly.

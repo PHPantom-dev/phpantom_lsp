@@ -18,6 +18,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
@@ -31,6 +32,17 @@ use crate::types::{
 };
 use crate::util::short_name;
 
+/// Global generation counter, incremented every time a file is re-parsed.
+/// Thread-local caches compare against this to detect staleness.
+static MIXIN_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Bump the mixin-cache generation so that all threads discard stale entries
+/// on their next access.  Called from [`Backend::update_ast`] whenever a file
+/// changes.
+pub fn bump_mixin_generation() {
+    MIXIN_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
 thread_local! {
     /// Thread-local cache of base-resolved mixin classes.
     ///
@@ -40,11 +52,10 @@ thread_local! {
     /// `\Illuminate\Database\Eloquent\Builder`) are performed at most
     /// once per thread.
     ///
-    /// Must be cleared between test runs via [`clear_mixin_cache`]
-    /// because different tests may define classes with the same short
-    /// name but different members.
-    static MIXIN_CACHE: RefCell<HashMap<String, Arc<ClassInfo>>> =
-        RefCell::new(HashMap::new());
+    /// Automatically invalidated when the global generation counter
+    /// advances (i.e. when any file is re-parsed).
+    static MIXIN_CACHE: RefCell<(u64, HashMap<String, Arc<ClassInfo>>)> =
+        RefCell::new((0, HashMap::new()));
 }
 
 /// Clear the thread-local mixin resolution cache.
@@ -55,7 +66,24 @@ thread_local! {
 /// different members.  Call this function when creating a new test
 /// backend so that stale entries from a previous test do not leak.
 pub fn clear_mixin_cache() {
-    MIXIN_CACHE.with(|cache| cache.borrow_mut().clear());
+    MIXIN_CACHE.with(|cache| {
+        let mut inner = cache.borrow_mut();
+        inner.0 = MIXIN_GENERATION.load(Ordering::Relaxed);
+        inner.1.clear();
+    });
+}
+
+/// Ensure the thread-local cache is current with the global generation.
+/// Clears the cache if stale.
+fn ensure_mixin_cache_fresh() {
+    MIXIN_CACHE.with(|cache| {
+        let current_gen = MIXIN_GENERATION.load(Ordering::Relaxed);
+        let mut inner = cache.borrow_mut();
+        if inner.0 != current_gen {
+            inner.0 = current_gen;
+            inner.1.clear();
+        }
+    });
 }
 
 /// Tracks member names already seen during mixin collection.
@@ -603,6 +631,7 @@ fn collect_mixin_members(
         //
         // Results are cached in a thread-local map so that the same
         // mixin (e.g. Builder) is only resolved once per thread.
+        ensure_mixin_cache_fresh();
         let resolved_mixin = if let Some(c) = cache {
             let map = c.lock();
             if let Some(cached) = map.get(&(Atom::from(&resolved_mixin_name), Vec::new())) {
@@ -611,7 +640,7 @@ fn collect_mixin_members(
                 drop(map);
                 MIXIN_CACHE.with(|thread_cache| {
                     let mut map = thread_cache.borrow_mut();
-                    Arc::clone(map.entry(resolved_mixin_name.clone()).or_insert_with(|| {
+                    Arc::clone(map.1.entry(resolved_mixin_name.clone()).or_insert_with(|| {
                         Arc::new(crate::inheritance::resolve_class_with_inheritance(
                             &mixin_class,
                             class_loader,
@@ -622,7 +651,7 @@ fn collect_mixin_members(
         } else {
             MIXIN_CACHE.with(|thread_cache| {
                 let mut map = thread_cache.borrow_mut();
-                Arc::clone(map.entry(resolved_mixin_name.clone()).or_insert_with(|| {
+                Arc::clone(map.1.entry(resolved_mixin_name.clone()).or_insert_with(|| {
                     Arc::new(crate::inheritance::resolve_class_with_inheritance(
                         &mixin_class,
                         class_loader,
