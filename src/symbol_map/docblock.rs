@@ -232,6 +232,20 @@ pub(super) fn extract_docblock_symbols(
             continue;
         }
 
+        // ── @property variants ───────────────────────────────────────
+        if matches!(
+            tag.kind,
+            TagKind::Property
+                | TagKind::PropertyRead
+                | TagKind::PropertyWrite
+                | TagKind::PsalmProperty
+                | TagKind::PsalmPropertyRead
+                | TagKind::PsalmPropertyWrite
+        ) {
+            extract_property_tag_symbols(docblock, desc_start_in_docblock, base_offset, spans);
+            continue;
+        }
+
         // ── @template variants ──────────────────────────────────────
         if let Some(variance) = template_variance_for_tag(&tag.kind) {
             if let Some((name, offset, bound)) =
@@ -1131,7 +1145,9 @@ fn extract_method_tag_symbols(
     let mut rest_offset_in_docblock = desc_start_in_docblock + leading_ws;
 
     // Skip optional `static` keyword.
+    let mut is_static = false;
     if rest.starts_with("static ") || rest.starts_with("static\t") {
+        is_static = true;
         let skip = "static".len();
         let after_static = rest[skip..].trim_start();
         let whitespace_len = rest.len() - skip - after_static.len();
@@ -1145,6 +1161,38 @@ fn extract_method_tag_symbols(
 
     // Extract return type.
     let (return_type, remainder) = split_type_token(rest);
+
+    // When the method has no explicit return type (e.g. `@method foo()`),
+    // `split_type_token` consumes `foo()` as the "type" because the
+    // parentheses are treated as a grouped type unit.  Detect this by
+    // checking if `return_type` contains `(` and `remainder` is empty.
+    // In that case, re-split at the method-name `(`.
+    let (return_type, remainder): (&str, &str) =
+        if remainder.is_empty() && return_type.contains('(') {
+            // The "type" is actually `name(params)`.  Split at the first
+            // `(` that follows a valid identifier to separate the method
+            // name from its parameters.
+            if let Some(paren) = return_type.find('(') {
+                let before = &return_type[..paren];
+                // Only re-split if the text before `(` looks like a plain
+                // identifier (no type operators).
+                let is_plain_ident = !before.contains('|')
+                    && !before.contains('&')
+                    && !before.contains('<')
+                    && !before.contains('{')
+                    && !before.contains(' ');
+                if is_plain_ident {
+                    ("", return_type)
+                } else {
+                    (return_type, remainder)
+                }
+            } else {
+                (return_type, remainder)
+            }
+        } else {
+            (return_type, remainder)
+        };
+
     if !return_type.is_empty() {
         emit_type_spans(
             return_type,
@@ -1155,6 +1203,28 @@ fn extract_method_tag_symbols(
 
     // After the return type, find the `(` for parameter list.
     if let Some(paren_pos) = remainder.find('(') {
+        // Emit MemberDeclaration span for the method name.
+        let method_name = remainder[..paren_pos].trim();
+        if !method_name.is_empty() {
+            // Calculate the absolute offset of the method name within the
+            // docblock.  `remainder` is a substring of `rest` that starts
+            // after `return_type`.  Its first byte is at:
+            //   rest_offset_in_docblock + return_type.len()
+            let remainder_start_in_docblock = rest_offset_in_docblock + return_type.len();
+            let trimmed_before_paren = remainder[..paren_pos].trim_start();
+            let ws_before_name = remainder[..paren_pos].len() - trimmed_before_paren.len();
+            let name_start_in_docblock = remainder_start_in_docblock + ws_before_name;
+            let name_file_start = base_offset + name_start_in_docblock as u32;
+            let name_file_end = name_file_start + method_name.len() as u32;
+            spans.push(SymbolSpan {
+                start: name_file_start,
+                end: name_file_end,
+                kind: SymbolKind::MemberDeclaration {
+                    name: method_name.to_string(),
+                    is_static,
+                },
+            });
+        }
         let close = remainder[paren_pos..].find(')');
         if let Some(close_pos) = close {
             let inner = &remainder[paren_pos + 1..paren_pos + close_pos];
@@ -1197,6 +1267,76 @@ fn extract_method_tag_symbols(
             );
         }
     }
+}
+
+// ─── @property tag symbol extraction ───────────────────────────────────────
+
+/// Extract a `MemberDeclaration` span from `@property`, `@property-read`,
+/// `@property-write`, and their `@psalm-` equivalents.
+///
+/// Format: `@property Type $name` or `@property $name` (no type).
+/// The emitted `MemberDeclaration` name does **not** include the `$` prefix.
+fn extract_property_tag_symbols(
+    docblock: &str,
+    desc_start_in_docblock: usize,
+    base_offset: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if desc_start_in_docblock >= docblock.len() {
+        return;
+    }
+    let raw = &docblock[desc_start_in_docblock..];
+    let first_nl = raw.find('\n').unwrap_or(raw.len());
+    let first_line = &raw[..first_nl];
+    let trimmed = first_line.trim_start();
+    if trimmed.is_empty() {
+        return;
+    }
+    let leading_ws = first_line.len() - trimmed.len();
+    let adjusted_start = desc_start_in_docblock + leading_ws;
+
+    // Split off the type (if any).  The property name `$name` is in the
+    // remainder after the type.
+    let (type_token, remainder) = split_type_token(trimmed);
+
+    // Emit type spans for the property type (if present).
+    if !type_token.is_empty() {
+        emit_type_spans(type_token, base_offset + adjusted_start as u32, spans);
+    }
+
+    // Find `$name` in the remainder.
+    let remainder_trimmed = remainder.trim_start();
+    if remainder_trimmed.is_empty() {
+        return;
+    }
+    let Some(dollar_pos) = remainder_trimmed.find('$') else {
+        return;
+    };
+    let after_dollar = &remainder_trimmed[dollar_pos + '$'.len_utf8()..];
+    // The name ends at the next whitespace or end of string.
+    let name_end = after_dollar
+        .find(|c: char| c.is_whitespace())
+        .unwrap_or(after_dollar.len());
+    let prop_name = &after_dollar[..name_end];
+    if prop_name.is_empty() {
+        return;
+    }
+
+    // Calculate absolute offset of the property name (excluding `$`).
+    let ws_before_remainder = remainder.len() - remainder_trimmed.len();
+    let name_start_in_docblock =
+        adjusted_start + type_token.len() + ws_before_remainder + dollar_pos + '$'.len_utf8();
+    let name_file_start = base_offset + name_start_in_docblock as u32;
+    let name_file_end = name_file_start + prop_name.len() as u32;
+
+    spans.push(SymbolSpan {
+        start: name_file_start,
+        end: name_file_end,
+        kind: SymbolKind::MemberDeclaration {
+            name: prop_name.to_string(),
+            is_static: false,
+        },
+    });
 }
 
 // ─── @see tag symbol extraction ─────────────────────────────────────────────

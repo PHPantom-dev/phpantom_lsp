@@ -1391,3 +1391,301 @@ async fn test_this_method_references_excludes_unrelated() {
         lines
     );
 }
+
+// ─── PHPDoc @property and @method References ────────────────────────────────
+
+#[tokio::test]
+async fn test_phpdoc_property_references_from_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                              // L0
+        "/**\n",                                // L1
+        " * @property string $email\n",         // L2
+        " */\n",                                // L3
+        "class User {\n",                       // L4
+        "    public function demo(): void {\n", // L5
+        "        echo $this->email;\n",         // L6
+        "    }\n",                              // L7
+        "}\n",                                  // L8
+        "$u = new User();\n",                   // L9
+        "echo $u->email;\n",                    // L10
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "email" at line 10 ($u->email).
+    let locs = find_references(&backend, &uri, 10, 13, true).await;
+    assert!(
+        locs.len() >= 3,
+        "Expected at least 3 references to email (declaration + 2 usages), got {}",
+        locs.len()
+    );
+
+    // Should include the @property declaration (line 2).
+    let has_declaration = locs.iter().any(|l| l.range.start.line == 2);
+    assert!(
+        has_declaration,
+        "Should include the @property declaration on line 2"
+    );
+
+    // Should include the $this->email usage (line 6).
+    let has_this_usage = locs.iter().any(|l| l.range.start.line == 6);
+    assert!(
+        has_this_usage,
+        "Should include the $this->email usage on line 6"
+    );
+
+    // Should include the $u->email usage (line 10).
+    let has_external_usage = locs.iter().any(|l| l.range.start.line == 10);
+    assert!(
+        has_external_usage,
+        "Should include the $u->email usage on line 10"
+    );
+}
+
+#[tokio::test]
+async fn test_phpdoc_property_references_from_declaration() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                              // L0
+        "/**\n",                                // L1
+        " * @property string $email\n",         // L2
+        " */\n",                                // L3
+        "class User {\n",                       // L4
+        "    public function demo(): void {\n", // L5
+        "        echo $this->email;\n",         // L6
+        "    }\n",                              // L7
+        "}\n",                                  // L8
+        "$u = new User();\n",                   // L9
+        "echo $u->email;\n",                    // L10
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "email" in the @property tag (line 2).
+    // Line: " * @property string $email"
+    // The MemberDeclaration span covers "email" (without $) starting at char 22.
+    let locs = find_references(&backend, &uri, 2, 22, true).await;
+    assert!(
+        locs.len() >= 3,
+        "Expected at least 3 references from @property declaration, got {}",
+        locs.len()
+    );
+}
+
+#[tokio::test]
+async fn test_phpdoc_method_references_from_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                        // L0
+        "/**\n",                          // L1
+        " * @method string getEmail()\n", // L2
+        " */\n",                          // L3
+        "class User {\n",                 // L4
+        "}\n",                            // L5
+        "$u = new User();\n",             // L6
+        "echo $u->getEmail();\n",         // L7
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "getEmail" at line 7 ($u->getEmail()).
+    let locs = find_references(&backend, &uri, 7, 10, true).await;
+    assert!(
+        locs.len() >= 2,
+        "Expected at least 2 references to getEmail (declaration + usage), got {}",
+        locs.len()
+    );
+
+    // Should include the @method declaration (line 2).
+    let has_declaration = locs.iter().any(|l| l.range.start.line == 2);
+    assert!(
+        has_declaration,
+        "Should include the @method declaration on line 2"
+    );
+}
+
+#[tokio::test]
+async fn test_phpdoc_property_references_exclude_unrelated_class() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                      // L0
+        "/**\n",                        // L1
+        " * @property string $email\n", // L2
+        " */\n",                        // L3
+        "class User {}\n",              // L4
+        "/**\n",                        // L5
+        " * @property int $email\n",    // L6
+        " */\n",                        // L7
+        "class Order {}\n",             // L8
+        "$u = new User();\n",           // L9
+        "echo $u->email;\n",            // L10
+        "$o = new Order();\n",          // L11
+        "echo $o->email;\n",            // L12
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "email" at line 10 ($u->email).
+    let locs = find_references(&backend, &uri, 10, 13, true).await;
+
+    // Should include User's @property and $u->email, but NOT Order's @property or $o->email.
+    let has_user_declaration = locs.iter().any(|l| l.range.start.line == 2);
+    let has_user_usage = locs.iter().any(|l| l.range.start.line == 10);
+    let has_order_declaration = locs.iter().any(|l| l.range.start.line == 6);
+    let has_order_usage = locs.iter().any(|l| l.range.start.line == 12);
+
+    assert!(
+        has_user_declaration,
+        "Should include User's @property declaration"
+    );
+    assert!(has_user_usage, "Should include $u->email usage");
+    assert!(
+        !has_order_declaration,
+        "Should NOT include Order's @property declaration"
+    );
+    assert!(!has_order_usage, "Should NOT include $o->email usage");
+}
+
+#[tokio::test]
+async fn test_phpdoc_property_multiple_properties() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                      // L0
+        "/**\n",                        // L1
+        " * @property int $id\n",       // L2
+        " * @property string $email\n", // L3
+        " * @property string $name\n",  // L4
+        " */\n",                        // L5
+        "class User {}\n",              // L6
+        "$u = new User();\n",           // L7
+        "echo $u->email;\n",            // L8
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "email" at line 8 ($u->email).
+    let locs = find_references(&backend, &uri, 8, 13, true).await;
+    assert!(
+        locs.len() >= 2,
+        "Expected at least 2 references to email, got {}",
+        locs.len()
+    );
+
+    // Should include only the @property string $email declaration (line 3), not id or name.
+    let has_email_decl = locs.iter().any(|l| l.range.start.line == 3);
+    let has_id_decl = locs.iter().any(|l| l.range.start.line == 2);
+    let has_name_decl = locs.iter().any(|l| l.range.start.line == 4);
+    assert!(
+        has_email_decl,
+        "Should include @property string $email declaration"
+    );
+    assert!(
+        !has_id_decl,
+        "Should NOT include @property int $id declaration"
+    );
+    assert!(
+        !has_name_decl,
+        "Should NOT include @property string $name declaration"
+    );
+}
+
+#[tokio::test]
+async fn test_phpdoc_property_read_write_variants() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                          // L0
+        "/**\n",                            // L1
+        " * @property-read string $name\n", // L2
+        " * @property-write int $age\n",    // L3
+        " */\n",                            // L4
+        "class User {}\n",                  // L5
+        "$u = new User();\n",               // L6
+        "echo $u->name;\n",                 // L7
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "name" at line 7 ($u->name).
+    let locs = find_references(&backend, &uri, 7, 13, true).await;
+    assert!(
+        locs.len() >= 2,
+        "Expected at least 2 references to name (property-read declaration + usage), got {}",
+        locs.len()
+    );
+
+    // Should include the @property-read declaration (line 2).
+    let has_read_decl = locs.iter().any(|l| l.range.start.line == 2);
+    assert!(
+        has_read_decl,
+        "Should include the @property-read declaration"
+    );
+}
+
+#[tokio::test]
+async fn test_phpdoc_method_references_from_declaration() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                        // L0
+        "/**\n",                          // L1
+        " * @method string getEmail()\n", // L2
+        " */\n",                          // L3
+        "class User {}\n",                // L4
+        "$u = new User();\n",             // L5
+        "echo $u->getEmail();\n",         // L6
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "getEmail" in the @method tag (line 2).
+    // Line: " * @method string getEmail()"
+    // The MemberDeclaration span covers "getEmail" starting at char 19.
+    let locs = find_references(&backend, &uri, 2, 19, true).await;
+    assert!(
+        locs.len() >= 2,
+        "Expected at least 2 references from @method declaration, got {}",
+        locs.len()
+    );
+
+    let has_usage = locs.iter().any(|l| l.range.start.line == 6);
+    assert!(has_usage, "Should include $u->getEmail() usage on line 6");
+}
+
+#[tokio::test]
+async fn test_phpdoc_method_no_return_type_references() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                 // L0
+        "/**\n",                   // L1
+        " * @method getEmail()\n", // L2
+        " */\n",                   // L3
+        "class User {}\n",         // L4
+        "$u = new User();\n",      // L5
+        "echo $u->getEmail();\n",  // L6
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "getEmail" at line 6 ($u->getEmail()).
+    let locs = find_references(&backend, &uri, 6, 10, true).await;
+    assert!(
+        locs.len() >= 2,
+        "Expected at least 2 references to getEmail (declaration + usage), got {}",
+        locs.len()
+    );
+
+    // Should include the @method declaration (line 2).
+    let has_declaration = locs.iter().any(|l| l.range.start.line == 2);
+    assert!(
+        has_declaration,
+        "Should include the @method declaration on line 2"
+    );
+}

@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Machine-readable CLI output.** Both `analyze` and `fix` accept a `--format` flag with `table`, `github`, and `json` options. When `GITHUB_ACTIONS` is set, table output automatically includes GitHub annotations.
 - **Magic property diagnostics.** New `report-magic-properties` option under `[diagnostics]` in `.phpantom.toml`. When enabled, classes with `__get` that also have virtual properties (from `@property` docblock tags, Laravel Eloquent column inference, or other providers) will flag unknown property access instead of silently allowing it.
 - **Inline diagnostic suppression.** `// @phpantom-ignore code` on the same line or the line above suppresses the specified diagnostic. Multiple codes can be comma-separated. A bare `// @phpantom-ignore` suppresses all diagnostics on the target line.
+- **Find references and rename for PHPDoc virtual members.** `@property`, `@property-read`, `@property-write`, and `@method` declarations in docblocks are now included in find-references and rename results alongside their runtime usages. (thanks @AbyssWaIker)
 
 ### Changed
 

@@ -8,12 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[CollectedBy(AuthorCollection::class)]
-
 /**
+ * @property-read string $displayName
+ * @method string bio()
  * @method static Builder<static> withTrashed(bool $withTrashed = true)
  * @method static Builder<static> onlyTrashed()
  */
+#[CollectedBy(AuthorCollection::class)]
 class BlogAuthor extends Model
 {
     protected $fillable = ['name', 'email', 'genre'];

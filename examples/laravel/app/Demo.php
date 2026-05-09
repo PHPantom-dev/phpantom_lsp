@@ -120,6 +120,7 @@ class Demo
         $top = $reviews->topRated();           // custom method from ReviewCollection
         $avg = $reviews->averageRating();       // custom method from ReviewCollection
         $reviews->first();                // inherited — returns Review|null
+        echo count($top), $avg;
 
         // Relationship properties also use the custom collection
         $review = new Review();
@@ -133,7 +134,8 @@ class Demo
     {
         // Eloquent chunk — $orders inferred as Collection
         BlogAuthor::where('active', true)->chunk(100, function ($orders) {
-            $total = $orders->count();    // resolves to Eloquent Collection
+            $count = $orders->count();    // resolves to Eloquent Collection
+            echo $count;
         });
 
         // Explicit bare type hint inherits inferred generic args for foreach
@@ -213,7 +215,24 @@ class Demo
     }
 
 
-    // ── Laravel Config (definition & references) ────────────────────────────
+    // ── PHPDoc Virtual Member References & Rename ───────────────────────────
+    // Try: right-click "displayName" or "bio" below and use
+    //   • Find All References — includes the @property/@method declaration
+    //   • Rename Symbol — renames in the docblock AND all usage sites
+
+    public function phpdocVirtualMembers(): void
+    {
+        $author = new BlogAuthor();
+        $author->displayName;           // @property-read on BlogAuthor
+        $author->bio();                 // @method on BlogAuthor
+
+        $found = BlogAuthor::where('active', true)->first();
+        $found->displayName;
+        $found->bio();
+    }
+
+
+    // ── Laravel Config (definition & references) ────────────────────────
 
     public function laravelConfig(): void
     {

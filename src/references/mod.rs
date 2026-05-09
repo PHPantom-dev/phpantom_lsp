@@ -774,8 +774,19 @@ impl Backend {
                         // Check if the enclosing class is in the hierarchy.
                         if let Some(hier) = hierarchy {
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
-                            if let Some(enclosing) = find_class_at_offset(&ctx.classes, span.start)
-                            {
+                            let enclosing =
+                                find_class_at_offset(&ctx.classes, span.start).or_else(|| {
+                                    // Docblock MemberDeclaration spans are before the
+                                    // opening brace; fall back to the nearest class.
+                                    ctx.classes
+                                        .iter()
+                                        .map(|c| c.as_ref())
+                                        .filter(|c| {
+                                            c.keyword_offset > 0 && span.start < c.start_offset
+                                        })
+                                        .min_by_key(|c| c.start_offset)
+                                });
+                            if let Some(enclosing) = enclosing {
                                 let fqn = enclosing.fqn().to_string();
                                 if !hier.contains(&fqn) {
                                     continue;
@@ -1045,7 +1056,16 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let current_class = find_class_at_offset(&classes, offset)?;
+        let current_class = find_class_at_offset(&classes, offset).or_else(|| {
+            // Fallback: offset may be in a class docblock (before the opening
+            // brace).  Find the nearest class whose body starts past the
+            // offset, meaning its docblock region likely contains the offset.
+            classes
+                .iter()
+                .map(|c| c.as_ref())
+                .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
+                .min_by_key(|c| c.start_offset)
+        })?;
         let fqn = current_class.fqn().to_string();
         Some(self.collect_hierarchy_for_fqns(&[fqn]))
     }

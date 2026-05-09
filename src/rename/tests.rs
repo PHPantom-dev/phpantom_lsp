@@ -2939,3 +2939,213 @@ async fn rename_namespace_multiple_files_same_namespace() {
         result_c
     );
 }
+
+// --- PHPDoc @property and @method rename tests ---
+
+#[tokio::test]
+async fn test_prepare_rename_phpdoc_property() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property string $email\n",
+        " */\n",
+        "class User {\n",
+        "    public function demo(): void {\n",
+        "        echo $this->email;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "email" in @property tag (line 2, char 22).
+    let result = prepare_rename(&backend, &uri, 2, 22).await;
+    assert!(
+        result.is_some(),
+        "prepare_rename should succeed on @property tag name"
+    );
+}
+
+#[tokio::test]
+async fn rename_phpdoc_property_from_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property string $email\n",
+        " */\n",
+        "class User {\n",
+        "    public function demo(): void {\n",
+        "        echo $this->email;\n",
+        "    }\n",
+        "}\n",
+        "$u = new User();\n",
+        "echo $u->email;\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename from $u->email usage (line 10, "email" at char 13).
+    let edit = rename(&backend, &uri, 10, 13, "emailAddress").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for @property rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    // Should have edits for: @property declaration, $this->email, $u->email.
+    assert!(
+        file_edits.len() >= 3,
+        "Expected at least 3 edits for @property rename, got {}",
+        file_edits.len()
+    );
+
+    // Verify that the @property declaration was included.
+    let has_decl_edit = file_edits.iter().any(|te| te.range.start.line == 2);
+    assert!(
+        has_decl_edit,
+        "Should include an edit for the @property declaration on line 2"
+    );
+}
+
+#[tokio::test]
+async fn rename_phpdoc_property_from_declaration() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property string $email\n",
+        " */\n",
+        "class User {\n",
+        "    public function demo(): void {\n",
+        "        echo $this->email;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename from the @property declaration (line 2, char 22).
+    let edit = rename(&backend, &uri, 2, 22, "emailAddress").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for @property rename from declaration"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    assert!(
+        file_edits.len() >= 2,
+        "Expected at least 2 edits (@property + $this->email), got {}",
+        file_edits.len()
+    );
+
+    // Verify $this->email usage was updated.
+    let has_usage_edit = file_edits.iter().any(|te| te.range.start.line == 6);
+    assert!(
+        has_usage_edit,
+        "Should include an edit for the $this->email usage on line 6"
+    );
+}
+
+#[tokio::test]
+async fn test_rename_phpdoc_method_from_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method string getEmail()\n",
+        " */\n",
+        "class User {}\n",
+        "$u = new User();\n",
+        "echo $u->getEmail();\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename from $u->getEmail() usage (line 6, "getEmail" at char 10).
+    let edit = rename(&backend, &uri, 6, 10, "getEmailAddress").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for @method rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    // Should have edits for: @method declaration + $u->getEmail() usage.
+    assert!(
+        file_edits.len() >= 2,
+        "Expected at least 2 edits for @method rename, got {}",
+        file_edits.len()
+    );
+
+    // Verify @method declaration was updated.
+    let has_decl_edit = file_edits.iter().any(|te| te.range.start.line == 2);
+    assert!(
+        has_decl_edit,
+        "Should include an edit for the @method declaration on line 2"
+    );
+}
+
+#[tokio::test]
+async fn test_prepare_rename_phpdoc_method() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method string getEmail()\n",
+        " */\n",
+        "class User {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "getEmail" in @method tag (line 2, char 19).
+    let result = prepare_rename(&backend, &uri, 2, 19).await;
+    assert!(
+        result.is_some(),
+        "prepare_rename should succeed on @method tag name"
+    );
+}
+
+#[tokio::test]
+async fn rename_phpdoc_property_does_not_leak_to_unrelated_class() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property string $email\n",
+        " */\n",
+        "class User {}\n",
+        "/**\n",
+        " * @property int $email\n",
+        " */\n",
+        "class Order {}\n",
+        "$u = new User();\n",
+        "echo $u->email;\n",
+        "$o = new Order();\n",
+        "echo $o->email;\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename from $u->email (line 11, char 13).
+    let edit = rename(&backend, &uri, 11, 13, "emailAddress").await;
+    assert!(edit.is_some());
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+
+    // Should NOT include edits for Order's @property or $o->email.
+    let has_order_decl = file_edits.iter().any(|te| te.range.start.line == 7);
+    let has_order_usage = file_edits.iter().any(|te| te.range.start.line == 13);
+    assert!(
+        !has_order_decl,
+        "Should NOT edit Order's @property declaration"
+    );
+    assert!(!has_order_usage, "Should NOT edit $o->email usage");
+}
