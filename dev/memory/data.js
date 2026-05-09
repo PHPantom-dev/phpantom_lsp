@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778337092071,
+  "lastUpdate": 1778338771492,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8669,6 +8669,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "500998f2c847853ada6a5d2787fcb17e7935517b",
+          "message": "Remove AST-based variable definition resolver and tests",
+          "timestamp": "2026-05-09T16:46:57+02:00",
+          "tree_id": "b513749f961965ff94ed689968621579198b270b",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/500998f2c847853ada6a5d2787fcb17e7935517b"
+        },
+        "date": 1778338770865,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.8,
             "unit": "MiB"
           }
         ]
