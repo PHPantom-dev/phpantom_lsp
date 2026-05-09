@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778248660575,
+  "lastUpdate": 1778295013005,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8465,6 +8465,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "211c97bca1b0da411c8be068c5246e5b6c6871f0",
+          "message": "Fix class definition lookup for unopened files via PSR-4",
+          "timestamp": "2026-05-09T04:38:16+02:00",
+          "tree_id": "72afffc2691f81df8873a9f7dbda103374d7b604",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/211c97bca1b0da411c8be068c5246e5b6c6871f0"
+        },
+        "date": 1778295011690,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.3,
             "unit": "MiB"
           }
         ]
