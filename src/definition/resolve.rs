@@ -170,8 +170,6 @@ impl Backend {
     ) -> Option<Vec<Location>> {
         match kind {
             SymbolKind::Variable { name } => {
-                let var_name = format!("${}", name);
-
                 // Try the precomputed var_defs map first.
                 // This avoids re-parsing the file at request time.
 
@@ -220,12 +218,6 @@ impl Backend {
                     }]);
                 }
 
-                // Fallback: AST-based variable resolution.
-                if let Some(location) =
-                    Self::resolve_variable_definition(content, uri, position, &var_name)
-                {
-                    return Some(vec![location]);
-                }
                 None
             }
 

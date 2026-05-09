@@ -400,7 +400,7 @@ impl Backend {
             // ── Variable name completion ────────────────────────────
             // Placed before the interpolation guard so that `"$`
             // and `"{$` both offer variable suggestions.
-            if let Some(response) = Self::try_variable_name_completion(&content, position) {
+            if let Some(response) = self.try_variable_name_completion(&content, position, &uri) {
                 return Ok(Some(response));
             }
 
@@ -1042,12 +1042,16 @@ impl Backend {
     /// Returns `None` when the cursor is not at a variable-name position
     /// or when no variables are found.
     fn try_variable_name_completion(
+        &self,
         content: &str,
         position: Position,
+        uri: &str,
     ) -> Option<CompletionResponse> {
         let partial = Self::extract_partial_variable_name(content, position)?;
+        let symbol_maps = self.symbol_maps.read();
+        let symbol_map = symbol_maps.get(uri).map(|arc| arc.as_ref());
         let (var_items, var_incomplete) =
-            Self::build_variable_completions(content, &partial, position);
+            Self::build_variable_completions(content, &partial, position, symbol_map);
 
         if var_items.is_empty() {
             None

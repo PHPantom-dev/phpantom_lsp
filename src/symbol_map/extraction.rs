@@ -36,6 +36,8 @@ struct ExtractionCtx<'a> {
     var_defs: Vec<VarDefSite>,
     /// Scope ranges `(start, end)` for functions, methods, closures, etc.
     scopes: Vec<(u32, u32)>,
+    /// Scope start offsets of arrow functions (inheriting scopes).
+    arrow_fn_scopes: Vec<u32>,
     /// Body boundaries `(body_start, body_end)` for closures and arrow fns.
     /// For closures the body start is the `{` offset; for arrow functions
     /// it is the `=>` token offset.  Used by signature help suppression.
@@ -62,6 +64,8 @@ struct ExtractionCtx<'a> {
     /// Ranges of static method bodies `(start_offset, end_offset)`.
     /// Used to detect whether `$this` is unavailable at a given offset.
     static_method_scopes: Vec<(u32, u32)>,
+    /// Ranges of non-static (instance) method bodies.
+    instance_method_scopes: Vec<(u32, u32)>,
     /// Trivia (comments, whitespace) from the parsed program.
     trivias: &'a [Trivia<'a>],
     /// The full source text of the file being extracted.
@@ -130,6 +134,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         spans: Vec::new(),
         var_defs: Vec::new(),
         scopes: Vec::new(),
+        arrow_fn_scopes: Vec::new(),
         body_scopes: Vec::new(),
         narrowing_blocks: Vec::new(),
         assert_narrowing_offsets: Vec::new(),
@@ -139,6 +144,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         loop_scopes: Vec::new(),
         switch_scopes: Vec::new(),
         static_method_scopes: Vec::new(),
+        instance_method_scopes: Vec::new(),
         trivias: program.trivia.as_slice(),
         content,
         untyped_closure_sites: Vec::new(),
@@ -233,6 +239,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         spans: ctx.spans,
         var_defs: ctx.var_defs,
         scopes: ctx.scopes,
+        arrow_fn_scopes: ctx.arrow_fn_scopes,
         body_scopes: ctx.body_scopes,
         narrowing_blocks: ctx.narrowing_blocks,
         assert_narrowing_offsets: ctx.assert_narrowing_offsets,
@@ -242,6 +249,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         loop_scopes: ctx.loop_scopes,
         switch_scopes: ctx.switch_scopes,
         static_method_scopes: ctx.static_method_scopes,
+        instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
     }
 }
@@ -388,6 +396,24 @@ fn extract_from_statement<'a>(
                     nesting_depth: ctx.cond_nesting_depth,
                     block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
                 });
+            } else if let Expression::Array(arr) = value_expr {
+                // Destructuring: `foreach ($items as [$name, $value])`
+                collect_destructuring_var_defs(
+                    &arr.elements,
+                    &mut ctx.var_defs,
+                    scope_start,
+                    VarDefKind::Foreach,
+                    value_expr.span().start.offset,
+                );
+            } else if let Expression::List(list) = value_expr {
+                // Destructuring: `foreach ($items as list($name, $value))`
+                collect_destructuring_var_defs(
+                    &list.elements,
+                    &mut ctx.var_defs,
+                    scope_start,
+                    VarDefKind::Foreach,
+                    value_expr.span().start.offset,
+                );
             }
             let body_span = foreach_stmt.body.span();
             record_breakable_scope(body_span.start.offset, body_span.end.offset, ctx);
@@ -1226,6 +1252,8 @@ fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut ExtractionCtx<'a>) 
         ctx.scopes.push((s, e));
         if is_static {
             ctx.static_method_scopes.push((s, e));
+        } else {
+            ctx.instance_method_scopes.push((s, e));
         }
         s
     } else {
@@ -2299,6 +2327,7 @@ fn extract_from_expression<'a>(
             let arrow_scope_start = arrow.span().start.offset;
             let arrow_scope_end = arrow.span().end.offset;
             ctx.scopes.push((arrow_scope_start, arrow_scope_end));
+            ctx.arrow_fn_scopes.push(arrow_scope_start);
             // Body scope starts at `=>` for signature help suppression.
             ctx.body_scopes
                 .push((arrow.arrow.start.offset, arrow_scope_end));

@@ -53,7 +53,6 @@ mod implementation;
 pub(crate) mod member;
 mod resolve;
 mod type_definition;
-mod variable;
 
 /// Build an LSP `Location` with a zero-width range (start == end).
 ///

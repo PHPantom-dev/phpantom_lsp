@@ -240,24 +240,6 @@ A minor inefficiency, not a parallel system.
 back to linear scan of `uri_classes_index`. Covers race conditions during initial
 indexing. Legitimate safety net.
 
-### `DIAGNOSTIC_SCOPE` vs `HOVER_SCOPE_CACHE`
-
-Two caches storing the same data type (`ScopeSnapshotMap`) for different consumers.
-`DIAGNOSTIC_SCOPE` is ephemeral/per-pass (build all scopes for the whole file,
-discard on drop). `HOVER_SCOPE_CACHE` is persistent/per-method with content-hash
-invalidation. The split is intentional: diagnostics check every line so they
-build all scopes upfront; hover checks one spot so it lazily caches per-method.
-However, the `is_diagnostic_scope_active()` guard causes ~14 behavioral forks
-in the forward walker, meaning bugs fixed for one consumer may not manifest for
-the other. Unifying them would eliminate the divergent walker behavior.
-
-### Consumer-gated caches
-
-`CALLABLE_TARGET_CACHE`, `PARSE_CACHE`, and `ACTIVE_RESOLVED_CACHE` are activated
-only during diagnostic/analyse passes. Completion and hover re-resolve callable
-targets and re-parse files from scratch. Extending these to all consumers would
-avoid redundant work.
-
 ---
 
 ## Redundant backwards text walkers

@@ -423,6 +423,12 @@ pub(crate) struct SymbolMap {
     /// methods, closures, and arrow functions.  Used by
     /// `find_enclosing_scope` to determine which scope the cursor is in.
     pub scopes: Vec<(u32, u32)>,
+    /// Scope start offsets of arrow functions.  Arrow functions inherit
+    /// the enclosing scope's variables (unlike closures which isolate
+    /// their scope).  Used by variable name completion to walk up
+    /// through arrow function boundaries while stopping at closure
+    /// and function boundaries.
+    pub arrow_fn_scopes: Vec<u32>,
     /// Body boundaries `(body_start_offset, body_end_offset)` for
     /// closures and arrow functions only.
     ///
@@ -479,6 +485,10 @@ pub(crate) struct SymbolMap {
     /// Sorted by start offset.  Used to determine whether `$this` is
     /// unavailable at a given cursor position without re-parsing the AST.
     pub static_method_scopes: Vec<(u32, u32)>,
+    /// Ranges of non-static (instance) method bodies `(start_offset,
+    /// end_offset)`.  Used by variable name completion to determine
+    /// whether `$this` is available at a given cursor position.
+    pub instance_method_scopes: Vec<(u32, u32)>,
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters.  Used by inlay hints to show inferred parameter types
     /// and return types from the enclosing callable signature.
