@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778336083401,
+  "lastUpdate": 1778337092071,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8635,6 +8635,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3d341772bd2098c3c50da50d9fa11ceaddbbb779",
+          "message": "Invalidate mixin cache on file change to prevent stale members",
+          "timestamp": "2026-05-09T16:19:06+02:00",
+          "tree_id": "39dd5df746c6ed968abcc24c976f2481f55bb86c",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3d341772bd2098c3c50da50d9fa11ceaddbbb779"
+        },
+        "date": 1778337091383,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.6,
             "unit": "MiB"
           }
         ]
