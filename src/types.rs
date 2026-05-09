@@ -2131,6 +2131,7 @@ impl ResolvedType {
     ///
     /// This is a migration helper for callers that currently expect
     /// `Vec<ClassInfo>`.
+    #[cfg(test)]
     pub(crate) fn into_classes(resolved: Vec<ResolvedType>) -> Vec<ClassInfo> {
         resolved
             .into_iter()

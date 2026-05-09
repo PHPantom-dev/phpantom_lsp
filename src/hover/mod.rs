@@ -968,16 +968,6 @@ impl Backend {
             constant_loader: Some(&constant_loader),
         };
 
-        // Use the dummy class approach same as completion for top-level code
-        let dummy_class;
-        let effective_class = match current_class {
-            Some(cc) => cc,
-            None => {
-                dummy_class = ClassInfo::default();
-                &dummy_class
-            }
-        };
-
         // Try the type-string path first.  This preserves generic
         // parameters (e.g. `Generator<int, Pencil>`) and scalar types
         // (e.g. `int`) that the ClassInfo-based path would lose.
@@ -1007,26 +997,10 @@ impl Backend {
             return Some(make_hover(hover_body));
         }
 
-        // Fall back to ClassInfo-based resolution (handles cases the
-        // type-string path doesn't cover, such as instanceof narrowing
-        // and complex call chains).
-        let resolved = crate::completion::variable::resolution::resolve_variable_types(
-            &var_name,
-            effective_class,
-            &ctx.classes,
-            content,
-            cursor_offset,
-            &class_loader,
-            loaders,
-        );
-
-        if resolved.is_empty() {
-            return Some(make_hover(format!("```php\n<?php\n{}\n```", var_name)));
-        }
-
-        let joined = ResolvedType::types_joined(&resolved);
-        let hover_body = build_variable_hover_body(&var_name, &joined, &class_loader, None);
-        Some(make_hover(hover_body))
+        // `resolve_variable_php_type` already calls `resolve_variable_types`
+        // internally, so if it returned `None` the variable is truly
+        // unresolved.  Show a plain variable hover.
+        Some(make_hover(format!("```php\n<?php\n{}\n```", var_name)))
     }
 
     /// Produce hover information for a class reference.

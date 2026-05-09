@@ -27,9 +27,9 @@ use std::sync::Arc;
 use crate::docblock;
 use crate::php_type::PhpType;
 use crate::types::{BracketSegment, ClassInfo};
-use crate::util::{find_semicolon_balanced, is_self_or_static, resolve_class_keyword, short_name};
+use crate::util::find_semicolon_balanced;
 
-use crate::completion::resolver::{Loaders, ResolutionCtx};
+use crate::completion::resolver::ResolutionCtx;
 
 // ─── Source-text helpers ────────────────────────────────────────────────────
 
@@ -383,10 +383,6 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
 ) -> Option<PhpType> {
     let content = rctx.content;
     let cursor_offset = rctx.cursor_offset;
-    let current_class = rctx.current_class;
-    let all_classes = rctx.all_classes;
-    let class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = rctx.class_loader;
-    let function_loader = rctx.function_loader;
     let search_area = content.get(..cursor_offset as usize)?;
 
     // Look for `$fn = ` assignment.
@@ -405,80 +401,52 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
         return None;
     }
 
-    // ── Instance method: `$this->method` or `$obj->method` ──────
-    if let Some(pos) = callable_text.rfind("->") {
-        let lhs = callable_text[..pos].trim_end_matches('?');
-        let method_name = &callable_text[pos + 2..];
+    // Parse the callable text into a structured expression using the
+    // main SubjectExpr pipeline, then resolve through the shared call
+    // return type resolver.
+    let callee_expr = crate::subject_expr::SubjectExpr::parse_callee(callable_text);
 
-        let owner = if is_self_or_static(lhs) {
-            current_class.cloned()
-        } else if lhs.starts_with('$') {
-            // Bare variable LHS like `$factory->create(...)`.
-            // Resolve the variable's type via the unified pipeline.
-            let default_class = ClassInfo::default();
-            let effective_class = current_class.unwrap_or(&default_class);
-            let resolved = crate::completion::variable::resolution::resolve_variable_types(
-                lhs,
-                effective_class,
-                all_classes,
-                content,
-                cursor_offset,
-                class_loader,
-                Loaders::with_function(function_loader),
+    // For method calls (instance and static), use the main pipeline
+    // with a return type hint capture.
+    match &callee_expr {
+        crate::subject_expr::SubjectExpr::MethodCall { .. }
+        | crate::subject_expr::SubjectExpr::StaticMethodCall { .. }
+        | crate::subject_expr::SubjectExpr::NewExpr { .. } => {
+            let mut return_type: Option<PhpType> = None;
+            let classes = crate::Backend::resolve_call_return_types_expr_with_hint(
+                &callee_expr,
+                "",
+                rctx,
+                Some(&mut return_type),
             );
-            crate::types::ResolvedType::into_classes(resolved)
-                .into_iter()
-                .next()
-        } else {
-            // Non-variable LHS (e.g. chained call) — delegate to
-            // the general-purpose text resolver.
-            resolve_lhs_to_class(lhs, current_class, all_classes, class_loader)
-        };
-
-        if let Some(cls) = owner {
-            return crate::inheritance::resolve_method_return_type(&cls, method_name, class_loader)
-                .map(|ret| ret.replace_self(&cls.fqn()));
+            // Prefer the captured PhpType hint (preserves generics and
+            // scalar types).  Fall back to reconstructing from the
+            // returned ClassInfo set.
+            return_type.or_else(|| {
+                if classes.is_empty() {
+                    None
+                } else if classes.len() == 1 {
+                    Some(PhpType::Named(classes[0].fqn().to_string()))
+                } else {
+                    Some(PhpType::Union(
+                        classes
+                            .iter()
+                            .map(|c| PhpType::Named(c.fqn().to_string()))
+                            .collect(),
+                    ))
+                }
+            })
         }
-        return None;
-    }
-
-    // ── Static method: `ClassName::method` / `self::method` ─────
-    if let Some(pos) = callable_text.rfind("::") {
-        let class_part = &callable_text[..pos];
-        let method_name = &callable_text[pos + 2..];
-
-        let owner = if is_self_or_static(class_part) {
-            current_class.cloned()
-        } else if let Some(resolved_name) = resolve_class_keyword(class_part, current_class) {
-            // Handles `parent` (case-insensitive) → load the resolved parent class.
-            class_loader(&resolved_name).map(Arc::unwrap_or_clone)
-        } else {
-            let lookup = short_name(class_part);
-            all_classes
-                .iter()
-                .find(|c| c.name == lookup)
-                .map(|c| ClassInfo::clone(c))
-                .or_else(|| class_loader(class_part).map(Arc::unwrap_or_clone))
-        };
-
-        if let Some(cls) = owner {
-            return crate::inheritance::resolve_method_return_type(&cls, method_name, class_loader)
-                .map(|ret| ret.replace_self(&cls.fqn()));
+        crate::subject_expr::SubjectExpr::FunctionCall(func_name) => {
+            let function_loader = rctx.function_loader?;
+            let func_info = function_loader(func_name)?;
+            func_info.return_type.clone()
         }
-        return None;
+        // Variable callables ($fn = $otherFn(...)) are not handled
+        // here; they would need forward walker resolution of the
+        // source variable first.
+        _ => None,
     }
-
-    // ── Plain function: `strlen`, `array_map`, etc. ─────────────
-    if callable_text
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
-        && !callable_text.starts_with('$')
-    {
-        let func_info = function_loader?(callable_text)?;
-        return func_info.return_type.clone();
-    }
-
-    None
 }
 
 /// Resolve a chained array access, trying each candidate raw type
@@ -612,167 +580,6 @@ fn walk_array_segments_and_resolve(
         return None;
     }
     Some(classes)
-}
-
-// ── Internal helpers for `extract_first_class_callable_return_type` ──
-
-/// Resolve the return type of a chained call expression from text.
-///
-/// Splits at the rightmost `->`, resolves the LHS to a `ClassInfo`,
-/// then looks up the method's return type.  Used by
-/// `extract_first_class_callable_return_type` for chained-call LHS
-/// patterns.
-fn resolve_raw_type_from_call_chain(
-    callee: &str,
-    _args_text: &str,
-    current_class: Option<&ClassInfo>,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    // Split at the rightmost `->` to get the final method name and
-    // the LHS expression that produces the owning object.
-    let pos = callee.rfind("->")?;
-    // Strip trailing `?` from LHS when the operator was `?->`
-    let lhs = callee[..pos]
-        .strip_suffix('?')
-        .unwrap_or(&callee[..pos])
-        .trim();
-    let method_name = callee[pos + 2..].trim();
-
-    // Resolve LHS to a class.
-    let owner = resolve_lhs_to_class(lhs, current_class, all_classes, class_loader)?;
-    crate::inheritance::resolve_method_return_type(&owner, method_name, class_loader)
-}
-
-/// Resolve the left-hand side of a chained expression to a `ClassInfo`.
-///
-/// Handles `$this` / `self` / `static`, `$this->prop`, `new Foo()`,
-/// `(new Foo())`, and recursive chains.  Used by
-/// `resolve_raw_type_from_call_chain` for the text-only path.
-fn resolve_lhs_to_class(
-    lhs: &str,
-    current_class: Option<&ClassInfo>,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<ClassInfo> {
-    // Trim whitespace so that multi-line call chains (where
-    // `rfind("->")` leaves trailing newlines/spaces on the LHS)
-    // are handled correctly by all downstream checks.
-    let lhs = lhs.trim();
-
-    // `$this` / `self` / `static`
-    if is_self_or_static(lhs) {
-        return current_class.cloned();
-    }
-
-    // `(new ClassName(...))` or `new ClassName(...)`
-    if let Some(class_name) = extract_new_expression_class(lhs) {
-        let lookup = short_name(&class_name);
-        return all_classes
-            .iter()
-            .find(|c| c.name == lookup)
-            .map(|c| ClassInfo::clone(c))
-            .or_else(|| class_loader(&class_name).map(Arc::unwrap_or_clone));
-    }
-
-    // LHS ends with `)` — it's a call expression.  Recurse.
-    if lhs.ends_with(')') {
-        let inner = lhs.strip_suffix(')')?;
-        // Find matching open paren.
-        let mut depth = 0u32;
-        let mut open = None;
-        for (i, b) in inner.bytes().enumerate().rev() {
-            match b {
-                b')' => depth += 1,
-                b'(' => {
-                    if depth == 0 {
-                        open = Some(i);
-                        break;
-                    }
-                    depth -= 1;
-                }
-                _ => {}
-            }
-        }
-        let open = open?;
-        let inner_callee = &inner[..open];
-        let inner_args = inner[open + 1..].trim();
-
-        // Inner callee may itself be a chain — recurse.
-        let ret_type = resolve_raw_type_from_call_chain(
-            inner_callee,
-            inner_args,
-            current_class,
-            all_classes,
-            class_loader,
-        )
-        .or_else(|| {
-            // Single-level: `$this->method`
-            if let Some(m) = inner_callee
-                .strip_prefix("$this->")
-                .or_else(|| inner_callee.strip_prefix("$this?->"))
-            {
-                let owner = current_class?;
-                return crate::inheritance::resolve_method_return_type(owner, m, class_loader);
-            }
-            // `ClassName::method`
-            if let Some((cls_part, m_part)) = inner_callee.rsplit_once("::") {
-                let resolved = if is_self_or_static(cls_part) {
-                    current_class.cloned()
-                } else if let Some(resolved_name) = resolve_class_keyword(cls_part, current_class) {
-                    // Handles `parent` (case-insensitive) → load the parent class.
-                    class_loader(&resolved_name).map(Arc::unwrap_or_clone)
-                } else {
-                    let lookup = short_name(cls_part);
-                    all_classes
-                        .iter()
-                        .find(|c| c.name == lookup)
-                        .map(|c| ClassInfo::clone(c))
-                        .or_else(|| class_loader(cls_part).map(Arc::unwrap_or_clone))
-                };
-                if let Some(cls) = resolved {
-                    return crate::inheritance::resolve_method_return_type(
-                        &cls,
-                        m_part,
-                        class_loader,
-                    );
-                }
-            }
-            None
-        })?;
-
-        // `ret_type` is a PhpType — resolve it to ClassInfo.
-        let effective = ret_type.non_null_type().unwrap_or_else(|| ret_type.clone());
-        if let Some(base) = effective.base_name() {
-            let lookup = short_name(base);
-            return all_classes
-                .iter()
-                .find(|c| c.name == lookup)
-                .map(|c| ClassInfo::clone(c))
-                .or_else(|| class_loader(base).map(Arc::unwrap_or_clone));
-        }
-    }
-
-    // `$this->prop` — property access
-    if let Some(prop) = lhs
-        .strip_prefix("$this->")
-        .or_else(|| lhs.strip_prefix("$this?->"))
-        && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
-    {
-        let owner = current_class?;
-        let parsed = crate::inheritance::resolve_property_type_hint(owner, prop, class_loader)?;
-        let effective = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
-        if let Some(base) = effective.base_name() {
-            let lookup = short_name(base);
-            return all_classes
-                .iter()
-                .find(|c| c.name == lookup)
-                .map(|c| ClassInfo::clone(c))
-                .or_else(|| class_loader(base).map(Arc::unwrap_or_clone));
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]

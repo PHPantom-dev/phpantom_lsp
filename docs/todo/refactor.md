@@ -214,21 +214,6 @@ Each item must include:
 
 ## Outstanding items
 
-### R1. Shadow chain resolver in `helpers.rs` 🔴
-
-`src/completion/source/helpers.rs` L625–780 contains `resolve_lhs_to_class` /
-`resolve_raw_type_from_call_chain`, a full parallel chain resolver that manually
-splits on `->` and `::` via `rfind`, handles `$this->prop`, `new Foo()`,
-`ClassName::method()`, and recursive call chains by string manipulation. This
-duplicates what `SubjectExpr::parse` + `resolve_target_classes_expr` in
-`completion/resolver.rs` already does. Also called from
-`extract_first_class_callable_return_type` (L407–470, same file).
-
-**Action:** Replace with calls through the main `SubjectExpr::parse` +
-`resolve_target_classes_expr` pipeline.
-
-**Files:** `src/completion/source/helpers.rs`
-
 ### R2. Mini expression resolver in `call_resolution.rs` 🔴
 
 `src/completion/call_resolution.rs` L2528 has `resolve_expression_to_type`, a
@@ -268,17 +253,6 @@ bypassing the forward walker which already tracks variable assignments.
 scanning.
 
 **Files:** `src/signature_help.rs`
-
-### R5. Hover double-resolution 🟠
-
-`src/hover/mod.rs` L984–1030: `hover_variable` calls `resolve_variable_php_type`
-(which internally runs `resolve_variable_types` via the forward walker). If that
-returns `None`, it calls `resolve_variable_types` again directly. Since the first
-function already called the second internally, the second call is dead code.
-
-**Action:** Remove the redundant second call to `resolve_variable_types`.
-
-**Files:** `src/hover/mod.rs`
 
 ---
 

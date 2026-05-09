@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LSP responsiveness.** Hover, go-to-definition, signature help, code actions, rename, and other handlers now run on background threads. Slow requests no longer block other requests or cancellations.
 - **Faster analysis.** Analysis time cut significantly on large projects.
 - **Reduced redundant file parsing.** Concurrent threads resolving the same vendor class no longer parse the file in parallel; the second thread waits for the first to finish.
+- **Unified first-class callable resolution.** First-class callable return type inference (`$fn = $obj->method(...)`) now uses the shared call return type pipeline, improving accuracy for chained calls and generic substitutions.
 - **Editing responsiveness.** Classes evicted from the cache after a file edit are now eagerly re-populated in dependency order.
 - **Diagnostic delivery model.** Editors that support pull diagnostics now get diagnostics on first file open without waiting for a debounce timer. Updates from external tools no longer re-run the entire native diagnostic pipeline.
 - **Virtual member resolution.** Mixins and virtual accessors are now resolved completely on every class, eliminating cases where they were missing after edits.
