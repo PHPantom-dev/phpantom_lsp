@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778342663056,
+  "lastUpdate": 1778343440017,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8737,6 +8737,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 56.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "461481e11aa527a45ac84e3acf4b20d934988fa7",
+          "message": "Fix double-$ prefix in assignment dependency tracking",
+          "timestamp": "2026-05-09T18:04:55+02:00",
+          "tree_id": "2f5a191017097840096921260245c4a0774b9638",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/461481e11aa527a45ac84e3acf4b20d934988fa7"
+        },
+        "date": 1778343439158,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.4,
             "unit": "MiB"
           }
         ]
