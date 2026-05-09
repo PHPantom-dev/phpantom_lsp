@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778352241031,
+  "lastUpdate": 1778356874748,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8873,6 +8873,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8faf01ab08939568c68ac228606d1eeb8a6a43dc",
+          "message": "Include virtual member references for nullable/union types",
+          "timestamp": "2026-05-09T21:48:03+02:00",
+          "tree_id": "235874eb324b4150988a5ee77b174855d538b72c",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/8faf01ab08939568c68ac228606d1eeb8a6a43dc"
+        },
+        "date": 1778356874055,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50,
             "unit": "MiB"
           }
         ]
