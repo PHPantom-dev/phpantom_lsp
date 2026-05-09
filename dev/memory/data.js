@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778303002335,
+  "lastUpdate": 1778333753377,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8567,6 +8567,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c27ab05eddbafc0dcebd5b0c8e82989b38f87280",
+          "message": "Refactor signature help to use AST for callable variable extraction",
+          "timestamp": "2026-05-09T15:24:18+02:00",
+          "tree_id": "88870e54016988e13135a7461f2cd3fda6b1ab38",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/c27ab05eddbafc0dcebd5b0c8e82989b38f87280"
+        },
+        "date": 1778333752746,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.5,
             "unit": "MiB"
           }
         ]
