@@ -1,9 +1,36 @@
-use crate::common::{create_test_backend, create_test_backend_with_full_stubs};
+use crate::common::create_test_backend;
 use phpantom_lsp::Backend;
+use std::collections::HashMap;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
+static BUILTIN_ATTRIBUTE_STUB: &str = r#"<?php
+final class Attribute
+{
+    public const TARGET_CLASS = 1;
+    public const TARGET_FUNCTION = 2;
+    public const TARGET_METHOD = 4;
+    public const TARGET_PROPERTY = 8;
+    public const TARGET_CLASS_CONSTANT = 16;
+    public const TARGET_PARAMETER = 32;
+    public const TARGET_ALL = 63;
+    public const IS_REPEATABLE = 64;
+
+    public function __construct(int $flags = self::TARGET_ALL) {}
+}
+
+#[Attribute(Attribute::TARGET_METHOD)]
+final class Override {}
+"#;
+
 // ─── Helper ─────────────────────────────────────────────────────────────────
+
+fn create_builtin_attribute_backend() -> Backend {
+    let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    class_stubs.insert("Attribute", BUILTIN_ATTRIBUTE_STUB);
+    class_stubs.insert("Override", BUILTIN_ATTRIBUTE_STUB);
+    Backend::new_test_with_all_stubs(class_stubs, HashMap::new(), HashMap::new())
+}
 
 async fn complete_at(
     backend: &Backend,
@@ -809,7 +836,7 @@ async fn attribute_context_no_following_declaration_in_class() {
 /// a method.
 #[tokio::test]
 async fn attribute_context_shows_builtin_override() {
-    let backend = create_test_backend_with_full_stubs();
+    let backend = create_builtin_attribute_backend();
 
     let uri = Url::parse("file:///test_attr_builtin.php").unwrap();
     let text = concat!(

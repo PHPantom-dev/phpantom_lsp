@@ -466,6 +466,69 @@ function test(): void {
     );
 }
 
+#[test]
+fn function_references_include_aliased_import_usage() {
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/functions.php",
+                r#"<?php
+namespace Foo;
+
+function bar(): void {}
+"#,
+            ),
+            (
+                "src/client.php",
+                r#"<?php
+namespace App;
+
+use function Foo\bar as baz;
+
+function run(): void {
+    baz();
+}
+"#,
+            ),
+        ],
+    );
+
+    let functions_path = dir.path().join("src/functions.php");
+    let client_path = dir.path().join("src/client.php");
+
+    let functions_uri = format!("file://{}", functions_path.display());
+    let client_uri = format!("file://{}", client_path.display());
+
+    let functions_content = std::fs::read_to_string(&functions_path).unwrap();
+    let client_content = std::fs::read_to_string(&client_path).unwrap();
+
+    open_file(&backend, &functions_uri, &functions_content);
+    open_file(&backend, &client_uri, &client_content);
+
+    let results = backend
+        .find_references(
+            &functions_uri,
+            &functions_content,
+            Position::new(3, 9),
+            true,
+        )
+        .expect("should find function references");
+
+    assert_no_duplicates(&results, "function_alias_refs");
+    assert!(
+        results.iter().any(|loc| loc.uri.as_str() == client_uri),
+        "Expected aliased baz() call in client.php, got {:#?}",
+        results
+    );
+}
+
 // ─── $this references ───────────────────────────────────────────────────────
 
 #[test]
@@ -572,6 +635,66 @@ class Baz {
         results.len() >= 2,
         "Expected at least 2 cross-file references, got {}: {:#?}",
         results.len(),
+        results
+    );
+}
+
+#[test]
+fn class_references_include_aliased_import_usage() {
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/Models/User.php",
+                r#"<?php
+namespace App\Models;
+
+class User {}
+"#,
+            ),
+            (
+                "src/Controller.php",
+                r#"<?php
+namespace App;
+
+use App\Models\User as Account;
+
+class Controller {
+    public function show(): void {
+        $user = new Account();
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let user_path = dir.path().join("src/Models/User.php");
+    let controller_path = dir.path().join("src/Controller.php");
+
+    let user_uri = format!("file://{}", user_path.display());
+    let controller_uri = format!("file://{}", controller_path.display());
+
+    let user_content = std::fs::read_to_string(&user_path).unwrap();
+    let controller_content = std::fs::read_to_string(&controller_path).unwrap();
+
+    open_file(&backend, &user_uri, &user_content);
+    open_file(&backend, &controller_uri, &controller_content);
+
+    let results = backend
+        .find_references(&user_uri, &user_content, Position::new(3, 6), true)
+        .expect("should find class references");
+
+    assert_no_duplicates(&results, "class_alias_refs");
+    assert!(
+        results.iter().any(|loc| loc.uri.as_str() == controller_uri),
+        "Expected aliased Account usage in Controller.php, got {:#?}",
         results
     );
 }
@@ -1578,6 +1701,70 @@ class Cart {
     }
 
     assert_no_duplicates(&results, "one_file_method_refs");
+}
+
+#[test]
+fn workspace_index_refreshes_after_new_file_is_added() {
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/Item.php",
+            r#"<?php
+namespace App;
+
+class Item {}
+"#,
+        )],
+    );
+
+    let item_path = dir.path().join("src/Item.php");
+    let item_uri = format!("file://{}", item_path.display());
+    let item_content = std::fs::read_to_string(&item_path).unwrap();
+
+    open_file(&backend, &item_uri, &item_content);
+
+    let initial_results = backend
+        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
+        .expect("should find initial class references");
+
+    assert_no_duplicates(&initial_results, "workspace_refresh_initial_refs");
+
+    let service_path = dir.path().join("src/Service.php");
+    std::fs::write(
+        &service_path,
+        r#"<?php
+namespace App;
+
+use App\Item;
+
+class Service {
+    public function build(): void {
+        $item = new Item();
+    }
+}
+"#,
+    )
+    .expect("failed to write newly added PHP file");
+
+    let service_uri = format!("file://{}", service_path.display());
+    let refreshed_results = backend
+        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
+        .expect("should find refreshed class references");
+
+    assert_no_duplicates(&refreshed_results, "workspace_refresh_refs");
+    assert!(
+        refreshed_results
+            .iter()
+            .any(|loc| loc.uri.as_str() == service_uri),
+        "Expected newly added Service.php to be discovered, got {:#?}",
+        refreshed_results
+    );
 }
 
 // ─── Nullable / union type member references ────────────────────────────────

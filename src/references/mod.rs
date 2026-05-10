@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
+use crate::types::ClassInfo;
 use crate::util::{
     build_fqn, collect_php_files_gitignore, find_class_at_offset, offset_to_position,
     position_to_offset, push_unique_location, strip_fqn_prefix,
@@ -51,12 +51,25 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        let start_total = std::time::Instant::now();
+        tracing::info!(
+            "Find References: starting at {} line {} char {}",
+            uri,
+            position.line,
+            position.character
+        );
+
         // Consult the precomputed symbol map for the current file
         // (retries one byte earlier for end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);
 
         // When the cursor is on a symbol span, dispatch by kind.
         if let Some(ref sym) = symbol {
+            tracing::info!(
+                "Find References: found symbol kind {:?} at offset {}",
+                sym.kind,
+                sym.start
+            );
             let locations = self.dispatch_symbol_references(
                 &sym.kind,
                 uri,
@@ -64,22 +77,36 @@ impl Backend {
                 sym.start,
                 include_declaration,
             );
+            tracing::info!(
+                "Find References: total time for {:?}: {:?}",
+                sym.kind,
+                start_total.elapsed()
+            );
             if !locations.is_empty() {
                 return Some(locations);
             }
         }
 
-        // Fallback for declaration sites in config/*.php, where array keys are
-        // not in the symbol map and lookup_symbol_at_position returns None.
-        // Also handles cases where the cursor is on a string literal that was
-        // indexed as a ClassReference (e.g. 'User' => ...) but the user
-        // actually wants config references.
+        // Fallback for declaration sites in config/*.php
+        let start_laravel = std::time::Instant::now();
         if let Some(locations) =
             laravel::find_config_references(self, uri, content, position, include_declaration)
         {
+            tracing::info!(
+                "Find References: found Laravel config references in {:?}",
+                start_laravel.elapsed()
+            );
+            tracing::info!(
+                "Find References: total time (fallback path): {:?}",
+                start_total.elapsed()
+            );
             return Some(locations);
         }
 
+        tracing::info!(
+            "Find References: no references found in {:?}",
+            start_total.elapsed()
+        );
         None
     }
 
@@ -423,7 +450,7 @@ impl Backend {
         let mut prev_len = 0;
         while reachable.len() != prev_len {
             prev_len = reachable.len();
-            let current: Vec<u32> = reachable.iter().copied().collect();
+            let current = reachable.clone();
 
             for def in &symbol_map.var_defs {
                 if def.name != var_name || def.kind != VarDefKind::ClosureCapture {
@@ -597,28 +624,19 @@ impl Backend {
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
 
-            let parsed_uri = match Url::parse(file_uri) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-
-            let content = match self.get_file_content_arc(file_uri) {
-                Some(c) => c,
-                None => continue,
-            };
-
-            for span in &symbol_map.spans {
-                match &span.kind {
-                    SymbolKind::ClassReference { name, is_fqn, .. } => {
-                        let resolved = if *is_fqn {
-                            name.clone()
-                        } else if let Some(fqn) =
+            // First pass: resolved-name check to avoid unnecessary content work.
+            // Aliased imports (`use Foo as Bar; new Bar`) must still reach the
+            // full matching loop, because the textual span name is the alias.
+            let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
+                SymbolKind::ClassReference { name, .. } => {
+                    if crate::util::short_name(name) == target_short {
+                        true
+                    } else {
+                        let resolved = if let Some(fqn) =
                             resolved_names.as_ref().and_then(|rn| rn.get(span.start))
                         {
                             fqn.to_string()
                         } else {
-                            // Fallback for offsets not tracked by mago-names
-                            // (e.g. docblock-sourced ClassReference spans).
                             let use_map = file_use_map.get_or_init(|| {
                                 self.file_imports
                                     .read()
@@ -628,55 +646,86 @@ impl Backend {
                             });
                             Self::resolve_to_fqn(name, use_map, &file_namespace)
                         };
-                        // Input boundary: resolve_to_fqn may return a leading `\`.
-                        let resolved_normalized = strip_fqn_prefix(&resolved);
-                        if !class_names_match(resolved_normalized, target, target_short) {
-                            continue;
-                        }
-                        let start = offset_to_position(&content, span.start as usize);
-                        let end = offset_to_position(&content, span.end as usize);
-                        locations.push(Location {
-                            uri: parsed_uri.clone(),
-                            range: Range { start, end },
-                        });
+                        class_names_match(strip_fqn_prefix(&resolved), target, target_short)
+                    }
+                }
+                SymbolKind::ClassDeclaration { name } => {
+                    include_declaration && name == target_short
+                }
+                SymbolKind::SelfStaticParent(ssp_kind) => *ssp_kind != SelfStaticParentKind::This,
+                _ => false,
+            });
+
+            if !has_potential_match {
+                continue;
+            }
+
+            let parsed_uri = match Url::parse(file_uri) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+
+            // Lazily load file content only if we find a true FQN match.
+            let mut file_content: Option<Arc<String>> = None;
+
+            for span in &symbol_map.spans {
+                let matched = match &span.kind {
+                    SymbolKind::ClassReference { name, is_fqn, .. } => {
+                        let resolved = if *is_fqn {
+                            name.clone()
+                        } else if let Some(fqn) =
+                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
+                        {
+                            fqn.to_string()
+                        } else {
+                            let use_map = file_use_map.get_or_init(|| {
+                                self.file_imports
+                                    .read()
+                                    .get(file_uri)
+                                    .cloned()
+                                    .unwrap_or_default()
+                            });
+                            Self::resolve_to_fqn(name, use_map, &file_namespace)
+                        };
+                        class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                     }
                     SymbolKind::ClassDeclaration { name } if include_declaration => {
-                        let fqn = build_fqn(name, file_namespace.as_deref());
-                        if !class_names_match(&fqn, target, target_short) {
-                            continue;
+                        if name != target_short {
+                            false
+                        } else {
+                            let fqn = build_fqn(name, file_namespace.as_deref());
+                            class_names_match(&fqn, target, target_short)
                         }
-                        let start = offset_to_position(&content, span.start as usize);
-                        let end = offset_to_position(&content, span.end as usize);
-                        locations.push(Location {
-                            uri: parsed_uri.clone(),
-                            range: Range { start, end },
-                        });
                     }
-                    SymbolKind::SelfStaticParent(ssp_kind) => {
-                        // self/static/parent resolve to the current class —
-                        // include them if they resolve to the target FQN.
-                        //
-                        // Skip `$this` — it is handled as a variable, not a
-                        // class reference.
-                        if *ssp_kind == SelfStaticParentKind::This {
-                            continue;
-                        }
+                    SymbolKind::SelfStaticParent(ssp_kind)
+                        if *ssp_kind != SelfStaticParentKind::This =>
+                    {
                         if let Some(fqn) = self.resolve_keyword_to_fqn(
                             ssp_kind,
                             file_uri,
                             &file_namespace,
                             span.start,
-                        ) && class_names_match(&fqn, target, target_short)
-                        {
-                            let start = offset_to_position(&content, span.start as usize);
-                            let end = offset_to_position(&content, span.end as usize);
-                            locations.push(Location {
-                                uri: parsed_uri.clone(),
-                                range: Range { start, end },
-                            });
+                        ) {
+                            class_names_match(&fqn, target, target_short)
+                        } else {
+                            false
                         }
                     }
-                    _ => {}
+                    _ => false,
+                };
+
+                if matched {
+                    if file_content.is_none() {
+                        file_content = self.get_file_content_arc(file_uri);
+                    }
+                    if let Some(ref content) = file_content {
+                        let start = offset_to_position(content, span.start as usize);
+                        let end = offset_to_position(content, span.end as usize);
+                        locations.push(Location {
+                            uri: parsed_uri.clone(),
+                            range: Range { start, end },
+                        });
+                    }
                 }
             }
         }
@@ -690,6 +739,7 @@ impl Backend {
                 .then(a.range.start.character.cmp(&b.range.start.character))
         });
 
+        locations.dedup();
         locations
     }
 
@@ -716,15 +766,54 @@ impl Backend {
         let snapshot = self.user_file_symbol_maps();
 
         for (file_uri, symbol_map) in &snapshot {
+            // First pass: name-only check to avoid unnecessary work.
+            let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
+                SymbolKind::MemberAccess {
+                    member_name,
+                    is_static,
+                    ..
+                } if member_name == target_member && *is_static == target_is_static => true,
+                SymbolKind::MemberDeclaration { name, is_static }
+                    if include_declaration
+                        && name == target_member
+                        && *is_static == target_is_static =>
+                {
+                    true
+                }
+                _ => false,
+            });
+
+            // Special check for property declarations in ClassInfo (represented as Variable spans)
+            let mut check_ast_map = false;
+            if !has_potential_match
+                && include_declaration
+                && let Some(classes) = self.get_classes_for_uri(file_uri)
+            {
+                for class in &classes {
+                    for prop in &class.properties {
+                        let prop_name = prop.name.strip_prefix('$').unwrap_or(&prop.name);
+                        let target_name = target_member.strip_prefix('$').unwrap_or(target_member);
+                        if prop_name == target_name && prop.is_static == target_is_static {
+                            check_ast_map = true;
+                            break;
+                        }
+                    }
+                    if check_ast_map {
+                        break;
+                    }
+                }
+            }
+
+            if !has_potential_match && !check_ast_map {
+                continue;
+            }
+
             let parsed_uri = match Url::parse(file_uri) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
 
-            let content = match self.get_file_content_arc(file_uri) {
-                Some(c) => c,
-                None => continue,
-            };
+            let mut file_content: Option<Arc<String>> = None;
 
             // Lazily resolved file context — only computed when we need
             // to check a candidate's subject against the hierarchy.
@@ -741,13 +830,20 @@ impl Backend {
                     } if member_name == target_member && *is_static == target_is_static => {
                         // Check if the subject belongs to the target hierarchy.
                         if let Some(hier) = hierarchy {
+                            if file_content.is_none() {
+                                file_content = self.get_file_content_arc(file_uri);
+                            }
+                            let Some(ref content) = file_content else {
+                                break;
+                            };
+
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let subject_fqns = self.resolve_subject_to_fqns(
                                 subject_text,
                                 *is_static,
                                 ctx,
                                 span.start,
-                                &content,
+                                content,
                             );
                             if !subject_fqns.is_empty()
                                 && !subject_fqns.iter().any(|fqn| hier.contains(fqn))
@@ -760,8 +856,15 @@ impl Backend {
                             // the subject — include conservatively.
                         }
 
-                        let start = offset_to_position(&content, span.start as usize);
-                        let end = offset_to_position(&content, span.end as usize);
+                        if file_content.is_none() {
+                            file_content = self.get_file_content_arc(file_uri);
+                        }
+                        let Some(ref content) = file_content else {
+                            break;
+                        };
+
+                        let start = offset_to_position(content, span.start as usize);
+                        let end = offset_to_position(content, span.end as usize);
                         locations.push(Location {
                             uri: parsed_uri.clone(),
                             range: Range { start, end },
@@ -795,8 +898,15 @@ impl Backend {
                             }
                         }
 
-                        let start = offset_to_position(&content, span.start as usize);
-                        let end = offset_to_position(&content, span.end as usize);
+                        if file_content.is_none() {
+                            file_content = self.get_file_content_arc(file_uri);
+                        }
+                        let Some(ref content) = file_content else {
+                            break;
+                        };
+
+                        let start = offset_to_position(content, span.start as usize);
+                        let end = offset_to_position(content, span.end as usize);
                         locations.push(Location {
                             uri: parsed_uri.clone(),
                             range: Range { start, end },
@@ -827,10 +937,17 @@ impl Backend {
                             && prop.is_static == target_is_static
                             && prop.name_offset != 0
                         {
+                            if file_content.is_none() {
+                                file_content = self.get_file_content_arc(file_uri);
+                            }
+                            let Some(ref content) = file_content else {
+                                break;
+                            };
+
                             let offset = prop.name_offset;
-                            let start = offset_to_position(&content, offset as usize);
+                            let start = offset_to_position(content, offset as usize);
                             let end =
-                                offset_to_position(&content, offset as usize + prop.name.len());
+                                offset_to_position(content, offset as usize + prop.name.len());
                             push_unique_location(&mut locations, &parsed_uri, start, end);
                         }
                     }
@@ -870,15 +987,47 @@ impl Backend {
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
 
+            // First pass: resolved-name check. Function imports can be aliased
+            // (`use function Foo\bar as baz; baz()`), so the call-site text
+            // alone is not enough to decide whether this file can match.
+            let has_potential_match = symbol_map.spans.iter().any(|span| {
+                if let SymbolKind::FunctionCall { name, .. } = &span.kind {
+                    if name == target_short {
+                        true
+                    } else {
+                        let resolved = if let Some(fqn) =
+                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
+                        {
+                            fqn.to_string()
+                        } else {
+                            let use_map = file_use_map.get_or_init(|| {
+                                self.file_imports
+                                    .read()
+                                    .get(file_uri)
+                                    .cloned()
+                                    .unwrap_or_default()
+                            });
+                            Self::resolve_to_fqn(name, use_map, &file_namespace)
+                        };
+                        let resolved_normalized = strip_fqn_prefix(&resolved);
+                        resolved_normalized == target
+                            || crate::util::short_name(resolved_normalized) == target_short
+                    }
+                } else {
+                    false
+                }
+            });
+
+            if !has_potential_match {
+                continue;
+            }
+
             let parsed_uri = match Url::parse(file_uri) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
 
-            let content = match self.get_file_content_arc(file_uri) {
-                Some(c) => c,
-                None => continue,
-            };
+            let mut file_content: Option<Arc<String>> = None;
 
             for span in &symbol_map.spans {
                 if let SymbolKind::FunctionCall {
@@ -889,6 +1038,7 @@ impl Backend {
                     if *is_definition && !include_declaration {
                         continue;
                     }
+
                     let resolved = if let Some(fqn) =
                         resolved_names.as_ref().and_then(|rn| rn.get(span.start))
                     {
@@ -903,25 +1053,24 @@ impl Backend {
                         });
                         Self::resolve_to_fqn(name, use_map, &file_namespace)
                     };
+
                     // Input boundary: resolve_to_fqn may return a leading `\`.
                     let resolved_normalized = strip_fqn_prefix(&resolved);
-                    if resolved_normalized != target
-                        && crate::util::short_name(resolved_normalized)
-                            != crate::util::short_name(target)
+                    if resolved_normalized == target
+                        || crate::util::short_name(resolved_normalized) == target_short
                     {
-                        // Also try matching by short name when the
-                        // namespaces don't line up (common for global
-                        // functions referenced from within a namespace).
-                        if name != target_short {
-                            continue;
+                        if file_content.is_none() {
+                            file_content = self.get_file_content_arc(file_uri);
+                        }
+                        if let Some(ref content) = file_content {
+                            let start = offset_to_position(content, span.start as usize);
+                            let end = offset_to_position(content, span.end as usize);
+                            locations.push(Location {
+                                uri: parsed_uri.clone(),
+                                range: Range { start, end },
+                            });
                         }
                     }
-                    let start = offset_to_position(&content, span.start as usize);
-                    let end = offset_to_position(&content, span.end as usize);
-                    locations.push(Location {
-                        uri: parsed_uri.clone(),
-                        range: Range { start, end },
-                    });
                 }
             }
         }
@@ -948,38 +1097,48 @@ impl Backend {
         let snapshot = self.user_file_symbol_maps();
 
         for (file_uri, symbol_map) in &snapshot {
+            // First pass: name-only check.
+            let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
+                SymbolKind::ConstantReference { name } => name == target_name,
+                SymbolKind::MemberDeclaration { name, is_static }
+                    if include_declaration && name == target_name && *is_static =>
+                {
+                    true
+                }
+                _ => false,
+            });
+
+            if !has_potential_match {
+                continue;
+            }
+
             let parsed_uri = match Url::parse(file_uri) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
 
-            let content = match self.get_file_content_arc(file_uri) {
-                Some(c) => c,
-                None => continue,
-            };
+            let mut file_content: Option<Arc<String>> = None;
 
             for span in &symbol_map.spans {
-                if let SymbolKind::ConstantReference { name } = &span.kind {
-                    if name != target_name {
-                        continue;
+                let matched = match &span.kind {
+                    SymbolKind::ConstantReference { name } => name == target_name,
+                    SymbolKind::MemberDeclaration { name, is_static }
+                        if include_declaration && name == target_name && *is_static =>
+                    {
+                        true
                     }
-                    let start = offset_to_position(&content, span.start as usize);
-                    let end = offset_to_position(&content, span.end as usize);
-                    locations.push(Location {
-                        uri: parsed_uri.clone(),
-                        range: Range { start, end },
-                    });
-                }
-                // Include MemberDeclaration for constant declarations
-                // when they match (class constants use MemberDeclaration).
-                if include_declaration
-                    && let SymbolKind::MemberDeclaration { name, is_static } = &span.kind
-                    && name == target_name
-                    && *is_static
-                {
-                    let start = offset_to_position(&content, span.start as usize);
-                    let end = offset_to_position(&content, span.end as usize);
-                    push_unique_location(&mut locations, &parsed_uri, start, end);
+                    _ => false,
+                };
+
+                if matched {
+                    if file_content.is_none() {
+                        file_content = self.get_file_content_arc(file_uri);
+                    }
+                    if let Some(ref content) = file_content {
+                        let start = offset_to_position(content, span.start as usize);
+                        let end = offset_to_position(content, span.end as usize);
+                        push_unique_location(&mut locations, &parsed_uri, start, end);
+                    }
                 }
             }
         }
@@ -1140,63 +1299,27 @@ impl Backend {
 
         // Insert the seeds.
         for fqn in seed_fqns {
-            hierarchy.insert(fqn.clone());
+            hierarchy.insert(normalize_fqn(fqn).to_string());
         }
 
         // Walk up: collect all ancestors for each seed.
-        for fqn in seed_fqns {
-            self.collect_ancestors(fqn, &class_loader, &mut hierarchy);
+        let seeds: Vec<String> = hierarchy.iter().cloned().collect();
+        for fqn in seeds {
+            self.collect_ancestors(&fqn, &class_loader, &mut hierarchy);
         }
 
-        // Walk down: collect all descendants from ast_map and class_index.
-        // We iterate until no new FQNs are added (transitive closure).
-        let mut changed = true;
-        let mut depth = 0u32;
-        while changed && depth < MAX_INHERITANCE_DEPTH {
-            changed = false;
-            depth += 1;
-
-            // Snapshot the current hierarchy to check against.
-            let current: Vec<String> = hierarchy.iter().cloned().collect();
-
-            // Scan all known classes for ones that extend/implement/use
-            // anything in the current hierarchy.
-            let all_classes: Vec<ClassInfo> = {
-                let map = self.uri_classes_index.read();
-                map.values()
-                    .flat_map(|classes| classes.iter().map(|c| ClassInfo::clone(c)))
-                    .collect()
-            };
-
-            for cls in &all_classes {
-                let cls_fqn = normalize_fqn(&cls.fqn());
-                if hierarchy.contains(&cls_fqn) {
-                    continue;
-                }
-
-                if self.class_is_descendant_of(cls, &current, &class_loader) {
-                    hierarchy.insert(cls_fqn);
-                    changed = true;
-                }
-            }
-
-            // Also check class_index entries not yet in ast_map.
-            let index_entries: Vec<String> = {
-                let idx = self.fqn_uri_index.read();
-                idx.keys().cloned().collect()
-            };
-
-            for fqn in &index_entries {
-                let normalized = normalize_fqn(fqn);
-                if hierarchy.contains(&normalized) {
-                    continue;
-                }
-
-                if let Some(cls) = class_loader(fqn)
-                    && self.class_is_descendant_of(&cls, &current, &class_loader)
-                {
-                    hierarchy.insert(normalized);
-                    changed = true;
+        // Walk down: collect all descendants using the global GTI index
+        // (reverse inheritance).  This is O(hierarchy size) rather than
+        // O(total classes).
+        let mut queue: std::collections::VecDeque<String> = hierarchy.iter().cloned().collect();
+        let gti = self.gti_index.read();
+        while let Some(fqn) = queue.pop_front() {
+            if let Some(descendants) = gti.get(&fqn) {
+                for desc in descendants {
+                    let normalized = normalize_fqn(desc).to_string();
+                    if hierarchy.insert(normalized.clone()) {
+                        queue.push_back(normalized);
+                    }
                 }
             }
         }
@@ -1249,96 +1372,6 @@ impl Backend {
         }
     }
 
-    /// Check whether a class directly extends, implements, or uses
-    /// anything in the given set of FQNs.
-    fn class_is_descendant_of(
-        &self,
-        cls: &ClassInfo,
-        targets: &[String],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
-        // Direct parent.
-        if let Some(ref parent) = cls.parent_class {
-            let parent_fqn = normalize_fqn(parent);
-            if targets.contains(&parent_fqn) {
-                return true;
-            }
-            // Transitive: walk the parent chain.
-            if self.ancestor_in_set(&parent_fqn, targets, class_loader, 0) {
-                return true;
-            }
-        }
-
-        // Direct interfaces.
-        for iface in &cls.interfaces {
-            let iface_fqn = normalize_fqn(iface);
-            if targets.contains(&iface_fqn) {
-                return true;
-            }
-            if self.ancestor_in_set(&iface_fqn, targets, class_loader, 0) {
-                return true;
-            }
-        }
-
-        // Used traits.
-        for trait_name in &cls.used_traits {
-            let trait_fqn = normalize_fqn(trait_name);
-            if targets.contains(&trait_fqn) {
-                return true;
-            }
-        }
-
-        // Mixins.
-        for mixin in &cls.mixins {
-            let mixin_fqn = normalize_fqn(mixin);
-            if targets.contains(&mixin_fqn) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Recursively check whether any ancestor of `fqn` is in the target set.
-    fn ancestor_in_set(
-        &self,
-        fqn: &str,
-        targets: &[String],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        depth: u32,
-    ) -> bool {
-        if depth >= MAX_INHERITANCE_DEPTH {
-            return false;
-        }
-
-        let cls = match class_loader(fqn) {
-            Some(c) => c,
-            None => return false,
-        };
-
-        if let Some(ref parent) = cls.parent_class {
-            let parent_fqn = normalize_fqn(parent);
-            if targets.contains(&parent_fqn) {
-                return true;
-            }
-            if self.ancestor_in_set(&parent_fqn, targets, class_loader, depth + 1) {
-                return true;
-            }
-        }
-
-        for iface in &cls.interfaces {
-            let iface_fqn = normalize_fqn(iface);
-            if targets.contains(&iface_fqn) {
-                return true;
-            }
-            if self.ancestor_in_set(&iface_fqn, targets, class_loader, depth + 1) {
-                return true;
-            }
-        }
-
-        false
-    }
-
     /// Ensure all workspace PHP files have been parsed and have symbol maps.
     ///
     /// This lazily parses files that are in the workspace directory but
@@ -1347,6 +1380,7 @@ impl Backend {
     /// `composer.json` `config.vendor-dir`, defaulting to `vendor`) is
     /// skipped during the filesystem walk.
     pub(crate) fn ensure_workspace_indexed(&self) {
+        let start = std::time::Instant::now();
         // Collect URIs that already have symbol maps.
         let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
@@ -1356,15 +1390,6 @@ impl Backend {
         let vendor_prefixes = self.vendor_uri_prefixes.lock().clone();
 
         // ── Phase 1: class_index files (user only) ─────────────────────
-        // These are files we already know about from update_ast calls,
-        // ensuring their symbol maps are populated.  Vendor files are
-        // skipped — find references only reports user code.
-        //
-        // File content is read and parsed in parallel using
-        // `std::thread::scope`.  Each thread reads one file from disk
-        // and calls `update_ast` which acquires write locks briefly to
-        // store the results.  The expensive parsing step runs without
-        // any locks held.
         let index_uris: Vec<String> = self.fqn_uri_index.read().values().cloned().collect();
 
         let phase1_uris: Vec<&String> = index_uris
@@ -1377,21 +1402,29 @@ impl Backend {
             })
             .collect();
 
-        self.parse_files_parallel(
-            phase1_uris
-                .iter()
-                .map(|uri| (uri.as_str(), None::<&str>))
-                .collect(),
-        );
+        if !phase1_uris.is_empty() {
+            tracing::info!(
+                "ensure_workspace_indexed: Phase 1 parsing {} files",
+                phase1_uris.len()
+            );
+            self.parse_files_parallel(
+                phase1_uris
+                    .iter()
+                    .map(|uri| (uri.as_str(), None::<&str>))
+                    .collect(),
+            );
+        }
 
         // ── Phase 2: workspace directory scan ───────────────────────────
-        // Recursively discover PHP files in the workspace root that are
-        // not yet indexed.  This catches files that are not in the
-        // classmap, class_index, or already opened.  The vendor directory
-        // is skipped — find references only reports user code.  The walk
-        // respects .gitignore so that generated/cached directories (e.g.
-        // storage/framework/views/, var/cache/, node_modules/) are
-        // automatically excluded.
+        //
+        // Even after the initial scan, repeat the walk so newly-created PHP
+        // files that are not open in the editor can still be discovered.
+        // The existing-URI filter below keeps this cheap by parsing only files
+        // that are not already in `symbol_maps`.
+        let has_scanned_workspace = self
+            .workspace_indexed
+            .load(std::sync::atomic::Ordering::Relaxed);
+
         let workspace_root = self.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
@@ -1400,7 +1433,18 @@ impl Backend {
             // Re-read existing URIs after phase 1 may have added more.
             let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
+            let walk_start = std::time::Instant::now();
             let php_files = collect_php_files_gitignore(&root, &vendor_dir_paths);
+            tracing::info!(
+                "ensure_workspace_indexed: Phase 2 {} found {} PHP files in {:?}",
+                if has_scanned_workspace {
+                    "refresh disk walk"
+                } else {
+                    "disk walk"
+                },
+                php_files.len(),
+                walk_start.elapsed()
+            );
 
             let phase2_work: Vec<(String, PathBuf)> = php_files
                 .into_iter()
@@ -1414,8 +1458,17 @@ impl Backend {
                 })
                 .collect();
 
-            self.parse_paths_parallel(&phase2_work);
+            if !phase2_work.is_empty() {
+                tracing::info!(
+                    "ensure_workspace_indexed: Phase 2 parsing {} files",
+                    phase2_work.len()
+                );
+                self.parse_paths_parallel(&phase2_work);
+            }
+            self.workspace_indexed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        tracing::info!("ensure_workspace_indexed: total time {:?}", start.elapsed());
     }
 
     /// Parse a batch of files in parallel using OS threads.

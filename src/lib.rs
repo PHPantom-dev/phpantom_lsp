@@ -615,6 +615,13 @@ pub struct Backend {
     /// URIs opened with `languageId == "blade"` that don't have a `.blade.php` extension.
     /// Allows editors to signal Blade files via languageId alone.
     pub(crate) blade_uris: Arc<RwLock<std::collections::HashSet<String>>>,
+    /// Whether the workspace directory has been fully scanned for PHP files.
+    ///
+    /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.
+    /// Subsequent calls still re-walk the directory to discover newly created
+    /// files, but the flag lets us log the difference between initial and
+    /// refresh scans.
+    pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Backend {
@@ -695,6 +702,7 @@ impl Backend {
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -771,6 +779,7 @@ impl Backend {
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -1126,6 +1135,7 @@ impl Backend {
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),
             blade_source_maps: Arc::clone(&self.blade_source_maps),
             blade_uris: Arc::clone(&self.blade_uris),
+            workspace_indexed: Arc::clone(&self.workspace_indexed),
         }
     }
 

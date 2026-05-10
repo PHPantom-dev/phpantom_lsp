@@ -54,7 +54,7 @@ async fn deprecated_diagnostics_variable_cache_regression() {
     php.push_str("    }\n}\n");
 
     let uri = "file:///test/service.php";
-    let backend = create_test_backend_with_full_stubs();
+    let backend = create_test_backend();
     backend.update_ast(uri, &php);
 
     let start = Instant::now();
@@ -391,16 +391,13 @@ final class DecimalCast implements CastsAttributes {
 /// Verify that `is_object()` type-guard narrowing works in the diagnostic
 /// scope cache (forward walker).
 ///
-/// When `$data = json_decode(...)` returns `mixed` and the condition is
-/// `is_object($data) && property_exists($data, 'error_link')`, the forward
-/// walker should narrow `$data` to `object` both within the `&&` chain
-/// and inside the `if` body.
+/// When `$data` starts as `mixed` and the condition is `is_object($data) &&
+/// property_exists($data, 'error_link')`, the forward walker should narrow
+/// `$data` to `object` both within the `&&` chain and inside the `if` body.
 #[test]
 fn is_object_type_guard_no_false_positive() {
     let php = r#"<?php
-function test(string $json): ?string {
-    $data = json_decode($json, false);
-
+function test(mixed $data): ?string {
     if (is_object($data) && property_exists($data, 'error_link') && is_string($data->error_link)) {
         return stripslashes($data->error_link);
     }

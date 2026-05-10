@@ -1,8 +1,28 @@
-use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
-};
+use crate::common::{create_psr4_workspace, create_test_backend};
+use phpantom_lsp::Backend;
+use std::collections::HashMap;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
+
+static EXCEPTION_CHAIN_STUB: &str = r#"<?php
+class Exception
+{
+    public function getMessage(): string {}
+    public function getCode(): int {}
+    public function getTrace(): array {}
+}
+
+class RuntimeException extends Exception {}
+class PDOException extends RuntimeException {}
+"#;
+
+fn create_exception_chain_backend() -> Backend {
+    let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    class_stubs.insert("Exception", EXCEPTION_CHAIN_STUB);
+    class_stubs.insert("RuntimeException", EXCEPTION_CHAIN_STUB);
+    class_stubs.insert("PDOException", EXCEPTION_CHAIN_STUB);
+    Backend::new_test_with_all_stubs(class_stubs, HashMap::new(), HashMap::new())
+}
 
 // ─── Inheritance tests ──────────────────────────────────────────────────────
 
@@ -1795,7 +1815,7 @@ async fn test_interface_virtual_members_visible_through_parent_chain() {
 /// Exception).
 #[tokio::test]
 async fn test_completion_deep_inheritance_through_stubs() {
-    let backend = create_test_backend_with_full_stubs();
+    let backend = create_exception_chain_backend();
 
     let uri = Url::parse("file:///deep_chain.php").unwrap();
     let text = concat!(

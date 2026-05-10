@@ -55,3 +55,7 @@ harness = false
 [[bench]]
 name = "completion"
 harness = false
+
+[[bench]]
+name = "references"
+harness = false

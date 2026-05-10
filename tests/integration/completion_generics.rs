@@ -1,8 +1,70 @@
-use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
-};
+use crate::common::{create_psr4_workspace, create_test_backend};
+use phpantom_lsp::Backend;
+use std::collections::HashMap;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
+
+static SPL_GENERIC_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ */
+interface Traversable {}
+
+/**
+ * @template TKey
+ * @template TValue
+ */
+interface Iterator extends Traversable
+{
+    /** @return TValue */
+    public function current(): mixed;
+    /** @return TKey */
+    public function key(): mixed;
+    public function next(): void;
+    public function rewind(): void;
+    public function valid(): bool;
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @implements Iterator<TKey, TValue>
+ */
+class ArrayIterator implements Iterator
+{
+    /** @param array<TKey, TValue> $array */
+    public function __construct(array $array = []) {}
+    /** @return TValue */
+    public function current(): mixed {}
+    /** @return TKey */
+    public function key(): mixed {}
+    public function next(): void {}
+    public function rewind(): void {}
+    public function valid(): bool {}
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class ArrayObject
+{
+    /** @param array<TKey, TValue> $array */
+    public function __construct(array $array = []) {}
+    /** @return ArrayIterator<TKey, TValue> */
+    public function getIterator(): ArrayIterator {}
+}
+"#;
+
+fn create_spl_generic_backend() -> Backend {
+    let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    class_stubs.insert("Traversable", SPL_GENERIC_STUB);
+    class_stubs.insert("Iterator", SPL_GENERIC_STUB);
+    class_stubs.insert("ArrayIterator", SPL_GENERIC_STUB);
+    class_stubs.insert("ArrayObject", SPL_GENERIC_STUB);
+    Backend::new_test_with_all_stubs(class_stubs, HashMap::new(), HashMap::new())
+}
 
 // ─── Generic type resolution tests ──────────────────────────────────────────
 //
@@ -8149,7 +8211,7 @@ async fn test_reduce_two_template_params_union_callable() {
 /// to avoid variable-resolution complexity.
 #[tokio::test]
 async fn test_array_iterator_current_resolves_generic_value_type() {
-    let backend = create_test_backend_with_full_stubs();
+    let backend = create_spl_generic_backend();
 
     let uri = Url::parse("file:///array_iterator_generics.php").unwrap();
     let text = concat!(
@@ -8222,7 +8284,7 @@ async fn test_array_iterator_current_resolves_generic_value_type() {
 /// Same as above but verifies variable assignment: `$rule = ...->current(); $rule->`
 #[tokio::test]
 async fn test_array_iterator_current_via_variable_assignment() {
-    let backend = create_test_backend_with_full_stubs();
+    let backend = create_spl_generic_backend();
 
     let uri = Url::parse("file:///array_iterator_var.php").unwrap();
     let text = concat!(
@@ -9011,7 +9073,7 @@ async fn test_constructor_array_key_value_template_inference() {
 /// enabling completion on the iterator's methods like `current()`.
 #[tokio::test]
 async fn test_arrayobject_getiterator_template_substitution() {
-    let backend = create_test_backend_with_full_stubs();
+    let backend = create_spl_generic_backend();
 
     let uri = Url::parse("file:///arrayobj_iter.php").unwrap();
     let text = concat!(

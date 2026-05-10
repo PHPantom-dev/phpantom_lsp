@@ -24,6 +24,270 @@ use std::path::Path;
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
+static UNIT_ENUM_STUB: &str = r#"<?php
+interface UnitEnum
+{
+    /** @return static[] */
+    public static function cases(): array;
+    public readonly string $name;
+}
+"#;
+
+static BACKED_ENUM_STUB: &str = r#"<?php
+interface BackedEnum extends UnitEnum
+{
+    public static function from(int|string $value): static;
+    public static function tryFrom(int|string $value): ?static;
+    public readonly int|string $value;
+}
+"#;
+
+static GENERATOR_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ * @template TSend
+ * @template TReturn
+ */
+final class Generator
+{
+    /** @return TReturn */
+    public function getReturn(): mixed {}
+}
+"#;
+
+static NO_REWIND_ITERATOR_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ */
+class NoRewindIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Traversable $iterator) {}
+    /** @return TValue */
+    public function current(): mixed {}
+    /** @return TKey */
+    public function key(): mixed {}
+}
+"#;
+
+static ITERATOR_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ */
+interface Iterator extends Traversable
+{
+    /** @return TValue */
+    public function current(): mixed;
+    /** @return TKey */
+    public function key(): mixed;
+    public function next(): void;
+    public function rewind(): void;
+    public function valid(): bool;
+}
+"#;
+
+static ITERATOR_AGGREGATE_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ */
+interface IteratorAggregate extends Traversable
+{
+    /** @return Traversable<TKey, TValue>|array<TValue> */
+    public function getIterator(): Traversable|array;
+}
+"#;
+
+static ITERATOR_ITERATOR_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @mixin TIterator
+ */
+class IteratorIterator implements Iterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Traversable $iterator) {}
+    /** @return TValue */
+    public function current(): mixed {}
+    /** @return TKey */
+    public function key(): mixed {}
+    public function next(): void {}
+    public function rewind(): void {}
+    public function valid(): bool {}
+}
+"#;
+
+static SPL_ITERATOR_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ * @implements Iterator<TKey, TValue>
+ */
+class ArrayIterator implements Iterator
+{
+    /** @param array<TKey, TValue> $array */
+    public function __construct(array $array = []) {}
+    /** @return TValue */
+    public function current(): mixed {}
+    /** @return TKey */
+    public function key(): mixed {}
+    public function next(): void {}
+    public function rewind(): void {}
+    public function valid(): bool {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class CachingIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator) {}
+    public function hasNext(): bool {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class InfiniteIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class LimitIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator, int $offset = 0, int $limit = -1) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class CallbackFilterIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator, callable $callback) {}
+}
+
+/**
+ * @template TValue
+ */
+class SplDoublyLinkedList
+{
+    /** @param TValue $value */
+    public function add(int $index, mixed $value): void {}
+    /** @return TValue */
+    public function bottom(): mixed {}
+}
+
+/**
+ * @template TKey of object
+ * @template TValue
+ */
+class SplObjectStorage
+{
+    /** @return TValue */
+    public function offsetGet(object $object): mixed {}
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class ArrayObject
+{
+    /** @param array<TKey, TValue> $array */
+    public function __construct(array $array = []) {}
+    /** @return ArrayIterator<TKey, TValue> */
+    public function getIterator(): ArrayIterator {}
+}
+"#;
+
+static TRAVERSABLE_STUB: &str = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ */
+interface Traversable {}
+"#;
+
+static DATE_INTERVAL_STUB: &str = r#"<?php
+class DateInterval
+{
+    public function __construct(string $duration) {}
+}
+"#;
+
+static DATE_TIME_IMMUTABLE_STUB: &str = r#"<?php
+class DateTimeImmutable
+{
+    public function __construct(string $datetime = "now") {}
+    public function sub(DateInterval $interval): static {}
+    public function modify(string $modifier): DateTimeImmutable|false {}
+}
+"#;
+
+static EXCEPTION_STUB: &str =
+    "<?php\nclass Exception {}\nclass LogicException extends Exception {}\n";
+
+static WEAK_REFERENCE_STUB: &str = r#"<?php
+class WeakReference
+{
+    public static function create(object $object): WeakReference {}
+    /** @return Exception|null */
+    public function get(): ?object {}
+}
+"#;
+
+static DOM_DOCUMENT_STUB: &str = "<?php\nclass DOMDocument {}\n";
+
+static DOM_ELEMENT_STUB: &str = r#"<?php
+class DOMElement
+{
+    public ?DOMDocument $ownerDocument;
+    public function __construct(string $qualifiedName, string $value = "", string $namespace = "") {}
+}
+"#;
+
+static SIMPLE_XML_ELEMENT_STUB: &str = r#"<?php
+class SimpleXMLElement
+{
+    public function __construct(string $data) {}
+    public function __get(string $name): SimpleXMLElement {}
+}
+"#;
+
+static STDCLASS_STUB: &str = "<?php\nclass stdClass {}\n";
+
+static ARRAY_FUNCTION_STUB: &str = r#"<?php
+/**
+ * @return array<int, string>
+ */
+function range(string $start, string $end): array {}
+"#;
+
 // ─── Assertion extraction ───────────────────────────────────────────────────
 
 /// A single `assertType('expected', expr)` call found in the source.
@@ -604,7 +868,51 @@ fn extract_type_from_hover(hover_text: &str, var_name: &str) -> Option<String> {
 // ─── Test runner ────────────────────────────────────────────────────────────
 
 fn create_assert_type_backend() -> Backend {
-    Backend::new_test_with_full_stubs()
+    let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    class_stubs.insert("UnitEnum", UNIT_ENUM_STUB);
+    class_stubs.insert("BackedEnum", BACKED_ENUM_STUB);
+    class_stubs.insert("Generator", GENERATOR_STUB);
+    class_stubs.insert("NoRewindIterator", NO_REWIND_ITERATOR_STUB);
+    class_stubs.insert("Iterator", ITERATOR_STUB);
+    class_stubs.insert("IteratorAggregate", ITERATOR_AGGREGATE_STUB);
+    class_stubs.insert("IteratorIterator", ITERATOR_ITERATOR_STUB);
+    class_stubs.insert("ArrayIterator", SPL_ITERATOR_STUB);
+    class_stubs.insert("CachingIterator", SPL_ITERATOR_STUB);
+    class_stubs.insert("InfiniteIterator", SPL_ITERATOR_STUB);
+    class_stubs.insert("LimitIterator", SPL_ITERATOR_STUB);
+    class_stubs.insert("CallbackFilterIterator", SPL_ITERATOR_STUB);
+    class_stubs.insert("SplDoublyLinkedList", SPL_ITERATOR_STUB);
+    class_stubs.insert("SplObjectStorage", SPL_ITERATOR_STUB);
+    class_stubs.insert("ArrayObject", SPL_ITERATOR_STUB);
+    class_stubs.insert("Traversable", TRAVERSABLE_STUB);
+    class_stubs.insert("DateInterval", DATE_INTERVAL_STUB);
+    class_stubs.insert("DateTimeImmutable", DATE_TIME_IMMUTABLE_STUB);
+    class_stubs.insert("Exception", EXCEPTION_STUB);
+    class_stubs.insert("LogicException", EXCEPTION_STUB);
+    class_stubs.insert("WeakReference", WEAK_REFERENCE_STUB);
+    class_stubs.insert("DOMDocument", DOM_DOCUMENT_STUB);
+    class_stubs.insert("DOMElement", DOM_ELEMENT_STUB);
+    class_stubs.insert("SimpleXMLElement", SIMPLE_XML_ELEMENT_STUB);
+    class_stubs.insert("stdClass", STDCLASS_STUB);
+
+    let mut func_stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    func_stubs.insert("range", ARRAY_FUNCTION_STUB);
+
+    Backend::new_test_with_all_stubs(class_stubs, func_stubs, HashMap::new())
+}
+
+fn fixture_uri(path: &Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .expect("assert-type runner should have a current directory")
+            .join(path)
+    };
+
+    Url::from_file_path(&absolute)
+        .expect("assert-type fixture path should convert to a file URI")
+        .to_string()
 }
 
 fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> {
@@ -621,8 +929,8 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
 
     // Create backend and open the file.
     let backend = create_assert_type_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, &transformed);
+    let uri = fixture_uri(path);
+    backend.update_ast(&uri, &transformed);
 
     let mut failures: Vec<String> = Vec::new();
     let mut passed = 0;
@@ -650,7 +958,7 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
             character: col + 1, // +1 to land inside the variable name (past $)
         };
 
-        let hover = backend.handle_hover(uri, &transformed, position);
+        let hover = backend.handle_hover(&uri, &transformed, position);
 
         match hover {
             Some(h) => {

@@ -168,6 +168,24 @@ fn find_string_key_usages(
 
     let mut locations = Vec::new();
     for (file_uri, symbol_map) in snapshot {
+        // First pass: check if this file even has ANY LaravelStringKey matches.
+        // This avoids reading file content from disk for thousands of unrelated files.
+        let has_match = symbol_map.spans.iter().any(|span| {
+            if let SymbolKind::LaravelStringKey {
+                kind: span_kind,
+                key: span_key,
+            } = &span.kind
+            {
+                span_kind == kind && span_key == key
+            } else {
+                false
+            }
+        });
+
+        if !has_match {
+            continue;
+        }
+
         let Ok(parsed_uri) = Url::parse(file_uri) else {
             continue;
         };

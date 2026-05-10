@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. (thanks [@MingJen](https://github.com/MingJen))
+- **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/100.
 - **Blade keyword highlighting.** Blade directives, echo delimiters, PHP keywords, cast types, comments, and PHPDoc tags inside `.blade.php` files now receive semantic tokens for proper syntax coloring.
 - **Blade view directive navigation.** Go-to-definition works on view names inside Blade directives (`@include`, `@extends`, `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`, `@component`, `@each`), jumping to the referenced template file.
 - **Replace FQCN with import.** A refactoring code action on any fully-qualified class name (`\Foo\Bar`) inserts a `use` statement and replaces the inline reference with the short name. Detects existing imports and short-name conflicts.
@@ -29,9 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import all missing classes.** A bulk code action that imports every unresolved class name in the file at once. Ambiguous names are left for manual resolution.
 - **Context-aware import candidate filtering.** Import class actions now filter candidates by syntactic context (only interfaces after `implements`, only traits after `use`, etc.).
 - **Convert to instance variable.** A code action that promotes a local variable inside a method to a class property, rewriting all references to `$this->prop` (or `self::$prop` in static methods).
-- **Laravel view, route, and translation key navigation.** Go to Definition works for Blade view names (`view('...')`), route names (`route('...')`), and translation keys (`__('...')`, `trans(...)`, `Lang::get(...)`). (thanks @MingJen)
-- **Laravel config and env key navigation.** Go to Definition and Find All References work for config keys and env variables (`config('app.name')`, `env('APP_KEY')`). (thanks @MingJen)
-- **Untyped property type inference from constructor.** Properties without type declarations are resolved by inspecting the constructor body for assignments and promoted parameter defaults. (thanks @lucasacoutinho)
+- **Laravel view, route, and translation key navigation.** Go to Definition works for Blade view names (`view('...')`), route names (`route('...')`), and translation keys (`__('...')`, `trans(...)`, `Lang::get(...)`). Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/101.
+- **Laravel config and env key navigation.** Go to Definition and Find All References work for config keys and env variables (`config('app.name')`, `env('APP_KEY')`). Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/93.
+- **Untyped property type inference from constructor.** Properties without type declarations are resolved by inspecting the constructor body for assignments and promoted parameter defaults. Contributed by @lucasacoutinho in https://github.com/AJenbo/phpantom_lsp/pull/81.
 - **Binary expression type inference.** Hover and variable resolution now show result types for all binary operators (`int + int` → `int`, `int + float` → `float`, `int / int` → `int|float`). Compound assignments update the variable's type accordingly.
 - **Nested array shape inference from multi-level key assignments.** Assignments like `$b['a']['b'] = 'x'` now produce a nested array shape type (`array{a: array{b: string}}`), enabling array key completion for incrementally built arrays.
 - **Loop type propagation.** Variables assigned late in loop bodies are now visible from the start on subsequent iterations.
@@ -40,10 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Machine-readable CLI output.** Both `analyze` and `fix` accept a `--format` flag with `table`, `github`, and `json` options. When `GITHUB_ACTIONS` is set, table output automatically includes GitHub annotations.
 - **Magic property diagnostics.** New `report-magic-properties` option under `[diagnostics]` in `.phpantom.toml`. When enabled, classes with `__get` that also have virtual properties (from `@property` docblock tags, Laravel Eloquent column inference, or other providers) will flag unknown property access instead of silently allowing it.
 - **Inline diagnostic suppression.** `// @phpantom-ignore code` on the same line or the line above suppresses the specified diagnostic. Multiple codes can be comma-separated. A bare `// @phpantom-ignore` suppresses all diagnostics on the target line.
-- **Find references and rename for PHPDoc virtual members.** `@property`, `@property-read`, `@property-write`, and `@method` declarations in docblocks are now included in find-references and rename results alongside their runtime usages, including when the subject has a nullable or union type (e.g. `Foo|null` from `->first()`). (thanks @AbyssWaIker)
+- **Find references and rename for PHPDoc virtual members.** `@property`, `@property-read`, `@property-write`, and `@method` declarations in docblocks are now included in find-references and rename results alongside their runtime usages, including when the subject has a nullable or union type (e.g. `Foo|null` from `->first()`). Contributed by @AbyssWaIker in https://github.com/AJenbo/phpantom_lsp/pull/115.
 
 ### Changed
 
+- **Find References performance and freshness.** Project-wide Find References now avoids more unnecessary file work while still returning references through aliased class and function imports, and it refreshes newly added workspace PHP files on later searches. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/116.
 - **Incremental text sync.** The server now uses incremental document sync, receiving only changed ranges from the editor instead of the full file content on every keystroke.
 - **Replace FQCN with import.** Now replaces all occurrences of the same FQCN throughout the file in one action, not just the one under the cursor. A new "Replace all FQCNs with imports" action appears when the file contains multiple distinct FQCNs, replacing all of them at once (skipping those with import conflicts).
 - **LSP responsiveness.** Hover, go-to-definition, signature help, code actions, rename, and other handlers now run on background threads. Slow requests no longer block other requests or cancellations.
