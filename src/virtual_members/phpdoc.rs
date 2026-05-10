@@ -633,11 +633,14 @@ fn collect_mixin_members(
         // mixin (e.g. Builder) is only resolved once per thread.
         ensure_mixin_cache_fresh();
         let resolved_mixin = if let Some(c) = cache {
-            let map = c.lock();
-            if let Some(cached) = map.get(&(Atom::from(&resolved_mixin_name), Vec::new())) {
-                Arc::clone(cached)
+            let cached = {
+                let map = c.lock();
+                map.get(&(Atom::from(&resolved_mixin_name), Vec::new()))
+                    .map(Arc::clone)
+            };
+            if let Some(cached) = cached {
+                cached
             } else {
-                drop(map);
                 MIXIN_CACHE.with(|thread_cache| {
                     let mut map = thread_cache.borrow_mut();
                     Arc::clone(map.1.entry(resolved_mixin_name.clone()).or_insert_with(|| {

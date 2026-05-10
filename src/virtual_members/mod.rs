@@ -1067,9 +1067,7 @@ fn resolve_class_fully_inner(
     merged.rebuild_method_index();
     let result = Arc::new(merged);
     if let Some(cache) = cache {
-        let mut map = cache.lock();
-
-        map.insert(cache_key, Arc::clone(&result));
+        cache.lock().insert(cache_key, Arc::clone(&result));
     }
 
     result
