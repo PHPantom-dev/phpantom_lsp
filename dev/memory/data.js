@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778356874748,
+  "lastUpdate": 1778440662910,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8907,6 +8907,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "MingJen@users.noreply.github.com",
+            "name": "Teemo",
+            "username": "MingJen"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6c352739c1e47c88d991b95f53917d58e3c47c2c",
+          "message": "perf: improve Find References performance and freshness",
+          "timestamp": "2026-05-10T21:05:27+02:00",
+          "tree_id": "42c5049913d0cd0fb5f0ca5392b0c5c7e9e6f476",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6c352739c1e47c88d991b95f53917d58e3c47c2c"
+        },
+        "date": 1778440662224,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.5,
             "unit": "MiB"
           }
         ]
