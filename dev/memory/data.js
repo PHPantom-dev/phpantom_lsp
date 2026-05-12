@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778440662910,
+  "lastUpdate": 1778593308442,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8941,6 +8941,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "eeb17c4538bf1e5b9ce0a3291c99681e666ef757",
+          "message": "Add macOS codesigning and notarization to release workflow",
+          "timestamp": "2026-05-12T15:28:59+02:00",
+          "tree_id": "040089533d9830194674a36f2c9c516dd4b15ecb",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/eeb17c4538bf1e5b9ce0a3291c99681e666ef757"
+        },
+        "date": 1778593306881,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.2,
             "unit": "MiB"
           }
         ]
