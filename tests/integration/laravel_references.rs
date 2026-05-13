@@ -100,7 +100,7 @@ User::query()->active();
     }
 
     let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
-    
+
     // Find references for UserBuilder::active() declaration (line 5, col 21)
     let params = ReferenceParams {
         text_document_position: TextDocumentPositionParams {
@@ -113,18 +113,39 @@ User::query()->active();
             include_declaration: true,
         },
     };
-    
-    let locations = backend.references(params).await.unwrap().unwrap_or_default();
-    
+
+    let locations = backend
+        .references(params)
+        .await
+        .unwrap()
+        .unwrap_or_default();
+
     let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
     let usage_locs: Vec<_> = locations.iter().filter(|l| l.uri == usage_uri).collect();
-    
+
     let lines: Vec<_> = usage_locs.iter().map(|l| l.range.start.line).collect();
-    
-    assert!(lines.contains(&4), "Should find User::active(). Found at lines: {:?}", lines);
-    assert!(lines.contains(&6), "Should find User::query()->active(). Found at lines: {:?}", lines);
-    assert!(!lines.contains(&5), "Should NOT find Post::active(). Found at lines: {:?}", lines);
-    assert_eq!(usage_locs.len(), 2, "Should find exactly 2 references in usage.php, but found: {:?}", lines);
+
+    assert!(
+        lines.contains(&4),
+        "Should find User::active(). Found at lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&6),
+        "Should find User::query()->active(). Found at lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&5),
+        "Should NOT find Post::active(). Found at lines: {:?}",
+        lines
+    );
+    assert_eq!(
+        usage_locs.len(),
+        2,
+        "Should find exactly 2 references in usage.php, but found: {:?}",
+        lines
+    );
 }
 
 #[tokio::test]
@@ -225,7 +246,7 @@ User::query()->active();
     }
 
     let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
-    
+
     // Find references for User::active() usage (line 4, col 6)
     let params = ReferenceParams {
         text_document_position: TextDocumentPositionParams {
@@ -238,20 +259,48 @@ User::query()->active();
             include_declaration: true,
         },
     };
-    
-    let locations = backend.references(params).await.unwrap().unwrap_or_default();
-    
+
+    let locations = backend
+        .references(params)
+        .await
+        .unwrap()
+        .unwrap_or_default();
+
     let usage_locs: Vec<_> = locations.iter().filter(|l| l.uri == usage_uri).collect();
     let lines: Vec<_> = usage_locs.iter().map(|l| l.range.start.line).collect();
-    
-    assert!(lines.contains(&4), "Should find User::active(). Found at lines: {:?}", lines);
-    assert!(lines.contains(&6), "Should find User::query()->active(). Found at lines: {:?}", lines);
-    assert!(!lines.contains(&5), "Should NOT find Post::active(). Found at lines: {:?}", lines);
-    assert_eq!(usage_locs.len(), 2, "Should find exactly 2 references in usage.php, but found: {:?}", lines);
+
+    assert!(
+        lines.contains(&4),
+        "Should find User::active(). Found at lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&6),
+        "Should find User::query()->active(). Found at lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&5),
+        "Should NOT find Post::active(). Found at lines: {:?}",
+        lines
+    );
+    assert_eq!(
+        usage_locs.len(),
+        2,
+        "Should find exactly 2 references in usage.php, but found: {:?}",
+        lines
+    );
 
     // Also should find the declaration in UserBuilder.php
-    let builder_locs: Vec<_> = locations.iter().filter(|l| l.uri.to_string().contains("UserBuilder.php")).collect();
-    assert_eq!(builder_locs.len(), 1, "Should find declaration in UserBuilder.php");
+    let builder_locs: Vec<_> = locations
+        .iter()
+        .filter(|l| l.uri.to_string().contains("UserBuilder.php"))
+        .collect();
+    assert_eq!(
+        builder_locs.len(),
+        1,
+        "Should find declaration in UserBuilder.php"
+    );
 }
 
 #[tokio::test]
@@ -335,7 +384,7 @@ Member::query()->active();
     }
 
     let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
-    
+
     // Find references for UserBuilder::active() declaration (line 5, col 21)
     let params = ReferenceParams {
         text_document_position: TextDocumentPositionParams {
@@ -348,14 +397,30 @@ Member::query()->active();
             include_declaration: true,
         },
     };
-    
-    let locations = backend.references(params).await.unwrap().unwrap_or_default();
-    
+
+    let locations = backend
+        .references(params)
+        .await
+        .unwrap()
+        .unwrap_or_default();
+
     let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
     let usage_locs: Vec<_> = locations.iter().filter(|l| l.uri == usage_uri).collect();
     let lines: Vec<_> = usage_locs.iter().map(|l| l.range.start.line).collect();
-    
-    assert!(lines.contains(&3), "Should find Member::active(). Found at lines: {:?}", lines);
-    assert!(lines.contains(&4), "Should find Member::query()->active(). Found at lines: {:?}", lines);
-    assert_eq!(usage_locs.len(), 2, "Should find exactly 2 references in usage.php");
+
+    assert!(
+        lines.contains(&3),
+        "Should find Member::active(). Found at lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&4),
+        "Should find Member::query()->active(). Found at lines: {:?}",
+        lines
+    );
+    assert_eq!(
+        usage_locs.len(),
+        2,
+        "Should find exactly 2 references in usage.php"
+    );
 }

@@ -144,7 +144,8 @@ impl Backend {
                         });
 
                     // Resolve the enclosing class to scope the search.
-                    let hierarchy = self.resolve_member_declaration_hierarchy(uri, span_start, name, is_static);
+                    let hierarchy =
+                        self.resolve_member_declaration_hierarchy(uri, span_start, name, is_static);
                     return self.find_member_references(
                         name,
                         is_static,
@@ -176,8 +177,13 @@ impl Backend {
             } => {
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
-                let hierarchy =
-                    self.resolve_member_access_hierarchy(uri, subject_text, *is_static, span_start, member_name);
+                let hierarchy = self.resolve_member_access_hierarchy(
+                    uri,
+                    subject_text,
+                    *is_static,
+                    span_start,
+                    member_name,
+                );
 
                 self.find_member_references(
                     member_name,
@@ -196,7 +202,8 @@ impl Backend {
             }
             SymbolKind::MemberDeclaration { name, is_static } => {
                 // Resolve the enclosing class to scope the search.
-                let hierarchy = self.resolve_member_declaration_hierarchy(uri, span_start, name, *is_static);
+                let hierarchy =
+                    self.resolve_member_declaration_hierarchy(uri, span_start, name, *is_static);
                 self.find_member_references(
                     name,
                     *is_static,
@@ -1334,14 +1341,13 @@ impl Backend {
         // add that builder to the hierarchy.
         let mut extensions = Vec::new();
         for fqn in &hierarchy {
-            if let Some(cls) = class_loader(fqn) {
-                if let Some(laravel) = cls.laravel() {
-                    if let Some(builder) = &laravel.custom_builder {
-                        if let Some(builder_fqn) = builder.base_name() {
-                            extensions.push(normalize_fqn(builder_fqn).to_string());
-                        }
-                    }
-                }
+            if let Some(cls) = class_loader(fqn)
+                && let Some(builder_fqn) = cls
+                    .laravel()
+                    .and_then(|l| l.custom_builder.as_ref())
+                    .and_then(|b| b.base_name())
+            {
+                extensions.push(normalize_fqn(builder_fqn).to_string());
             }
         }
         for ext_fqn in extensions {
@@ -1358,14 +1364,18 @@ impl Backend {
             let class_index = self.fqn_class_index.read();
             for (class_fqn, class_info) in class_index.iter() {
                 if let Some(laravel) = class_info.laravel() {
-                    if let Some(builder) = &laravel.custom_builder {
-                        if let Some(builder_fqn) = builder.base_name() {
-                            let normalized = normalize_fqn(builder_fqn);
-                            if hierarchy.contains(normalized.as_str()) {
-                                model_seeds.push(class_fqn.clone());
-                            }
+                    if let Some(normalized) = laravel
+                        .custom_builder
+                        .as_ref()
+                        .and_then(|b| b.base_name())
+                        .map(normalize_fqn)
+                    {
+                        if hierarchy.contains(normalized.as_str()) {
+                            model_seeds.push(class_fqn.clone());
                         }
-                    } else if hierarchy.contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN) {
+                    } else if hierarchy
+                        .contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
+                    {
                         // All models use the base Eloquent Builder by default.
                         model_seeds.push(class_fqn.clone());
                     }
@@ -1429,26 +1439,32 @@ impl Backend {
 
         // Laravel forwarded methods
         if let Some(laravel) = cls.laravel() {
-            if let Some(builder) = &laravel.custom_builder {
-                if let Some(builder_fqn) = builder.base_name() {
-                    if let Some(builder_cls) = class_loader(builder_fqn) {
-                        // Forwarded methods are instance methods on the builder
-                        // but called statically on the model.
-                        if builder_cls.methods.iter().any(|m| {
-                            m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static)
-                        }) {
-                            return true;
-                        }
-                    }
+            if let Some(builder_cls) = laravel
+                .custom_builder
+                .as_ref()
+                .and_then(|b| b.base_name())
+                .and_then(class_loader)
+            {
+                // Forwarded methods are instance methods on the builder
+                // but called statically on the model.
+                if builder_cls
+                    .methods
+                    .iter()
+                    .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
+                {
+                    return true;
                 }
             }
             // Standard builder forwarding
-            if let Some(builder_cls) = class_loader(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN) {
-                if builder_cls.methods.iter().any(|m| {
-                    m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static)
-                }) {
-                    return true;
-                }
+            if class_loader(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
+                .filter(|bc| {
+                    bc.methods
+                        .iter()
+                        .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
+                })
+                .is_some()
+            {
+                return true;
             }
         }
 

@@ -820,7 +820,6 @@ class User extends Model {}
     );
 }
 
-
 #[tokio::test]
 async fn test_goto_definition_custom_builder_inherited_attribute() {
     let (backend, dir) = create_psr4_workspace(

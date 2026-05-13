@@ -811,13 +811,13 @@ impl Backend {
         let mut current = Some(class.clone());
         for _ in 0..MAX_INHERITANCE_DEPTH {
             let Some(curr) = current else { break };
-            if let Some(laravel) = curr.laravel() {
-                if let Some(builder) = &laravel.custom_builder {
-                    if let Some(name) = builder.base_name() {
-                        builder_fqn = name.to_string();
-                        break;
-                    }
-                }
+            if let Some(name) = curr
+                .laravel()
+                .and_then(|l| l.custom_builder.as_ref())
+                .and_then(|b| b.base_name())
+            {
+                builder_fqn = name.to_string();
+                break;
             }
             current = curr
                 .parent_class
