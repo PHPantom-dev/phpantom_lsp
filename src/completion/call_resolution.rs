@@ -559,12 +559,12 @@ impl Backend {
                 None
             };
             let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(&owner));
-            let base = crate::virtual_members::resolve_class_fully_maybe_cached(
+            crate::virtual_members::resolve_class_fully_with_type_args(
                 &owner,
                 rctx.class_loader,
                 rctx.resolved_class_cache,
-            );
-            Arc::new(crate::inheritance::apply_generic_args(&base, &args))
+                &args,
+            )
         } else {
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
@@ -1523,34 +1523,34 @@ impl Backend {
                                     })
                                 })
                                 .collect();
-                            let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-                                &cls_arc,
-                                ctx.class_loader,
-                                ctx.resolved_class_cache,
-                            );
                             let substituted =
-                                crate::inheritance::apply_generic_args(&resolved, &type_args);
+                                crate::virtual_members::resolve_class_fully_with_type_args(
+                                    &cls_arc,
+                                    ctx.class_loader,
+                                    ctx.resolved_class_cache,
+                                    &type_args,
+                                );
                             if let Some(ref mut hint_out) = return_type_hint_out {
                                 **hint_out =
                                     Some(PhpType::Generic(substituted.name.to_string(), type_args));
                             }
-                            return vec![Arc::new(substituted)];
+                            return vec![substituted];
                         }
                     }
                 }
 
                 // Fallback: resolve unbound template params to bounds.
                 let type_args = crate::inheritance::default_type_args(&cls_arc);
-                let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
                     &cls_arc,
                     ctx.class_loader,
                     ctx.resolved_class_cache,
+                    &type_args,
                 );
-                let substituted = crate::inheritance::apply_generic_args(&resolved, &type_args);
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(PhpType::Generic(substituted.name.to_string(), type_args));
                 }
-                vec![Arc::new(substituted)]
+                vec![substituted]
             }
 
             // ── Any other callee form (e.g. a nested CallExpr used as

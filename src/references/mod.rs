@@ -144,7 +144,7 @@ impl Backend {
                         });
 
                     // Resolve the enclosing class to scope the search.
-                    let hierarchy = self.resolve_member_declaration_hierarchy(uri, span_start);
+                    let hierarchy = self.resolve_member_declaration_hierarchy(uri, span_start, name, is_static);
                     return self.find_member_references(
                         name,
                         is_static,
@@ -177,7 +177,7 @@ impl Backend {
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
                 let hierarchy =
-                    self.resolve_member_access_hierarchy(uri, subject_text, *is_static, span_start);
+                    self.resolve_member_access_hierarchy(uri, subject_text, *is_static, span_start, member_name);
 
                 self.find_member_references(
                     member_name,
@@ -196,7 +196,7 @@ impl Backend {
             }
             SymbolKind::MemberDeclaration { name, is_static } => {
                 // Resolve the enclosing class to scope the search.
-                let hierarchy = self.resolve_member_declaration_hierarchy(uri, span_start);
+                let hierarchy = self.resolve_member_declaration_hierarchy(uri, span_start, name, *is_static);
                 self.find_member_references(
                     name,
                     *is_static,
@@ -767,18 +767,19 @@ impl Backend {
 
         for (file_uri, symbol_map) in &snapshot {
             // First pass: name-only check to avoid unnecessary work.
+            // When a hierarchy is present (e.g. Laravel), we allow static mismatch.
             let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
                 SymbolKind::MemberAccess {
                     member_name,
                     is_static,
                     ..
-                } if member_name == target_member && *is_static == target_is_static => true,
+                } if member_name == target_member => {
+                    hierarchy.is_some() || *is_static == target_is_static
+                }
                 SymbolKind::MemberDeclaration { name, is_static }
-                    if include_declaration
-                        && name == target_member
-                        && *is_static == target_is_static =>
+                    if include_declaration && name == target_member =>
                 {
-                    true
+                    hierarchy.is_some() || *is_static == target_is_static
                 }
                 _ => false,
             });
@@ -827,7 +828,17 @@ impl Backend {
                         member_name,
                         is_static,
                         ..
-                    } if member_name == target_member && *is_static == target_is_static => {
+                    } if member_name == target_member => {
+                        // For Laravel custom builders, we allow static-ness mismatch
+                        // (Model::active() is static, UserBuilder->active() is instance).
+                        if *is_static != target_is_static {
+                            // Only allow mismatch if we have a hierarchy to verify
+                            // that they are indeed related (one is Model, one is Builder).
+                            if hierarchy.is_none() {
+                                continue;
+                            }
+                        }
+
                         // Check if the subject belongs to the target hierarchy.
                         if let Some(hier) = hierarchy {
                             if file_content.is_none() {
@@ -871,10 +882,12 @@ impl Backend {
                         });
                     }
                     SymbolKind::MemberDeclaration { name, is_static }
-                        if include_declaration
-                            && name == target_member
-                            && *is_static == target_is_static =>
+                        if include_declaration && name == target_member =>
                     {
+                        if *is_static != target_is_static && hierarchy.is_none() {
+                            continue;
+                        }
+
                         // Check if the enclosing class is in the hierarchy.
                         if let Some(hier) = hierarchy {
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
@@ -1191,6 +1204,7 @@ impl Backend {
         subject_text: &str,
         is_static: bool,
         span_start: u32,
+        member_name: &str,
     ) -> Option<HashSet<String>> {
         let ctx = self.file_context(uri);
         let content = self.get_file_content(uri)?;
@@ -1199,7 +1213,7 @@ impl Backend {
         if fqns.is_empty() {
             return None;
         }
-        Some(self.collect_hierarchy_for_fqns(&fqns))
+        Some(self.collect_hierarchy_for_fqns(&fqns, Some(member_name), is_static))
     }
 
     /// Resolve the class hierarchy for a `MemberDeclaration` at a given offset.
@@ -1209,6 +1223,8 @@ impl Backend {
         &self,
         uri: &str,
         offset: u32,
+        member_name: &str,
+        is_static: bool,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
             .uri_classes_index
@@ -1227,7 +1243,7 @@ impl Backend {
                 .min_by_key(|c| c.start_offset)
         })?;
         let fqn = current_class.fqn().to_string();
-        Some(self.collect_hierarchy_for_fqns(&[fqn]))
+        Some(self.collect_hierarchy_for_fqns(&[fqn], Some(member_name), is_static))
     }
 
     /// Resolve a member access subject to zero or more class FQNs.
@@ -1293,7 +1309,12 @@ impl Backend {
     /// - All ancestor FQNs (parent chain, interfaces, traits)
     /// - All descendant FQNs (classes that extend/implement any class in
     ///   the hierarchy)
-    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
+    fn collect_hierarchy_for_fqns(
+        &self,
+        seed_fqns: &[String],
+        member_name: Option<&str>,
+        is_static: bool,
+    ) -> HashSet<String> {
         let mut hierarchy = HashSet::new();
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
@@ -1308,10 +1329,69 @@ impl Backend {
             self.collect_ancestors(&fqn, &class_loader, &mut hierarchy);
         }
 
-        // Walk down: collect all descendants using the global GTI index
-        // (reverse inheritance).  This is O(hierarchy size) rather than
-        // O(total classes).
-        let mut queue: std::collections::VecDeque<String> = hierarchy.iter().cloned().collect();
+        // Bridge Laravel Models and their Custom Builders.
+        // If a class in the hierarchy is a Model with a custom builder,
+        // add that builder to the hierarchy.
+        let mut extensions = Vec::new();
+        for fqn in &hierarchy {
+            if let Some(cls) = class_loader(fqn) {
+                if let Some(laravel) = cls.laravel() {
+                    if let Some(builder) = &laravel.custom_builder {
+                        if let Some(builder_fqn) = builder.base_name() {
+                            extensions.push(normalize_fqn(builder_fqn).to_string());
+                        }
+                    }
+                }
+            }
+        }
+        for ext_fqn in extensions {
+            if hierarchy.insert(ext_fqn.clone()) {
+                self.collect_ancestors(&ext_fqn, &class_loader, &mut hierarchy);
+            }
+        }
+
+        // Bridge Laravel Builders back to their Models.
+        // If a class in the hierarchy is a custom builder, find which models
+        // use it and add them to the hierarchy.
+        let mut model_seeds = Vec::new();
+        {
+            let class_index = self.fqn_class_index.read();
+            for (class_fqn, class_info) in class_index.iter() {
+                if let Some(laravel) = class_info.laravel() {
+                    if let Some(builder) = &laravel.custom_builder {
+                        if let Some(builder_fqn) = builder.base_name() {
+                            let normalized = normalize_fqn(builder_fqn);
+                            if hierarchy.contains(normalized.as_str()) {
+                                model_seeds.push(class_fqn.clone());
+                            }
+                        }
+                    } else if hierarchy.contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN) {
+                        // All models use the base Eloquent Builder by default.
+                        model_seeds.push(class_fqn.clone());
+                    }
+                }
+            }
+        }
+        for model_fqn in model_seeds {
+            if hierarchy.insert(normalize_fqn(&model_fqn).to_string()) {
+                self.collect_ancestors(&model_fqn, &class_loader, &mut hierarchy);
+            }
+        }
+
+        // Walk down: collect all descendants using the global GTI index.
+        // We only walk down from a class if it actually defines the member
+        // (or if no member name was provided).
+        let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+        if let Some(name) = member_name {
+            for fqn in &hierarchy {
+                if self.defines_member(fqn, name, is_static, &class_loader) {
+                    queue.push_back(fqn.clone());
+                }
+            }
+        } else {
+            queue.extend(hierarchy.iter().cloned());
+        }
+
         let gti = self.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
@@ -1325,6 +1405,54 @@ impl Backend {
         }
 
         hierarchy
+    }
+
+    fn defines_member(
+        &self,
+        fqn: &str,
+        name: &str,
+        is_static: bool,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> bool {
+        let Some(cls) = class_loader(fqn) else {
+            return false;
+        };
+
+        // Real methods
+        if cls
+            .methods
+            .iter()
+            .any(|m| m.name.eq_ignore_ascii_case(name) && m.is_static == is_static)
+        {
+            return true;
+        }
+
+        // Laravel forwarded methods
+        if let Some(laravel) = cls.laravel() {
+            if let Some(builder) = &laravel.custom_builder {
+                if let Some(builder_fqn) = builder.base_name() {
+                    if let Some(builder_cls) = class_loader(builder_fqn) {
+                        // Forwarded methods are instance methods on the builder
+                        // but called statically on the model.
+                        if builder_cls.methods.iter().any(|m| {
+                            m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static)
+                        }) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            // Standard builder forwarding
+            if let Some(builder_cls) = class_loader(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN) {
+                if builder_cls.methods.iter().any(|m| {
+                    m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static)
+                }) {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Walk up the inheritance chain and collect all ancestor FQNs.

@@ -398,9 +398,12 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
     for method in virtual_members.methods {
         let key = (method.name.to_string(), method.is_static);
         if let Some(&idx) = method_index.get(&key) {
-            if class.methods[idx].has_scope_attribute {
-                // Replace the #[Scope]-attributed original with the
-                // synthesized virtual scope method.
+            if class.methods[idx].has_scope_attribute
+                || matches!(method.name.as_str(), "query" | "newQuery" | "newModelQuery")
+            {
+                // Replace the original with the synthesized virtual method.
+                // For scope attributes, the original is an implementation detail.
+                // For query methods, we want to return the custom builder.
                 class.methods.make_mut()[idx] = Arc::new(method);
             }
             // Otherwise: real declared member — keep the original.
@@ -690,7 +693,17 @@ pub fn resolve_class_fully_maybe_cached(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
-    resolve_class_fully_inner(class, class_loader, cache, &[])
+    let started = std::time::Instant::now();
+    let result = resolve_class_fully_inner(class, class_loader, cache, &[]);
+    let elapsed = started.elapsed();
+    if elapsed >= std::time::Duration::from_millis(50) {
+        tracing::info!(
+            "PHPantom: resolve_class_fully_cached({}) took {:?}",
+            class.fqn(),
+            elapsed
+        );
+    }
+    result
 }
 
 /// Resolve a class fully and apply generic type argument substitution,
@@ -733,6 +746,7 @@ pub fn resolve_class_fully_with_generics(
         }
     }
 
+    let started = std::time::Instant::now();
     // Resolve the base class (cached at (FQN, [])).
     let base = resolve_class_fully_inner(class, class_loader, cache, &[]);
 
@@ -748,7 +762,45 @@ pub fn resolve_class_fully_with_generics(
         c.lock().insert(cache_key, Arc::clone(&result));
     }
 
+    let elapsed = started.elapsed();
+    if elapsed >= std::time::Duration::from_millis(50) {
+        tracing::info!(
+            "PHPantom: resolve_class_fully_with_generics({}, {:?}) took {:?}",
+            class.fqn(),
+            generic_arg_strings,
+            elapsed
+        );
+    }
+
     result
+}
+
+/// Resolve a class fully and apply generic type arguments, deriving the
+/// cache key strings from the structured [`PhpType`] arguments.
+///
+/// Use this on hot paths that already have concrete type arguments and would
+/// otherwise call `resolve_class_fully_maybe_cached` followed by
+/// `apply_generic_args`. The substituted result is cached under
+/// `(FQN, generic_args)` while the base resolved class is still shared under
+/// `(FQN, [])`.
+pub fn resolve_class_fully_with_type_args(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&ResolvedClassCache>,
+    generic_args: &[crate::php_type::PhpType],
+) -> Arc<ClassInfo> {
+    if generic_args.is_empty() {
+        return resolve_class_fully_inner(class, class_loader, cache, &[]);
+    }
+
+    let generic_arg_strings: Vec<String> = generic_args.iter().map(|arg| arg.to_string()).collect();
+    resolve_class_fully_with_generics(
+        class,
+        class_loader,
+        cache,
+        &generic_arg_strings,
+        generic_args,
+    )
 }
 
 /// Shared implementation behind [`resolve_class_fully`] and
@@ -814,6 +866,12 @@ fn resolve_class_fully_inner(
     // providers run, so that `collect_mixin_members` picks them up.
     if fqn.as_str() == "Illuminate\\Redis\\Connections\\Connection" {
         let mixin = atom("Redis");
+        if !merged.mixins.contains(&mixin) {
+            merged.mixins.push(mixin);
+        }
+    }
+    if fqn.as_str() == "Illuminate\\Database\\Eloquent\\Builder" {
+        let mixin = atom("Illuminate\\Database\\Query\\Builder");
         if !merged.mixins.contains(&mixin) {
             merged.mixins.push(mixin);
         }

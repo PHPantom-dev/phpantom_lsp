@@ -127,7 +127,6 @@ impl LanguageServer for Backend {
                         "'".to_string(),
                         "\"".to_string(),
                         "[".to_string(),
-                        " ".to_string(),
                         "\\".to_string(),
                         "/".to_string(),
                         "*".to_string(),
@@ -298,6 +297,15 @@ impl LanguageServer for Backend {
             }
 
             if let Some(ref tok) = progress_token {
+                self.progress_report(tok, 90, Some("Warming Laravel completions".to_string()))
+                    .await;
+            }
+            let warmed = self.warm_laravel_completion_cache();
+            if warmed > 0 {
+                tracing::info!("PHPantom: warmed {} Laravel completion classes", warmed);
+            }
+
+            if let Some(ref tok) = progress_token {
                 let classmap_count = self.fqn_uri_index.read().len();
                 self.progress_end(tok, Some(format!("Indexed {} classes", classmap_count)))
                     .await;
@@ -387,38 +395,36 @@ impl LanguageServer for Backend {
 
         // Files opened during startup (before indexing finished) were
         // not diagnosed because `schedule_diagnostics` skips work when
-        // `init_complete` is false.  Now that the index is ready,
-        // diagnose every open file so the user sees results without
-        // having to edit.
-        //
-        // We compute diagnostics eagerly here (via
-        // `publish_diagnostics_for_file`) so the editor sees fast
-        // diagnostics immediately.  In pull mode, slow diagnostics
-        // are cached but only pushed as fast-only; we send a
-        // `workspace/diagnostic/refresh` afterwards so the editor
-        // re-pulls and gets the full set (fast + slow).
-        {
-            let file_snapshots: Vec<(String, Arc<String>)> = self
+        // `init_complete` is false. Queue that catch-up work after
+        // `initialized` returns so early completion requests are not
+        // stuck behind diagnostics for the active file.
+        let diagnostics_backend = self.clone_for_diagnostic_worker();
+        tokio::spawn(async move {
+            let file_snapshots: Vec<(String, Arc<String>)> = diagnostics_backend
                 .open_files
                 .read()
                 .iter()
                 .map(|(uri, content)| (uri.clone(), Arc::clone(content)))
                 .collect();
             for (uri, content) in &file_snapshots {
-                self.schedule_diagnostics(uri.clone());
-                self.publish_diagnostics_for_file(uri, content).await;
+                diagnostics_backend.schedule_diagnostics(uri.clone());
+                diagnostics_backend
+                    .publish_diagnostics_for_file(uri, content)
+                    .await;
             }
-        }
 
-        // In pull mode the eager publish above only pushed fast
-        // diagnostics.  The full set (including slow diagnostics) is
-        // now cached in `diag_last_full`.  Send a refresh so the
-        // editor re-pulls and receives the complete diagnostics.
-        if self.supports_pull_diagnostics.load(Ordering::Acquire)
-            && let Some(ref client) = self.client
-        {
-            let _ = client.workspace_diagnostic_refresh().await;
-        }
+            // In pull mode the eager publish above only pushed fast
+            // diagnostics.  The full set (including slow diagnostics) is
+            // now cached in `diag_last_full`.  Send a refresh so the
+            // editor re-pulls and receives the complete diagnostics.
+            if diagnostics_backend
+                .supports_pull_diagnostics
+                .load(Ordering::Acquire)
+                && let Some(ref client) = diagnostics_backend.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
+        });
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -502,20 +508,65 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
-        // Re-parse and update AST map, use map, and namespace map
-        let signature_changed = self.update_ast(&uri, &text);
+        // Re-parse in a blocking background task so typing does not
+        // monopolize the LSP service loop and delay completion requests.
+        //
+        // Until this task completes, hover/completion may use the
+        // previous symbol map for this file. That is preferable to
+        // queuing interactive requests behind a full parse on every
+        // keystroke; `update_ast` already tolerates stale maps when
+        // incomplete code cannot be parsed.
+        if self.sync_ast_updates {
+            let changed = self.update_ast(&uri, &text);
+            if changed {
+                self.schedule_diagnostics_for_open_files(&uri);
+            }
+            self.schedule_diagnostics(uri.clone());
+        } else {
+            let backend = self.clone_for_blocking();
+            tokio::spawn(async move {
+                let uri_for_diagnostics = uri.clone();
+                let signature_changed = tokio::task::spawn_blocking(move || {
+                    let parse_lock = {
+                        let mut locks = backend.did_change_parse_locks.lock();
+                        Arc::clone(
+                            locks
+                                .entry(uri.clone())
+                                .or_insert_with(|| Arc::new(parking_lot::Mutex::new(()))),
+                        )
+                    };
+                    let _parse_guard = parse_lock.lock();
+                    let is_latest_text = backend
+                        .open_files
+                        .read()
+                        .get(&uri)
+                        .is_some_and(|current| Arc::ptr_eq(current, &text));
+                    if !is_latest_text {
+                        return false;
+                    }
 
-        // Schedule diagnostics in a background task with debouncing.
-        // This returns immediately so that completion, hover, and
-        // signature help are never blocked by diagnostic computation.
-        self.schedule_diagnostics(uri.clone());
+                    let started = std::time::Instant::now();
+                    let changed = backend.update_ast(&uri, &text);
+                    let elapsed = started.elapsed();
+                    if elapsed >= std::time::Duration::from_millis(100) {
+                        tracing::debug!(
+                            target: "performance",
+                            "PHPantom: didChange parse took {:?}",
+                            elapsed
+                        );
+                    }
+                    if changed {
+                        backend.schedule_diagnostics_for_open_files(&uri);
+                    }
+                    backend.schedule_diagnostics(uri_for_diagnostics);
+                    changed
+                })
+                .await;
 
-        // When a class signature changed (method/property added,
-        // removed, or modified; class renamed; parent changed; etc.)
-        // other open files may have stale diagnostics that reference
-        // the affected classes.  Queue them all for a re-check.
-        if signature_changed {
-            self.schedule_diagnostics_for_open_files(&uri);
+                if let Err(err) = signature_changed {
+                    tracing::error!("PHPantom: didChange parse task failed: {}", err);
+                }
+            });
         }
     }
 
@@ -523,6 +574,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
 
         self.open_files.write().remove(&uri);
+        self.did_change_parse_locks.lock().remove(&uri);
 
         // Clean up Blade preprocessor state for the closed file.
         if self.is_blade_file(&uri) {
@@ -703,7 +755,22 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        self.handle_completion(params).await
+        let started = std::time::Instant::now();
+        let result = self.handle_completion(params).await;
+        let elapsed = started.elapsed();
+        let item_count = match &result {
+            Ok(Some(CompletionResponse::Array(items))) => items.len(),
+            Ok(Some(CompletionResponse::List(list))) => list.items.len(),
+            _ => 0,
+        };
+        tracing::debug!(
+            target: "performance",
+            "PHPantom: completion took {:?}, returned {} items",
+            elapsed,
+            item_count
+        );
+
+        result
     }
 
     async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
@@ -1441,6 +1508,35 @@ impl Backend {
     }
 
     // ── Initialization helpers ───────────────────────────────────────────
+
+    /// Pre-resolve Laravel's shared builder classes so the first
+    /// `Model::query()->` or `Model::with()->` completion does not pay
+    /// the full inheritance + mixin + patch cost on the editor hot path.
+    ///
+    /// This intentionally warms only framework-level classes. Per-model
+    /// generic specialisations like `Builder<User>` still depend on the
+    /// concrete model and are resolved on demand.
+    fn warm_laravel_completion_cache(&self) -> usize {
+        let loader = |name: &str| self.find_or_load_class(name);
+        let mut warmed = 0usize;
+
+        for fqn in [
+            crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN,
+            "Illuminate\\Database\\Query\\Builder",
+        ] {
+            let Some(class_info) = self.find_or_load_class(fqn) else {
+                continue;
+            };
+            crate::virtual_members::resolve_class_fully_cached(
+                &class_info,
+                &loader,
+                &self.resolved_class_cache,
+            );
+            warmed += 1;
+        }
+
+        warmed
+    }
 
     /// Initialize a single-project workspace (root `composer.json` exists).
     ///

@@ -349,7 +349,7 @@ pub(crate) fn try_inject_builder_scopes(
     generic_args: &[PhpType],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
-    if !is_eloquent_builder_fqn(base_fqn, raw_cls) || generic_args.is_empty() {
+    if !is_eloquent_builder_fqn(base_fqn, raw_cls, class_loader) || generic_args.is_empty() {
         return;
     }
 
@@ -645,10 +645,17 @@ fn inject_model_virtual_methods(
 /// 2. The `ClassInfo.name` field (short name or FQN depending on source).
 /// 3. The FQN constructed from `file_namespace + name` (PSR-4 loaded classes
 ///    where `name` is the short name only).
-fn is_eloquent_builder_fqn(base_fqn: &str, cls: &ClassInfo) -> bool {
+///
+/// Also checks whether the class extends the base Eloquent Builder.
+fn is_eloquent_builder_fqn(
+    base_fqn: &str,
+    cls: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
     base_fqn == ELOQUENT_BUILDER_FQN
         || cls.name == ELOQUENT_BUILDER_FQN
         || cls.fqn() == ELOQUENT_BUILDER_FQN
+        || helpers::extends_eloquent_builder(cls, class_loader)
 }
 
 /// Find a class in a slice by name (short or FQN).

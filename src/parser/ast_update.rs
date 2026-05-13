@@ -674,6 +674,10 @@ impl Backend {
             );
         }
 
+        if any_signature_changed {
+            self.member_completion_cache.lock().clear();
+        }
+
         any_signature_changed
     }
 
@@ -758,6 +762,13 @@ impl Backend {
                 let resolver =
                     |name: &str| -> String { Self::resolve_name(name, use_map, namespace) };
                 class.laravel_mut().custom_collection = Some(coll.resolve_names(&resolver));
+            }
+
+            // Resolve custom builder class name to FQN
+            if let Some(builder) = class.laravel().and_then(|l| l.custom_builder.clone()) {
+                let resolver =
+                    |name: &str| -> String { Self::resolve_name(name, use_map, namespace) };
+                class.laravel_mut().custom_builder = Some(builder.resolve_names(&resolver));
             }
 
             // Resolve cast class names to FQN so that custom cast

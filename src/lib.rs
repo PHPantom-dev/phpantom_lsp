@@ -86,6 +86,7 @@ use std::sync::atomic::AtomicU64;
 
 use parking_lot::{Mutex, RwLock};
 use tower_lsp::Client;
+use tower_lsp::lsp_types::CompletionItem;
 
 /// A single parse error entry: `(message, start_byte_offset, end_byte_offset)`.
 ///
@@ -211,7 +212,17 @@ pub struct Backend {
     /// (caught by `catch_unwind`), a single "Parse failed" entry is
     /// stored instead.
     pub(crate) parse_errors: Arc<RwLock<HashMap<String, Vec<ParseErrorEntry>>>>,
+    /// Per-URI locks for background `didChange` parses.
+    ///
+    /// `didChange` handlers offload parsing to blocking tasks.  Without a
+    /// per-file lock, an older parse can finish after a newer edit and publish
+    /// stale symbol state.  These locks serialize parse commits per URI; the
+    /// handler also verifies that the captured text is still current before
+    /// updating shared maps.
+    pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     pub(crate) client: Option<Client>,
+    /// Whether to update ASTs synchronously.  Used for testing.
+    pub(crate) sync_ast_updates: bool,
     /// The root directory of the workspace (set during `initialize`).
     pub(crate) workspace_root: Arc<RwLock<Option<PathBuf>>>,
     /// PSR-4 autoload mappings parsed from `composer.json`.
@@ -368,6 +379,13 @@ pub struct Backend {
     /// `parse_and_cache_content`) so that stale results never survive
     /// an edit.
     pub(crate) resolved_class_cache: virtual_members::ResolvedClassCache,
+    /// Per-target member completion cache.
+    ///
+    /// Typing `$model->wh...` triggers a completion request for each
+    /// keyword edit. The receiver and candidate member set are unchanged
+    /// across those requests, so cache the unfiltered member list and let
+    /// each request apply only its current prefix filter.
+    pub(crate) member_completion_cache: Arc<Mutex<HashMap<String, Vec<CompletionItem>>>>,
     /// Global method store: `(class_fqn, method_name)` → `Arc<MethodInfo>`.
     ///
     /// Populated alongside `fqn_index` whenever classes are parsed or
@@ -643,6 +661,7 @@ impl Backend {
             uri_classes_index: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
+            did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             client: None,
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
@@ -666,6 +685,7 @@ impl Backend {
             stub_function_index: RwLock::new(stubs::build_stub_function_index()),
             stub_constant_index: RwLock::new(stubs::build_stub_constant_index()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
+            member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
             php_version: Mutex::new(types::PhpVersion::default()),
@@ -703,6 +723,7 @@ impl Backend {
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sync_ast_updates: false,
         }
     }
 
@@ -721,6 +742,7 @@ impl Backend {
             uri_classes_index: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
+            did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             client: None,
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
@@ -744,6 +766,7 @@ impl Backend {
             stub_function_index: RwLock::new(HashMap::new()),
             stub_constant_index: RwLock::new(HashMap::new()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
+            member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
             php_version: Mutex::new(types::PhpVersion::default()),
@@ -780,6 +803,7 @@ impl Backend {
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sync_ast_updates: true,
         }
     }
 
@@ -963,6 +987,11 @@ impl Backend {
         &self.phpcs_last_diags
     }
 
+    /// Clear the member completion cache.
+    pub fn clear_completion_cache(&self) {
+        self.member_completion_cache.lock().clear();
+    }
+
     /// Return the configured PHP version.
     pub fn php_version(&self) -> types::PhpVersion {
         *self.php_version.lock()
@@ -1074,6 +1103,7 @@ impl Backend {
             uri_classes_index: Arc::clone(&self.uri_classes_index),
             symbol_maps: Arc::clone(&self.symbol_maps),
             parse_errors: Arc::clone(&self.parse_errors),
+            did_change_parse_locks: Arc::clone(&self.did_change_parse_locks),
             // RwLock fields are shared by Arc::clone — the diagnostic
             // worker reads them concurrently with the main Backend.
             client: self.client.clone(),
@@ -1095,6 +1125,7 @@ impl Backend {
             class_not_found_cache: Arc::clone(&self.class_not_found_cache),
             stub_index: RwLock::new(self.stub_index.read().clone()),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
+            member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),
             stub_function_index: RwLock::new(self.stub_function_index.read().clone()),
@@ -1136,6 +1167,7 @@ impl Backend {
             blade_source_maps: Arc::clone(&self.blade_source_maps),
             blade_uris: Arc::clone(&self.blade_uris),
             workspace_indexed: Arc::clone(&self.workspace_indexed),
+            sync_ast_updates: self.sync_ast_updates,
         }
     }
 

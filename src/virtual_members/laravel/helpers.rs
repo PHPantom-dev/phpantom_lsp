@@ -77,6 +77,20 @@ pub fn extends_eloquent_model(
     walks_parent_chain(class, class_loader, is_eloquent_model)
 }
 
+/// Determine whether `class_name` is the Eloquent Builder base class.
+pub(in crate::virtual_members::laravel) fn is_eloquent_builder(class_name: &str) -> bool {
+    class_name == super::ELOQUENT_BUILDER_FQN
+}
+
+/// Walk the parent chain of `class` looking for
+/// `Illuminate\Database\Eloquent\Builder`.
+pub fn extends_eloquent_builder(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    walks_parent_chain(class, class_loader, is_eloquent_builder)
+}
+
 /// Convert a camelCase or PascalCase string to snake_case.
 ///
 /// Inserts an underscore before each uppercase letter that follows a

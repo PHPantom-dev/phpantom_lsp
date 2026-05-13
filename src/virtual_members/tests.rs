@@ -1020,6 +1020,42 @@ fn make_cache() -> HashMap<ResolvedClassCacheKey, Arc<ClassInfo>> {
 }
 
 #[test]
+fn resolve_class_fully_with_type_args_caches_specialisation() {
+    let mut collection = make_class("Collection");
+    collection.template_params.push(atom("TValue"));
+    collection
+        .methods
+        .push(Arc::new(make_method("first", Some("TValue"))));
+
+    let cache = new_resolved_class_cache();
+    let class_loader = |_name: &str| None;
+    let args = vec![PhpType::parse("User")];
+
+    let first = resolve_class_fully_with_type_args(&collection, &class_loader, Some(&cache), &args);
+    let second =
+        resolve_class_fully_with_type_args(&collection, &class_loader, Some(&cache), &args);
+
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "same generic specialisation should come from cache"
+    );
+    assert_eq!(
+        first.get_method("first").and_then(|m| m.return_type_str()),
+        Some("User".to_string())
+    );
+
+    let map = cache.lock();
+    assert!(
+        map.contains_key(&(atom("Collection"), Vec::new())),
+        "base resolved class should be cached separately"
+    );
+    assert!(
+        map.contains_key(&(atom("Collection"), vec!["User".to_string()])),
+        "generic specialisation should be cached by type arguments"
+    );
+}
+
+#[test]
 fn evict_removes_direct_match() {
     let mut cache = make_cache();
     let cls = make_class("App\\Models\\User");

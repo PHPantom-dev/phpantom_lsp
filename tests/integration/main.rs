@@ -100,6 +100,8 @@ mod folding_ranges;
 mod hover;
 mod implementation;
 mod inlay_hints;
+mod laravel_custom_builder;
+mod laravel_references;
 mod linked_editing;
 mod parser;
 mod php_version;

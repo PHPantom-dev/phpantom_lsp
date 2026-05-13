@@ -263,6 +263,7 @@ impl Backend {
     ) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri.to_string();
         let mut position = params.text_document_position.position;
+        let completion_context = params.context.clone();
 
         // Get file content for offset calculation.  For Blade files,
         // use the virtual PHP content and translate the cursor position
@@ -285,6 +286,9 @@ impl Backend {
             // request.  The guard is re-entrant safe.
             let _chain_guard = super::resolver::with_chain_resolution_cache();
             let _body_infer_guard = self.activate_body_return_inferrer();
+            let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
+                &self.resolved_class_cache,
+            );
 
             // Gather per-file context (classes, use-map, namespace) in one
             // call instead of three separate lock-and-unwrap blocks.
@@ -373,9 +377,13 @@ impl Backend {
             }
 
             // ── Member access completion (-> or ::) ─────────────────
-            if let Some(response) =
-                self.try_member_access_completion(&uri, &content, position, &ctx)
-            {
+            if let Some(response) = self.try_member_access_completion(
+                &uri,
+                &content,
+                position,
+                &ctx,
+                completion_context.as_ref(),
+            ) {
                 // In simple interpolation (`"$var->"`), PHP only allows
                 // property access — method calls and constants are
                 // syntax errors.  Filter to properties only.
@@ -900,6 +908,7 @@ impl Backend {
         content: &str,
         position: Position,
         ctx: &FileContext,
+        completion_context: Option<&CompletionContext>,
     ) -> Option<CompletionResponse> {
         // ── Primary path: AST-based detection via symbol map ────────
         // The symbol map's `MemberAccess` correctly handles `(new Foo)->`,
@@ -911,6 +920,11 @@ impl Backend {
 
         let cursor_offset = position_to_offset(content, position);
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
+        let prefix = if completion_context.is_some() {
+            Self::member_completion_prefix(content, position)
+        } else {
+            String::new()
+        };
 
         let class_loader = self.class_loader(ctx);
         let function_loader = self.function_loader(ctx);
@@ -920,118 +934,234 @@ impl Backend {
         // Suppress suggestions to nudge the developer toward `self::`.
         let suppress = target.subject == "static" && current_class.is_some_and(|cc| cc.is_final);
 
+        // ── Resolve subject to concrete types ───────────────────────
+        // We resolve the subject BEFORE checking the cache so that the
+        // cache key can include the actual resolved types. This prevents
+        // stale results if a variable (e.g. `$model`) changes type
+        // within the same file.
+        let rctx = ResolutionCtx {
+            current_class,
+            all_classes: &ctx.classes,
+            content,
+            cursor_offset,
+            class_loader: &class_loader,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: Some(&function_loader),
+            scope_var_resolver: None,
+            is_in_static_method: false,
+        };
+        let mut resolved = if suppress {
+            vec![]
+        } else {
+            super::resolver::resolve_target_classes(&target.subject, target.access_kind, &rctx)
+        };
+
+        // ── Incomplete-expression retry ─────────────────────────────
+        if resolved.is_empty() && !suppress && target.subject.starts_with('$') {
+            let patched = Self::patch_incomplete_member_access(content, position);
+            if patched != content {
+                let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
+                    self.parse_php(&patched).into_iter().map(Arc::new).collect();
+                let patched_offset = position_to_offset(&patched, position);
+                let patched_current = find_class_at_offset(&patched_classes, patched_offset);
+                let patched_rctx = ResolutionCtx {
+                    current_class: patched_current,
+                    all_classes: &patched_classes,
+                    content: &patched,
+                    cursor_offset: patched_offset,
+                    class_loader: &class_loader,
+                    resolved_class_cache: Some(&self.resolved_class_cache),
+                    function_loader: Some(&function_loader),
+                    scope_var_resolver: None,
+                    is_in_static_method: false,
+                };
+                resolved = super::resolver::resolve_target_classes(
+                    &target.subject,
+                    target.access_kind,
+                    &patched_rctx,
+                );
+            }
+        }
+
+        if resolved.is_empty() {
+            return None;
+        }
+
+        let resolved_types: Vec<String> = resolved
+            .iter()
+            .map(|rt| rt.type_string.to_string())
+            .collect();
+        let cache_key =
+            Self::member_completion_cache_key(uri, &target, current_class, &resolved_types);
+
         // Wrap resolution + inheritance merging in catch_unwind so
         // that a stack overflow (e.g. from deep trait/inheritance
         // resolution when the subject is a call expression like
         // `collect($x)->`) doesn't crash the LSP server process.
-        // The variable-resolution path already has its own
-        // catch_unwind, but the direct call-expression path
-        // (resolve_call_return_types_expr → type_hint_to_classes_typed →
-        // class_loader → find_or_load_class → parse_php →
-        // resolve_class_with_inheritance) does not.
-        let member_items = crate::util::catch_panic_unwind_safe(
-            "member-access completion",
-            uri,
-            Some(position),
-            || {
-                let candidates = if suppress {
-                    vec![]
-                } else {
-                    let rctx = ResolutionCtx {
-                        current_class,
-                        all_classes: &ctx.classes,
-                        content,
-                        cursor_offset,
-                        class_loader: &class_loader,
-                        resolved_class_cache: Some(&self.resolved_class_cache),
-                        function_loader: Some(&function_loader),
-                        scope_var_resolver: None,
-                        is_in_static_method: false,
-                    };
-                    let mut resolved = super::resolver::resolve_target_classes(
-                        &target.subject,
-                        target.access_kind,
-                        &rctx,
-                    );
-
-                    // ── Incomplete-expression retry ─────────────────
-                    // When the cursor sits right after `->` (or `?->`)
-                    // at the end of an expression with no trailing
-                    // semicolon (e.g. inside an arrow function body the
-                    // user is still typing), the PHP parser may fail to
-                    // produce the enclosing statement.  Patch the
-                    // content by appending a dummy identifier +
-                    // semicolon so the parser can recover.
-                    if resolved.is_empty() && target.subject.starts_with('$') {
-                        let patched = Self::patch_incomplete_member_access(content, position);
-                        if patched != content {
-                            let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
-                                self.parse_php(&patched).into_iter().map(Arc::new).collect();
-                            let patched_offset = position_to_offset(&patched, position);
-                            let patched_current =
-                                find_class_at_offset(&patched_classes, patched_offset);
-                            let patched_rctx = ResolutionCtx {
-                                current_class: patched_current,
-                                all_classes: &patched_classes,
-                                content: &patched,
-                                cursor_offset: patched_offset,
-                                class_loader: &class_loader,
-                                resolved_class_cache: Some(&self.resolved_class_cache),
-                                function_loader: Some(&function_loader),
-                                scope_var_resolver: None,
-                                is_in_static_method: false,
-                            };
-                            resolved = super::resolver::resolve_target_classes(
-                                &target.subject,
-                                target.access_kind,
-                                &patched_rctx,
-                            );
-                        }
+        let started = std::time::Instant::now();
+        let cached_items = self.member_completion_cache.lock().get(&cache_key).cloned();
+        let cache_hit = cached_items.is_some();
+        let member_items = cached_items.or_else(|| {
+            crate::util::catch_panic_unwind_safe(
+                "member-access completion",
+                uri,
+                Some(position),
+                || {
+                    let candidates = ResolvedType::into_arced_classes(resolved);
+                    if candidates.is_empty() {
+                        return vec![];
                     }
 
-                    ResolvedType::into_arced_classes(resolved)
-                };
-                if candidates.is_empty() {
-                    return vec![];
+                    // `parent::`, `self::`, and `static::` are syntactically
+                    // `::` but semantically different from external static
+                    // access.
+                    let effective_access =
+                        if matches!(target.subject.as_str(), "parent" | "self" | "static") {
+                            crate::AccessKind::ParentDoubleColon
+                        } else {
+                            target.access_kind
+                        };
+
+                    super::builder::build_union_completion_items(
+                        &candidates,
+                        effective_access,
+                        current_class,
+                        &class_loader,
+                        &self.resolved_class_cache,
+                        uri,
+                    )
+                },
+            )
+            .inspect(|items| {
+                if !items.is_empty() {
+                    let mut cache = self.member_completion_cache.lock();
+                    // Simple size limit: evict everything if the cache gets too big.
+                    // This is crude but effective at preventing memory leaks
+                    // in long-running sessions.
+                    if cache.len() > 200 {
+                        cache.clear();
+                    }
+                    cache.insert(cache_key.clone(), items.clone());
                 }
-
-                // `parent::`, `self::`, and `static::` are syntactically
-                // `::` but semantically different from external static
-                // access: they show both static and instance members
-                // (PHP allows `self::nonStaticMethod()` etc. from an
-                // instance context).  `parent::` additionally excludes
-                // private members, which is handled by visibility
-                // filtering in `build_completion_items`.
-                let effective_access =
-                    if matches!(target.subject.as_str(), "parent" | "self" | "static") {
-                        crate::AccessKind::ParentDoubleColon
-                    } else {
-                        target.access_kind
-                    };
-
-                super::builder::build_union_completion_items(
-                    &candidates,
-                    effective_access,
-                    current_class,
-                    &class_loader,
-                    &self.resolved_class_cache,
-                    uri,
-                )
-            },
-        );
+            })
+        });
 
         match member_items {
             Some(all_items) if !all_items.is_empty() => {
-                // ── Suppress snippet parentheses when `(` already follows ──
-                let items = if paren_follows_cursor(content, position) {
-                    strip_snippet_parens(all_items)
+                let is_filtered = !prefix.is_empty();
+                let unfiltered_count = all_items.len();
+                let items = if is_filtered {
+                    Self::filter_member_completion_items(all_items, &prefix)
                 } else {
                     all_items
                 };
-                Some(CompletionResponse::Array(items))
+
+                // ── Suppress snippet parentheses when `(` already follows ──
+                let items = if paren_follows_cursor(content, position) {
+                    strip_snippet_parens(items)
+                } else {
+                    items
+                };
+                let returned_count = items.len();
+
+                let elapsed = started.elapsed();
+                if elapsed >= std::time::Duration::from_millis(20) || !cache_hit {
+                    tracing::debug!(
+                        target: "performance",
+                        "PHPantom: member completion subject={} access={:?} prefix={} cache={} resolved=[{}] took {:?}, returned {}/{} items",
+                        target.subject,
+                        target.access_kind,
+                        prefix,
+                        if cache_hit { "hit" } else { "miss" },
+                        resolved_types.join(","),
+                        elapsed,
+                        returned_count,
+                        unfiltered_count
+                    );
+                }
+
+                if is_filtered {
+                    Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: false,
+                        items,
+                    }))
+                } else {
+                    Some(CompletionResponse::Array(items))
+                }
             }
             _ => None,
         }
+    }
+
+    fn member_completion_cache_key(
+        uri: &str,
+        target: &CompletionTarget,
+        current_class: Option<&ClassInfo>,
+        resolved_types: &[String],
+    ) -> String {
+        format!(
+            "{}\n{:?}\n{}\n{}\n{}",
+            uri,
+            target.access_kind,
+            target.subject,
+            current_class
+                .map(|c| c.fqn().to_string())
+                .unwrap_or_default(),
+            resolved_types.join(",")
+        )
+    }
+
+    fn member_completion_prefix(content: &str, position: Position) -> String {
+        let cursor_offset = position_to_offset(content, position) as usize;
+        let bytes = content.as_bytes();
+        let mut start = cursor_offset.min(bytes.len());
+        while start > 0 {
+            let b = bytes[start - 1];
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+
+        let has_member_operator = (start >= 2
+            && ((bytes[start - 2] == b'-' && bytes[start - 1] == b'>')
+                || (bytes[start - 2] == b':' && bytes[start - 1] == b':')))
+            || (start >= 3
+                && bytes[start - 3] == b'?'
+                && bytes[start - 2] == b'-'
+                && bytes[start - 1] == b'>');
+        if !has_member_operator {
+            return String::new();
+        }
+
+        content[start..cursor_offset.min(content.len())].to_string()
+    }
+
+    fn filter_member_completion_items(
+        items: Vec<CompletionItem>,
+        prefix: &str,
+    ) -> Vec<CompletionItem> {
+        if prefix.is_empty() {
+            return items;
+        }
+
+        let prefix_lower = prefix.to_ascii_lowercase();
+        let started = std::time::Instant::now();
+        let filtered: Vec<CompletionItem> = items
+            .into_iter()
+            .filter(|item| item.label.to_ascii_lowercase().starts_with(&prefix_lower))
+            .collect();
+        let elapsed = started.elapsed();
+        if elapsed >= std::time::Duration::from_micros(500) {
+            tracing::debug!(
+                target: "performance",
+                "PHPantom: filter_member_completion_items (prefix: {}) took {:?}",
+                prefix,
+                elapsed
+            );
+        }
+        filtered
     }
 
     // ─── Strategy: variable name completion ──────────────────────────────

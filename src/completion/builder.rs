@@ -22,6 +22,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::resolve::CompletionItemData;
+use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::types::Visibility;
 use crate::types::*;
 
@@ -658,7 +659,8 @@ pub(crate) fn build_union_completion_items(
             uri,
         );
 
-        for item in items {
+        for mut item in items {
+            apply_declaring_class_label(&mut item, &merged, class_loader);
             if let Some(existing) = all_items
                 .iter_mut()
                 .find(|existing| existing.label == item.label)
@@ -677,6 +679,47 @@ pub(crate) fn build_union_completion_items(
     }
 
     merge_union_completion_items(all_items, occurrence_count, num_candidates)
+}
+
+fn apply_declaring_class_label(
+    item: &mut CompletionItem,
+    owner: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) {
+    let Some(data_value) = item.data.as_ref() else {
+        return;
+    };
+    let Ok(mut data) = serde_json::from_value::<CompletionItemData>(data_value.clone()) else {
+        return;
+    };
+    let member_kind = match data.kind.as_str() {
+        "method" => MemberKindForOrigin::Method,
+        "property" => MemberKindForOrigin::Property,
+        "constant" => MemberKindForOrigin::Constant,
+        _ => return,
+    };
+
+    let declaring = find_declaring_class(owner, &data.member_name, &member_kind, class_loader);
+    let declaring_name = declaring.name.to_string();
+    if declaring_name == data.class_name {
+        return;
+    }
+
+    data.class_name = declaring_name.clone();
+    data.extra_class_names.clear();
+    if let Ok(value) = serde_json::to_value(&data) {
+        item.data = Some(value);
+    }
+
+    let description = Some(display_class_name(&declaring_name).to_string());
+    if let Some(ref mut label_details) = item.label_details {
+        label_details.description = description;
+    } else {
+        item.label_details = Some(CompletionItemLabelDetails {
+            detail: None,
+            description,
+        });
+    }
 }
 
 /// Merge the class name from a new item's `data` into the existing item's

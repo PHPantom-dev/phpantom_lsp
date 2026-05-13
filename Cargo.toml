@@ -59,3 +59,11 @@ harness = false
 [[bench]]
 name = "references"
 harness = false
+
+[[bench]]
+name = "laravel_completion"
+harness = false
+
+[[bench]]
+name = "custom_builder"
+harness = false

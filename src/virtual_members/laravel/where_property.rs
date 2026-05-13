@@ -130,8 +130,14 @@ pub fn build_where_property_methods_for_class(
     }
 
     // Build the return type: Builder<ConcreteModel>.
+    let builder_fqn = class
+        .laravel()
+        .and_then(|l| l.custom_builder.as_ref())
+        .and_then(|t| t.base_name())
+        .unwrap_or(ELOQUENT_BUILDER_FQN);
+
     let return_type = PhpType::Generic(
-        ELOQUENT_BUILDER_FQN.to_string(),
+        builder_fqn.to_string(),
         vec![PhpType::Named(class.name.to_string())],
     );
 

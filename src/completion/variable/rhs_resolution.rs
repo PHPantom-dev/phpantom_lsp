@@ -837,13 +837,14 @@ fn resolve_rhs_instantiation(
                                 })
                             })
                             .collect();
-                        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-                            cls,
-                            ctx.class_loader,
-                            ctx.resolved_class_cache,
-                        );
-                        let mut substituted =
-                            crate::inheritance::apply_generic_args(&resolved, &type_args);
+                        let substituted_arc =
+                            crate::virtual_members::resolve_class_fully_with_type_args(
+                                cls,
+                                ctx.class_loader,
+                                ctx.resolved_class_cache,
+                                &type_args,
+                            );
+                        let mut substituted = Arc::unwrap_or_clone(substituted_arc);
 
                         // ── Template-param mixin resolution ────────────────
                         // When a class declares `@mixin TParam` where `TParam`
@@ -890,14 +891,14 @@ fn resolve_rhs_instantiation(
             // semantics and prevents raw template names from leaking
             // into method parameter/return types.
             let type_args = crate::inheritance::default_type_args(cls);
-            let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
                 cls,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
+                &type_args,
             );
-            let substituted = crate::inheritance::apply_generic_args(&resolved, &type_args);
             let generic_type = PhpType::Generic(substituted.name.to_string(), type_args.clone());
-            return vec![ResolvedType::from_both(generic_type, substituted)];
+            return vec![ResolvedType::from_both_arc(generic_type, substituted)];
         }
 
         return ResolvedType::from_classes_with_hint(classes, parsed_name);
@@ -3235,17 +3236,15 @@ fn expand_union_generic_owners(
     let mut expanded_owners: Vec<Arc<ClassInfo>> = Vec::new();
     let mut expanded_resolved: Vec<ResolvedType> = Vec::new();
 
-    let resolved_base = crate::virtual_members::resolve_class_fully_maybe_cached(
-        base_cls,
-        ctx.class_loader,
-        ctx.resolved_class_cache,
-    );
-
     for member in union_members {
         match member {
             PhpType::Generic(name, args) if is_same_base(name) => {
-                let substituted = crate::inheritance::apply_generic_args(&resolved_base, args);
-                let arc = Arc::new(substituted);
+                let arc = crate::virtual_members::resolve_class_fully_with_type_args(
+                    base_cls,
+                    ctx.class_loader,
+                    ctx.resolved_class_cache,
+                    args,
+                );
                 expanded_resolved.push(ResolvedType::from_both_arc(
                     member.clone(),
                     Arc::clone(&arc),

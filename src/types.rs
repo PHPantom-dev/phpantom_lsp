@@ -1407,6 +1407,20 @@ pub struct LaravelMetadata {
     ///   property should be synthesized.
     /// - `Some(Some("modified"))` — custom column name.
     pub updated_at_name: Option<Option<String>>,
+    /// Custom Eloquent builder class for the model.
+    ///
+    /// Detected from three Laravel mechanisms:
+    ///
+    /// 1. The `#[UseEloquentBuilder(CustomBuilder::class)]` attribute on
+    ///    the model class (Laravel 11+).
+    /// 2. The `/** @use HasBuilder<CustomBuilder> */` docblock
+    ///    annotation on a `use HasBuilder;` trait usage.
+    /// 3. A `newEloquentBuilder()` method override returning a custom type.
+    ///
+    /// When set, the `LaravelModelProvider` uses this class instead of
+    /// the standard `Illuminate\Database\Eloquent\Builder` for
+    /// builder-as-static forwarding and `query()` resolution.
+    pub custom_builder: Option<PhpType>,
 }
 
 /// Stores extracted class information from a parsed PHP file.
