@@ -238,45 +238,6 @@ today and what is still missing.
 
 ---
 
-#### L4. Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`)
-
-**Impact: High · Effort: Medium**
-
-Custom builders are the recommended pattern for complex query scoping
-in modern Laravel. Without this, users get zero completions for
-builder-specific methods via static model calls.
-
-Laravel 11+ introduced the `HasBuilder` trait and
-`#[UseEloquentBuilder(UserBuilder::class)]` attribute to let models
-declare a custom builder class. When present, `User::query()` and
-all static builder-forwarded calls should resolve to the custom
-builder instead of the base `Illuminate\Database\Eloquent\Builder`.
-
-```php
-/** @extends Builder<User> */
-class UserBuilder extends Builder {
-    /** @return $this */
-    public function active(): static { ... }
-}
-
-class User extends Model {
-    /** @use HasBuilder<UserBuilder> */
-    use HasBuilder;
-}
-
-User::query()->active()->get(); // active() should resolve on UserBuilder
-```
-
-Larastan handles this via `BuilderHelper::determineBuilderName()`,
-which inspects `newEloquentBuilder()`'s return type or the
-`#[UseEloquentBuilder]` attribute to find the custom builder class.
-
-**Where to change:** In `build_builder_forwarded_methods`, before
-loading the standard `Eloquent\Builder`, check whether the model
-declares a custom builder via `@use HasBuilder<X>` in `use_generics`
-or a `newEloquentBuilder()` method with a non-default return type.
-If found, load and resolve that builder class instead.
-
 #### L5. `abort_if`/`abort_unless` type narrowing
 
 **Impact: High · Effort: Medium**

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Laravel custom Eloquent builder support.** Models using the `#[UseEloquentBuilder]` attribute now have their custom builder's methods forwarded as static methods on the model. `query()`, `newQuery()`, and `newModelQuery()` return the custom builder type with correct generic model substitution.
 - **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/100.
 - **Blade keyword highlighting.** Blade directives, echo delimiters, PHP keywords, cast types, comments, and PHPDoc tags inside `.blade.php` files now receive semantic tokens for proper syntax coloring.
 - **Blade view directive navigation.** Go-to-definition works on view names inside Blade directives (`@include`, `@extends`, `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`, `@component`, `@each`), jumping to the referenced template file.
@@ -52,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Improved LSP responsiveness.** File parsing (`update_ast`) and diagnostics now run in background tasks, preventing interactive requests (completion, hover) from being blocked by full-file parses during typing.
+- **Member completion caching.** Unfiltered member lists are cached per-target to speed up subsequent completions during keyword entry.
+- **Laravel startup performance.** Common Laravel builder classes are warmed in the background at startup to eliminate the first-access penalty on Eloquent completions.
 - **Find References performance and freshness.** Project-wide Find References now avoids more unnecessary file work while still returning references through aliased class and function imports, and it refreshes newly added workspace PHP files on later searches. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/116.
 - **Incremental text sync.** The server now uses incremental document sync, receiving only changed ranges from the editor instead of the full file content on every keystroke.
 - **LSP responsiveness.** Hover, go-to-definition, signature help, code actions, rename, and other handlers now run on background threads. Slow requests no longer block other requests or cancellations.

@@ -29,8 +29,8 @@ within the same impact tier.
 
 > **Note:** F1 (Workspace symbol search), F2 (Document symbols), A8
 > (Implement interface methods), A9 (Auto import), D1 (Unknown class
-> diagnostic), and D3 (Unknown member diagnostic) were originally
-> planned here but have already shipped.
+> diagnostic), D3 (Unknown member diagnostic), and L4 (Custom Eloquent
+> builders) were originally planned here but have already shipped.
 
 ## Sprint 6 — 1.0 release, editor plugins & type intelligence
 
@@ -151,8 +151,7 @@ unlikely to move the needle for most users.
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low-Medium  | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Low         |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
-| L4  | Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`)                                                                                                           | Medium      | Medium      |
-| L3  | `$dates` array (deprecated)                                                                                                                                                 | Low-Medium  | Low         |
+| L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
 | L6  | Factory `has*`/`for*` relationship methods                                                                                                                                  | Low-Medium  | Medium      |
 | L7  | `$pivot` property on BelongsToMany                                                                                                                                          | Medium      | Medium-High |
 | L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | Medium-High |
@@ -164,7 +163,6 @@ unlikely to move the needle for most users.
 |     | **[Performance](todo/performance.md) / [Eager Resolution](todo/eager-resolution.md)**                                                                                       |             |             |
 | ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5--mago-style-separated-metadata)                                                                                | High        | High        |
 | P14 | [Eager docblock parsing into structured fields](todo/performance.md#p14-eager-docblock-parsing-into-structured-fields)                                                      | Medium      | Medium      |
-| P9  | [`resolved_class_cache` generic-arg specialisation](todo/performance.md#p9-resolved_class_cache-generic-arg-specialisation)                                                 | Medium      | Medium      |
 | P11 | [Uncached base-resolution in `build_scope_methods_for_builder`](todo/performance.md#p11-uncached-base-resolution-in-build_scope_methods_for_builder)                        | Low-Medium  | Low         |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium      |
 | P4  | `memmem` for block comment terminator search                                                                                                                                | Low         | Low         |
@@ -173,7 +171,6 @@ unlikely to move the needle for most users.
 | P7  | `diag_pending_uris` uses `Vec::contains` for dedup                                                                                                                          | Low         | Low         |
 | P8  | `find_class_in_uri_classes_index` linear fallback scan                                                                                                                       | Low         | Low         |
 | P12 | [`find_or_load_function` Phase 1.75 serial bottleneck](todo/performance.md#p12-find_or_load_function-phase-175-serial-bottleneck)                                           | Low         | Low         |
-| P17 | [`mago-names` resolution on the parse hot path](todo/performance.md#p17-mago-names-resolution-on-the-parse-hot-path)                                                        | Medium      | Low         |
 | P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                          | Medium      | Low         |
 | P19 | [Arena reuse on the parse hot path](todo/performance.md#p19-arena-reuse-on-the-parse-hot-path) (thread-local `Bump::reset()` instead of `Bump::new()`)                      | Medium      | Low         |
 | P20 | [Content-hash gated resolution cache persistence](todo/performance.md#p20-content-hash-gated-resolution-cache-persistence)                                                  | Medium      | Medium      |
