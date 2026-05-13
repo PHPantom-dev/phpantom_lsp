@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778685224506,
+  "lastUpdate": 1778712272125,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9009,6 +9009,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a099ec85621406e9de7698f1bf1cd8e3a58d49b2",
+          "message": "Fix throw/catch completion to include vendor Throwable classes",
+          "timestamp": "2026-05-14T00:31:56+02:00",
+          "tree_id": "0925b56b0247c6d0ac0e918f058ff7e4512aa6ec",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/a099ec85621406e9de7698f1bf1cd8e3a58d49b2"
+        },
+        "date": 1778712271386,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.5,
             "unit": "MiB"
           }
         ]
