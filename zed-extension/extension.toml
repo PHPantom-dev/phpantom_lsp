@@ -1,7 +1,7 @@
 id = "phpantom"
 name = "PHPantom"
 description = "PHP language support powered by PHPantom LSP, a fast and lightweight PHP language server."
-version = "0.7.0"
+version = "0.8.0"
 schema_version = 1
 authors = ["Anders Jenbo <anders@jenbo.dk>"]
 repository = "https://github.com/AJenbo/phpantom_lsp"
