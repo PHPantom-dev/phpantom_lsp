@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`throw new` completion no longer offers non-instantiable types.** Interfaces, abstract classes, traits, and enums are now filtered out, matching the behavior of `new` completion. The `throw new` path also now filters to Throwable descendants only.
+- **Unified class name completion architecture.** `throw new` and `catch()` completion now use the same `build_class_name_completions` pipeline as `new`, `extends`, `implements`, etc. `throw new` uses a `ThrowNew` context (instantiable + Throwable) and `catch()`/`@throws` uses a `Catch` context (class or interface + Throwable). This gives both contexts the same affinity scoring, FQN shortening via use-map, namespace segment drill-down, deprecation flags, and consistent filtering. The separate `build_catch_class_name_completions` function has been removed.
+- **Consolidated class completion passes.** The previous 5-pass architecture (use-map, same-namespace, fqn_uri_index, fqn_uri_index duplicate, stub_index) has been simplified to 2 passes (fqn_uri_index + stub_index) with an inline `classify` closure that determines tier (`'0'` use-imported, `'1'` same/sub-namespace, `'2'` everything else) per candidate. The redundant pass 4 (identical to pass 3) is eliminated, and tier assignment is now based on proximity checks rather than which data source produced the item.
+
 ## [0.8.0] - 2026-05-14
 
 ### Added
@@ -14,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/100.
 - **Blade keyword highlighting.** Blade directives, echo delimiters, PHP keywords, cast types, comments, and PHPDoc tags inside `.blade.php` files now receive semantic tokens for proper syntax coloring.
 - **Blade view directive navigation.** Go-to-definition works on view names inside Blade directives (`@include`, `@extends`, `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`, `@component`, `@each`), jumping to the referenced template file.
-- **Replace FQCN with import.** A refactoring code action on any fully-qualified class name (`\Foo\Bar`) inserts a `use` statement and replaces the inline reference with the short name. Detects existing imports and short-name conflicts.
+- **Replace FQCN with import.** A refactoring code action on any fully-qualified class name (`\Foo\Bar`) inserts a `use` statement and replaces all occurrences of the same FQCN throughout the file with the short name. Detects existing imports and short-name conflicts. A separate "Replace all FQCNs with imports" action appears when the file contains multiple distinct FQCNs, replacing all of them at once (skipping those with import conflicts).
 - **Broader type narrowing.** `instanceof`, type-guard functions, `in_array()` strict mode, `assert()`, `@phpstan-assert-if-true`/`-if-false`, and compound `&&`/`||` conditions now narrow types in if/else branches, guard clauses, while-loop bodies, ternary expressions, and `match(true)` arms.
 - **Argument type mismatch diagnostics.** Flags function and method calls where an argument's resolved type is incompatible with the declared parameter type.
 - **Invalid class-like kind diagnostics.** Flags class-like names used in positions where their kind is guaranteed to fail at runtime: `new` on abstract classes, interfaces, traits, or enums; `extends` on a final class, interface, or trait; `implements` with a non-interface; trait `use` with a non-trait; `instanceof` with a trait; `catch` with a non-Throwable type; and traits in type-hint positions.
@@ -48,7 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Find References performance and freshness.** Project-wide Find References now avoids more unnecessary file work while still returning references through aliased class and function imports, and it refreshes newly added workspace PHP files on later searches. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/116.
 - **Incremental text sync.** The server now uses incremental document sync, receiving only changed ranges from the editor instead of the full file content on every keystroke.
-- **Replace FQCN with import.** Now replaces all occurrences of the same FQCN throughout the file in one action, not just the one under the cursor. A new "Replace all FQCNs with imports" action appears when the file contains multiple distinct FQCNs, replacing all of them at once (skipping those with import conflicts).
 - **LSP responsiveness.** Hover, go-to-definition, signature help, code actions, rename, and other handlers now run on background threads. Slow requests no longer block other requests or cancellations.
 - **Faster analysis.** Analysis time cut significantly on large projects.
 - **Reduced redundant file parsing.** Concurrent threads resolving the same vendor class no longer parse the file in parallel; the second thread waits for the first to finish.

@@ -769,8 +769,8 @@ async fn test_no_snippet_for_constants() {
 // ─── `throw new` Context ────────────────────────────────────────────────────
 
 /// `throw new ExceptionClass` should get parens in the snippet.
-/// The throw-new path goes through `build_catch_class_name_completions`
-/// with `is_new = true`, so at minimum we get `Name()$0`.
+/// The throw-new path goes through `build_class_name_completions`
+/// with `ClassNameContext::ThrowNew`, so at minimum we get `Name()$0`.
 #[tokio::test]
 async fn test_snippet_throw_new_context() {
     let backend = create_test_backend();

@@ -15,8 +15,7 @@
 /// - `try_member_access_completion` — `->` and `::` member completion
 /// - `try_variable_name_completion` — `$var` name completion
 /// - `try_catch_completion` — exception type completion inside `catch()`
-/// - `try_throw_new_completion` — Throwable-only completion after `throw new`
-/// - `try_class_constant_function_completion` — bare class/constant/function names
+/// - `try_class_constant_function_completion` — bare class/constant/function names (including `new` and `throw new`)
 ///
 /// Methods prefixed with `complete_` always short-circuit: the caller
 /// unconditionally returns their result.  Methods prefixed with `try_`
@@ -423,11 +422,6 @@ impl Backend {
                 )));
             }
 
-            // ── `throw new` completion ──────────────────────────────
-            if let Some(response) = self.try_throw_new_completion(&content, position, &ctx, &uri) {
-                return Ok(Some(response));
-            }
-
             // ── Class declaration name completion ───────────────────
             // When declaring a new class/interface/trait/enum, suggest
             // the filename (without extension) as the class name.
@@ -536,9 +530,17 @@ impl Backend {
                 // the same ordering as `throw new` so that exception
                 // classes appear at the top.
                 if tag == "throws" {
-                    let (class_items, class_incomplete) = self.build_catch_class_name_completions(
-                        ctx, &partial, content, false, position, uri,
-                    );
+                    let (class_items, class_incomplete) =
+                        self.build_class_name_completions(ClassCompletionParams {
+                            file_use_map: &ctx.use_map,
+                            file_namespace: &ctx.namespace,
+                            prefix: &partial,
+                            content,
+                            context: ClassNameContext::Catch,
+                            position,
+                            affinity_table_override: None,
+                            uri,
+                        });
                     return if class_items.is_empty() {
                         None
                     } else {
@@ -1111,7 +1113,16 @@ impl Backend {
             catch_ctx.partial.clone()
         };
         let (class_items, class_incomplete) =
-            self.build_catch_class_name_completions(ctx, &partial, content, false, position, uri);
+            self.build_class_name_completions(ClassCompletionParams {
+                file_use_map: &ctx.use_map,
+                file_namespace: &ctx.namespace,
+                prefix: &partial,
+                content,
+                context: ClassNameContext::Catch,
+                position,
+                affinity_table_override: None,
+                uri,
+            });
         let mut all_items = items; // Throwable item (if matched)
         for ci in class_items {
             if !all_items.iter().any(|existing| existing.label == ci.label) {
@@ -1125,42 +1136,6 @@ impl Backend {
                 strip_snippet_parens(all_items)
             } else {
                 all_items
-            };
-            Some(CompletionResponse::List(CompletionList {
-                is_incomplete: class_incomplete,
-                items,
-            }))
-        }
-    }
-
-    // ─── Strategy: throw new completion ──────────────────────────────────
-
-    /// Try to offer Throwable-only class completions after `throw new`.
-    ///
-    /// Restricts to Throwable descendants only — no constants or functions.
-    ///
-    /// Returns `None` when the cursor is not in a `throw new` context or
-    /// when no completions could be produced.
-    fn try_throw_new_completion(
-        &self,
-        content: &str,
-        position: Position,
-        ctx: &FileContext,
-        uri: &str,
-    ) -> Option<CompletionResponse> {
-        let partial = Self::extract_partial_class_name(content, position)?;
-        if !Self::is_throw_new_context(content, position) {
-            return None;
-        }
-        let (class_items, class_incomplete) =
-            self.build_catch_class_name_completions(ctx, &partial, content, true, position, uri);
-        if class_items.is_empty() {
-            None
-        } else {
-            let items = if paren_follows_cursor(content, position) {
-                strip_snippet_parens(class_items)
-            } else {
-                class_items
             };
             Some(CompletionResponse::List(CompletionList {
                 is_incomplete: class_incomplete,

@@ -39,6 +39,12 @@ pub(crate) enum ClassNameContext {
     Any,
     /// After `new` keyword — only concrete (non-abstract) classes.
     New,
+    /// After `throw new` — only concrete (non-abstract) classes that
+    /// implement `Throwable`.
+    ThrowNew,
+    /// Inside a `catch()` clause or `@throws` docblock tag — any
+    /// class or interface that implements `Throwable`.
+    Catch,
     /// After `extends` in a class declaration — only non-final,
     /// non-abstract-only classes.
     ExtendsClass,
@@ -82,6 +88,8 @@ impl ClassNameContext {
         match self {
             Self::Any => true,
             Self::New => cls.kind == ClassLikeKind::Class && !cls.is_abstract,
+            Self::ThrowNew => cls.kind == ClassLikeKind::Class && !cls.is_abstract,
+            Self::Catch => matches!(cls.kind, ClassLikeKind::Class | ClassLikeKind::Interface),
             Self::ExtendsClass => cls.kind == ClassLikeKind::Class && !cls.is_final,
             Self::ExtendsInterface => cls.kind == ClassLikeKind::Interface,
             Self::Implements => cls.kind == ClassLikeKind::Interface,
@@ -107,6 +115,8 @@ impl ClassNameContext {
         match self {
             Self::Any | Self::UseImport => true,
             Self::New => kind == ClassLikeKind::Class && !is_abstract,
+            Self::ThrowNew => kind == ClassLikeKind::Class && !is_abstract,
+            Self::Catch => matches!(kind, ClassLikeKind::Class | ClassLikeKind::Interface),
             Self::ExtendsClass => kind == ClassLikeKind::Class && !is_final,
             Self::ExtendsInterface => kind == ClassLikeKind::Interface,
             Self::Implements => kind == ClassLikeKind::Interface,
@@ -124,6 +134,8 @@ impl ClassNameContext {
         matches!(
             self,
             Self::New
+                | Self::ThrowNew
+                | Self::Catch
                 | Self::ExtendsClass
                 | Self::ExtendsInterface
                 | Self::Implements
@@ -137,7 +149,7 @@ impl ClassNameContext {
 
     /// Whether this context is `New`.
     pub(crate) fn is_new(&self) -> bool {
-        matches!(self, Self::New)
+        matches!(self, Self::New | Self::ThrowNew)
     }
 
     /// Whether this context is inside an attribute list (`#[…]`).
@@ -167,6 +179,19 @@ impl ClassNameContext {
     pub(crate) fn likely_mismatch(&self, short_name: &str) -> bool {
         match self {
             Self::New => likely_non_instantiable(short_name),
+            Self::ThrowNew => {
+                // Demote if it doesn't look instantiable OR doesn't look
+                // like an exception class.
+                likely_non_instantiable(short_name)
+                    || (!short_name.ends_with("Exception")
+                        && !short_name.ends_with("Error")
+                        && !short_name.ends_with("Throwable"))
+            }
+            Self::Catch => {
+                !short_name.ends_with("Exception")
+                    && !short_name.ends_with("Error")
+                    && !short_name.ends_with("Throwable")
+            }
             Self::ExtendsClass => likely_interface_name(short_name),
             Self::Implements | Self::ExtendsInterface => likely_non_interface_name(short_name),
             Self::TraitUse => likely_non_instantiable(short_name),
@@ -310,6 +335,15 @@ pub(crate) fn detect_class_name_context(content: &str, position: Position) -> Cl
         return ClassNameContext::Instanceof;
     }
     if keyword_ends_at(&chars, i, "new") {
+        // Check if `throw` precedes `new` → ThrowNew context.
+        let new_start = i - "new".len();
+        let mut j = new_start;
+        while j > 0 && chars[j - 1].is_ascii_whitespace() {
+            j -= 1;
+        }
+        if keyword_ends_at(&chars, j, "throw") {
+            return ClassNameContext::ThrowNew;
+        }
         return ClassNameContext::New;
     }
     if keyword_ends_at(&chars, i, "implements") {
@@ -792,10 +826,6 @@ fn declaration_keywords(line: &str) -> Vec<&str> {
         }
     }
     result
-}
-
-pub(in crate::completion) fn is_anonymous_class(name: &str) -> bool {
-    name.starts_with("__anonymous@")
 }
 
 /// Expand a namespace alias at the start of a typed prefix.
@@ -1348,52 +1378,6 @@ impl Backend {
         Some(partial)
     }
 
-    /// Detect whether the cursor is immediately after `throw new`.
-    ///
-    /// Used by the handler to offer exception-only completions in
-    /// `throw new` context.
-    pub(crate) fn is_throw_new_context(content: &str, position: Position) -> bool {
-        let lines: Vec<&str> = content.lines().collect();
-        if position.line as usize >= lines.len() {
-            return false;
-        }
-        let line = lines[position.line as usize];
-        let chars: Vec<char> = line.chars().collect();
-        let col = (position.character as usize).min(chars.len());
-
-        // Walk back past the partial class name
-        let mut i = col;
-        while i > 0
-            && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '\\')
-        {
-            i -= 1;
-        }
-        // Skip whitespace
-        while i > 0 && chars[i - 1].is_ascii_whitespace() {
-            i -= 1;
-        }
-        // Should be `new`
-        if i < 3 {
-            return false;
-        }
-        let new_candidate: String = chars[i - 3..i].iter().collect();
-        if !new_candidate.eq_ignore_ascii_case("new") {
-            return false;
-        }
-        let j = i - 3;
-        // Skip whitespace
-        let mut k = j;
-        while k > 0 && chars[k - 1].is_ascii_whitespace() {
-            k -= 1;
-        }
-        // Should be `throw`
-        if k < 5 {
-            return false;
-        }
-        let throw_candidate: String = chars[k - 5..k].iter().collect();
-        throw_candidate.eq_ignore_ascii_case("throw")
-    }
-
     /// Build the insert text (and optional format) for a `new` context
     /// class name completion.
     ///
@@ -1549,313 +1533,100 @@ impl Backend {
             uri,
         };
 
-        // ── 1. Use-imported classes (highest priority) ──────────────
-        for (sn, fqn) in file_use_map {
-            if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix, expanded_prefix_lower) {
-                continue;
+        // Build a reverse lookup: FQN → use-import short name.
+        let use_imported_fqns: HashSet<&String> = file_use_map.values().collect();
+
+        // Namespace prefix for same/sub-namespace proximity check.
+        let ns_prefix = file_namespace.as_ref().map(|ns| format!("{}\\{}", ns, ""));
+
+        // ── Helper: classify a FQN into source tier and demotion ─────
+        //
+        // Returns `None` to exclude, or `Some((tier, demoted, deprecated))`.
+        //   '0' = use-imported (already in file's use-map)
+        //   '1' = same/sub namespace
+        //   '2' = everything else
+        let classify = |fqn: &str, sn: &str| -> Option<(char, bool, bool)> {
+            // Context-aware kind filtering (instantiability, Throwable, etc.)
+            if context.is_class_only() {
+                match self.check_context_match(fqn, context) {
+                    Some(false) => return None,
+                    Some(true) => { /* passed */ }
+                    None => {
+                        // Unloaded class — pass through with heuristic
+                        // demotion below.  In narrow contexts, reject
+                        // entirely since we can't verify.
+                        if context.is_narrow_kind() {
+                            return None;
+                        }
+                    }
+                }
             }
-            // Skip use-map entries that are namespace aliases rather
-            // than actual class imports (e.g. `use Foo\Bar as FB;`
-            // where `Foo\Bar` is a namespace, not a class).
-            if self.is_likely_namespace_not_class(fqn) {
+
+            // Determine tier by proximity.
+            let tier = if use_imported_fqns.contains(&fqn.to_string()) {
+                '0'
+            } else {
+                let in_same_or_sub_ns = match &ns_prefix {
+                    Some(pfx) => fqn.starts_with(pfx.as_str()),
+                    None => !fqn.contains('\\'),
+                };
+                if in_same_or_sub_ns { '1' } else { '2' }
+            };
+
+            // Demotion: only for unloaded classes where context-match
+            // was unknown.
+            let demoted = context.is_class_only()
+                && self.check_context_match(fqn, context).is_none()
+                && context.likely_mismatch(sn);
+
+            // Deprecation flag from ClassInfo if available.
+            let deprecated = self
+                .find_class_in_uri_classes_index(fqn)
+                .as_ref()
+                .is_some_and(|c| c.deprecation_message.is_some());
+
+            Some((tier, demoted, deprecated))
+        };
+
+        // ── Pass 1: fqn_uri_index (project + vendor classes) ────────
+        // Collect keys first to avoid holding the read lock while
+        // calling classify/is_likely_namespace_not_class (which
+        // re-acquire the same lock — parking_lot RwLock is not
+        // reentrant).
+        let fqn_keys: Vec<String> = self.fqn_uri_index.read().keys().cloned().collect();
+        for fqn in &fqn_keys {
+            let sn = short_name(fqn);
+            if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix, expanded_prefix_lower) {
                 continue;
             }
             if !seen_fqns.insert(fqn.clone()) {
                 continue;
             }
-            // Apply context-aware filtering for loaded classes.
-            // Unloaded classes pass through (demoted below).
-            if context.is_class_only()
-                && let Some(false) = self.check_context_match(fqn, context)
-            {
+            let Some((tier, demoted, deprecated)) = classify(fqn, sn) else {
+                continue;
+            };
+            // Skip namespace aliases.
+            if self.is_likely_namespace_not_class(fqn) {
                 continue;
             }
-            // In narrow contexts (TraitUse, Implements, ExtendsInterface)
-            // the expected class-like kind is very specific.  Reject
-            // use-map entries we cannot verify as actual class-likes —
-            // they are likely namespace aliases or non-existent imports.
-            if context.is_narrow_kind() && !self.is_known_class_like(fqn) {
-                continue;
-            }
-            let (mut base_name, filter, _use_import) = class_edit_texts(
+            let (mut base_name, filter, mut use_import) = class_edit_texts(
                 sn,
                 fqn,
                 is_fqn_prefix,
                 has_leading_backslash,
                 effective_namespace,
             );
+            let mut was_shortened = false;
             if should_shorten_via_imports
                 && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
             {
                 base_name = shortened;
-            }
-            // Source 1 never needs a use-import (already imported).
-            let texts = ClassItemTexts {
-                base_name,
-                filter,
-                use_import: None,
-            };
-            let demoted = context.is_class_only()
-                && self.check_context_match(fqn, context).is_none()
-                && context.likely_mismatch(sn);
-            let ctor = if needs_ctor {
-                self.ctor_params_for(fqn)
-            } else {
-                None
-            };
-            items.push(ctx.build_item(texts, fqn, '0', demoted, ctor.as_deref(), false));
-        }
-
-        // ── 2. Same-namespace classes (from uri_classes_index) ────────────────
-        // Skip in UseImport context: same-namespace classes don't need
-        // a `use` statement (PHP auto-resolves them), so offering them
-        // in `use |` completion is not useful.
-        if !is_use_import && let Some(ns) = file_namespace {
-            let nmap = self.file_namespaces.read();
-            // Find all URIs that share the same namespace
-            let same_ns_uris: Vec<String> = nmap
-                .iter()
-                .filter_map(|(uri, spans)| {
-                    let has_ns = spans
-                        .iter()
-                        .any(|s| s.namespace.as_deref() == Some(ns.as_str()));
-                    if has_ns { Some(uri.clone()) } else { None }
-                })
-                .collect();
-            drop(nmap);
-
-            {
-                let amap = self.uri_classes_index.read();
-                for uri in &same_ns_uris {
-                    if let Some(classes) = amap.get(uri) {
-                        for cls in classes {
-                            if is_anonymous_class(&cls.name) {
-                                continue;
-                            }
-                            let cls_fqn = format!("{}\\{}", ns, cls.name);
-                            if !matches_class_prefix(
-                                &cls.name,
-                                &cls_fqn,
-                                &prefix_lower,
-                                is_fqn_prefix,
-                                expanded_prefix_lower,
-                            ) {
-                                continue;
-                            }
-                            // Apply context-aware filtering.
-                            if context.is_class_only() && !context.matches(cls) {
-                                continue;
-                            }
-                            if !seen_fqns.insert(cls_fqn.clone()) {
-                                continue;
-                            }
-                            let (mut base_name, filter, _use_import) = class_edit_texts(
-                                &cls.name,
-                                &cls_fqn,
-                                is_fqn_prefix,
-                                has_leading_backslash,
-                                effective_namespace,
-                            );
-                            if should_shorten_via_imports
-                                && let Some(shortened) =
-                                    shorten_fqn_via_use_map(&cls_fqn, file_use_map)
-                            {
-                                base_name = shortened;
-                            }
-                            // Source 2 has ClassInfo — check __construct
-                            // for richer `new` / attribute snippets.
-                            let ctor_params: Option<Vec<ParameterInfo>> = if needs_ctor {
-                                cls.get_method_ci("__construct")
-                                    .map(|m| m.parameters.clone())
-                            } else {
-                                None
-                            };
-                            // Source 2 never needs a use-import
-                            // (same namespace).
-                            let texts = ClassItemTexts {
-                                base_name,
-                                filter,
-                                use_import: None,
-                            };
-                            items.push(ctx.build_item(
-                                texts,
-                                &cls_fqn,
-                                '1',
-                                false,
-                                ctor_params.as_deref(),
-                                cls.deprecation_message.is_some(),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── 3. fqn_uri_index (discovered / interacted-with classes) ───
-        {
-            let idx = self.fqn_uri_index.read();
-            for fqn in idx.keys() {
-                let sn = short_name(fqn);
-                if !matches_class_prefix(
-                    sn,
-                    fqn,
-                    &prefix_lower,
-                    is_fqn_prefix,
-                    expanded_prefix_lower,
-                ) {
-                    continue;
-                }
-                if !seen_fqns.insert(fqn.clone()) {
-                    continue;
-                }
-                // Apply context-aware filtering for loaded classes.
-                // Unloaded classes pass through (demoted below).
-                let ctx_match = if context.is_class_only() {
-                    let m = self.check_context_match(fqn, context);
-                    if m == Some(false) {
-                        continue;
-                    }
-                    m
-                } else {
-                    None
-                };
-                let (mut base_name, filter, mut use_import) = class_edit_texts(
-                    sn,
-                    fqn,
-                    is_fqn_prefix,
-                    has_leading_backslash,
-                    effective_namespace,
-                );
-                let mut was_shortened = false;
-                if should_shorten_via_imports
-                    && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
-                {
-                    base_name = shortened;
-                    use_import = None;
-                    was_shortened = true;
-                }
-                let mut texts = ClassItemTexts {
-                    base_name,
-                    filter,
-                    use_import,
-                };
-                ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, was_shortened);
-                // Demote only when the class could not be loaded (truly
-                // unknown).  Loaded classes already passed matches().
-                let demoted = ctx_match.is_none() && context.likely_mismatch(sn);
-                let ctor = if needs_ctor {
-                    self.ctor_params_for(fqn)
-                } else {
-                    None
-                };
-                items.push(ctx.build_item(texts, fqn, '2', demoted, ctor.as_deref(), false));
-            }
-        }
-
-        // ── 4. Class index (all autoloaded classes) ─────────────────
-        {
-            let cmap = self.fqn_uri_index.read();
-            for fqn in cmap.keys() {
-                let sn = short_name(fqn);
-                if !matches_class_prefix(
-                    sn,
-                    fqn,
-                    &prefix_lower,
-                    is_fqn_prefix,
-                    expanded_prefix_lower,
-                ) {
-                    continue;
-                }
-                if !seen_fqns.insert(fqn.clone()) {
-                    continue;
-                }
-                // Apply context-aware filtering for loaded classes.
-                // Unloaded classes pass through (demoted below).
-                let ctx_match = if context.is_class_only() {
-                    let m = self.check_context_match(fqn, context);
-                    if m == Some(false) {
-                        continue;
-                    }
-                    m
-                } else {
-                    None
-                };
-                let (mut base_name, filter, mut use_import) = class_edit_texts(
-                    sn,
-                    fqn,
-                    is_fqn_prefix,
-                    has_leading_backslash,
-                    effective_namespace,
-                );
-                let mut was_shortened = false;
-                if should_shorten_via_imports
-                    && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
-                {
-                    base_name = shortened;
-                    use_import = None;
-                    was_shortened = true;
-                }
-                let mut texts = ClassItemTexts {
-                    base_name,
-                    filter,
-                    use_import,
-                };
-                ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, was_shortened);
-                // Demote only when the class could not be loaded.
-                let demoted = ctx_match.is_none() && context.likely_mismatch(sn);
-                let ctor = if needs_ctor {
-                    self.ctor_params_for(fqn)
-                } else {
-                    None
-                };
-                items.push(ctx.build_item(texts, fqn, '2', demoted, ctor.as_deref(), false));
-            }
-        }
-
-        // ── 5. Built-in PHP classes from stubs (lowest priority) ────
-        let stub_idx = self.stub_index.read();
-        for &name in stub_idx.keys() {
-            let sn = short_name(name);
-            if !matches_class_prefix(
-                sn,
-                name,
-                &prefix_lower,
-                is_fqn_prefix,
-                expanded_prefix_lower,
-            ) {
-                continue;
-            }
-            if !seen_fqns.insert(name.to_string()) {
-                continue;
-            }
-
-            // Apply context-aware filtering.  Parse-and-cache the
-            // stub if it lives in memory but hasn't been parsed yet,
-            // so we get a real ClassInfo with kind/abstract/final
-            // flags instead of scanning raw source.
-            let ctx_match = if context.is_class_only() {
-                let m = self.check_context_match(name, context);
-                if m == Some(false) {
-                    continue;
-                }
-                m
-            } else {
-                None
-            };
-            let (mut base_name, filter, mut use_import) = class_edit_texts(
-                sn,
-                name,
-                is_fqn_prefix,
-                has_leading_backslash,
-                effective_namespace,
-            );
-            let mut was_shortened = false;
-            if should_shorten_via_imports
-                && let Some(shortened) = shorten_fqn_via_use_map(name, file_use_map)
-            {
-                base_name = shortened;
                 use_import = None;
                 was_shortened = true;
+            }
+            // Tier 0/1 never need a use-import.
+            if tier <= '1' {
+                use_import = None;
             }
             let mut texts = ClassItemTexts {
                 base_name,
@@ -1863,14 +1634,58 @@ impl Backend {
                 use_import,
             };
             ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, was_shortened);
-            // Demote only when the class could not be loaded.
-            let demoted = ctx_match.is_none() && context.likely_mismatch(sn);
             let ctor = if needs_ctor {
-                self.ctor_params_for(name)
+                self.ctor_params_for(fqn)
             } else {
                 None
             };
-            items.push(ctx.build_item(texts, name, '2', demoted, ctor.as_deref(), false));
+            items.push(ctx.build_item(texts, fqn, tier, demoted, ctor.as_deref(), deprecated));
+        }
+
+        // ── Pass 2: stub_index (built-in PHP classes) ───────────────
+        // Collect keys first to avoid deadlock (same reason as pass 1).
+        let stub_keys: Vec<&'static str> = self.stub_index.read().keys().copied().collect();
+        for fqn in &stub_keys {
+            let sn = short_name(fqn);
+            if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix, expanded_prefix_lower) {
+                continue;
+            }
+            if !seen_fqns.insert(fqn.to_string()) {
+                continue;
+            }
+            let Some((tier, demoted, deprecated)) = classify(fqn, sn) else {
+                continue;
+            };
+            let (mut base_name, filter, mut use_import) = class_edit_texts(
+                sn,
+                fqn,
+                is_fqn_prefix,
+                has_leading_backslash,
+                effective_namespace,
+            );
+            let mut was_shortened = false;
+            if should_shorten_via_imports
+                && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
+            {
+                base_name = shortened;
+                use_import = None;
+                was_shortened = true;
+            }
+            if tier <= '1' {
+                use_import = None;
+            }
+            let mut texts = ClassItemTexts {
+                base_name,
+                filter,
+                use_import,
+            };
+            ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, was_shortened);
+            let ctor = if needs_ctor {
+                self.ctor_params_for(fqn)
+            } else {
+                None
+            };
+            items.push(ctx.build_item(texts, fqn, tier, demoted, ctor.as_deref(), deprecated));
         }
 
         // ── Namespace segment items (FQN mode only) ─────────────────
@@ -2066,30 +1881,21 @@ impl Backend {
         // load_stub_class checks uri_classes_index first, then parses in-memory
         // stubs if needed.  No disk I/O.
         if let Some(cls) = self.load_stub_class(class_name) {
-            return Some(context.matches(&cls));
+            let kind_ok = context.matches(&cls);
+            if !kind_ok {
+                return Some(false);
+            }
+            // ThrowNew and Catch require Throwable ancestry.
+            if matches!(
+                context,
+                ClassNameContext::ThrowNew | ClassNameContext::Catch
+            ) {
+                return Some(self.is_throwable_descendant(class_name, 0));
+            }
+            return Some(true);
         }
         // Truly unknown.
         None
-    }
-
-    /// Check whether `class_name` exists in any class source (uri_classes_index,
-    /// fqn_uri_index, or stub_index).
-    ///
-    /// Used to reject use-map entries in narrow contexts (e.g.
-    /// `TraitUse`, `Implements`) where showing an unverifiable FQN is
-    /// worse than hiding it.
-    fn is_known_class_like(&self, class_name: &str) -> bool {
-        if self.find_class_in_uri_classes_index(class_name).is_some() {
-            return true;
-        }
-        if self.stub_index.read().contains_key(class_name) {
-            return true;
-        }
-        if self.fqn_uri_index.read().contains_key(class_name) {
-            return true;
-        }
-
-        false
     }
 }
 

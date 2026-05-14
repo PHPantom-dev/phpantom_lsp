@@ -13,25 +13,14 @@
 //! The inline `/** @throws */` annotation is an escape hatch that lets
 //! developers document exceptions from dependencies that don't have
 //! `@throws` tags themselves.
-//!
-//! Also provides a Throwable-filtered class completion variant for catch
-//! clause fallback and `throw new` completion, which only suggests
-//! exception classes from already-parsed sources and includes everything
-//! else (class index, stubs) unfiltered.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::types::*;
-use crate::util::{short_name, strip_fqn_prefix};
+use crate::util::short_name;
 
-use super::class_completion::{
-    ClassItemCtx, ClassItemTexts, build_affinity_table, class_edit_texts, expand_alias_prefix,
-    matches_class_prefix,
-};
-use crate::completion::builder::analyze_use_block;
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::completion::source::throws_analysis;
 
@@ -385,7 +374,7 @@ impl Backend {
     /// when this returns `true`.
     ///
     /// This never triggers disk I/O; it only consults `uri_classes_index`.
-    fn is_throwable_descendant(&self, class_name: &str, depth: u32) -> bool {
+    pub(crate) fn is_throwable_descendant(&self, class_name: &str, depth: u32) -> bool {
         if depth > 20 {
             return false; // prevent infinite loops
         }
@@ -418,228 +407,6 @@ impl Backend {
             }
             None => false, // class not loaded — can't confirm
         }
-    }
-
-    /// Build completion items for class names suitable for `throw new`
-    /// and `catch` contexts.
-    ///
-    /// Every matching class from `fqn_uri_index` and `stub_index` is
-    /// included exactly once.  Sort priority is determined by:
-    ///
-    /// - **Source tier `'0'`** — use-imported and confirmed Throwable.
-    /// - **Source tier `'1'`** — same namespace (or sub-namespace) and
-    ///   confirmed Throwable.
-    /// - **Source tier `'2'`** — everything else (confirmed Throwable
-    ///   from other namespaces, or unloaded classes).
-    ///
-    /// Within tier `'2'`, classes whose short name does *not* end with
-    /// `Exception`, `Error`, or `Throwable` are demoted so that likely
-    /// exception classes sort first.
-    pub(crate) fn build_catch_class_name_completions(
-        &self,
-        ctx: &crate::types::FileContext,
-        prefix: &str,
-        content: &str,
-        is_new: bool,
-        position: Position,
-        uri: &str,
-    ) -> (Vec<CompletionItem>, bool) {
-        let file_use_map = &ctx.use_map;
-        let file_namespace = &ctx.namespace;
-        let has_leading_backslash = prefix.starts_with('\\');
-        let normalized = strip_fqn_prefix(prefix);
-        let prefix_lower = normalized.to_lowercase();
-        let is_fqn_prefix = has_leading_backslash || normalized.contains('\\');
-
-        // When the prefix starts with an alias (e.g. `OA\Re` where
-        // `use OpenApi\Attributes as OA`), expand it to the FQN form
-        // so that `matches_class_prefix` can find classes under the
-        // aliased namespace.
-        let expanded = expand_alias_prefix(normalized, file_use_map);
-        let expanded_lower = expanded.as_deref().map(|s| s.to_lowercase());
-        let expanded_prefix_lower = expanded_lower.as_deref();
-
-        // When the user is typing a namespace-qualified reference,
-        // provide an explicit replacement range so the editor replaces
-        // the entire typed prefix (including namespace separators).
-        let fqn_replace_range = if is_fqn_prefix {
-            Some(Range {
-                start: Position {
-                    line: position.line,
-                    character: position
-                        .character
-                        .saturating_sub(prefix.chars().count() as u32),
-                },
-                end: position,
-            })
-        } else {
-            None
-        };
-        let mut seen_fqns: HashSet<String> = HashSet::new();
-        let mut items: Vec<CompletionItem> = Vec::new();
-
-        // Extract the short-name portion of the typed prefix for match
-        // quality classification.
-        let quality_prefix = match normalized.rfind('\\') {
-            Some(pos) => normalized[pos + 1..].to_string(),
-            None => normalized.to_string(),
-        };
-
-        // Build the affinity table from the file's use-map and namespace.
-        let affinity_table = build_affinity_table(file_use_map, file_namespace);
-
-        let prefix_has_namespace = normalized.contains('\\');
-
-        let ctx = ClassItemCtx {
-            is_fqn_prefix,
-            is_new,
-            is_attribute: false,
-            fqn_replace_range,
-            file_use_map,
-            use_block: analyze_use_block(content),
-            file_namespace,
-            affinity_table,
-            quality_prefix,
-            prefix_has_namespace,
-            uri,
-        };
-
-        // Build a reverse lookup from FQN → use-import short name so we
-        // can detect use-imported classes in O(1).
-        let use_imported_fqns: HashSet<&String> = file_use_map.values().collect();
-
-        // Namespace prefix for "same namespace or sub-namespace" check.
-        // For namespace `App\Models`, both `App\Models\User` and
-        // `App\Models\Concerns\HasFactory` are considered same-or-sub.
-        let ns_prefix = file_namespace.as_ref().map(|ns| format!("{}\\", ns));
-
-        // ── Helper: classify a FQN into a source tier and demotion ───
-        //
-        // Returns `Some((source_tier, demoted))` or `None` to exclude.
-        //   '0' = use-imported + confirmed Throwable
-        //   '1' = same/sub namespace + confirmed Throwable
-        //   '2' = everything else
-        // `demoted` is true only in tier '2' when the short name doesn't
-        // look like an exception class.
-        //
-        // Loaded classes that are confirmed NOT Throwable (class/interface
-        // with a fully walkable chain that doesn't reach Throwable) are
-        // excluded.  Unloaded classes pass through with heuristic demotion.
-        let classify = |fqn: &str, sn: &str| -> Option<(char, bool)> {
-            // Check if loaded as a class or interface so we can verify
-            // Throwable ancestry.
-            let loaded_info = self.find_class_in_uri_classes_index(fqn);
-            let is_loaded_class_or_interface = loaded_info
-                .as_ref()
-                .is_some_and(|c| matches!(c.kind, ClassLikeKind::Class | ClassLikeKind::Interface));
-
-            if is_loaded_class_or_interface {
-                if self.is_throwable_descendant(fqn, 0) {
-                    // Confirmed Throwable — assign tier by proximity.
-                    if use_imported_fqns.contains(&fqn.to_string()) {
-                        return Some(('0', false));
-                    }
-                    let in_same_or_sub_ns = match &ns_prefix {
-                        Some(pfx) => fqn.starts_with(pfx.as_str()),
-                        None => !fqn.contains('\\'),
-                    };
-                    if in_same_or_sub_ns {
-                        return Some(('1', false));
-                    }
-                    return Some(('2', false));
-                }
-                // Loaded as class/interface but NOT Throwable — exclude.
-                return None;
-            }
-
-            // Not loaded (or loaded as trait/enum which we skip) —
-            // include with heuristic demotion.
-            let demoted =
-                !sn.ends_with("Exception") && !sn.ends_with("Error") && !sn.ends_with("Throwable");
-            Some(('2', demoted))
-        };
-
-        // ── Pass 1: fqn_uri_index (project + vendor classes) ────────
-        {
-            let idx = self.fqn_uri_index.read();
-            for fqn in idx.keys() {
-                let sn = short_name(fqn);
-                if !matches_class_prefix(
-                    sn,
-                    fqn,
-                    &prefix_lower,
-                    is_fqn_prefix,
-                    expanded_prefix_lower,
-                ) {
-                    continue;
-                }
-                if !seen_fqns.insert(fqn.clone()) {
-                    continue;
-                }
-                let Some((source_tier, demoted)) = classify(fqn, sn) else {
-                    continue;
-                };
-                let (base_name, filter, use_import) = class_edit_texts(
-                    sn,
-                    fqn,
-                    is_fqn_prefix,
-                    has_leading_backslash,
-                    file_namespace,
-                );
-                let mut texts = ClassItemTexts {
-                    base_name,
-                    filter,
-                    use_import,
-                };
-                ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, false);
-                items.push(ctx.build_item(texts, fqn, source_tier, demoted, None, false));
-            }
-        }
-
-        // ── Pass 2: stub_index (built-in PHP classes) ───────────────
-        {
-            let stub_idx = self.stub_index.read();
-            for &fqn in stub_idx.keys() {
-                let sn = short_name(fqn);
-                if !matches_class_prefix(
-                    sn,
-                    fqn,
-                    &prefix_lower,
-                    is_fqn_prefix,
-                    expanded_prefix_lower,
-                ) {
-                    continue;
-                }
-                if !seen_fqns.insert(fqn.to_string()) {
-                    continue;
-                }
-                let Some((source_tier, demoted)) = classify(fqn, sn) else {
-                    continue;
-                };
-                let (base_name, filter, use_import) = class_edit_texts(
-                    sn,
-                    fqn,
-                    is_fqn_prefix,
-                    has_leading_backslash,
-                    file_namespace,
-                );
-                let mut texts = ClassItemTexts {
-                    base_name,
-                    filter,
-                    use_import,
-                };
-                ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, false);
-                items.push(ctx.build_item(texts, fqn, source_tier, demoted, None, false));
-            }
-        }
-
-        let is_incomplete = items.len() > Self::MAX_CLASS_COMPLETIONS;
-        if is_incomplete {
-            items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
-            items.truncate(Self::MAX_CLASS_COMPLETIONS);
-        }
-
-        (items, is_incomplete)
     }
 }
 
