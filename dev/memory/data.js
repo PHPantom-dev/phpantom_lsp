@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778798537507,
+  "lastUpdate": 1778873514187,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9145,6 +9145,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a4fe3e475c1e6e679ba6cc1ae038a17497a8e8cc",
+          "message": "Refactor diagnostics to avoid holding read lock during analysis",
+          "timestamp": "2026-05-15T21:19:23+02:00",
+          "tree_id": "726ad93c7478532bf61a98ec8362dfa865992068",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/a4fe3e475c1e6e679ba6cc1ae038a17497a8e8cc"
+        },
+        "date": 1778873513445,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.4,
             "unit": "MiB"
           }
         ]
