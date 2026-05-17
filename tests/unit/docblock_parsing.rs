@@ -1306,6 +1306,39 @@ fn mixin_tag_empty_after_tag() {
     assert!(mixins.is_empty());
 }
 
+#[test]
+fn mixin_tag_union() {
+    let doc = concat!("/**\n", " * @mixin Webpage|AwaitableWebpage\n", " */",);
+    let mixins = extract_mixin_tags(doc);
+    assert_eq!(
+        mixins,
+        vec![
+            ("Webpage".to_string(), vec![]),
+            ("AwaitableWebpage".to_string(), vec![]),
+        ]
+    );
+}
+
+#[test]
+fn mixin_tag_union_with_generics() {
+    let doc = concat!(
+        "/**\n",
+        " * @mixin Builder<User>|Collection<int, User>\n",
+        " */",
+    );
+    let mixins = extract_mixin_tags(doc);
+    assert_eq!(
+        mixins,
+        vec![
+            ("Builder".to_string(), vec![PhpType::parse("User")]),
+            (
+                "Collection".to_string(),
+                vec![PhpType::parse("int"), PhpType::parse("User")],
+            ),
+        ]
+    );
+}
+
 // ─── @phpstan-assert / @psalm-assert extraction ─────────────────────────
 
 #[test]

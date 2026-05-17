@@ -248,26 +248,37 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
         // Parse the type token into a structured PhpType and extract
         // the base class name and optional generic arguments.
         let parsed = PhpType::parse(type_token);
-        let (base, generic_args) = match &parsed {
-            PhpType::Generic(name, args) => {
-                let cleaned_args: Vec<PhpType> = args.iter().map(strip_fqn_prefix_typed).collect();
-                (name.clone(), cleaned_args)
-            }
-            PhpType::Named(name) => (name.clone(), vec![]),
-            PhpType::Nullable(inner) => match inner.as_ref() {
-                PhpType::Named(name) => (name.clone(), vec![]),
+
+        // Collect individual type members. A union like `Foo|Bar` yields
+        // multiple mixin entries, one per member.
+        let members: Vec<&PhpType> = match &parsed {
+            PhpType::Union(parts) => parts.iter().collect(),
+            other => vec![other],
+        };
+
+        for member in members {
+            let (base, generic_args) = match member {
                 PhpType::Generic(name, args) => {
                     let cleaned_args: Vec<PhpType> =
                         args.iter().map(strip_fqn_prefix_typed).collect();
                     (name.clone(), cleaned_args)
                 }
+                PhpType::Named(name) => (name.clone(), vec![]),
+                PhpType::Nullable(inner) => match inner.as_ref() {
+                    PhpType::Named(name) => (name.clone(), vec![]),
+                    PhpType::Generic(name, args) => {
+                        let cleaned_args: Vec<PhpType> =
+                            args.iter().map(strip_fqn_prefix_typed).collect();
+                        (name.clone(), cleaned_args)
+                    }
+                    _ => continue,
+                },
                 _ => continue,
-            },
-            _ => continue,
-        };
+            };
 
-        if !base.is_empty() {
-            results.push((base, generic_args));
+            if !base.is_empty() {
+                results.push((base, generic_args));
+            }
         }
     }
 

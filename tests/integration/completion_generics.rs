@@ -7702,6 +7702,79 @@ class KlaviyoClient {
     }
 }
 
+/// When `@mixin Foo|Bar` is used, members from both classes should be available.
+#[tokio::test]
+async fn test_mixin_union_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Webpage {\n",
+        "    public function getUrl(): string {}\n",
+        "}\n",
+        "class AwaitableWebpage {\n",
+        "    public function doAwait(): void {}\n",
+        "}\n",
+        "/**\n",
+        " * @mixin Webpage|AwaitableWebpage\n",
+        " */\n",
+        "final class PendingAwaitablePage {\n",
+        "    public function pending(): bool {}\n",
+        "}\n",
+        "$page = new PendingAwaitablePage();\n",
+        "$page->\n",
+    );
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let line = text.lines().count() as u32 - 1;
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position { line, character: 7 },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                names.contains(&"getUrl"),
+                "Union mixin should include Webpage::getUrl(), got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"doAwait"),
+                "Union mixin should include AwaitableWebpage::doAwait(), got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"pending"),
+                "Own method pending() should be present, got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// When `@param Closure(T): void $cb` receives `fn(User $u) => ...`,
 /// the template param `T` should be inferred from the closure's parameter
 /// type (contravariant position).
