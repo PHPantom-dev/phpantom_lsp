@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779058891850,
+  "lastUpdate": 1779062059544,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9247,6 +9247,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "74d8c3d373d4d6909c928091930e88de83c28920",
+          "message": "Support `@mixin` union types and expose all member classes",
+          "timestamp": "2026-05-18T01:42:08+02:00",
+          "tree_id": "68148226c5eaa95f7027da897ef722b2327ea668",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/74d8c3d373d4d6909c928091930e88de83c28920"
+        },
+        "date": 1779062058570,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 58.1,
             "unit": "MiB"
           }
         ]
