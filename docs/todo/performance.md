@@ -190,6 +190,36 @@ window.
 
 ---
 
+## P9. `resolved_class_cache` generic-arg specialisation
+
+**Impact: Medium · Effort: Medium**
+
+The resolved-class cache is keyed by `(FQN, Vec<String>)`. Every
+distinct generic instantiation of the same class (e.g.
+`Builder<User>`, `Builder<Order>`, `Builder<Product>`) triggers a
+full `resolve_class_fully` call, even though the base resolution
+(inheritance merging, trait merging, virtual member injection) is
+identical. Only the final generic substitution differs.
+
+In a Laravel codebase with hundreds of Eloquent models, this means
+`Builder` is fully resolved hundreds of times, once per model.
+
+### Fix
+
+Cache the base-resolved class (before generic substitution)
+separately, keyed by FQN alone. When a generic instantiation is
+requested, look up the base-resolved class and apply
+`apply_substitution` on top. The substitution step is cheap
+(tree walk) compared to the full resolution (inheritance walking,
+trait merging, virtual member providers).
+
+This requires splitting `resolve_class_fully` into two stages:
+base resolution (cached by FQN) and generic specialisation (cached
+by `(FQN, Vec<String>)` as today, but with a much cheaper miss
+path).
+
+---
+
 ## P11. Uncached base-resolution in `build_scope_methods_for_builder`
 
 **Impact: Low-Medium · Effort: Low**
@@ -473,6 +503,48 @@ will become the dominant fixed overhead once vendor indexing is
 deferred. Implementing this before full vendor indexing lands
 avoids hitting the memory ceiling and ensures the stubs layer is
 essentially free for both eager and deferred indexing paths.
+
+---
+
+## P17. `mago-names` resolution on the parse hot path
+
+**Impact: Medium · Effort: Low**
+
+The `mago-names` name resolver runs synchronously inside
+`update_ast_inner`, adding a full AST walk plus an owned `HashMap`
+copy on every `didChange` event. Measured regression from `6a0737a`
+("Migrate to use mago-names"):
+
+| Benchmark        | Before | After | Δ    |
+| ---------------- | ------ | ----- | ---- |
+| with_narrowing   | 12 ms  | 15 ms | +25% |
+| 5_methods_chain  | 8 ms   | 10 ms | +25% |
+| carbon_class     | 250 ms | 340 ms | +36% |
+| large_file       | 150 ms | 210 ms | +40% |
+
+The resolved names are currently consumed only by diagnostics (which
+run asynchronously) and `FileContext::resolve_name_at()`. Nothing on
+the completion hot path requires this data to be computed eagerly.
+
+### Fix
+
+Defer name resolution out of `update_ast_inner`. Options:
+
+- **Lazy resolution:** compute `OwnedResolvedNames` on first access
+  per file version, invalidate on the next `update_ast`. Moves the
+  cost off the typing hot path entirely.
+- **Diagnostic-worker resolution:** run the resolver in the
+  diagnostic worker clone of `Backend`, since diagnostics are the
+  primary consumer.
+
+### When to implement
+
+Low priority. The `mago-names` migration is complete, but the
+`use_map` is still used by several consumers. Further refactoring
+(migrating more consumers to byte-offset lookups, eventually
+removing `use_map`) will change the access patterns. Optimizing
+now would likely be reworked. Revisit once `use_map` usage is
+significantly reduced.
 
 ---
 
