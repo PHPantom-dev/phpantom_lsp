@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778873514187,
+  "lastUpdate": 1779051635652,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9179,6 +9179,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fd3121bdd034618acfa2b21a4ddf545b8fb68892",
+          "message": "Changelog: Fix analysis deadlock caused by lock acquisition order in\nvendor file parsing",
+          "timestamp": "2026-05-17T22:48:11+02:00",
+          "tree_id": "5369470c7cfcfe308cac07f855711b64333492ac",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/fd3121bdd034618acfa2b21a4ddf545b8fb68892"
+        },
+        "date": 1779051634895,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.4,
             "unit": "MiB"
           }
         ]
