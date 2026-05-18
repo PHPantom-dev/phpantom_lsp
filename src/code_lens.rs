@@ -70,30 +70,16 @@ impl Backend {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
                     let title = format!("{} {}::{}", icon, proto.ancestor_name, method.name);
 
-                    // Build a URI with a fragment encoding the target
-                    // line and column so that `vscode.open` jumps to the
-                    // right position.  This avoids the `instanceof`
-                    // constraint errors that `editor.action.goToLocations`
-                    // and `editor.action.showReferences` trigger when
-                    // called from an LSP server without a companion
-                    // extension to convert plain JSON into VS Code class
-                    // instances.
-                    let fragment = format!(
-                        "L{},{}",
-                        proto.position.line + 1,
-                        proto.position.character + 1
-                    );
-                    let mut target_uri: Url = match proto.file_uri.parse() {
+                    let target_uri: Url = match proto.file_uri.parse() {
                         Ok(u) => u,
                         Err(_) => continue,
                     };
-                    target_uri.set_fragment(Some(&fragment));
 
-                    let command = Command {
+                    let command = self.build_code_lens_command(
                         title,
-                        command: "vscode.open".to_string(),
-                        arguments: Some(vec![serde_json::json!(target_uri)]),
-                    };
+                        target_uri,
+                        proto.position,
+                    );
 
                     lenses.push(CodeLens {
                         range,
@@ -320,6 +306,45 @@ impl Backend {
         }
 
         None
+    }
+
+    /// Build the LSP `Command` for a code lens that navigates to a target
+    /// location.
+    ///
+    /// Uses `editor.action.showReferences` (widely supported) by default,
+    /// and `vscode.open` when connected to a VS Code client.
+    fn build_code_lens_command(&self, title: String, uri: Url, position: Position) -> Command {
+        let client = self.client_name.lock();
+        if client.contains("Visual Studio Code") {
+            // VS Code: use vscode.open with a fragment for direct navigation.
+            let fragment = format!("L{},{}", position.line + 1, position.character + 1);
+            let mut target_uri = uri;
+            target_uri.set_fragment(Some(&fragment));
+            Command {
+                title,
+                command: "vscode.open".to_string(),
+                arguments: Some(vec![serde_json::json!(target_uri)]),
+            }
+        } else {
+            // All other editors: use editor.action.showReferences which is
+            // handled by most LSP clients (Zed, Neovim, Emacs, etc.).
+            let location = Location {
+                uri: uri.clone(),
+                range: Range {
+                    start: position,
+                    end: position,
+                },
+            };
+            Command {
+                title,
+                command: "editor.action.showReferences".to_string(),
+                arguments: Some(vec![
+                    serde_json::json!(uri),
+                    serde_json::json!(position),
+                    serde_json::json!([location]),
+                ]),
+            }
+        }
     }
 
     /// Build a `Prototype` by locating the method's position in the

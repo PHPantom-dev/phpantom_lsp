@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Code lens navigation.** Code lenses now work in Zed, Neovim, Emacs, and other editors. Previously the click command used a VS Code-specific API that other editors ignored.
 - **`@mixin` with union types.** `@mixin Foo|Bar` now correctly exposes members from all classes in the union. Previously only single-class mixins were recognized.
 - **`throw new` completion no longer offers non-instantiable types.** Interfaces, abstract classes, traits, and enums are now filtered out, matching the behavior of `new` completion. The `throw new` path also now filters to Throwable descendants only.
 - **Unified class name completion architecture.** `throw new` and `catch()` completion now use the same `build_class_name_completions` pipeline as `new`, `extends`, `implements`, etc. `throw new` uses a `ThrowNew` context (instantiable + Throwable) and `catch()`/`@throws` uses a `Catch` context (class or interface + Throwable). This gives both contexts the same affinity scoring, FQN shortening via use-map, namespace segment drill-down, deprecation flags, and consistent filtering. The separate `build_catch_class_name_completions` function has been removed.

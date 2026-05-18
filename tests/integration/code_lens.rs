@@ -301,7 +301,7 @@ class Handler extends Base {
 // ─── Code Lens Command ─────────────────────────────────────────────────────
 
 #[test]
-fn lens_command_uses_vscode_open() {
+fn lens_command_uses_show_references_by_default() {
     let backend = create_test_backend();
     let content = r#"<?php
 class Parent_ {
@@ -317,16 +317,11 @@ class Child extends Parent_ {
 
     assert_eq!(lenses.len(), 1);
     let cmd = lenses[0].command.as_ref().unwrap();
-    assert_eq!(cmd.command, "vscode.open");
+    assert_eq!(cmd.command, "editor.action.showReferences");
     assert!(cmd.arguments.is_some());
     let args = cmd.arguments.as_ref().unwrap();
-    // Should have 1 argument: the URI with a fragment encoding the position
-    assert_eq!(args.len(), 1);
-    let uri_str = args[0].as_str().unwrap();
-    assert!(
-        uri_str.contains("#L"),
-        "URI should contain a #L fragment for the target position, got: {uri_str}"
-    );
+    // Should have 3 arguments: uri, position, locations[]
+    assert_eq!(args.len(), 3);
 }
 
 // ─── Multiple Interfaces ────────────────────────────────────────────────────
