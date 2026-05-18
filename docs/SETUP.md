@@ -142,20 +142,22 @@ vim.lsp.enable('phpantom')
 <details>
 <summary><b>Sublime Text</b></summary>
 
-With [LSP for Sublime Text](https://github.com/sublimelsp/LSP):
+1. **Install the LSP package.** Open the Command Palette (`Ctrl+Shift+P` on Linux/Windows, `Cmd+Shift+P` on macOS), type `Package Control: Install Package`, press Enter, then search for `LSP` and install it.
+
+2. **Configure PHPantom.** Open the Command Palette again and type `Preferences: LSP Server Configurations`. This opens `LanguageServers.sublime-settings`. Add the following:
 
 ```json
 {
-  "clients": {
-    "phpantom": {
-      "enabled": true,
-      "command": ["/path/to/phpantom_lsp"],
-      "selector": "embedding.php",
-      "priority_selector": "source.php"
-    }
+  "phpantom": {
+    "enabled": true,
+    "command": ["phpantom_lsp"],
+    "selector": "embedding.php",
+    "priority_selector": "source.php"
   }
 }
 ```
+
+Make sure `phpantom_lsp` is on your `PATH`, or replace it with the full path to the binary.
 
 </details>
 
