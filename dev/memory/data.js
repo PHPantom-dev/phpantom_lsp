@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779069023414,
+  "lastUpdate": 1779123997372,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9349,6 +9349,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "39f6257c000c89b28afa05b9a996c1345f7138a7",
+          "message": "Update Sublime Text setup instructions for LSP configuration",
+          "timestamp": "2026-05-18T18:54:04+02:00",
+          "tree_id": "4c48d2b8265f24aa8a46548725ce42b96788d223",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/39f6257c000c89b28afa05b9a996c1345f7138a7"
+        },
+        "date": 1779123996618,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.6,
             "unit": "MiB"
           }
         ]
