@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779123997372,
+  "lastUpdate": 1779128744292,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9383,6 +9383,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "00d64ae5dc324441e784f0c132f26e8021d020bf",
+          "message": "Fix code lens navigation for non-VS Code editors",
+          "timestamp": "2026-05-18T20:13:13+02:00",
+          "tree_id": "2db8c90a63a724bae4ca1051797394d87554d311",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/00d64ae5dc324441e784f0c132f26e8021d020bf"
+        },
+        "date": 1779128742886,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.8,
             "unit": "MiB"
           }
         ]
