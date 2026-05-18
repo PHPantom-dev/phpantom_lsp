@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779063058318,
+  "lastUpdate": 1779069023414,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9315,6 +9315,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "37b1551d70db44f7c21ac2c402df8ac4714393bd",
+          "message": "Update setup guide with Homebrew, Cargo, and Neovim instructions",
+          "timestamp": "2026-05-18T03:38:44+02:00",
+          "tree_id": "6d8adc51e898a70e03ef71825a8eb3646e7dd04a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/37b1551d70db44f7c21ac2c402df8ac4714393bd"
+        },
+        "date": 1779069022122,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.8,
             "unit": "MiB"
           }
         ]
