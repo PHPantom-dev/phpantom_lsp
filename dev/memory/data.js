@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779062059544,
+  "lastUpdate": 1779063058318,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9281,6 +9281,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 58.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "MingJen@users.noreply.github.com",
+            "name": "Teemo",
+            "username": "MingJen"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "18499a6a302359bc2ebbb7b26640e40e8ce52523",
+          "message": "feat(laravel): support custom Eloquent builders and improve LSP responsiveness (#118)\n\nNice work, wasn't an easy one to solve.",
+          "timestamp": "2026-05-18T01:58:36+02:00",
+          "tree_id": "23fb0734aa114cea158a154bebbc4a274360fd1a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/18499a6a302359bc2ebbb7b26640e40e8ce52523"
+        },
+        "date": 1779063056942,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.9,
             "unit": "MiB"
           }
         ]
