@@ -1,6 +1,6 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779128744292,
-  "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
+  "lastUpdate": 1779158881618,
+  "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
       {
@@ -9417,6 +9417,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bfecbcb08aad950927164a9364d9ea1fed9b49d1",
+          "message": "Update VS Code setup instructions to recommend official extension",
+          "timestamp": "2026-05-19T00:25:49+02:00",
+          "tree_id": "c2a559d78f336b3933330485577ee3d31402c2e0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/bfecbcb08aad950927164a9364d9ea1fed9b49d1"
+        },
+        "date": 1779158880667,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.8,
             "unit": "MiB"
           }
         ]
