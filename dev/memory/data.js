@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779158881618,
+  "lastUpdate": 1779288195993,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9451,6 +9451,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "150914753+delu999@users.noreply.github.com",
+            "name": "R",
+            "username": "delu999"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aef3c0de6c3c89f103d5db37a7cbf36478a3e451",
+          "message": "Fix cargo install dependency resolution (#136)",
+          "timestamp": "2026-05-20T16:30:06+02:00",
+          "tree_id": "b34edf060e49d357cb9a64aae84104b30838dcf0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/aef3c0de6c3c89f103d5db37a7cbf36478a3e451"
+        },
+        "date": 1779288193623,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48,
             "unit": "MiB"
           }
         ]
