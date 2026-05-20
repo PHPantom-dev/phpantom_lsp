@@ -75,11 +75,7 @@ impl Backend {
                         Err(_) => continue,
                     };
 
-                    let command = self.build_code_lens_command(
-                        title,
-                        target_uri,
-                        proto.position,
-                    );
+                    let command = self.build_code_lens_command(title, target_uri, proto.position);
 
                     lenses.push(CodeLens {
                         range,
