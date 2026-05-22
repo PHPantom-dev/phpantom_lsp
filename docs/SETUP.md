@@ -11,7 +11,7 @@ brew install phpantom-lsp
 ### Cargo
 
 ```bash
-cargo install phpantom_lsp
+cargo install phpantom_lsp --locked
 ```
 
 See [phpantom_lsp on crates.io](https://crates.io/crates/phpantom_lsp).
