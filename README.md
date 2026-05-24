@@ -88,7 +88,7 @@ PHPantom understands Composer projects out of the box, but works without setup o
 - **[Architecture](docs/ARCHITECTURE.md).** Symbol resolution, stub loading, and inheritance merging.
 - **[Contributing](docs/CONTRIBUTING.md)**
 - **[Changelog](docs/CHANGELOG.md)**
-- **Benchmarks.** [Latency](https://ajenbo.github.io/phpantom_lsp/dev/bench/) and [memory usage](https://ajenbo.github.io/phpantom_lsp/dev/memory/) tracked on every commit.
+- **Benchmarks.** [Latency](https://phpantom-dev.github.io/phpantom_lsp/dev/bench/) and [memory usage](https://phpantom-dev.github.io/phpantom_lsp/dev/memory/) tracked on every commit.
 - **[Roadmap](docs/todo.md).** Planned features and domain-specific plans.
 
 ## Acknowledgements
