@@ -59,9 +59,9 @@ jobs:
 
       - name: Build
         env:
-          RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64-v2' || '' }}
+          RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64-v3' || '' }}
           CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
-          CARGO_PROFILE_RELEASE_LTO: "fat"
+          CARGO_PROFILE_RELEASE_LTO: "thin"
         run: cargo build --release --target ${{ matrix.target }}
 
       # --- macOS: import certificate and sign the binary ---
