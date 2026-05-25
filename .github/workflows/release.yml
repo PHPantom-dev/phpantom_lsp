@@ -12,84 +12,29 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }} (${{ matrix.cpu_version || 'native' }})
+    name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # --- Linux x86_64 ---
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-            cpu_version: x86-64-v2
-            rustflags: "-C target-cpu=x86-64-v2"
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-            cpu_version: x86-64-v3
-            suffix: modern
-            rustflags: "-C target-cpu=x86-64-v3"
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-            cpu_version: x86-64-v4
-            suffix: avx512
-            rustflags: "-C target-cpu=x86-64-v4"
-
-          # --- Linux ARM ---
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-
-          # --- macOS x86_64 ---
           - target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
             macos_sign: true
-            cpu_version: x86-64-v2
-            rustflags: "-C target-cpu=x86-64-v2"
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            archive: tar.gz
-            macos_sign: true
-            cpu_version: x86-64-v3
-            suffix: modern
-            rustflags: "-C target-cpu=x86-64-v3"
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            archive: tar.gz
-            macos_sign: true
-            cpu_version: x86-64-v4
-            suffix: avx512
-            rustflags: "-C target-cpu=x86-64-v4"
-
-          # --- macOS ARM ---
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
             macos_sign: true
-
-          # --- Windows x86_64 ---
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-            cpu_version: x86-64-v2
-            rustflags: "-C target-cpu=x86-64-v2"
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
-            cpu_version: x86-64-v3
-            suffix: modern
-            rustflags: "-C target-cpu=x86-64-v3"
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
-            cpu_version: x86-64-v4
-            suffix: avx512
-            rustflags: "-C target-cpu=x86-64-v4"
-
-          # --- Windows ARM ---
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             archive: zip
@@ -110,14 +55,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Scopes the cache by CPU version as well so v2, v3, and v4 don't thrash each other's cache
-          key: ${{ matrix.target }}-${{ matrix.cpu_version || 'default' }}
+          key: ${{ matrix.target }}
 
       - name: Build
         env:
-          RUSTFLAGS: ${{ matrix.rustflags || '' }}
+          RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64-v2' || '' }}
           CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
-          CARGO_PROFILE_RELEASE_LTO: "thin"
+          CARGO_PROFILE_RELEASE_LTO: "fat"
         run: cargo build --release --target ${{ matrix.target }}
 
       # --- macOS: import certificate and sign the binary ---
@@ -130,7 +74,7 @@ jobs:
         run: |
           # Write the .p12 to disk
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
-          
+
           # Create a temporary keychain so we don't touch the login keychain
           security create-keychain -p actions-keychain phpantom.keychain
           security set-keychain-settings -lut 21600 phpantom.keychain
@@ -148,7 +92,7 @@ jobs:
             -S apple-tool:,apple: \
             -k actions-keychain \
             phpantom.keychain
-          
+
           rm certificate.p12
 
       - name: Sign binary (macOS)
@@ -195,25 +139,22 @@ jobs:
         if: matrix.archive == 'tar.gz'
         run: |
           cd target/${{ matrix.target }}/release
-          # Appends the cpu_version (e.g., -x86-64-v3) to the archive name if it exists
-          SUFFIX="${{ matrix.suffix && format('-{0}', matrix.suffix) || '' }}"
-          tar czf ../../../phpantom_lsp-${{ matrix.target }}${SUFFIX}.tar.gz phpantom_lsp
+          tar czf ../../../phpantom_lsp-${{ matrix.target }}.tar.gz phpantom_lsp
           cd ../../..
 
       - name: Package (windows)
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          $suffix = "${{ matrix.suffix }}" ? "-${{ matrix.suffix }}" : ""
           Compress-Archive `
             -Path "target/${{ matrix.target }}/release/phpantom_lsp.exe" `
-            -DestinationPath "phpantom_lsp-${{ matrix.target }}$suffix.zip"
+            -DestinationPath "phpantom_lsp-${{ matrix.target }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: phpantom_lsp-${{ matrix.target }}-${{ matrix.suffix || '' }}
-          path: phpantom_lsp-${{ matrix.target }}${{ matrix.suffix && format('-{0}', matrix.suffix) || '' }}.${{ matrix.archive }}
+          name: phpantom_lsp-${{ matrix.target }}
+          path: phpantom_lsp-${{ matrix.target }}.${{ matrix.archive }}
 
   release:
     name: Create Release
