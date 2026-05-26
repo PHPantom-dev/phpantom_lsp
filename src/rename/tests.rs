@@ -3149,3 +3149,87 @@ async fn rename_phpdoc_property_does_not_leak_to_unrelated_class() {
     );
     assert!(!has_order_usage, "Should NOT edit $o->email usage");
 }
+
+#[tokio::test]
+async fn rename_function_param_propagates_into_nested_arrows() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function foo(?bool $abstract = false)\n",
+        "{\n",
+        "    fn () => fn () => $abstract;\n",
+        "}\n",
+    );
+    open_file(&backend, &uri, text).await;
+    let edit = rename(&backend, &uri, 1, 19, "$renamed").await;
+    assert!(edit.is_some());
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+    assert!(result.contains("$renamed = false"));
+    assert!(result.contains("fn () => fn () => $renamed;"));
+    let edit2 = rename(&backend, &uri, 3, 23, "$renamed2").await;
+    assert!(edit2.is_some());
+    let file_edits2 = edits_for_uri(&edit2.unwrap(), &uri);
+    let result2 = apply_edits(text, &file_edits2);
+    assert!(result2.contains("function foo(?bool $renamed2 = false)"));
+    assert!(result2.contains("fn () => fn () => $renamed2;"));
+}
+
+#[tokio::test]
+async fn rename_function_param_propagates_into_deeply_nested_closures_with_use() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function test(string $outer) {\n",
+        "    $f = function () use ($outer) {\n",
+        "        $g = function () use ($outer) {\n",
+        "            echo $outer;\n",
+        "        };\n",
+        "    };\n",
+        "}\n",
+    );
+    open_file(&backend, &uri, text).await;
+    let edit = rename(&backend, &uri, 1, 22, "$renamed").await;
+    assert!(edit.is_some());
+    let edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &edits);
+    assert!(result.contains("function test(string $renamed)"));
+    assert!(result.contains("use ($renamed)"));
+    assert!(result.contains("echo $renamed;"));
+    let edit2 = rename(&backend, &uri, 4, 19, "$renamed2").await;
+    assert!(edit2.is_some());
+    let edits2 = edits_for_uri(&edit2.unwrap(), &uri);
+    let result2 = apply_edits(text, &edits2);
+    assert!(result2.contains("function test(string $renamed2)"));
+    assert!(result2.contains("echo $renamed2;"));
+}
+
+#[tokio::test]
+async fn rename_function_param_propagates_mixed_closure_arrow_nesting() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function demo($v) {\n",
+        "    function () use ($v) {\n",
+        "        fn () => fn () => $v;\n",
+        "    };\n",
+        "}\n",
+    );
+    open_file(&backend, &uri, text).await;
+    let edit = rename(&backend, &uri, 1, 16, "$renamed").await;
+    assert!(edit.is_some());
+    let edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &edits);
+    assert!(result.contains("use ($renamed)"));
+    assert!(result.contains("fn () => fn () => $renamed;"));
+    let edit2 = rename(&backend, &uri, 3, 27, "$renamed2").await;
+    assert!(edit2.is_some());
+    let edits2 = edits_for_uri(&edit2.unwrap(), &uri);
+    let result2 = apply_edits(text, &edits2);
+    assert!(result2.contains("function demo($renamed2)"));
+    assert!(result2.contains("use ($renamed2)"));
+    assert!(result2.contains("fn () => fn () => $renamed2;"));
+}

@@ -23,7 +23,7 @@
 //! Accesses on unrelated classes that happen to have a member with the
 //! same name are excluded.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -281,15 +281,52 @@ impl Backend {
         // cursor is on a parameter (physically before the `{`) or on
         // a docblock `@param $var` mention, returning the body scope
         // those tokens logically belong to.
-        let scope_start = symbol_map.find_variable_scope(var_name, cursor_offset);
-
+        //
+        // We then walk upward from the initial scope to the nearest
+        // declaring scope for the variable (stopping at Parameter,
+        // Assignment, Foreach, etc. but skipping ClosureCapture so
+        // that uses inside explicit-capturing closures still see their
+        // outer declaration). This makes rename and find-references
+        // work correctly when invoked from deep inside nested arrows
+        // or closures.
+        let mut scope_start = symbol_map.find_variable_scope(var_name, cursor_offset);
+        {
+            let mut decl = scope_start;
+            let mut cur = scope_start;
+            while cur != 0 {
+                let has_def = symbol_map.var_defs.iter().any(|d| {
+                    d.name == var_name
+                        && d.scope_start == cur
+                        && !matches!(
+                            d.kind,
+                            VarDefKind::ClosureCapture
+                                | VarDefKind::Unset
+                                | VarDefKind::CompoundAssignment
+                                | VarDefKind::DocblockVar
+                                | VarDefKind::Property
+                        )
+                });
+                if has_def {
+                    decl = cur;
+                    break;
+                }
+                let parent = symbol_map.find_enclosing_scope(cur.saturating_sub(1));
+                if parent == cur {
+                    break;
+                }
+                cur = parent;
+            }
+            scope_start = decl;
+        }
         let parsed_uri = match Url::parse(uri) {
             Ok(u) => u,
             Err(_) => return locations,
         };
 
-        // Build the set of reachable scopes: the primary scope plus any
-        // closure/arrow-function scopes that capture this variable.
+        // Build the set of reachable scopes: the primary (declaring)
+        // scope plus every nested closure/arrow-function scope that
+        // can see the variable (via explicit `use` or implicit arrow
+        // capture) without being shadowed.
         let reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
 
         for span in &symbol_map.spans {
@@ -367,6 +404,24 @@ impl Backend {
     ) -> HashSet<u32> {
         let mut reachable = HashSet::new();
         reachable.insert(root_scope);
+        let scope_ends: HashMap<u32, u32> = symbol_map.scopes.iter().cloned().collect();
+        fn has_usage(
+            symbol_map: &SymbolMap,
+            var_name: &str,
+            scope_start: u32,
+            scope_ends: &HashMap<u32, u32>,
+        ) -> bool {
+            symbol_map.spans.iter().any(|s| {
+                if let SymbolKind::Variable { name } = &s.kind {
+                    name == var_name
+                        && scope_ends
+                            .get(&scope_start)
+                            .is_some_and(|&e| s.start >= scope_start && s.start <= e)
+                } else {
+                    false
+                }
+            })
+        }
 
         // Explicit closure captures: `function () use ($var) { … }`
         // These have VarDefKind::ClosureCapture with scope_start
@@ -388,6 +443,12 @@ impl Backend {
         // A variable is implicitly captured if:
         //   1. The arrow scope is directly nested in a reachable scope.
         //   2. There is no parameter with the same name in the arrow scope.
+        //
+        // Note: the caller (find_variable_references) has already
+        // normalized the incoming root_scope to the actual declaring
+        // scope by walking ancestors.  This lets us start from the
+        // correct root whether the request originated on a declaration
+        // or deep inside nested arrows/closures.
         for &(scope_start, _scope_end) in &symbol_map.scopes {
             if reachable.contains(&scope_start) {
                 continue; // Already reachable, skip.
@@ -416,7 +477,14 @@ impl Backend {
             // appears there to avoid false positives with unrelated
             // nested functions.
             //
-            // But we also need to check: is this scope a closure body
+            // has_usage uses lexical containment (usage offset lies
+            // inside the scope's byte range) rather than checking
+            // whether find_variable_scope reports exactly this scope.
+            // This is required to correctly handle chains of nested
+            // arrows (`fn()=>fn()=> $var`) where the usage's innermost
+            // scope is deeper than the intermediate arrow.
+            //
+            // We also still need to check: is this scope a closure body
             // (not an arrow function)?  Closures create new variable
             // scopes and require explicit `use` — if there's no
             // ClosureCapture def for this scope, the variable is NOT
@@ -439,14 +507,7 @@ impl Backend {
             }
             // This is an arrow function scope or similar transparent
             // scope.  The variable is implicitly captured.
-            let has_usage = symbol_map.spans.iter().any(|s| {
-                if let SymbolKind::Variable { name } = &s.kind {
-                    name == var_name && symbol_map.find_variable_scope(name, s.start) == scope_start
-                } else {
-                    false
-                }
-            });
-            if has_usage {
+            if has_usage(symbol_map, var_name, scope_start, &scope_ends) {
                 reachable.insert(scope_start);
             }
         }
@@ -495,15 +556,7 @@ impl Backend {
                 if is_closure_scope {
                     continue;
                 }
-                let has_usage = symbol_map.spans.iter().any(|s| {
-                    if let SymbolKind::Variable { name } = &s.kind {
-                        name == var_name
-                            && symbol_map.find_variable_scope(name, s.start) == scope_start
-                    } else {
-                        false
-                    }
-                });
-                if has_usage {
+                if has_usage(symbol_map, var_name, scope_start, &scope_ends) {
                     reachable.insert(scope_start);
                 }
             }
