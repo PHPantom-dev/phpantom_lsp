@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779662829680,
+  "lastUpdate": 1780009697651,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9621,6 +9621,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d2e541763ba3ff3334a4afeb2f55c12377fa72a7",
+          "message": "Move PHPMD diagnostic proxy to Sprint 6 and remove Sprint 5 section",
+          "timestamp": "2026-05-29T00:54:32+02:00",
+          "tree_id": "4861ac0f34ebeac8fa14af793e0768ff3bc971eb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d2e541763ba3ff3334a4afeb2f55c12377fa72a7"
+        },
+        "date": 1780009696286,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.9,
             "unit": "MiB"
           }
         ]
