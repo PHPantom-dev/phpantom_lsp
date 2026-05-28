@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780009697651,
+  "lastUpdate": 1780009852779,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9655,6 +9655,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2044372580ab3a2218ace0e4e0d92893a2c4bc3d",
+          "message": "Add T19: @template on @method tags to type inference todo",
+          "timestamp": "2026-05-29T00:57:42+02:00",
+          "tree_id": "d9e5629a0f5efcf5fc9b58fc0d651387ef1a973b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2044372580ab3a2218ace0e4e0d92893a2c4bc3d"
+        },
+        "date": 1780009851884,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.5,
             "unit": "MiB"
           }
         ]
