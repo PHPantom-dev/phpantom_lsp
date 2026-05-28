@@ -21,22 +21,11 @@ within the same impact tier.
 
 # Scheduled Sprints
 
-## Sprint 5 — Polish for office adoption
-
-| #   | Item              | Impact | Effort |
-| --- | ----------------- | ------ | ------ |
-|     | **Release 0.8.0** |        |        |
-
-> **Note:** F1 (Workspace symbol search), F2 (Document symbols), A8
-> (Implement interface methods), A9 (Auto import), D1 (Unknown class
-> diagnostic), D3 (Unknown member diagnostic), and L4 (Custom Eloquent
-> builders) were originally planned here but have already shipped.
-
 ## Sprint 6 — 1.0 release, editor plugins & type intelligence
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-|     | Clear [refactoring gate](todo/refactor.md)                                                                            | —          | —      |
+| D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | A35 | [Convert to arrow function](todo/actions.md#a35-convert-to-arrow-function) (only non-void single-expression closures) | Low-Medium | Low    |
 | C2  | [`#[ArrayShape]` return shapes on stub functions](todo/completion.md#c2-arrayshape-return-shapes-on-stub-functions)   | Medium     | Medium |
 | A3  | Switch → match conversion                                                                                             | Low-Medium | Medium |
