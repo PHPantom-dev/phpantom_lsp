@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780009852779,
+  "lastUpdate": 1780087778103,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9689,6 +9689,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f09af9c239e5f2677e37ab2b3b0589945ecb62bb",
+          "message": "Update mago crates to 1.29 and switch parser to byte slices",
+          "timestamp": "2026-05-29T22:36:30+02:00",
+          "tree_id": "dd6db70c1bf2505fdbbacc0b41437bd78a020916",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f09af9c239e5f2677e37ab2b3b0589945ecb62bb"
+        },
+        "date": 1780087776938,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.3,
             "unit": "MiB"
           }
         ]
