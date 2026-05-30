@@ -3540,10 +3540,40 @@ function globalKeywordDemo(): void {
     $globalPen->write();                  // Pen — resolved from top-level scope via `global`
 }
 
+// ── Method-Tag Template ─────────────────────────────────────────────────────
+
+class MethodTagTemplateDemo
+{
+    public function demo(): void
+    {
+        // @method tags with <T of Bound> template params resolve at call sites.
+        $registry = new ScaffoldingMethodTagTemplate();
+
+        // TVal inferred from argument type
+        $pen = new Pen('demo');
+        $result = $registry->get($pen);
+        $result->write();                 // TVal = Pen
+
+        // Inline chain
+        $registry->get(new Pencil())->sketch(); // TVal = Pencil
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
-// ── Template-param @mixin scaffolding ───────────────────────────────────────
+// ── Method-Tag Template scaffolding ────────────────────────────────────────────
+
+/**
+ * @method TVal get<TVal of mixed>(TVal $default)
+ */
+class ScaffoldingMethodTagTemplate
+{
+    /** @return mixed */
+    public function __call(string $name, array $args): mixed { return $args[0] ?? null; }
+}
+
+// ── Template-param @mixin scaffolding ─────────────────────────────────────────
 interface ScaffoldingAstNodeInterface {
     public function getStartColumn(): int;
     public function getEndColumn(): int;

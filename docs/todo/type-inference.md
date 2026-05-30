@@ -686,40 +686,5 @@ blowup.
   `references/psalm/src/Psalm/Type.php`
 
 
-## T19. `@template` on `@method` tags
-
-Virtual methods declared via `@method` PHPDoc tags cannot currently
-define their own template parameters. The `extract_method_tags`
-function in `src/docblock/virtual_members.rs` always sets
-`template_params: Vec::new()`.
-
-This is important for Laravel Facade support, where the underlying
-accessor class has generic methods that are proxied through the
-Facade's `@method` tags:
-
-```php
-/**
- * @method static TValue get<TValue>(string $key, TValue $default)
- */
-class Config extends Facade {}
-```
-
-PHPStan syntax: `@method <T> T get(class-string<T> $class)`
-
-### Implementation
-
-1. Parse method-level template params from `@method` tag syntax in
-   `extract_method_tags` (`src/docblock/virtual_members.rs`).
-2. Store them in `MethodInfo::template_params` on the synthesized
-   virtual method.
-3. Ensure call-site template inference (`resolve_call_return_types`)
-   works with virtual methods the same way it does with real methods.
-
-### References
-
-- PHPStan: `MethodTagParser` at
-  `references/phpstan-src/src/PhpDoc/Tag/MethodTagParser.php`
-- PHPStan rule tests:
-  `references/phpstan-src/tests/PHPStan/Rules/Generics/MethodTagTemplateTypeRuleTest.php`
 
 

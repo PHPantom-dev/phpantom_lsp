@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@template` on `@method` tags.** Virtual methods declared via `@method` PHPDoc tags can now define their own template parameters using the `<T of Bound>` syntax (e.g. `@method TVal get<TVal of mixed>(TVal $default)`). Template inference at call sites works the same as for real methods.
 - **Laravel custom Eloquent builder support.** Models using the `#[UseEloquentBuilder]` attribute now have their custom builder's methods forwarded as static methods on the model. `query()`, `newQuery()`, and `newModelQuery()` return the custom builder type with correct generic model substitution. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/118.
 
 ### Fixed

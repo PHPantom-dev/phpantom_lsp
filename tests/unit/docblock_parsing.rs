@@ -1963,3 +1963,22 @@ fn conditional_negated_with_template_default() {
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
     assert_eq!(result, Some(PhpType::Named("Response".to_string())));
 }
+
+#[test]
+fn method_tag_with_template_params() {
+    let doc = "/** @method TVal get<TVal of mixed>(TVal $default) */";
+    let methods = extract_method_tags(doc);
+    assert_eq!(methods.len(), 1, "Should parse one method");
+    assert_eq!(methods[0].name, "get");
+    assert_eq!(methods[0].return_type_str().as_deref(), Some("TVal"));
+    assert_eq!(methods[0].template_params.len(), 1);
+    assert_eq!(methods[0].template_params[0].as_str(), "TVal");
+    assert!(
+        methods[0]
+            .template_param_bounds
+            .contains_key(&phpantom_lsp::atom::atom("TVal"))
+    );
+    assert_eq!(methods[0].template_bindings.len(), 1);
+    assert_eq!(methods[0].template_bindings[0].0.as_str(), "TVal");
+    assert_eq!(methods[0].template_bindings[0].1.as_str(), "$default");
+}

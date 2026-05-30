@@ -9299,3 +9299,82 @@ async fn test_key_of_and_value_of_type_operators() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Test that @template on @method tags resolves at call sites.
+/// `@method TVal doThing<TVal of mixed>(TVal $param)` should infer TVal from the argument.
+#[tokio::test]
+async fn test_method_tag_template_resolves_at_call_site() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///method_tag_template.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @method TVal get<TVal of mixed>(TVal $default)\n",
+        " */\n",
+        "class Config {\n",
+        "    public function __call(string $name, array $args): mixed { return null; }\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $config = new Config();\n",
+        "    $user = new User();\n",
+        "    $result = $config->get($user);\n",
+        "    $result->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$result->` on line 17
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 17,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve TVal to User and show User's 'getName' method, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should resolve TVal to User and show User's 'getEmail' method, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

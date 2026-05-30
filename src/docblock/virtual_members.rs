@@ -156,7 +156,7 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
         // at nesting depth 0.  We must skip parenthesised type prefixes
         // like `(string|int)[]` and `(callable():string)` where the `(`
         // is part of the return type, not the parameter list.
-        let Some((method_name, return_type_raw, params_str, after_params)) =
+        let Some((method_name, return_type_raw, params_str, after_params, template_str)) =
             parse_method_signature(rest)
         else {
             continue;
@@ -222,6 +222,22 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
         let method_atom = crate::atom::atom(method_name);
         let is_vendor_tag = tag.kind == TagKind::PsalmMethod;
 
+        // Parse method-level template parameters from `<T, U of Bound>` syntax.
+        let (template_params, template_param_bounds) = if let Some(tpl) = template_str {
+            parse_inline_template_params(tpl)
+        } else {
+            (Vec::new(), AtomMap::default())
+        };
+
+        // Compute template bindings: map template param names to the
+        // parameter names that directly use them as their type.
+        let template_bindings = if template_params.is_empty() {
+            Vec::new()
+        } else {
+            let tpl_names: Vec<String> = template_params.iter().map(|a| a.to_string()).collect();
+            compute_template_bindings_from_params(&parameters, &tpl_names)
+        };
+
         results.push(MethodInfo {
             name: method_atom,
             name_offset: 0,
@@ -237,9 +253,9 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             conditional_return: None,
             deprecation_message: None,
             deprecated_replacement: None,
-            template_params: Vec::new(),
-            template_param_bounds: AtomMap::default(),
-            template_bindings: Vec::new(),
+            template_params,
+            template_param_bounds,
+            template_bindings,
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: true,
@@ -275,24 +291,30 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
     results
 }
 
-// ─── Internal Helpers ───────────────────────────────────────────────────────
+// ─── Internal Helpers ───────────────────────────────────────────────────────────
+
+/// Parsed components of a `@method` tag signature:
+/// (method_name, return_type_raw, params_str, after_params, template_str).
+type MethodSignatureParts<'a> = (&'a str, Option<&'a str>, &'a str, &'a str, Option<&'a str>);
 
 /// Parse the method signature from the text after the optional `static`
-/// keyword.  Returns `(method_name, optional_prefix_return_type,
-/// params_str, text_after_closing_paren)`.
+/// keyword.
 ///
 /// Handles parenthesised return type prefixes like `(string|int)[]` and
 /// `(callable():string)` by tracking `()` nesting depth.  The method
-/// name is the bare identifier token immediately before a `(` at depth 0
-/// that is NOT preceded by a type-like token (i.e. the identifier looks
-/// like a PHP method name: starts with a letter or underscore).
-fn parse_method_signature(input: &str) -> Option<(&str, Option<&str>, &str, &str)> {
-    // Strategy: scan for `identifier(` patterns at paren depth 0.
+/// name is the bare identifier token immediately before a `(` (or `<...>(`) at
+/// depth 0 that is NOT preceded by a type-like token.
+fn parse_method_signature(input: &str) -> Option<MethodSignatureParts<'_>> {
+    // Strategy: scan for `identifier(` or `identifier<...>(` patterns at paren depth 0.
     // The last such pattern where `identifier` looks like a method name
     // (not a type keyword like `callable`) is the method name.
     //
     // Actually, a simpler approach: use `split_type_token` to consume
-    // the return type (if present), then expect `methodName(...)`.
+    // the return type (if present), then expect `methodName(...)` or
+    // `methodName<TemplateParams>(...)`.
+    //
+    // Template params appear between the method name and the opening
+    // paren: `@method TVal doThing<TVal of mixed>(TVal $param)`
 
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -316,14 +338,45 @@ fn parse_method_signature(input: &str) -> Option<(&str, Option<&str>, &str, &str
         let b = bytes[i];
         match b {
             b'(' if paren_depth == 0 => {
-                // Check if the text immediately before `(` is an identifier.
-                if i > 0 && is_ident_byte(bytes[i - 1]) {
+                // Check if preceded by `>` (closing a template param list)
+                // or by an identifier directly.
+                let (ident_end, template_str) = if i > 0 && bytes[i - 1] == b'>' {
+                    // Walk backwards to find matching `<` at depth 0.
+                    let mut angle_depth = 1i32;
+                    let mut k = i - 2; // start before the `>`
+                    loop {
+                        if bytes[k] == b'>' {
+                            angle_depth += 1;
+                        } else if bytes[k] == b'<' {
+                            angle_depth -= 1;
+                            if angle_depth == 0 {
+                                break;
+                            }
+                        }
+                        if k == 0 {
+                            break;
+                        }
+                        k -= 1;
+                    }
+                    if angle_depth == 0 {
+                        // k points to `<`, template content is between k+1 and i-1
+                        let tpl = trimmed[k + 1..i - 1].trim();
+                        (k, Some(tpl))
+                    } else {
+                        (i, None)
+                    }
+                } else {
+                    (i, None)
+                };
+
+                // Check if the text immediately before `(` (or `<`) is an identifier.
+                if ident_end > 0 && is_ident_byte(bytes[ident_end - 1]) {
                     // Walk backwards to find the start of the identifier.
-                    let mut id_start = i - 1;
+                    let mut id_start = ident_end - 1;
                     while id_start > 0 && is_ident_byte(bytes[id_start - 1]) {
                         id_start -= 1;
                     }
-                    let ident = &trimmed[id_start..i];
+                    let ident = &trimmed[id_start..ident_end];
 
                     // Make sure this looks like a method name, not a type
                     // keyword.  Type keywords that can appear before `(`
@@ -394,9 +447,16 @@ fn parse_method_signature(input: &str) -> Option<(&str, Option<&str>, &str, &str
                     };
                     let after_params = if j < len { &trimmed[j..] } else { "" };
 
-                    return Some((ident, return_type_raw, params_str, after_params));
+                    return Some((
+                        ident,
+                        return_type_raw,
+                        params_str,
+                        after_params,
+                        template_str,
+                    ));
                 } else {
-                    // `(` at depth 0 but not preceded by an identifier.
+                    // `(` at depth 0 but not preceded by an identifier
+                    // (and not preceded by a `>` with a valid template block).
                     // This is a grouped type like `(string|int)[]`.
                     // Track depth and continue.
                     paren_depth += 1;
@@ -524,6 +584,78 @@ fn split_params(s: &str) -> Vec<&str> {
     parts
 }
 
+/// Parse inline template parameters from the `<...>` block of a `@method` tag.
+///
+/// Input example: `"TVal of mixed, U, V of \Countable"`
+/// Returns a list of template param names (as `Atom`s) and a bounds map.
+fn parse_inline_template_params(input: &str) -> (Vec<crate::atom::Atom>, AtomMap<PhpType>) {
+    let mut params = Vec::new();
+    let mut bounds = AtomMap::default();
+
+    for segment in input.split(',') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        // Format: `Name` or `Name of Bound`
+        let (name, bound) = if let Some(of_pos) = segment.find(" of ") {
+            let name = segment[..of_pos].trim();
+            let bound_str = segment[of_pos + 4..].trim();
+            (
+                name,
+                if bound_str.is_empty() {
+                    None
+                } else {
+                    Some(bound_str)
+                },
+            )
+        } else {
+            (segment, None)
+        };
+
+        // Skip if name doesn't look like a valid identifier.
+        if name.is_empty() || !name.chars().next().unwrap().is_alphabetic() {
+            continue;
+        }
+
+        let atom = crate::atom::atom(name);
+        params.push(atom);
+        if let Some(bound_str) = bound {
+            bounds.insert(atom, PhpType::parse(bound_str));
+        }
+    }
+
+    (params, bounds)
+}
+
+/// Compute template bindings from a method's parameters.
+///
+/// For each parameter whose type is exactly a template parameter name,
+/// creates a binding `(template_name, "$param_name")`.
+fn compute_template_bindings_from_params(
+    parameters: &[ParameterInfo],
+    template_params: &[String],
+) -> Vec<(crate::atom::Atom, crate::atom::Atom)> {
+    use crate::docblock::templates::collect_template_bindings;
+    let mut results = Vec::new();
+
+    for param in parameters {
+        if let Some(ref ty) = param.type_hint {
+            let param_name = if param.name.starts_with('$') {
+                param.name.to_string()
+            } else {
+                format!("${}", param.name)
+            };
+            collect_template_bindings(ty, template_params, &param_name, &mut results);
+        }
+    }
+
+    results
+        .into_iter()
+        .map(|(t, p)| (crate::atom::atom(&t), crate::atom::atom(&p)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,23 +664,25 @@ mod tests {
 
     #[test]
     fn simple_no_return_type() {
-        let (name, ret, params, _) = parse_method_signature("getString()").unwrap();
+        let (name, ret, params, _, tpl) = parse_method_signature("getString()").unwrap();
         assert_eq!(name, "getString");
         assert!(ret.is_none());
         assert_eq!(params, "");
+        assert!(tpl.is_none());
     }
 
     #[test]
     fn simple_with_return_type() {
-        let (name, ret, params, _) = parse_method_signature("string getString()").unwrap();
+        let (name, ret, params, _, tpl) = parse_method_signature("string getString()").unwrap();
         assert_eq!(name, "getString");
         assert_eq!(ret, Some("string"));
         assert_eq!(params, "");
+        assert!(tpl.is_none());
     }
 
     #[test]
     fn with_params() {
-        let (name, ret, params, _) =
+        let (name, ret, params, _, _) =
             parse_method_signature("void setInteger(int $integer)").unwrap();
         assert_eq!(name, "setInteger");
         assert_eq!(ret, Some("void"));
@@ -557,7 +691,7 @@ mod tests {
 
     #[test]
     fn grouped_union_array_return() {
-        let (name, ret, params, _) =
+        let (name, ret, params, _, _) =
             parse_method_signature("(string|int)[] getArray() with some text").unwrap();
         assert_eq!(name, "getArray");
         assert_eq!(ret, Some("(string|int)[]"));
@@ -566,7 +700,7 @@ mod tests {
 
     #[test]
     fn callable_return_in_parens() {
-        let (name, ret, params, _) =
+        let (name, ret, params, _, _) =
             parse_method_signature("(callable() : string) getCallable() dsa sada").unwrap();
         assert_eq!(name, "getCallable");
         assert_eq!(ret, Some("(callable() : string)"));
@@ -575,7 +709,7 @@ mod tests {
 
     #[test]
     fn colon_return_after_params() {
-        let (name, ret, _, after) =
+        let (name, ret, _, after, _) =
             parse_method_signature("getBool(string $foo)  :   bool dsa sada").unwrap();
         assert_eq!(name, "getBool");
         assert!(ret.is_none());
@@ -584,12 +718,33 @@ mod tests {
 
     #[test]
     fn callable_param_type_not_confused_with_method_name() {
-        let (name, ret, params, _) =
+        let (name, ret, params, _, _) =
             parse_method_signature("void setCallback(callable():mixed $mockDefinition = null)")
                 .unwrap();
         assert_eq!(name, "setCallback");
         assert_eq!(ret, Some("void"));
         assert!(params.contains("$mockDefinition"));
+    }
+
+    #[test]
+    fn template_params_after_method_name() {
+        let (name, ret, params, _, tpl) =
+            parse_method_signature("TVal get<TVal of mixed>(TVal $default)").unwrap();
+        assert_eq!(name, "get");
+        assert_eq!(ret, Some("TVal"));
+        assert_eq!(params, "TVal $default");
+        assert_eq!(tpl, Some("TVal of mixed"));
+    }
+
+    #[test]
+    fn multiple_template_params() {
+        let (name, ret, params, _, tpl) =
+            parse_method_signature("TVal doThing<TKey, TVal of mixed>(TKey $key, TVal $val)")
+                .unwrap();
+        assert_eq!(name, "doThing");
+        assert_eq!(ret, Some("TVal"));
+        assert_eq!(params, "TKey $key, TVal $val");
+        assert_eq!(tpl, Some("TKey, TVal of mixed"));
     }
 
     // ─── extract_method_tags ────────────────────────────────────────────
