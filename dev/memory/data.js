@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780127508051,
+  "lastUpdate": 1780128901841,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9791,6 +9791,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9007febe15eed24fc03eb055128b4aadb7cd1e2a",
+          "message": "Add \"Extract interface\" code action to generate interfaces from classes",
+          "timestamp": "2026-05-30T10:02:10+02:00",
+          "tree_id": "6571510de31e43001b50d143114266ade8caba97",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9007febe15eed24fc03eb055128b4aadb7cd1e2a"
+        },
+        "date": 1780128900771,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.3,
             "unit": "MiB"
           }
         ]
