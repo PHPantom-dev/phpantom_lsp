@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780087778103,
+  "lastUpdate": 1780101367375,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9723,6 +9723,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "08e5b949c3d87778dab6e3fbba2411c4bd558fdb",
+          "message": "Add support for @template on @method tags\n\nVirtual methods declared via @method PHPDoc tags can now define their\nown\ntemplate parameters using the <T of Bound> syntax (e.g.\n@method TVal get<TVal of mixed>(TVal $default)). Template inference at\ncall\nsites works the same as for real methods. Includes tests and demo.\nRemoves\ncompleted todo item T19.",
+          "timestamp": "2026-05-30T02:23:03+02:00",
+          "tree_id": "c2136c272aa699f4b91d0e054669a0ea90042e78",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/08e5b949c3d87778dab6e3fbba2411c4bd558fdb"
+        },
+        "date": 1780101366539,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.9,
             "unit": "MiB"
           }
         ]
