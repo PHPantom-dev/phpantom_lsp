@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780101367375,
+  "lastUpdate": 1780127508051,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9757,6 +9757,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "cc26c0bd775541336b2155aeabf385f3c786b2bd",
+          "message": "Add \"Convert to arrow function\" code action and demo\n\n- **Convert to arrow function.** A new `refactor.rewrite` code action\n  converts single-expression closures to arrow functions (`function($x)\n  { return $x * 2; }` to `fn($x) => $x * 2`). The action is only offered\n  when the conversion is safe: single return statement, no by-reference\n  `use` captures, no `void`/`never` return type, and PHP >= 7.4.\n- Add `ConvertToArrowFunctionDemo` to `examples/demo.php` with sample\n  closures for code action testing.\n- Remove completed \"Convert to arrow function\" task from todo files.",
+          "timestamp": "2026-05-30T09:38:44+02:00",
+          "tree_id": "d11a6a6256649fe4efe254827c2105d866ffb819",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cc26c0bd775541336b2155aeabf385f3c786b2bd"
+        },
+        "date": 1780127506734,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.3,
             "unit": "MiB"
           }
         ]
