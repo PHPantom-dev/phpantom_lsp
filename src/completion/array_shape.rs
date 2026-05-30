@@ -532,6 +532,7 @@ impl Backend {
                 &dummy_class
             }
         };
+        let function_loader = self.function_loader(file_ctx);
         let resolved = crate::completion::variable::resolution::resolve_variable_types(
             var_name,
             effective_class,
@@ -539,7 +540,10 @@ impl Backend {
             content,
             cursor_offset as u32,
             &class_loader,
-            Loaders::default(),
+            Loaders {
+                function_loader: Some(&function_loader),
+                ..Loaders::default()
+            },
         );
         if resolved.is_empty() {
             None

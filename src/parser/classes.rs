@@ -1959,6 +1959,15 @@ impl Backend {
                             parsed_doc_type.as_ref(),
                         );
 
+                        // Apply #[ArrayShape] override if present.
+                        let effective = if let Some(ctx) = doc_ctx {
+                            effective.map(|ty| {
+                                super::apply_array_shape_override(ty, &method.attribute_lists, ctx)
+                            })
+                        } else {
+                            effective
+                        };
+
                         let conditional = docblock::extract_conditional_return_type_from_info(info);
 
                         // Extract method-level @template params, their bounds,
@@ -2064,8 +2073,18 @@ impl Backend {
                         // #[Deprecated] attribute on the method itself.
                         let depr_info =
                             merge_deprecation_info(None, &method.attribute_lists, doc_ctx);
+
+                        // Apply #[ArrayShape] override even without a docblock.
+                        let effective_ret = if let Some(ctx) = doc_ctx {
+                            native_return_type.clone().map(|ty| {
+                                super::apply_array_shape_override(ty, &method.attribute_lists, ctx)
+                            })
+                        } else {
+                            native_return_type.clone()
+                        };
+
                         (
-                            native_return_type.clone(),
+                            effective_ret,
                             None,
                             depr_info.message,
                             depr_info.replacement,

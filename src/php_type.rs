@@ -1438,6 +1438,10 @@ impl PhpType {
         match self {
             PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => Some(entries),
             PhpType::Nullable(inner) => inner.shape_entries(),
+            PhpType::Union(members) => {
+                // Find the first array/object shape member in the union.
+                members.iter().find_map(|m| m.shape_entries())
+            }
             _ => None,
         }
     }

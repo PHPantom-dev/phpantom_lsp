@@ -68,6 +68,9 @@ const ATTR_ELEMENT_AVAILABLE: &str = "PhpStormStubsElementAvailable";
 /// Last segment of the `LanguageLevelTypeAware` attribute FQN.
 const ATTR_LANGUAGE_LEVEL_TYPE_AWARE: &str = "LanguageLevelTypeAware";
 
+/// Last segment of the `ArrayShape` attribute FQN.
+const ATTR_ARRAY_SHAPE: &str = "ArrayShape";
+
 /// Fully-qualified names (without leading `\`) that we recognise as
 /// deprecation attributes.  Only the native PHP 8.4 `\Deprecated` and
 /// the JetBrains stubs `\JetBrains\PhpStorm\Deprecated` should match.
@@ -101,6 +104,13 @@ impl DocblockCtx<'_> {
         let name_str = bytes_to_str(attr_short_name);
         let canonical = self.resolve_attr_last_segment(name_str).unwrap_or(name_str);
         canonical == ATTR_LANGUAGE_LEVEL_TYPE_AWARE
+    }
+
+    /// Check whether `attr_short_name` resolves to `ArrayShape`.
+    fn is_array_shape_attr(&self, attr_short_name: &[u8]) -> bool {
+        let name_str = bytes_to_str(attr_short_name);
+        let canonical = self.resolve_attr_last_segment(name_str).unwrap_or(name_str);
+        canonical == ATTR_ARRAY_SHAPE
     }
 }
 
@@ -323,6 +333,103 @@ pub(crate) fn extract_language_level_type_for_param(
     php_version: PhpVersion,
 ) -> Option<PhpType> {
     extract_language_level_type(&param.attribute_lists, ctx, php_version)
+}
+
+/// Extract an `array{key: type, ...}` shape from a `#[ArrayShape]` attribute.
+///
+/// phpstorm-stubs annotate functions and methods with
+/// `#[ArrayShape(["key" => "type", ...])]` to declare the structure of
+/// their array return values.  This function extracts that information
+/// and returns it as a `PhpType::ArrayShape`.
+pub(crate) fn extract_array_shape_type(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: &DocblockCtx<'_>,
+) -> Option<PhpType> {
+    use crate::php_type::ShapeEntry;
+
+    for attr_list in attribute_lists.iter() {
+        for attr in attr_list.attributes.iter() {
+            if !ctx.is_array_shape_attr(last_segment(attr.name.value())) {
+                continue;
+            }
+
+            let arg_list = attr.argument_list.as_ref()?;
+            // The ArrayShape attribute takes a single positional argument:
+            // an associative array literal ["key" => "type", ...].
+            let first_arg = arg_list.arguments.first()?;
+            let expr = match first_arg {
+                argument::Argument::Positional(p) => p.value,
+                argument::Argument::Named(n) => n.value,
+            };
+
+            let elements: Box<dyn Iterator<Item = &ArrayElement<'_>>> = match expr {
+                Expression::Array(arr) => Box::new(arr.elements.iter()),
+                Expression::LegacyArray(arr) => Box::new(arr.elements.iter()),
+                _ => return None,
+            };
+
+            let mut entries = Vec::new();
+            for elem in elements {
+                if let ArrayElement::KeyValue(kv) = elem {
+                    let key = extract_string_literal_value(kv.key, ctx.content)?;
+                    let value_str = extract_string_literal_value(kv.value, ctx.content)?;
+                    let value_type = PhpType::parse(&value_str);
+                    entries.push(ShapeEntry {
+                        key: Some(key),
+                        value_type,
+                        optional: false,
+                    });
+                }
+            }
+
+            if !entries.is_empty() {
+                return Some(PhpType::ArrayShape(entries));
+            }
+        }
+    }
+
+    None
+}
+
+/// Replace bare `array` components in `ty` with the shape from an
+/// `#[ArrayShape]` attribute, if present.  Handles `array`, `?array`,
+/// and `array|false` patterns.
+pub(crate) fn apply_array_shape_override(
+    ty: PhpType,
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: &DocblockCtx<'_>,
+) -> PhpType {
+    let Some(shape) = extract_array_shape_type(attribute_lists, ctx) else {
+        return ty;
+    };
+
+    match &ty {
+        // Exact `array` → replace with shape.
+        PhpType::Named(n) if n == "array" => shape,
+        // `?array` → `?array{...}`
+        PhpType::Nullable(inner) => {
+            if matches!(inner.as_ref(), PhpType::Named(n) if n == "array") {
+                PhpType::Nullable(Box::new(shape))
+            } else {
+                ty
+            }
+        }
+        // `array|false` or other unions containing bare `array`.
+        PhpType::Union(members) => {
+            let new_members: Vec<PhpType> = members
+                .iter()
+                .map(|m| {
+                    if matches!(m, PhpType::Named(n) if n == "array") {
+                        shape.clone()
+                    } else {
+                        m.clone()
+                    }
+                })
+                .collect();
+            PhpType::Union(new_members)
+        }
+        _ => ty,
+    }
 }
 
 /// Parse the version → type array inside `LanguageLevelTypeAware`.

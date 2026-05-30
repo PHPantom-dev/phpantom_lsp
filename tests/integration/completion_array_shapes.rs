@@ -6032,3 +6032,215 @@ async fn test_nullsafe_does_not_narrow_in_else() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Tests that `#[ArrayShape]` attributes on stub functions produce
+/// array shape key completions.
+#[tokio::test]
+async fn test_array_shape_attribute_on_function() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_attr.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use JetBrains\\PhpStorm\\ArrayShape;\n",
+        "#[ArrayShape([\"lifetime\" => \"int\", \"path\" => \"string\", \"domain\" => \"string\"])]\n",
+        "function my_get_cookie_params(): array { return []; }\n",
+        "$params = my_get_cookie_params();\n",
+        "$params['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from #[ArrayShape] attribute"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"lifetime"),
+                "Should suggest 'lifetime' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"path"),
+                "Should suggest 'path' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"domain"),
+                "Should suggest 'domain' key, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Tests that `#[ArrayShape]` works on methods too.
+#[tokio::test]
+async fn test_array_shape_attribute_on_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_attr_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use JetBrains\\PhpStorm\\ArrayShape;\n",
+        "class Stats {\n",
+        "    #[ArrayShape([\"runs\" => \"int\", \"collected\" => \"int\"])]\n",
+        "    public function getStatus(): array { return []; }\n",
+        "}\n",
+        "$s = new Stats();\n",
+        "$status = $s->getStatus();\n",
+        "$status['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from #[ArrayShape] on method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"runs"),
+                "Should suggest 'runs' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"collected"),
+                "Should suggest 'collected' key, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Tests that `#[ArrayShape]` works with `array|false` return types.
+#[tokio::test]
+async fn test_array_shape_attribute_union_with_false() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_attr_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use JetBrains\\PhpStorm\\ArrayShape;\n",
+        "#[ArrayShape([\"dev\" => \"int\", \"ino\" => \"int\", \"mode\" => \"int\"])]\n",
+        "function my_stat(string $filename): array|false { return []; }\n",
+        "$info = my_stat('/tmp/foo');\n",
+        "$info['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from #[ArrayShape] with array|false"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"dev"),
+                "Should suggest 'dev' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"ino"),
+                "Should suggest 'ino' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"mode"),
+                "Should suggest 'mode' key, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

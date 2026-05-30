@@ -46,44 +46,6 @@ These functions have return type semantics that don't fit into either
 
 ---
 
-## C2. `#[ArrayShape]` return shapes on stub functions
-
-**Impact: Medium · Effort: Medium**
-
-phpstorm-stubs annotate ~84 functions and methods with
-`#[ArrayShape(["key" => "type", ...])]` to declare the structure of
-their array return values. Almost none of these have a companion
-`@return array{...}` docblock, so the shape information is invisible
-to PHPantom. This affects commonly used functions like `parse_url`,
-`stat`, `pathinfo`, `gc_status`, `getimagesize`,
-`session_get_cookie_params`, `stream_get_meta_data`, and
-`password_get_info`.
-
-```php
-#[ArrayShape(["lifetime" => "int", "path" => "string", "domain" => "string",
-              "secure" => "bool", "httponly" => "bool", "samesite" => "string"])]
-function session_get_cookie_params(): array {}
-
-#[ArrayShape(["runs" => "int", "collected" => "int", "threshold" => "int", "roots" => "int"])]
-function gc_status(): array {}
-```
-
-**Attribute FQN:** `JetBrains\PhpStorm\ArrayShape`. Stub files import
-it via `use JetBrains\PhpStorm\ArrayShape;`. No aliases are used.
-Match by resolving through the `DocblockCtx` use-map and comparing the
-last segment of the resolved FQN (same pattern as `Deprecated` and
-`PhpStormStubsElementAvailable`).
-
-**Implementation:** During function/method extraction, scan for the
-`ArrayShape` attribute. Parse the associative array literal in its
-argument to build an `array{key: type, ...}` string, and use it as
-the effective return type (or parameter type when applied to a
-parameter). This complements the existing docblock `array{...}`
-parsing and should feed into the same `return_type` field on
-`FunctionInfo` / `MethodInfo`.
-
----
-
 ## C3. Go-to-definition for array shape keys via bracket access
 
 **Impact: Low-Medium · Effort: Medium**

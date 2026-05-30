@@ -167,6 +167,14 @@ impl Backend {
                             parsed_doc_return.as_ref(),
                         );
 
+                        // If the effective return type is bare `array` (or
+                        // nullable/union containing array) and the function
+                        // has a `#[ArrayShape]` attribute, replace it with
+                        // the more specific shape type.
+                        let effective = effective.map(|ty| {
+                            super::apply_array_shape_override(ty, &func.attribute_lists, ctx)
+                        });
+
                         let conditional = info
                             .as_ref()
                             .and_then(docblock::extract_conditional_return_type_from_info);

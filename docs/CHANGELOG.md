@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`#[ArrayShape]` attribute support.** Functions and methods annotated with `#[ArrayShape(["key" => "type", ...])]` (used by ~84 phpstorm-stubs entries) now produce array shape key completions, hover type info, and correct type resolution. Affects commonly used functions like `parse_url`, `stat`, `pathinfo`, `gc_status`, `getimagesize`, and `session_get_cookie_params`.
 - **Convert to arrow function.** A new `refactor.rewrite` code action converts single-expression closures to arrow functions (`function($x) { return $x * 2; }` to `fn($x) => $x * 2`). The action is only offered when the conversion is safe: single return statement, no by-reference `use` captures, no `void`/`never` return type, and PHP >= 7.4.
 - **Convert switch to match.** A new `refactor.rewrite` code action converts `switch` statements to `match` expressions when all arms are single-expression returns or assignments to the same variable. Handles fall-through cases (merged with commas), trailing `break` removal, and `throw` arms. Requires PHP >= 8.0.
 - **Extract interface.** A new `refactor.extract` code action generates an interface from a concrete class. All public method signatures (excluding the constructor) are extracted into a new `{ClassName}Interface.php` file in the same directory, and the class is updated with `implements {ClassName}Interface`. Class-level and method-level `@template` tags are preserved when referenced by extracted methods.
