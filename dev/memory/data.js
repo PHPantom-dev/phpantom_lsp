@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780132283938,
+  "lastUpdate": 1780183535879,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9859,6 +9859,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "673af855392e26f8cca630cf62f0c6a92becb81d",
+          "message": "Add #[ArrayShape] attribute support for array shape inference\n\nFunctions and methods annotated with #[ArrayShape([\"key\" => \"type\",\n...])]\nnow produce array shape key completions, hover type info, and correct\ntype\nresolution. Includes tests for function, method, and union return types.\nRemoves completed todo item from docs/todo.md and\ndocs/todo/completion.md.\nChangelog updated.",
+          "timestamp": "2026-05-31T01:12:40+02:00",
+          "tree_id": "8d7a82ec5913de50b31d7f4fba71e5cd3d5eeb1a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/673af855392e26f8cca630cf62f0c6a92becb81d"
+        },
+        "date": 1780183535146,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.4,
             "unit": "MiB"
           }
         ]
