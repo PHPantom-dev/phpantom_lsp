@@ -319,42 +319,6 @@ these eagerly, removing the else changes semantics).
 
 ---
 
-### A35. Convert to arrow function
-
-**Impact: Low-Medium · Effort: Low**
-
-Convert a single-expression anonymous function to an arrow function:
-`function($x) { return $x * 2; }` → `fn($x) => $x * 2`.
-
-Only offer the conversion when ALL of the following are true:
-
-- The closure body contains exactly one statement, and that statement
-  is a `return` with an expression.
-- The closure does not have a `use()` clause that captures by reference
-  (`&$var`). Arrow functions capture by value automatically; by-ref
-  semantics differ.
-- The closure's return type (native hint, `@return` docblock, or
-  inferred from callable context) is NOT `void` or `never`. Arrow
-  functions always return their expression value. Converting a
-  `void`-returning closure produces code that silently changes
-  behaviour when the caller inspects the return value (e.g.
-  `array_walk`, `register_shutdown_function`, `Event::listen`).
-- The closure does not have a return type hint of `void` or `never`
-  explicitly declared.
-- `php_version >= 7.4`.
-
-**Why the void/never guard matters:** Several PHP functions and
-framework APIs behave differently depending on whether a callback
-returns a value. `array_walk` ignores the return, but `array_filter`
-uses it. A closure typed `function(): void { doSomething(); }` makes
-the intent explicit. Converting it to `fn() => doSomething()` changes
-the return value from `null` (void) to whatever `doSomething()` returns,
-which can silently break filtering, mapping, or event-handling logic.
-
-**Code action kind:** `refactor.rewrite`.
-
----
-
 ### A37. Simplify with `?->` (nullsafe operator)
 
 **Impact: Low-Medium · Effort: Medium**

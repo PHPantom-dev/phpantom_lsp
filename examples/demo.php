@@ -3559,6 +3559,26 @@ class MethodTagTemplateDemo
     }
 }
 
+/**
+ * Convert to arrow function — place cursor on a single-expression closure
+ * and trigger code actions to see "Convert to arrow function".
+ */
+class ConvertToArrowFunctionDemo
+{
+    public function demo(): void
+    {
+        // Try: place cursor on `function` and use code action
+        $double = function(int $x): int { return $x * 2; };
+
+        // Static closure with use clause (by-value)
+        $base = 10;
+        $add = static function(int $x) use ($base) { return $x + $base; };
+
+        // Passes as callback — trigger inside the closure
+        $result = array_map(function(string $s) { return strtoupper($s); }, ['a', 'b']);
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 

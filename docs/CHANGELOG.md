@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Convert to arrow function.** A new `refactor.rewrite` code action converts single-expression closures to arrow functions (`function($x) { return $x * 2; }` to `fn($x) => $x * 2`). The action is only offered when the conversion is safe: single return statement, no by-reference `use` captures, no `void`/`never` return type, and PHP >= 7.4.
 - **`@template` on `@method` tags.** Virtual methods declared via `@method` PHPDoc tags can now define their own template parameters using the `<T of Bound>` syntax (e.g. `@method TVal get<TVal of mixed>(TVal $default)`). Template inference at call sites works the same as for real methods.
 - **Laravel custom Eloquent builder support.** Models using the `#[UseEloquentBuilder]` attribute now have their custom builder's methods forwarded as static methods on the model. `query()`, `newQuery()`, and `newModelQuery()` return the custom builder type with correct generic model substitution. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/118.
 
