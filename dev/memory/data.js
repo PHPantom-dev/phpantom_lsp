@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780128901841,
+  "lastUpdate": 1780132283938,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9825,6 +9825,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9f125e3f3032da746eaeb99196c5dc4b0003f581",
+          "message": "Add \"Convert switch to match\" code action and tests\n\n- Implements a `refactor.rewrite` code action to convert eligible\n  `switch`\n  statements to `match` expressions when all arms are single-expression\n  returns or assignments to the same variable.\n- Handles fall-through cases, default arms, and preserves indentation.\n- Only offered for PHP 8.0+ and when conversion is safe.\n- Adds integration and unit tests for conversion logic.\n- Removes completed todo item from docs/todo.md and\n  docs/todo/actions.md.\n- Updates changelog with new feature entry.",
+          "timestamp": "2026-05-30T10:58:09+02:00",
+          "tree_id": "3e654c6dead3fb42bc8d2e495e1eeccad943d031",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9f125e3f3032da746eaeb99196c5dc4b0003f581"
+        },
+        "date": 1780132282412,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.3,
             "unit": "MiB"
           }
         ]
