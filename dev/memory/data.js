@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780183535879,
+  "lastUpdate": 1780195499025,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9893,6 +9893,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "de696c3de3b5e3d8da5d20fc35dbbe21b4a2c8ef",
+          "message": "Add Eloquent relation and column string completion\n\n- Typing inside string arguments to Eloquent methods like with(),\n  load(),\n  whereHas(), and where() now offers completions for relationship method\n  names (with dot-notation traversal) and column/attribute names.\n- Recognize Larastan's model-property<T> pseudo-type as a string\n  subtype.\n- Remove completed L11 from todo files and add demos to\n  examples/laravel/app/Demo.php.",
+          "timestamp": "2026-05-31T04:32:01+02:00",
+          "tree_id": "cfe603c00c4ace77ca0fdc9d6e688ad14a206c78",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/de696c3de3b5e3d8da5d20fc35dbbe21b4a2c8ef"
+        },
+        "date": 1780195497654,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 57.1,
             "unit": "MiB"
           }
         ]
