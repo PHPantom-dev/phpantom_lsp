@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780569940459,
+  "lastUpdate": 1780571495498,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10029,6 +10029,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9c9733e8921d5817901419e24e3f12f79be81dfa",
+          "message": "Fix CRLF byte offsets in text edits",
+          "timestamp": "2026-06-04T12:58:25+02:00",
+          "tree_id": "aac4e8c728bb2c97dce1c714f05d3715872ba02b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9c9733e8921d5817901419e24e3f12f79be81dfa"
+        },
+        "date": 1780571494219,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.4,
             "unit": "MiB"
           }
         ]
