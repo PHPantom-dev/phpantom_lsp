@@ -561,3 +561,35 @@ The code action should:
 **References:**
 - Phpactor: `FixNamespaceClassName` code action.
 
+
+---
+
+## F19. Connect to a remote/TCP language server (VS Code extension)
+
+**Impact: Low · Effort: Low-Medium**
+
+This task is for the VS Code extension package, not the `phpantom_lsp`
+server itself. The server can already speak LSP over a TCP socket; the
+gap is purely on the client side, where the editor extensions only ever
+spawn a local binary over stdio. Expose an option in the extension
+(mirroring Phpactor's `remote.enabled` / `remote.host` / `remote.port`)
+to connect to an already-running server instead of spawning one. This
+covers running the server inside a container or on a remote host while
+editing locally.
+
+### Scope
+
+This is a client-side change in the editor extensions, not the server.
+In the VS Code extension, add `phpantom.remote.enabled`, `.host`, and
+`.port` settings; when enabled, build the language client from a socket
+transport rather than a spawned process. Remote mode is a single shared
+endpoint, so it bypasses the per-folder server model and uses one
+client that matches all PHP documents (the same exception Phpactor's
+extension makes).
+
+### Caveats
+
+A remote server has its own filesystem view, so `rootUri` / workspace
+paths must line up with the paths the server sees (or be remapped).
+Auto-download, version checks, and the per-folder rooting do not apply
+in remote mode.

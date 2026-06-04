@@ -581,3 +581,48 @@ makes it safe to ship without X4.
 
 
 
+
+## X9. Honor editor file excludes and PHP associations during indexing
+
+**Impact: Low-Medium · Effort: Medium**
+
+This task spans both the server and the IDE plugins. The server side
+teaches the directory walkers to honor a generic list of exclude globs
+and extra PHP extensions. The client side (each editor extension) must
+gather the editor's effective `files.exclude` / `files.associations`
+and forward them to the server, since only the extension has access to
+those editor settings.
+
+The workspace scanners discover files by the `.php` extension and do
+not consult any exclude list. Two pieces of information the editor
+already has are ignored:
+
+- **`files.exclude` (and a PHPantom-specific exclude glob).** Large
+  generated/vendored directories that the user has hidden from the
+  editor are still walked and parsed by the indexer. Skipping them
+  would cut startup work and avoid indexing irrelevant symbols.
+- **`files.associations`.** Files mapped to PHP under a non-`.php`
+  extension (e.g. `.module`, `.inc`, `.theme` in Drupal) are not
+  discovered by the byte-level scanners, so their classes/functions
+  are missing from the index. Note that *open* associated files
+  already work, because VS Code reports them with the `php` language
+  id and the client's document selector matches on language id, not
+  extension. Only background discovery is affected.
+
+### Approach
+
+The client passes the effective exclude globs and the set of
+PHP-associated extensions to the server (via `initializationOptions`,
+or by responding to `workspace/configuration` the way Intelephense's
+middleware merges VS Code's native `files.exclude` /
+`files.associations` into the server config). The directory walkers in
+`classmap_scanner.rs` and `util.rs` consult the exclude globs before
+descending, and treat the extra associated extensions as PHP when
+collecting candidate files.
+
+### Editor-agnostic note
+
+Excludes and associations are editor concepts. Keep the server's
+interface generic (a list of globs and a list of extensions) so any
+client (VS Code, Zed) can supply them, rather than hard-coding
+VS Code setting names in the server.

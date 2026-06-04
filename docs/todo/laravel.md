@@ -524,3 +524,134 @@ provider already knows the model type; it would need to emit
 different return types for `create()`/`make()` based on whether
 the chain includes a count-setting call.
 
+---
+
+## Laravel string-context intelligence (completion, hover, diagnostics)
+
+This is the set of features that live *inside string literals* passed to
+Laravel helpers and facades: `route('...')`, `config('...')`, `env('...')`,
+`__('...')`, `view('...')`, and so on. The official Laravel VS Code
+extension (https://github.com/laravel/vs-code-extension) is built almost
+entirely around this layer, and PhpStorm + Laravel Idea cover it too.
+
+### Why we do this statically (and they boot the app)
+
+The Laravel extension gathers these facts by **booting the user's
+application** in the background and introspecting the live container
+(`app('router')->getRoutes()`, `config()->all()`, `app()->getBindings()`,
+etc.). PhpStorm's Laravel Idea and `barryvdh/laravel-ide-helper` do the
+same thing differently: they generate a snapshot (JSON payload or PHP
+stubs) that the IDE then reads.
+
+All three share two problems:
+
+1. **A snapshot is one environment on one code path.** The booted values
+   reflect whatever bindings, config, and routes are registered under the
+   default boot. A controller that rebinds a service, a config value that
+   differs in production, or a route registered behind a feature flag is
+   either invisible or actively wrong. The answer is "true for that boot,"
+   not "true here."
+2. **Staleness.** A snapshot is only as fresh as its last regeneration
+   (manual for ide-helper, periodic background re-boot for the extension).
+   Static scanning with a file watcher updates the instant the source file
+   changes, not at the next heartbeat.
+
+Our position (consistent with the **No application booting** philosophy
+above): the overwhelming majority of these facts live in static files we
+can parse and keep fresh for free — `routes/*.php` (`->name()`),
+`config/*.php` return arrays, `lang/**` PHP + JSON, `.env`, and
+`resources/views/**`. We recover ~90% of the value with no code execution,
+no stale snapshot, and correct behaviour on a project that doesn't even
+boot. The dynamic tail (routes/config/bindings registered at runtime by a
+closure) is the only part a snapshot wins on, and that is exactly the code
+that is hard to reason about anyway.
+
+### What already works
+
+Go-to-definition is implemented for **route names** (`route()`), **config
+keys**, **env vars**, **translation keys**, and **view names** via the
+declaration scanners in `virtual_members/laravel/{route_names, config_keys,
+env_vars, trans_keys, view_names}.rs`. These walk the relevant source files
+and resolve a string key to its declaration site. `LaravelStringKey` also
+flows through find-references, rename, and document-highlight. **Eloquent
+relation and column name strings** have completion (`completion/eloquent_string.rs`).
+
+The scanners already enumerate every valid key for go-to-definition. The
+items below mostly wire that existing enumeration into three more LSP
+endpoints rather than building new analysis.
+
+#### L14. Diagnostics for Laravel string keys
+
+**Impact: High · Effort: Medium**
+
+No Laravel string key is currently validated. A typo in `route('dashbaord')`,
+`config('app.naem')`, `env('DB_CONNCTION')`, `__('auth.failedd')`, or
+`view('layouts.ap')` produces no warning — the bug surfaces only at runtime.
+This is the single highest-value gap, because it catches a class of error
+that PHP itself never reports.
+
+Emit a warning when a string argument in a recognised context resolves to no
+declaration. The candidate set is the same one the go-to-definition scanners
+already build, so the diagnostic is "key not in the collected set." Each
+construct reuses its existing scanner:
+
+- `route('name')` → not in collected `->name()` declarations.
+- `config('a.b.c')` → not in flattened `config/*.php` keys.
+- `env('KEY')` → not in `.env` / `.env.example`.
+- `__()`/`trans()`/`trans_choice()` → not in `lang/**` keys.
+- `view('a.b')` → no matching file under `resources/views/`.
+
+Pair each with a quick-fix where cheap: "create missing view file,"
+"add missing key to `.env` (copy from `.env.example`)" (mirrors the
+extension's two quick-fixes). Guard against false positives from genuinely
+dynamic keys (e.g. `config($key)` with a variable, or
+`route("admin.$section")` interpolation) by only flagging plain string
+literals.
+
+#### L15. Completion for Laravel string keys
+
+**Impact: High · Effort: Medium**
+
+Completion exists only for Eloquent relations/columns. Extend it to offer
+route names, config keys (dot-notation drill-down), env var names,
+translation keys, and view names inside the corresponding string contexts.
+The candidate lists are exactly the declaration sets the go-to scanners
+already produce; the work is detecting the string-literal cursor context
+(the symbol-map already records these as `LaravelStringKey`) and returning
+the collected keys as completion items.
+
+#### L16. Hover for Laravel string keys
+
+**Impact: Medium · Effort: Low-Medium**
+
+`SymbolKind::LaravelStringKey` currently returns `None` from hover
+(`hover/mod.rs`). Show the resolved target: the config/env/translation
+*value*, the route's URI + action, or the view's file path. The data is
+already loaded by the go-to scanners; this is formatting it as hover markdown.
+
+#### L17. Additional string contexts without booting
+
+**Impact: Medium · Effort: Medium**
+
+Constructs the extension covers that we don't, and that are statically
+recoverable (no booting):
+
+- **Middleware aliases** — completion/go-to/diagnostics for `->middleware('auth')`.
+  Aliases are declared statically in `bootstrap/app.php`
+  (`$middleware->alias([...])`) on Laravel 11+, or the HTTP Kernel's
+  `$middlewareAliases` on older versions. Scan that array.
+- **Asset paths** — `asset('...')` against a filesystem walk of `public/`.
+- **Validation rules** — completion for the rule strings in
+  `'field' => 'required|email'`. This is a fixed, known rule list plus
+  parameter snippets (the extension hardcodes ~50 rules); no project data
+  needed.
+- **Inertia page paths** — `Inertia::render('...')` against a filesystem
+  walk of `resources/js/Pages` (extension/extensions from `inertia` config,
+  read statically). Only relevant to Inertia projects.
+
+**Explicitly still out of scope** (see the table at the top): container
+binding names (`app('...')`), facade string aliases, and anything else that
+requires the live container. These genuinely cannot be resolved without
+booting, and a snapshot of them is the "true for one boot" half-truth we are
+choosing not to ship.
+

@@ -179,8 +179,13 @@ pub(crate) fn run_mago_lint(
         .current_dir(workspace_root);
 
     let file_path_str = file_path.to_string_lossy();
-    let result =
-        run_command_with_timeout(&mut cmd, timeout, cancelled, "Mago lint", Some(content))?;
+    let result = crate::util::run_command_with_timeout(
+        &mut cmd,
+        timeout,
+        cancelled,
+        "Mago lint",
+        Some(content),
+    )?;
 
     // Mago exit codes:
     //   0 = no issues found (may output "INFO No issues found." to stderr)
@@ -239,8 +244,13 @@ pub(crate) fn run_mago_analyze(
         .current_dir(workspace_root);
 
     let file_path_str = file_path.to_string_lossy();
-    let result =
-        run_command_with_timeout(&mut cmd, timeout, cancelled, "Mago analyze", Some(content))?;
+    let result = crate::util::run_command_with_timeout(
+        &mut cmd,
+        timeout,
+        cancelled,
+        "Mago analyze",
+        Some(content),
+    )?;
 
     match result.code {
         0 => {
@@ -517,95 +527,6 @@ fn paths_match(a: &str, b: &str) -> bool {
     // Check suffix match (one is a suffix of the other), requiring a
     // path separator boundary so that e.g. "AFoo.php" does not match "Foo.php".
     a_norm.ends_with(&format!("/{}", b_norm)) || b_norm.ends_with(&format!("/{}", a_norm))
-}
-
-/// Result of running an external command.
-struct CommandOutput {
-    /// Exit code (or -1 if the process was killed / no code available).
-    code: i32,
-    /// Captured stdout content.
-    stdout: String,
-    /// Captured stderr content.
-    stderr: String,
-}
-
-/// Spawn a command, wait for it with a timeout, and return the result.
-///
-/// Both stdout and stderr are captured.  Mago writes its JSON output
-/// to stdout.  When `stdin_content` is provided, it is written to the
-/// child's stdin before waiting (used for `--stdin-input`).
-fn run_command_with_timeout(
-    command: &mut Command,
-    timeout: Duration,
-    cancelled: &std::sync::atomic::AtomicBool,
-    tool_name: &str,
-    stdin_content: Option<&str>,
-) -> Result<CommandOutput, String> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", tool_name, e))?;
-
-    // Write buffer content to stdin, then close it.
-    if let Some((content, mut stdin)) = stdin_content.zip(child.stdin.take()) {
-        std::io::Write::write_all(&mut stdin, content.as_bytes())
-            .map_err(|e| format!("Failed to write to {} stdin: {}", tool_name, e))?;
-    }
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = child
-                    .stdout
-                    .take()
-                    .and_then(|mut s| {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut s, &mut buf).ok()?;
-                        Some(buf)
-                    })
-                    .unwrap_or_default();
-
-                let stderr = child
-                    .stderr
-                    .take()
-                    .and_then(|mut s| {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut s, &mut buf).ok()?;
-                        Some(buf)
-                    })
-                    .unwrap_or_default();
-
-                return Ok(CommandOutput {
-                    code: status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                });
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!(
-                        "{} timed out after {}ms",
-                        tool_name,
-                        timeout.as_millis()
-                    ));
-                }
-                if cancelled.load(std::sync::atomic::Ordering::Acquire) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("{} cancelled (server shutting down)", tool_name));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                let _ = child.kill();
-                return Err(format!("Error waiting for {}: {}", tool_name, e));
-            }
-        }
-    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
