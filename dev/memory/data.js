@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780195499025,
+  "lastUpdate": 1780564773595,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9927,6 +9927,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 57.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2195971f3fb5452fe9e04b50c0eed29b87625aef",
+          "message": "Add watched file index refresh\n\nHandle filesystem change notifications by reindexing PHP files,\nrescanning vendor packages on composer updates, and clearing caches\nto refresh diagnostics.",
+          "timestamp": "2026-06-04T11:06:34+02:00",
+          "tree_id": "4e3a5893aa398d477589f5f5a172246f8152f831",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2195971f3fb5452fe9e04b50c0eed29b87625aef"
+        },
+        "date": 1780564772773,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.1,
             "unit": "MiB"
           }
         ]
