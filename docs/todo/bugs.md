@@ -23,30 +23,6 @@ handle this automatically.
 upstream stubs land).
 
 
-## B21. Named-argument positional-index confusion
-
-**Severity: Medium.** Multiple call sites match arguments to
-parameters by `enumerate()` index / `.nth(param_idx)`, ignoring
-that named arguments can appear in any order:
-
-- `src/completion/types/conditional.rs:716` — conditional return
-  types misresolve for `func($a, paramName: $b)`; a non-matching
-  named arg in the positional slot makes the conditional fall
-  through to the else branch.
-- `src/diagnostics/argument_count.rs:288` — `actual_args` is the
-  raw count, so `f(c: 3)` against `function f($a, $b = 0, $c = 0)`
-  raises **no** "missing required argument" diagnostic even though
-  PHP throws `ArgumentCountError` (false negative).
-- `src/completion/variable/rhs_resolution.rs:1877` and
-  `src/completion/variable/forward_walk.rs:5219` — pass-by-ref
-  type seeding consults the wrong parameter for named args.
-
-**Fix:** Resolve named arguments by parameter name everywhere
-call-args are matched to parameters, via one shared mapping
-(positional args fill in order, named args fill by name), and
-verify each required parameter is actually supplied.
-
-
 ## B22. Constructor-less classes flagged for too many arguments
 
 **Severity: Medium (false positive).** In

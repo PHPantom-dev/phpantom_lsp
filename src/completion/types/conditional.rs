@@ -164,10 +164,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 .map(|p| p.is_variadic)
                 .unwrap_or(false);
 
-            // Split the textual arguments by comma (at depth 0) and pick
-            // the one at `param_idx`.
+            // Split the textual arguments by comma (at depth 0), then bind
+            // them to parameters by PHP's rules so a named argument resolves
+            // to the parameter it targets rather than its ordinal slot.
             let args = split_text_args(text_args);
-            let arg_text = args.get(param_idx).map(|s| s.trim());
+            let bound_text = crate::call_args::bind_text_args_to_params(params, &args);
+            let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
+            let arg_text = arg_text_owned.as_deref();
 
             if matches!(condition.as_ref(), PhpType::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
@@ -715,26 +718,15 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
             // Find which parameter index corresponds to param
             let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
 
-            // Extract param_name without $ prefix for named argument matching
-            let param_name_without_dollar = param.strip_prefix('$').unwrap_or(param);
-
-            // Get the actual argument expression (if provided)
-            let arg_expr: Option<&Expression<'b>> = argument_list
-                .arguments
-                .iter()
-                .nth(param_idx)
-                .and_then(|arg| match arg {
-                    Argument::Positional(pos) => Some(pos.value),
-                    Argument::Named(named) => {
-                        // Also match named arguments by param name
-                        if crate::atom::bytes_to_str(named.name.value) == param_name_without_dollar
-                        {
-                            Some(named.value)
-                        } else {
-                            None
-                        }
-                    }
-                });
+            // Bind arguments to parameters following PHP's rules (positional
+            // fill in order, named fill by name) so a named argument in an
+            // earlier slot does not shadow the parameter the conditional
+            // refers to.
+            let arg_expr: Option<&Expression<'b>> =
+                crate::call_args::bind_args_to_params(params, argument_list)
+                    .get(param_idx)
+                    .copied()
+                    .flatten();
 
             if matches!(condition.as_ref(), PhpType::ClassString(_)) {
                 // Extract the bound from `class-string<Bound>` and determine

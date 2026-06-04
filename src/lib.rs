@@ -99,6 +99,7 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 pub mod analyse;
 pub mod atom;
 pub mod blade;
+pub(crate) mod call_args;
 pub mod classmap_scanner;
 mod code_actions;
 mod code_lens;

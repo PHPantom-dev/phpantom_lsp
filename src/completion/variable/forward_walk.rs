@@ -5216,10 +5216,15 @@ fn seed_pass_by_ref_primitives<'b>(
         _ => return,
     };
 
-    for (i, arg) in arg_list.arguments.iter().enumerate() {
-        let arg_expr = match arg {
-            Argument::Positional(pos) => pos.value,
-            Argument::Named(named) => named.value,
+    // Bind arguments to parameters following PHP's rules so a named argument
+    // seeds the parameter it actually targets, not the one at its ordinal
+    // position in the call.
+    let bound = crate::call_args::bind_args_to_params(&parameters, arg_list);
+
+    for (param, arg_expr) in parameters.iter().zip(bound.iter()) {
+        let arg_expr = match arg_expr {
+            Some(expr) => *expr,
+            None => continue,
         };
 
         // Only handle direct variable arguments.
@@ -5234,9 +5239,7 @@ fn seed_pass_by_ref_primitives<'b>(
         }
 
         // Check if the corresponding parameter is pass-by-reference.
-        if let Some(param) = parameters.get(i)
-            && param.is_reference
-        {
+        if param.is_reference {
             if let Some(type_hint) = &param.type_hint {
                 scope.set(
                     &var_name,

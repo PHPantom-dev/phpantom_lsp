@@ -1,0 +1,20 @@
+// test: pass-by-reference type seeding follows named arguments to the right parameter
+// feature: completion
+// The by-ref parameter is the second one but is passed first by name, so the
+// seeded type must come from $bar's parameter, not the first positional slot.
+// expect: doWork(
+---
+<?php
+
+class Baz {
+    public function doWork(): void {}
+}
+
+function foo(int $first, Baz &$bar): void
+{
+    $bar = new Baz();
+}
+
+foo(bar: $out, first: 1);
+
+$out-><>
