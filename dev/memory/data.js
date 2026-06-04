@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780567693589,
+  "lastUpdate": 1780569940459,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9995,6 +9995,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "39f5d4b8355952ec150d29038272ec157000a30d",
+          "message": "Skip promotion for shared property declarations\n\nAdds regression tests and removes the resolved bug entry.",
+          "timestamp": "2026-06-04T12:32:27+02:00",
+          "tree_id": "6ae71cf5da7daaa85497e1bcf05bcda5e06497e8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/39f5d4b8355952ec150d29038272ec157000a30d"
+        },
+        "date": 1780569939193,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.8,
             "unit": "MiB"
           }
         ]
