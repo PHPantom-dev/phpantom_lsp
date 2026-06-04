@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780564773595,
+  "lastUpdate": 1780567693589,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9961,6 +9961,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fca2f8e72c017d13bd6ed8325bd602effa3d14ba",
+          "message": "Drain external tool output during run\n\nPrevent pipe-buffer deadlocks when running PHPStan, PHPCS, and\nMago by reading stdout/stderr concurrently. Update changelog and\nbacklog docs with new items and bug reports.",
+          "timestamp": "2026-06-04T11:55:20+02:00",
+          "tree_id": "bbc95e7dc2bc6f07f44488c145011e4af9fbd277",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fca2f8e72c017d13bd6ed8325bd602effa3d14ba"
+        },
+        "date": 1780567692699,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51,
             "unit": "MiB"
           }
         ]
