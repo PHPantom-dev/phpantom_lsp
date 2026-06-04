@@ -23,31 +23,6 @@ handle this automatically.
 upstream stubs land).
 
 
-## B20. CRLF byte-offset drift in text-based edits
-
-**Severity: Medium (file corruption on CRLF files).** Several
-text-based edit builders compute line-start byte offsets with the
-pattern `content.lines().take(n).map(|l| l.len() + 1).sum()`,
-which assumes a single-byte line terminator. `str::lines()` strips
-the `\r` of `\r\n`, so on CRLF files every preceding line is
-undercounted by one byte and the computed offsets drift, producing
-edits that no longer align with the target text.
-
-Sites:
-
-- `src/rename/mod.rs:833,889,923,1218`
-  (`collect_namespace_decl_edits`, `collect_use_statement_edits`,
-  `find_use_line_range`)
-- `src/code_actions/remove_unused_import.rs:252`
-  (`build_line_deletion_edit`)
-- `src/code_actions/import_class.rs:860`
-- `src/code_actions/phpstan/fix_return_type.rs:531`
-
-**Fix:** Compute line-start offsets from the real terminator
-length (or via a shared helper that walks byte offsets), so CRLF
-and LF files both map correctly.
-
-
 ## B21. Named-argument positional-index confusion
 
 **Severity: Medium.** Multiple call sites match arguments to

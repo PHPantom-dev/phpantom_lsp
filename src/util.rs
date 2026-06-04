@@ -343,6 +343,33 @@ pub(crate) fn offset_to_position(content: &str, offset: usize) -> Position {
     }
 }
 
+/// Return the byte offset of the start of the line at `line_idx`
+/// (0-based) within `content`.
+///
+/// Unlike the common `content.lines().take(n).map(|l| l.len() + 1).sum()`
+/// idiom, this counts the real line terminator. `str::lines()` strips the
+/// `\r` of a `\r\n` (CRLF) pair, so the sum-of-`len + 1` approach
+/// undercounts every preceding line by one byte on CRLF files and drifts
+/// the computed offset. Counting newline bytes directly stays correct for
+/// both LF and CRLF (the `\n` is the final byte of a CRLF pair either way).
+///
+/// If `line_idx` exceeds the number of lines, `content.len()` is returned.
+pub(crate) fn line_start_byte_offset(content: &str, line_idx: usize) -> usize {
+    if line_idx == 0 {
+        return 0;
+    }
+    let mut seen = 0usize;
+    for (i, b) in content.bytes().enumerate() {
+        if b == b'\n' {
+            seen += 1;
+            if seen == line_idx {
+                return i + 1;
+            }
+        }
+    }
+    content.len()
+}
+
 /// Convert an LSP `Position` (line, character) to a byte offset in
 /// `content`.
 ///
@@ -2235,6 +2262,30 @@ pub fn run_command_with_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_start_byte_offset_lf() {
+        let content = "aaa\nbb\nc\n";
+        assert_eq!(line_start_byte_offset(content, 0), 0);
+        assert_eq!(line_start_byte_offset(content, 1), 4); // after "aaa\n"
+        assert_eq!(line_start_byte_offset(content, 2), 7); // after "bb\n"
+        assert_eq!(line_start_byte_offset(content, 3), 9); // after "c\n" (EOF)
+    }
+
+    #[test]
+    fn line_start_byte_offset_crlf() {
+        let content = "aaa\r\nbb\r\nc\r\n";
+        assert_eq!(line_start_byte_offset(content, 0), 0);
+        assert_eq!(line_start_byte_offset(content, 1), 5); // after "aaa\r\n"
+        assert_eq!(line_start_byte_offset(content, 2), 9); // after "bb\r\n"
+        assert_eq!(line_start_byte_offset(content, 3), 12); // after "c\r\n" (EOF)
+    }
+
+    #[test]
+    fn line_start_byte_offset_past_end_returns_len() {
+        let content = "one\ntwo";
+        assert_eq!(line_start_byte_offset(content, 5), content.len());
+    }
 
     #[test]
     fn is_self_or_static_matches_three() {

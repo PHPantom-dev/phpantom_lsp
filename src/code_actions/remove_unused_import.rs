@@ -26,7 +26,7 @@ use tower_lsp::lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
-use crate::util::{offset_to_position, ranges_overlap};
+use crate::util::{line_start_byte_offset, offset_to_position, ranges_overlap};
 
 impl Backend {
     /// Collect "Remove unused import" code actions.
@@ -253,39 +253,33 @@ pub(crate) fn build_line_deletion_edit(
     let start_line = range.start.line as usize;
     let end_line = range.end.line as usize;
 
-    // Find the byte offset of the start of the first line.
-    let mut start_offset = 0;
-    for line in &lines[..start_line] {
-        start_offset += line.len() + 1; // +1 for newline
-    }
-
-    let mut edit_start_offset = start_offset;
-    if should_consume_previous_blank_line(
+    // Compute line-start offsets from real terminator lengths so the edit
+    // stays aligned on CRLF files (where `str::lines()` strips the `\r`).
+    let edit_start_offset = if should_consume_previous_blank_line(
         lines.as_slice(),
         start_line,
         end_line,
         removed_import_lines,
     ) {
-        edit_start_offset -= lines[start_line - 1].len() + 1;
-    }
+        line_start_byte_offset(content, start_line - 1)
+    } else {
+        line_start_byte_offset(content, start_line)
+    };
 
-    // Find the byte offset of the end of the last line (including newline).
-    let mut end_offset = start_offset;
-    for line in &lines[start_line..=end_line.min(lines.len() - 1)] {
-        end_offset += line.len() + 1;
-    }
-
-    if should_consume_following_blank_line(
+    // Deleting through the start of the line after `end_line` consumes
+    // `end_line`'s terminator. Optionally extend over a following blank
+    // line as well.
+    let last_consumed_line = if should_consume_following_blank_line(
         lines.as_slice(),
         start_line,
         end_line,
         removed_import_lines,
     ) {
-        end_offset += lines[end_line + 1].len() + 1;
-    }
-
-    // Clamp to content length.
-    end_offset = end_offset.min(content.len());
+        end_line + 1
+    } else {
+        end_line
+    };
+    let end_offset = line_start_byte_offset(content, last_consumed_line + 1).min(content.len());
 
     let start_pos = offset_to_position(content, edit_start_offset);
     let end_pos = offset_to_position(content, end_offset);
@@ -548,6 +542,19 @@ mod tests {
         let start = lsp_position_to_byte_offset(content, edit.range.start);
         let end = lsp_position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Foo\\Bar;\n");
+    }
+
+    #[test]
+    fn deletes_full_use_line_crlf() {
+        // On a CRLF file the deletion must still cover the entire
+        // `use Foo\Bar;\r\n` line including its two-byte terminator,
+        // not drift one byte short.
+        let content = "<?php\r\nuse Foo\\Bar;\r\nuse Baz\\Qux;\r\n";
+        let range = Range::new(Position::new(1, 4), Position::new(1, 11));
+        let edit = build_single_line_deletion_edit(content, &range);
+        let start = lsp_position_to_byte_offset(content, edit.range.start);
+        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        assert_eq!(&content[start..end], "use Foo\\Bar;\r\n");
     }
 
     #[test]

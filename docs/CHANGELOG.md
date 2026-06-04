@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Edits on Windows (CRLF) files land correctly.** Rename, remove-unused-import, and the PHPStan return-type quickfix computed line offsets assuming single-byte line endings, so on files with `\r\n` terminators the edits drifted one byte per preceding line and could corrupt the file. Offsets now account for the real terminator.
 - **Malformed `@method` tags no longer crash requests.** A docblock with a degenerate `@method` signature (such as `@method >()`) could panic completion, hover, and go-to-definition. Such tags are now parsed gracefully and simply produce no virtual method.
 - **Code lens navigation.** Code lenses now work in Zed, Neovim, Emacs, and other editors. Previously the click command used a VS Code-specific API that other editors ignored.
 - **`@mixin` with union types.** `@mixin Foo|Bar` now correctly exposes members from all classes in the union. Previously only single-class mixins were recognized.
