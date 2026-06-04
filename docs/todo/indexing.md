@@ -107,30 +107,6 @@ is that it never self-scans to fill gaps.
 
 ---
 
-## X1. Staleness detection and auto-refresh
-
-**Goal:** Keep the classmap fresh without user intervention.
-
-### Trigger points
-
-- On `workspace/didChangeWatchedFiles`: if `composer.json` or
-  `composer.lock` changed, schedule a rescan of vendor directories
-  (the user likely ran `composer install` or `composer update`).
-- On `did_save` of a PHP file: if the file is in a PSR-4 directory,
-  do a targeted single-file rescan (read the file, extract class
-  names, update the classmap entry). This is cheap enough to do
-  synchronously.
-
-### Targeted refresh
-
-For single-file changes, re-scan only that file and update/remove its
-classmap entries. No need to rescan the entire workspace.
-
-For dependency changes (vendor rescan), this is the expensive case but
-happens rarely (a few times per day at most).
-
----
-
 ## X2. Parallel file processing
 
 **Goal:** Speed up workspace-wide operations (find references,

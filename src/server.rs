@@ -365,18 +365,48 @@ impl LanguageServer for Backend {
         // lsp-types 0.94 does not expose a `type_hierarchy_provider`
         // field on `ServerCapabilities`, so we register the capability
         // dynamically via `client/registerCapability` instead.
+        let mut registrations = Vec::new();
+
         if self
             .supports_type_hierarchy_dynamic_registration
             .load(Ordering::Acquire)
-            && let Some(client) = &self.client
         {
-            let _ = client
-                .register_capability(vec![Registration {
-                    id: "type-hierarchy".to_string(),
-                    method: "textDocument/prepareTypeHierarchy".to_string(),
-                    register_options: None,
-                }])
-                .await;
+            registrations.push(Registration {
+                id: "type-hierarchy".to_string(),
+                method: "textDocument/prepareTypeHierarchy".to_string(),
+                register_options: None,
+            });
+        }
+
+        // Register file watchers for staleness detection.  The client
+        // will notify us when PHP files or composer files change on disk
+        // (even outside the editor), so we can refresh our indices.
+        registrations.push(Registration {
+            id: "workspace/didChangeWatchedFiles".to_string(),
+            method: "workspace/didChangeWatchedFiles".to_string(),
+            register_options: Some(
+                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                    watchers: vec![
+                        FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/*.php".to_string()),
+                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                        },
+                        FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/composer.json".to_string()),
+                            kind: Some(WatchKind::Change),
+                        },
+                        FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
+                            kind: Some(WatchKind::Change),
+                        },
+                    ],
+                })
+                .unwrap(),
+            ),
+        });
+
+        if let Some(client) = &self.client {
+            let _ = client.register_capability(registrations).await;
         }
 
         // Clear the negative class-resolution cache.  During startup,
@@ -590,6 +620,139 @@ impl LanguageServer for Backend {
 
         self.log(MessageType::INFO, format!("Closed file: {}", uri))
             .await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let workspace_root = self.workspace_root.read().clone();
+        let Some(root) = workspace_root else {
+            return;
+        };
+
+        let mut composer_changed = false;
+        let mut php_created_or_deleted: Vec<(Url, FileChangeType)> = Vec::new();
+
+        for change in &params.changes {
+            let path_str = change.uri.path();
+            if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
+                composer_changed = true;
+            } else if path_str.ends_with(".php") {
+                // Only handle files not currently open in the editor.
+                // Open files are already tracked via did_open/did_change.
+                let uri_str = change.uri.to_string();
+                if !self.open_files.read().contains_key(&uri_str) {
+                    php_created_or_deleted.push((change.uri.clone(), change.typ));
+                }
+            }
+        }
+
+        // Handle individual PHP file changes (targeted single-file rescan).
+        for (uri, change_type) in &php_created_or_deleted {
+            let uri_str = uri.to_string();
+            let Ok(file_path) = uri.to_file_path() else {
+                continue;
+            };
+
+            match *change_type {
+                FileChangeType::CREATED | FileChangeType::CHANGED => {
+                    // Re-scan the file: purge every stale entry (classes,
+                    // functions, or constants removed from the file) and
+                    // re-add its current symbols.
+                    self.reindex_file(&uri_str, &file_path);
+                }
+                FileChangeType::DELETED => {
+                    // Purge every index entry that referenced the file.
+                    self.deindex_file(&uri_str, &file_path);
+                }
+                _ => {}
+            }
+        }
+
+        // Invalidate caches whenever any PHP file is created, changed,
+        // or deleted.  A class that was previously "not found" may now
+        // exist, and resolved class info may be stale.
+        if !php_created_or_deleted.is_empty() {
+            tracing::info!(
+                "PHPantom: {} watched PHP file(s) changed on disk, indexes refreshed",
+                php_created_or_deleted.len()
+            );
+            self.class_not_found_cache.write().clear();
+            self.resolved_class_cache.lock().clear();
+            // Member completion results embed members of the resolved
+            // target class; a class whose file changed may have gained,
+            // lost, or renamed members.
+            self.member_completion_cache.lock().clear();
+
+            // Open files may reference a class that was just added or
+            // removed; ask the editor to re-pull diagnostics so stale
+            // "unknown class" errors (or missing ones) are corrected.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
+        }
+
+        // Handle composer.json/composer.lock changes: full vendor rescan.
+        if composer_changed {
+            tracing::info!("PHPantom: composer files changed, rescanning vendor");
+
+            // Re-read composer.json for updated PSR-4 mappings.
+            if let Some(pkg) = composer::read_composer_package(&root) {
+                let mappings = composer::extract_psr4_mappings_from_package(&pkg);
+                *self.psr4_mappings.write() = mappings;
+
+                let vendor_dir = composer::get_vendor_dir(&pkg);
+                let vendor_path = root.join(&vendor_dir);
+
+                // Rebuild vendor classmap.
+                let vendor_scan = classmap_scanner::scan_vendor_packages(&root, &vendor_dir);
+                {
+                    let vendor_uri_prefix = if let Ok(canonical) = vendor_path.canonicalize() {
+                        format!("{}/", crate::util::path_to_uri(&canonical))
+                    } else {
+                        format!("{}/", crate::util::path_to_uri(&vendor_path))
+                    };
+
+                    // Remove old vendor entries and insert new ones.
+                    let mut idx = self.fqn_uri_index.write();
+                    idx.retain(|_, v| !v.starts_with(&vendor_uri_prefix));
+                    for (fqn, path) in vendor_scan.classmap {
+                        idx.insert(fqn, crate::util::path_to_uri(&path));
+                    }
+                }
+                {
+                    let mut fi = self.autoload_function_index.write();
+                    for (fqn, path) in vendor_scan.function_index {
+                        fi.insert(fqn, path);
+                    }
+                }
+                {
+                    let mut ci = self.autoload_constant_index.write();
+                    for (name, path) in vendor_scan.constant_index {
+                        ci.insert(name, path);
+                    }
+                }
+
+                // Rescan autoload files (they may have changed).
+                self.scan_autoload_files(&root, &vendor_dir);
+            }
+
+            // Clear all cached class info since vendor classes may have
+            // changed versions.
+            self.fqn_class_index.write().clear();
+            self.method_store.write().clear();
+            self.gti_index.write().clear();
+            self.class_not_found_cache.write().clear();
+            self.resolved_class_cache.lock().clear();
+            self.member_completion_cache.lock().clear();
+
+            // Notify the editor to re-pull diagnostics.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
+        }
     }
 
     async fn goto_definition(

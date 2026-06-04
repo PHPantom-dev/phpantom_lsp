@@ -26,7 +26,6 @@ within the same impact tier.
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | X4  | [Full background indexing](todo/indexing.md#x4-full-background-indexing) (workspace symbols, fast find-references)                                              | Medium      | High        |
-| X1  | [Staleness detection and auto-refresh](todo/indexing.md#x1-staleness-detection-and-auto-refresh)                                                                | Medium      | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion)                                                                                                       | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 

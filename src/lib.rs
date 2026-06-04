@@ -1085,6 +1085,107 @@ impl Backend {
         gti.retain(|_, v| !v.is_empty());
     }
 
+    /// Remove every index entry that points at a single file.
+    ///
+    /// This is the inverse of the indexing performed during the
+    /// workspace scan and `update_ast`.  When a file is deleted or
+    /// changed outside the editor (e.g. a git checkout or `composer`
+    /// run), every index that references it must be purged, or stale
+    /// symbols linger: completion keeps suggesting a class whose file
+    /// was removed, go-to-definition jumps into a deleted file, and so
+    /// on.  Purging only some indexes (e.g. `fqn_uri_index` but not
+    /// `method_store`) leaves the symptom alive in whichever feature
+    /// reads the index that was missed.
+    ///
+    /// `uri_str` is the file's URI as the editor reports it; `file_path`
+    /// is the same file as a filesystem path.  A given FQN→URI entry may
+    /// have been stored under either of two URI conventions depending on
+    /// how it was created — the classmap scan stores
+    /// [`crate::util::path_to_uri`] of the discovered path, while
+    /// `update_ast` stores the editor's URI string — so values are
+    /// matched against both spellings.
+    pub(crate) fn deindex_file(&self, uri_str: &str, file_path: &std::path::Path) {
+        let canonical_uri = crate::util::path_to_uri(file_path);
+        let matches_uri = |v: &str| v == uri_str || v == canonical_uri.as_str();
+
+        // FQNs whose source is this file, under either URI convention.
+        let fqns_in_file: Vec<String> = {
+            let idx = self.fqn_uri_index.read();
+            idx.iter()
+                .filter(|(_, v)| matches_uri(v.as_str()))
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+
+        self.fqn_uri_index
+            .write()
+            .retain(|_, v| !matches_uri(v.as_str()));
+
+        {
+            let mut fci = self.fqn_class_index.write();
+            for fqn in &fqns_in_file {
+                fci.remove(fqn);
+            }
+        }
+        self.evict_methods_for_fqns(&fqns_in_file);
+        self.evict_gti_for_fqns(&fqns_in_file);
+
+        self.autoload_function_index
+            .write()
+            .retain(|_, v| v != file_path);
+        self.autoload_constant_index
+            .write()
+            .retain(|_, v| v != file_path);
+
+        // `global_functions` / `global_defines` store the editor URI for
+        // workspace files; purge any whose source is this file.
+        self.global_functions
+            .write()
+            .retain(|_, (u, _)| !matches_uri(u.as_str()));
+        self.global_defines
+            .write()
+            .retain(|_, d| !matches_uri(d.file_uri.as_str()));
+
+        self.clear_file_maps(uri_str);
+        self.uri_classes_index.write().remove(uri_str);
+        self.parsed_uris.write().remove(uri_str);
+    }
+
+    /// Re-scan a single file from disk and refresh its discovery-level
+    /// index entries (FQN→URI, autoload functions/constants).
+    ///
+    /// Used when a file is created or changed on disk outside the editor.
+    /// All previous entries for the file are purged first via
+    /// [`deindex_file`](Self::deindex_file) so that classes, functions,
+    /// or constants removed from the file do not survive the change.  The
+    /// full [`ClassInfo`](crate::types::ClassInfo) is re-parsed lazily on
+    /// next access; this only restores the lightweight discovery indexes.
+    pub(crate) fn reindex_file(&self, uri_str: &str, file_path: &std::path::Path) {
+        self.deindex_file(uri_str, file_path);
+
+        let classes = crate::classmap_scanner::scan_file(file_path);
+        {
+            let mut idx = self.fqn_uri_index.write();
+            for fqn in classes {
+                idx.insert(fqn, uri_str.to_string());
+            }
+        }
+
+        let scan = crate::classmap_scanner::scan_file_full(file_path);
+        {
+            let mut fi = self.autoload_function_index.write();
+            for fqn in scan.functions {
+                fi.entry(fqn).or_insert_with(|| file_path.to_path_buf());
+            }
+        }
+        {
+            let mut ci = self.autoload_constant_index.write();
+            for name in scan.constants {
+                ci.entry(name).or_insert_with(|| file_path.to_path_buf());
+            }
+        }
+    }
+
     /// Create a shallow clone of this `Backend` that shares every
     /// `Arc`-wrapped field with the original.
     ///

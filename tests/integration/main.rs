@@ -116,4 +116,5 @@ mod signature_help;
 mod smoke;
 mod type_definition;
 mod type_hierarchy;
+mod watched_files;
 mod workspace_symbols;
