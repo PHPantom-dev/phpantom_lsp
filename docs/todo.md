@@ -156,7 +156,6 @@ unlikely to move the needle for most users.
 | P4  | `memmem` for block comment terminator search                                                                                                                                | Low         | Low         |
 | P5  | `memmap2` for file reads during scanning                                                                                                                                    | Low         | Low         |
 | P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | Low         |
-| P7  | `diag_pending_uris` uses `Vec::contains` for dedup                                                                                                                          | Low         | Low         |
 | P8  | `find_class_in_uri_classes_index` linear fallback scan                                                                                                                       | Low         | Low         |
 | P12 | [`find_or_load_function` Phase 1.75 serial bottleneck](todo/performance.md#p12-find_or_load_function-phase-175-serial-bottleneck)                                           | Low         | Low         |
 | P17 | [`mago-names` resolution on the parse hot path](todo/performance.md#p17-mago-names-resolution-on-the-parse-hot-path)                                                        | Medium      | Low         |

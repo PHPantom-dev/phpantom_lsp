@@ -144,28 +144,6 @@ of the dependency graph within the cache.
 
 ---
 
-## P7. `diag_pending_uris` uses `Vec::contains` for deduplication
-
-**Impact: Low · Effort: Low**
-
-`schedule_diagnostics` and `schedule_diagnostics_for_open_files`
-deduplicate pending URIs with `Vec::contains`, which is O(n) per
-insertion. When a class signature changes, every open file is
-queued, and each insertion scans the entire pending list.
-
-For typical usage (< 50 open files) this is imperceptible. It
-becomes measurable only with hundreds of open tabs and rapid
-cross-file edits.
-
-### Fix
-
-Replace `Vec<String>` with `IndexSet<String>` (from `indexmap`) or
-`HashSet<String>` + a separate `Vec<String>` for ordering. The
-worker drains the collection on each wake, so insertion order is
-not important and a plain `HashSet` suffices.
-
----
-
 ## P8. `find_class_in_uri_classes_index` linear fallback scan
 
 **Impact: Low · Effort: Low**

@@ -475,7 +475,10 @@ pub struct Backend {
     ///
     /// Wrapped in `Arc` so the diagnostic worker task (spawned during
     /// `initialized`) shares the same slot as the main `Backend`.
-    pub(crate) diag_pending_uris: Arc<Mutex<Vec<String>>>,
+    ///
+    /// A `HashSet` deduplicates queued URIs in O(1); the worker drains
+    /// the whole set on each wake, so insertion order does not matter.
+    pub(crate) diag_pending_uris: Arc<Mutex<HashSet<String>>>,
     /// Last-published slow diagnostics (unknown classes, unknown members, etc.)
     /// per file URI.  Used by the two-phase diagnostic publisher: the fast
     /// phase merges fresh fast diagnostics with the previous slow diagnostics
@@ -692,7 +695,7 @@ impl Backend {
             php_version: Mutex::new(types::PhpVersion::default()),
             diag_version: Arc::new(AtomicU64::new(0)),
             diag_notify: Arc::new(tokio::sync::Notify::new()),
-            diag_pending_uris: Arc::new(Mutex::new(Vec::new())),
+            diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
             diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
             phpstan_notify: Arc::new(tokio::sync::Notify::new()),
@@ -773,7 +776,7 @@ impl Backend {
             php_version: Mutex::new(types::PhpVersion::default()),
             diag_version: Arc::new(AtomicU64::new(0)),
             diag_notify: Arc::new(tokio::sync::Notify::new()),
-            diag_pending_uris: Arc::new(Mutex::new(Vec::new())),
+            diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
             diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
             phpstan_notify: Arc::new(tokio::sync::Notify::new()),

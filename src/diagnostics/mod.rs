@@ -886,9 +886,7 @@ impl Backend {
         // caches the full set in `diag_last_full` for pull responses.
         {
             let mut pending = self.diag_pending_uris.lock();
-            if !pending.contains(&uri) {
-                pending.push(uri.clone());
-            }
+            pending.insert(uri.clone());
         }
         self.diag_version.fetch_add(1, Ordering::Release);
         self.diag_notify.notify_one();
@@ -948,11 +946,7 @@ impl Backend {
         // caches the full set in `diag_last_full` for pull responses.
         {
             let mut pending = self.diag_pending_uris.lock();
-            for uri in uris {
-                if !pending.contains(&uri) {
-                    pending.push(uri);
-                }
-            }
+            pending.extend(uris);
         }
         self.diag_version.fetch_add(1, Ordering::Release);
         self.diag_notify.notify_one();
@@ -1041,7 +1035,7 @@ impl Backend {
             }
 
             // ── Step 3: snapshot all pending URIs ────────────────────
-            let uris: Vec<String> = {
+            let uris: std::collections::HashSet<String> = {
                 let mut pending = self.diag_pending_uris.lock();
                 std::mem::take(&mut *pending)
             };
