@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780587976204,
+  "lastUpdate": 1780592842318,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10131,6 +10131,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "92c1c21c8733c18cb057d2ad8e8c5434a6c2fc9c",
+          "message": "Use HashSet for pending diagnostic URIs\n\nRemove the completed P7 item from the performance todo list",
+          "timestamp": "2026-06-04T18:54:25+02:00",
+          "tree_id": "50a7f315991b09fe7c81ecdc2009f53fdd9ff9fa",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/92c1c21c8733c18cb057d2ad8e8c5434a6c2fc9c"
+        },
+        "date": 1780592841174,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.2,
             "unit": "MiB"
           }
         ]
