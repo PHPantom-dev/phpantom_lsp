@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780631006856,
+  "lastUpdate": 1780634592215,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10301,6 +10301,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d1a29d071ed1c9475f90f360e6a5a191685c876e",
+          "message": "Make watched file updates cancellation safe\n\nBatch reindexing now runs in a cancellation-safe blocking task and\nignores content-change events for never-loaded files, keeping focus\nrefreshes responsive.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-05T06:27:50+02:00",
+          "tree_id": "a47f1846970de8cb02a8faa51a935adc7f961ba9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d1a29d071ed1c9475f90f360e6a5a191685c876e"
+        },
+        "date": 1780634590259,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51,
             "unit": "MiB"
           }
         ]
