@@ -87,7 +87,7 @@ fn test_regular_chain() {
 
 #[test]
 fn test_triple_method_chain() {
-    // B8: 3-level chained method calls must be fully extracted.
+    // 3-level chained method calls must be fully extracted.
     let input = "$this->products()->filter()->first()->";
     let chars: Vec<char> = input.chars().collect();
     let arrow_pos = input.rfind("->").unwrap();

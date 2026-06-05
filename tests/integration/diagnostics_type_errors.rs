@@ -1583,7 +1583,7 @@ class MyTest extends TestCase {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Class-level template parameter substitution (D15)
+// Class-level template parameter substitution
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -2393,7 +2393,7 @@ function test(): void {
     );
 }
 
-// ─── Type guard narrowing (B4) ──────────────────────────────────────────────
+// ─── Type guard narrowing ──────────────────────────────────────────────
 
 #[test]
 fn no_diagnostic_when_is_string_guard_narrows_before_call() {
@@ -3001,7 +3001,8 @@ function test(): void {
 
 #[test]
 fn no_false_positive_for_class_template_via_static_method_return_type() {
-    // Same as B6 but through a static method return type.
+    // Like the class-template parameter test above, but the value flows
+    // through a static method return type.
     let php = r#"<?php
 /**
  * @template T
@@ -3096,7 +3097,7 @@ function test(): void {
     );
 }
 
-// ── B5: Unresolved template params resolved to bounds/mixed ─────────────
+// ── Unresolved template params resolved to bounds/mixed ─────────────
 
 #[test]
 fn no_false_positive_for_new_generic_class_without_annotation() {
@@ -3615,7 +3616,7 @@ function test(): void {
     );
 }
 
-/// B28: When the return type of the outermost method call is an unresolvable
+/// When the return type of the outermost method call is an unresolvable
 /// class (not in the project), the resolver must not fall through and report
 /// the type of the *argument* passed into that method instead.
 #[test]

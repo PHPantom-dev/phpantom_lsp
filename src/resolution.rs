@@ -440,7 +440,7 @@ impl Backend {
         // for lazily-loaded files (vendor, stubs, PSR-4).  These maps
         // are only needed for files open in the editor (populated by
         // update_ast_inner).  Skipping them reduces memory usage across
-        // thousands of vendor files.  See P13.
+        // thousands of vendor files.
 
         // Populate the fqn_index so that `find_class_in_uri_classes_index` can
         // resolve these classes via O(1) hash lookup.  Also populate

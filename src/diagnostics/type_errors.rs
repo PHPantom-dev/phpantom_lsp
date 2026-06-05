@@ -90,8 +90,9 @@ fn is_type_compatible(
     // are handled by the `is_subtype_of_typed` fallback at the end
     // of this function and should NOT be duplicated here.
     //
-    // See D14 in docs/todo/diagnostics.md for the Phase 2 plan to
-    // tighten specific MAYBE rules.
+    // A future pass may tighten specific MAYBE relationships (reporting
+    // them as mismatches rather than letting them pass) once we are
+    // confident the narrowing does not introduce false positives.
 
     // Skip if either type is unresolved/unknown.
     if arg_type.is_untyped() || param_type.is_untyped() {

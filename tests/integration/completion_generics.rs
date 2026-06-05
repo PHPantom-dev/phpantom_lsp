@@ -8670,7 +8670,7 @@ async fn test_implements_generic_interface_completion() {
 }
 
 /// Class-level template parameters must survive through a chained method call
-/// that returns `self<T>` (B8).  When `products()` returns `Collection<Product>`
+/// that returns `self<T>`.  When `products()` returns `Collection<Product>`
 /// and `filter()` returns `self<TItem>`, completing after `->` should show
 /// Collection's methods (proving the type is still Collection<Product>).
 #[tokio::test]
@@ -8759,7 +8759,7 @@ async fn test_class_template_params_preserved_through_chained_calls() {
     }
 }
 
-/// B8: After calling a method that returns `self<TItem>` on a Collection<Product>,
+/// After calling a method that returns `self<TItem>` on a Collection<Product>,
 /// further chaining `->first()->` should resolve TItem to Product and show
 /// Product's methods.  Uses a variable assignment to keep the chain to 2 levels
 /// at the completion point.

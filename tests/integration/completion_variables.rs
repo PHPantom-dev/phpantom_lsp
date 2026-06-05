@@ -19579,7 +19579,7 @@ async fn test_completion_class_string_template_standalone_function_chain() {
     }
 }
 
-// ─── Loop-body assignments visible inside the same iteration (B20) ──────────
+// ─── Loop-body assignments visible inside the same iteration ──────────
 
 /// When a variable is initialized as `null` and reassigned later in the
 /// same foreach body, the assignment type should be visible earlier in

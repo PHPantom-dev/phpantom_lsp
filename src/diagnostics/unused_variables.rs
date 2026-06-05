@@ -950,8 +950,10 @@ class Foo {
 
     #[test]
     fn skips_non_promoted_constructor_parameter() {
-        // Constructor parameters are skipped until suppression support
-        // is available (D15 depends on D5).
+        // Unused (non-promoted) constructor parameters are intentionally
+        // not flagged: reporting unused parameters is only useful once
+        // users have a way to suppress the warning on parameters they
+        // must keep for interface or signature compatibility.
         let diags = collect(
             r#"<?php
 class Foo {

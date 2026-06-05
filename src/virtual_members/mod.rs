@@ -821,7 +821,7 @@ fn resolve_class_fully_inner(
     // from that substituted class and cache the result under the bare
     // FQN key `(MockBuilder, [])`, every subsequent lookup gets the
     // contaminated version — causing non-deterministic diagnostics
-    // depending on which thread/file was processed first (B28).
+    // depending on which thread/file was processed first.
     //
     // To prevent this, always try to reload the raw (un-substituted)
     // class from the class_loader.  The class_loader returns the

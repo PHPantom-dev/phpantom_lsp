@@ -2307,7 +2307,7 @@ class Seeder {
     );
 }
 
-// ─── Eloquent relationship property diagnostics (B4) ────────────────────────
+// ─── Eloquent relationship property diagnostics ────────────────────────
 
 #[test]
 fn no_diagnostic_for_relationship_property_on_model() {
@@ -4910,7 +4910,7 @@ class MyService {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// B29 — merge_branch must not let `mixed` subsume narrowed class types
+// merge_branch must not let `mixed` subsume narrowed class types
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// After `assert($data instanceof \stdClass)`, inserting any `if` block

@@ -2554,7 +2554,7 @@ mod tests {
         b.description = Some("Different description".to_string());
         assert!(
             !a.signature_eq(&b),
-            "Description changes must break signature_eq (B12)"
+            "Description changes must break signature_eq"
         );
     }
 
@@ -2566,7 +2566,7 @@ mod tests {
         b.return_description = None;
         assert!(
             !a.signature_eq(&b),
-            "Return description changes must break signature_eq (B12)"
+            "Return description changes must break signature_eq"
         );
     }
 
@@ -2575,10 +2575,7 @@ mod tests {
         let mut a = method("foo");
         a.links = vec!["https://example.com".to_string()];
         let b = method("foo");
-        assert!(
-            !a.signature_eq(&b),
-            "Link changes must break signature_eq (B12)"
-        );
+        assert!(!a.signature_eq(&b), "Link changes must break signature_eq");
     }
 
     #[test]
@@ -2668,7 +2665,7 @@ mod tests {
         let b = prop("name", "string");
         assert!(
             !a.signature_eq(&b),
-            "Property description changes must break signature_eq (B12)"
+            "Property description changes must break signature_eq"
         );
     }
 
@@ -3154,7 +3151,7 @@ mod tests {
     }
 
     /// Changing descriptions or links MUST trigger eviction so that
-    /// hover shows updated content after cross-file edits (B12).
+    /// hover shows updated content after cross-file edits.
     #[test]
     fn class_signature_eq_description_change_triggers_eviction() {
         let mut m_a = method("doWork");
@@ -3179,7 +3176,7 @@ mod tests {
         );
     }
 
-    /// Changing a property description MUST trigger eviction (B12).
+    /// Changing a property description MUST trigger eviction.
     #[test]
     fn class_signature_eq_property_description_change_triggers_eviction() {
         let mut p_a = prop("name", "string");

@@ -1337,7 +1337,7 @@ class Handler {
 
 #[test]
 fn hover_cross_file_docblock_updated_after_edit() {
-    // B12: When a cross-file class is loaded via PSR-4 and its docblock is
+    // When a cross-file class is loaded via PSR-4 and its docblock is
     // later edited (simulated via update_ast), hover should show the NEW
     // description, not the stale cached version.
     let (backend, _dir) = create_psr4_workspace(
@@ -1412,7 +1412,7 @@ class Job {
 
 #[test]
 fn hover_cross_file_property_type_updated_after_edit() {
-    // B12: When a cross-file class @property type changes, hover on a
+    // When a cross-file class @property type changes, hover on a
     // variable accessing that property should reflect the new type.
     let (backend, _dir) = create_psr4_workspace(
         r#"{
@@ -9907,7 +9907,7 @@ function test(): void {
     }
 }
 
-// ─── Inherited class constants via self:: (B37) ─────────────────────────────
+// ─── Inherited class constants via self:: ─────────────────────────────
 
 #[test]
 fn hover_inherited_constant_via_self() {
@@ -10007,7 +10007,7 @@ function test(): void {
     );
 }
 
-// ─── instanceof on nullable strips null (B31) ───────────────────────────────
+// ─── instanceof on nullable strips null ───────────────────────────────
 
 #[test]
 fn hover_instanceof_strips_null_from_nullable() {
@@ -10090,7 +10090,7 @@ function test(Animal $x): void {
     );
 }
 
-// ─── is_object() on multi-class union (B35) ─────────────────────────────────
+// ─── is_object() on multi-class union ─────────────────────────────────
 
 #[test]
 fn hover_is_object_narrows_multi_class_union() {

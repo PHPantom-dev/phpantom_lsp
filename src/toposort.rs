@@ -129,7 +129,7 @@ pub(crate) fn toposort_classes<'a>(
     // processed in different orders across runs, which causes the
     // recursion guard in `resolve_class_fully_inner` to break
     // implicit cycles differently — leading to non-deterministic
-    // cache contents and flaky diagnostics (see B28).
+    // cache contents and flaky diagnostics.
     all_fqns.sort();
 
     let mut visited: HashSet<String> = HashSet::with_capacity(all_fqns.len());

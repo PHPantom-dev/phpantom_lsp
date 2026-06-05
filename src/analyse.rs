@@ -283,7 +283,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
 
     // Phase 2 diagnostic threads need large stacks because the forward
     // walker + type resolution pipeline can nest deeply on files with
-    // many class hierarchies and virtual members (see B24).
+    // many class hierarchies and virtual members.
     //
     // `std::thread::scope` + `s.spawn()` ignores `RUST_MIN_STACK` and
     // always uses the OS default (8 MB).  Use `std::thread::Builder`
@@ -393,9 +393,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 (t0.elapsed(), "fast")
                             });
 
-                            // Slow collectors: each checks the deadline.
-                            // ── Bisect: enable collectors one at a time to find
-                            //    which one causes infinite recursion (B24 debug).
+                            // Slow collectors, each run separately so it
+                            // can be timed independently and check the
+                            // deadline between collectors.  Keeping them as
+                            // named entries also makes it easy to disable an
+                            // individual collector when narrowing down which
+                            // one is responsible for a hang on a given file.
                             let collectors: &[(&str, &CollectFn)] = &[
                                 (
                                     "unknown_class",
