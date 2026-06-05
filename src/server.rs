@@ -415,8 +415,23 @@ impl LanguageServer for Backend {
         // "not found" for classes that are now resolvable.  Without this
         // clear, those stale entries cause false-positive "Class not found"
         // diagnostics even though hover and go-to-definition (which run
-        // later) resolve the same symbols correctly.  (B22)
+        // later) resolve the same symbols correctly.
         self.class_not_found_cache.write().clear();
+
+        // Clear the resolved-class cache for the same reason.  A request
+        // that arrives while indexing is still in progress (the editor
+        // fires hover, completion, semantic-tokens, and inlay-hint
+        // requests the moment a file opens) resolves classes against an
+        // incomplete index.  When a class's parent, trait, or interface
+        // is a vendor type not yet in `fqn_uri_index`, the inheritance
+        // merge silently drops every inherited member and the partial
+        // result is cached permanently.  Diagnostics then report
+        // false-positive "unknown member" errors for inherited methods
+        // (e.g. a controller's framework base-class methods) even though
+        // hover — which walks the parent chain live rather than reading
+        // the merged cache — resolves them correctly.  Clearing here lets
+        // the now-complete index rebuild every merge correctly.
+        self.resolved_class_cache.lock().clear();
 
         // Mark initialization as complete so that diagnostic workers
         // and pull handlers know the project is fully indexed.

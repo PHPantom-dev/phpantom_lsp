@@ -282,7 +282,7 @@ mod tests {
         out
     }
 
-    /// B22 reproduction: when a vendor class exists in the classmap,
+    /// When a vendor class exists in the classmap,
     /// `collect_unknown_class_diagnostics` must NOT flag it as unknown.
     /// This simulates the IDE scenario where the classmap is loaded
     /// during init and then a file referencing vendor classes is opened.
@@ -343,7 +343,7 @@ class MyProvider {
         );
     }
 
-    /// B22 regression: when `find_or_load_class` runs before the classmap
+    /// When `find_or_load_class` runs before the classmap
     /// is populated (e.g. `did_open` during startup), the negative cache
     /// gets a stale entry.  Clearing the cache after init (as the server
     /// now does) must allow subsequent lookups to succeed.

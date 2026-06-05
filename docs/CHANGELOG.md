@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Inherited members no longer briefly flagged as unknown after opening a project.** A method or property inherited from a vendor base class (for example the base methods of a framework controller) could be reported as an unknown member right after a file opened, even though hover resolved it correctly, and the error went away when the file was closed and reopened. Such members now resolve as soon as indexing finishes.
 - **Named arguments are matched to parameters by name.** Calls that pass arguments by name (`f(c: 3)`) are now bound to the parameters they actually target instead of by their position in the call. Conditional return types resolve correctly when the deciding argument is passed by name out of order, a "missing required argument" error is now reported when a named argument fills an optional parameter but leaves a required one unsupplied, and pass-by-reference type inference seeds the right variable.
 - **Argument-count false positives.** Extra arguments to a class with no constructor are no longer flagged (PHP accepts them), and namespaced calls to overloaded built-ins written with a leading backslash (`\mt_rand()`) are no longer measured against the wrong minimum.
 - **`@var` annotations no longer leak between functions.** A `/** @var T $x */` annotation in one function used to suppress "undefined variable" warnings for that name everywhere in the file; it is now scoped to the function it appears in.

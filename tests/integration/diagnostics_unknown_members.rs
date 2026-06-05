@@ -1,6 +1,7 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_exception_stubs,
 };
+use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
@@ -38,6 +39,76 @@ fn unknown_member_diagnostics(
     let mut out = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, text, &mut out);
     out
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Startup race: resolved-class cache poisoned before indexing completes
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A method inherited from a vendor base class must not be flagged as
+/// unknown once indexing has finished, even if the child class was first
+/// resolved (by an early hover/completion/diagnostic request) while the
+/// vendor parent was not yet in the index.
+///
+/// Reproduces the reported Symfony controller bug: `redirectToRoute` (an
+/// inherited method on `AbstractController`) was flagged `unknown_member`
+/// by diagnostics while hover resolved it correctly.  The cause was the
+/// resolved-class cache caching a base-only merge of the child (parent
+/// unresolvable mid-indexing) and never invalidating it.  The diagnostic
+/// path reads that merged cache; hover walks the parent chain live, which
+/// is why hover was unaffected.
+#[tokio::test]
+async fn inherited_member_not_flagged_after_indexing_completes() {
+    // The parent lives in `vendor/` and is therefore only discoverable
+    // through the vendor scan that runs during `initialized()` — exactly
+    // like a framework base class.  It is NOT in the user's PSR-4 map, so
+    // it cannot be resolved before indexing.
+    let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
+    let installed_json = r#"{"packages": [{
+        "name": "acme/framework",
+        "version": "1.0.0",
+        "install-path": "../acme/framework",
+        "autoload": {"psr-4": {"Acme\\Framework\\": ""}}
+    }]}"#;
+    let base = "<?php\nnamespace Acme\\Framework;\nclass BaseController {\n    public function redirectToRoute(string $route): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            ("vendor/acme/framework/BaseController.php", base),
+            ("vendor/composer/installed.json", installed_json),
+        ],
+    );
+
+    let uri = "file:///child.php";
+    let text = "<?php\nnamespace App;\nuse Acme\\Framework\\BaseController;\nclass BlogController extends BaseController {\n    public function index(): void {\n        $this->redirectToRoute('home');\n    }\n}\n";
+
+    // ── Pre-indexing request poisons the cache ──────────────────────
+    // Resolving the child here cannot find the vendor parent, so the
+    // merged child is cached without its inherited members.
+    backend.update_ast(uri, text);
+    let mut pre = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, text, &mut pre);
+    assert!(
+        pre.iter().any(|d| d.message.contains("redirectToRoute")),
+        "setup precondition: the inherited method should be flagged \
+         while the vendor parent is not yet indexed, got: {pre:?}"
+    );
+
+    // ── Indexing completes ──────────────────────────────────────────
+    // `initialized()` scans the vendor package (indexing the parent)
+    // and must invalidate the poisoned merged-class cache.
+    backend.initialized(InitializedParams {}).await;
+
+    // ── The same diagnostic pass must now resolve the inherited method ──
+    // Note: we deliberately do NOT re-run `update_ast` here — re-parsing
+    // the file would evict the cached merge on its own and mask the bug.
+    let mut post = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, text, &mut post);
+    assert!(
+        !post.iter().any(|d| d.message.contains("redirectToRoute")),
+        "inherited method must resolve once the vendor parent is indexed, got: {post:?}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
