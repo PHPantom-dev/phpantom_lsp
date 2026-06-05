@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780630030612,
+  "lastUpdate": 1780630321265,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10233,6 +10233,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "636c632a35919f6c3288c9712c23679b157245ea",
+          "message": "fix(rename): support renaming variables inside deeply nested arrows and closures#145",
+          "timestamp": "2026-06-05T05:19:01+02:00",
+          "tree_id": "246a5f67f752d8a61676316d1550f20edaf03331",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/636c632a35919f6c3288c9712c23679b157245ea"
+        },
+        "date": 1780630319770,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.3,
             "unit": "MiB"
           }
         ]
