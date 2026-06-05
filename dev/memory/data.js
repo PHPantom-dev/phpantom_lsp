@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780592842318,
+  "lastUpdate": 1780629456552,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10165,6 +10165,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "88330a726e19ca00c226e49fb3f329ceadef7cc2",
+          "message": "Clear resolved class cache after indexing\n\nPrevents early requests from caching class merges that omit vendor\ninheritance, which caused transient unknown-member diagnostics. Adds\na regression test for inherited methods after indexing completes and\nupdates the changelog.",
+          "timestamp": "2026-06-05T05:04:55+02:00",
+          "tree_id": "c902d03640295934ab19a7217e2c465bcd9544ef",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/88330a726e19ca00c226e49fb3f329ceadef7cc2"
+        },
+        "date": 1780629455517,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.7,
             "unit": "MiB"
           }
         ]
