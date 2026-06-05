@@ -509,7 +509,7 @@ async fn test_completion_parent_double_colon_no_parent_falls_back() {
 }
 
 #[tokio::test]
-async fn test_completion_parent_double_colon_construct_included_other_magic_excluded() {
+async fn test_completion_parent_double_colon_construct_and_magic_included() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///parent_magic.php").unwrap();
@@ -567,8 +567,9 @@ async fn test_completion_parent_double_colon_construct_included_other_magic_excl
                 method_names
             );
             assert!(
-                !method_names.contains(&"__toString"),
-                "Other magic methods like __toString should still be filtered from parent::"
+                method_names.contains(&"__toString"),
+                "Implemented magic methods like __toString are offered via parent::, got: {:?}",
+                method_names
             );
             assert!(
                 method_names.contains(&"realMethod"),
@@ -800,7 +801,7 @@ async fn test_completion_self_double_colon_works_on_final_class() {
     }
 }
 
-/// `self::` should include `__construct` but exclude other magic methods.
+/// `self::` should include `__construct` along with other implemented magic methods.
 #[tokio::test]
 async fn test_completion_self_double_colon_includes_construct() {
     let backend = create_test_backend();
@@ -857,8 +858,8 @@ async fn test_completion_self_double_colon_includes_construct() {
                 method_names
             );
             assert!(
-                !method_names.contains(&"__toString"),
-                "self:: should still exclude other magic methods like __toString"
+                method_names.contains(&"__toString"),
+                "self:: offers implemented magic methods like __toString"
             );
             assert!(
                 method_names.contains(&"create"),
@@ -869,7 +870,7 @@ async fn test_completion_self_double_colon_includes_construct() {
     }
 }
 
-/// `static::` should include `__construct` but exclude other magic methods.
+/// `static::` should include `__construct` along with other implemented magic methods.
 #[tokio::test]
 async fn test_completion_static_double_colon_includes_construct() {
     let backend = create_test_backend();
@@ -926,8 +927,8 @@ async fn test_completion_static_double_colon_includes_construct() {
                 method_names
             );
             assert!(
-                !method_names.contains(&"__clone"),
-                "static:: should still exclude other magic methods like __clone"
+                method_names.contains(&"__clone"),
+                "static:: offers implemented magic methods like __clone"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

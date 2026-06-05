@@ -1189,6 +1189,12 @@ class InvokeReturnTypeDemo
         $formatter = new ScaffoldingFormatter();
         $formatter()->write();                    // __invoke() returns Pen
 
+        // Try: type `$formatter->` — implemented magic methods such as
+        // __invoke() and __toString() are offered for explicit calls and
+        // go-to-definition, sorted below the regular methods so they never
+        // appear at the top of the list.
+        $formatter->__invoke()->write();          // explicit __invoke() call
+
         // Chaining through __invoke() return type
         $factory = new ScaffoldingPenFactory();
         $factory()->rename('Fine')->write();      // __invoke() → Pen → rename() → Pen
