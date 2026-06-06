@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780746782821,
+  "lastUpdate": 1780749970301,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10505,6 +10505,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b209f5efd7d1a2ba1d5b3bb18026999a3495a65c",
+          "message": "Build FQN index entries outside write locks\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T14:32:55+02:00",
+          "tree_id": "10dca242c371023c88fd4aff3fc2b02b294bb53d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b209f5efd7d1a2ba1d5b3bb18026999a3495a65c"
+        },
+        "date": 1780749968746,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52,
             "unit": "MiB"
           }
         ]
