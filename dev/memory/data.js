@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780750922227,
+  "lastUpdate": 1780756378542,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10607,6 +10607,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "061b5ba365186d4cc61685e1e6b7dcfa11148b9a",
+          "message": "Parse code actions once per request\n\nUse the shared parser cache across code action collectors so the file\nis parsed once instead of once per refactoring candidate. Migrate\nhelper call sites to `with_parsed_program` and drop redundant arena\nallocations, then remove the completed P19 performance todo and record\nthe user-visible speedup in the changelog.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T16:20:31+02:00",
+          "tree_id": "62426435032c121c8e70b50c3df772e68398d508",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/061b5ba365186d4cc61685e1e6b7dcfa11148b9a"
+        },
+        "date": 1780756377224,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.5,
             "unit": "MiB"
           }
         ]
