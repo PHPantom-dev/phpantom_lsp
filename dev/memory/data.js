@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780727030723,
+  "lastUpdate": 1780735781820,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10437,6 +10437,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "71048b25e1224bca7e671d5468a61b03e76aaddb",
+          "message": "Coalesce whole-file requests and offload diagnostics\n\nAdd shared `(kind, uri)` request coalescing for expensive whole-file\nLSP handlers so superseded requests reuse the last result instead of\nstarting new full scans.\n\nMove fast and slow diagnostic collection onto the blocking pool and keep\npull diagnostics cache entries between edits, so pull requests return\ncached results while background recompute runs.\n\nAlso expose the cancel-safe blocking helper for reuse, clean up\ncoalescing state on file close, and update performance/changelog docs.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T10:36:53+02:00",
+          "tree_id": "45774e233f4369fbaca20a91079cdc0c82d0b716",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/71048b25e1224bca7e671d5468a61b03e76aaddb"
+        },
+        "date": 1780735780847,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.2,
             "unit": "MiB"
           }
         ]
