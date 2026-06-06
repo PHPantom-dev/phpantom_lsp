@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780750233725,
+  "lastUpdate": 1780750922227,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10573,6 +10573,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2cb0d115ced330777895ce7d8108303f800c5aa8",
+          "message": "Reuse parser arena across AST updates\n\nAdd a thread-local reusable bump arena for parse updates and reset it\nper call to avoid repeated mmap/munmap churn on each didChange.\n\nHandle re-entrant parses safely by falling back to a temporary arena\nwhen the shared arena is already borrowed.\n\nRetarget P19 in performance docs to track remaining arena reuse work\nin code action helpers instead of the parse hot path.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T14:48:54+02:00",
+          "tree_id": "377a9cd24a6f357c1f9975c0d649ad563955dd15",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2cb0d115ced330777895ce7d8108303f800c5aa8"
+        },
+        "date": 1780750921033,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.7,
             "unit": "MiB"
           }
         ]
