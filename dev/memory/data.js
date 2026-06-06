@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780749970301,
+  "lastUpdate": 1780750233725,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10539,6 +10539,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "88d95e0a54e303241fed6ba2e454b99a5090950a",
+          "message": "Use memmem for block comment terminator scan\n\nReplace block comment skipping in classmap scanning with direct\n`memmem` searches for `*/` in both symbol and class scanners.\n\nRemove completed P4 performance task from todo docs\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T14:37:40+02:00",
+          "tree_id": "955813248b53b3b711022c595dea77dde6f65394",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/88d95e0a54e303241fed6ba2e454b99a5090950a"
+        },
+        "date": 1780750232924,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.4,
             "unit": "MiB"
           }
         ]
