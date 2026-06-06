@@ -448,14 +448,19 @@ impl Backend {
         // the source file even after the uri_classes_index entry is
         // cleared by didClose.
         {
+            // Build the new entries outside the lock so the FQN-string
+            // formatting and Arc clones don't serialize concurrent readers.
+            // Only the brief insert below holds the `.write()` guards.
+            let new_entries: Vec<(String, Arc<ClassInfo>)> = arc_classes
+                .iter()
+                .filter(|cls| !cls.name.starts_with("__anonymous@"))
+                .map(|cls| (cls.fqn().to_string(), Arc::clone(cls)))
+                .collect();
+
             let mut class_idx = self.fqn_uri_index.write();
             let mut fqn_idx = self.fqn_class_index.write();
-            for cls in &arc_classes {
-                if cls.name.starts_with("__anonymous@") {
-                    continue;
-                }
-                let fqn = cls.fqn().to_string();
-                fqn_idx.insert(fqn.clone(), Arc::clone(cls));
+            for (fqn, cls) in new_entries {
+                fqn_idx.insert(fqn.clone(), cls);
                 class_idx.entry(fqn).or_insert_with(|| uri.to_owned());
             }
         }
