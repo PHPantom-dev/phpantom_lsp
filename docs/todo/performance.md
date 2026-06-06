@@ -113,37 +113,6 @@ parallelisation, this item can be dropped.
 
 ---
 
-## P6. O(n²) transitive eviction in `evict_fqn`
-
-**Impact: Low-Medium · Effort: Low**
-
-The `evict_fqn` function in `virtual_members/mod.rs` runs a
-fixed-point loop that scans the entire resolved-class cache on each
-iteration to find transitive dependents. In a large project with a
-deep class hierarchy (common in Laravel codebases with hundreds of
-Eloquent models), editing a base class can trigger a cascade of
-evictions where each round does a full cache scan.
-
-The `depends_on_any` helper also matches against both the FQN and
-the short name of the evicted class, which increases the chance of
-false-positive transitive evictions (e.g. two unrelated classes that
-share a short name like `Builder`).
-
-### Fix
-
-Build a reverse-dependency index (`HashMap<String, Vec<String>>`)
-that maps each FQN to the set of cached FQNs that directly depend
-on it. Maintain this index alongside cache insertions and removals.
-On eviction, walk the reverse index instead of scanning the entire
-cache, turning the O(n²) loop into O(dependents).
-
-If the reverse index is too much bookkeeping, a simpler first step
-is to collect all dependents in a single pass (instead of the
-current iterative fixed-point loop) by doing a breadth-first walk
-of the dependency graph within the cache.
-
----
-
 ## P8. `find_class_in_uri_classes_index` linear fallback scan
 
 **Impact: Low · Effort: Low**
@@ -803,23 +772,18 @@ Two residuals remain:
   lookup. With many of these in flight at once the mutex becomes a hot
   serialization point.
 - The per-keystroke re-parse holds `resolved_class_cache.lock()` while
-  iterating the file's classes (`ast_update.rs:587`), and — when a signature
-  actually changed — runs `evict_fqn` per class under that lock, which is
-  O(cache_size) each (see **P6**). Concurrent diagnostics also lazily parse
-  vendor/PSR-4/stub classes mid-run, taking `.write()` on the FQN indices
-  (`resolution.rs:451-452`).
+  iterating the file's classes (`ast_update.rs:587`). Concurrent diagnostics
+  also lazily parse vendor/PSR-4/stub classes mid-run, taking `.write()` on
+  the FQN indices (`resolution.rs:451-452`).
 
 **Fix (in priority order):**
 
 1. Let concurrent resolution proceed without serializing on one mutex:
    make `resolved_class_cache` a sharded / `RwLock` / lock-free map so
    lookups don't contend (it is read-mostly during resolution). This is the
-   same cache **P6**/**P9** address algorithmically; here the concern is the
+   same cache **P9** addresses algorithmically; here the concern is the
    lock granularity.
-2. Stop holding `resolved_class_cache.lock()` across `evict_fqn`
-   (`ast_update.rs:587`, `resolution.rs:511`): collect keys under a short
-   lock, or keep a reverse dependency index so eviction is O(dependents).
-3. Build new `fqn_uri_index` / `fqn_class_index` entries outside the lock,
+2. Build new `fqn_uri_index` / `fqn_class_index` entries outside the lock,
    then extend under a brief `.write()`.
 
 **Reproduction:** drive the server over stdio against a warm-cache large
