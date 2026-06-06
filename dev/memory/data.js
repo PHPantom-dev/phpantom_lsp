@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780764634687,
+  "lastUpdate": 1780772238763,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10675,6 +10675,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "669b0e1f41bd90a6b0c0f1d5dc601c80710b9622",
+          "message": "Remove dead linear class lookup fallback\n\nDrop the unreachable O(n) fallback scan in\n`find_class_in_uri_classes_index` and return `None` after the hash\nindex miss. Update performance todo docs to remove P8 and note the\nchange in the changelog.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T20:43:52+02:00",
+          "tree_id": "9ed78dccd0cf1b0871f0820b802b8bf5dd7a062f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/669b0e1f41bd90a6b0c0f1d5dc601c80710b9622"
+        },
+        "date": 1780772237151,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 57.4,
             "unit": "MiB"
           }
         ]
