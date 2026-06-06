@@ -374,6 +374,12 @@ impl<'a> LineIndex<'a> {
         }
     }
 
+    /// The content this index was built from, for callers that also need to
+    /// scan the raw source (e.g. to locate a declaration's end).
+    pub(crate) fn content(&self) -> &'a str {
+        self.content
+    }
+
     /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
     /// column). Offsets past the end of the content clamp to the content
     /// length, matching [`offset_to_position`].

@@ -759,30 +759,6 @@ diagnostic layer.
 
 ---
 
-## P22. `offset_to_position` rescans content per element in outline/folding
-
-**Impact: Medium · Effort: Low**
-
-`offset_to_position` walks the file from byte 0 on every call, so it is
-O(offset). The semantic-tokens handler used to call it once per token,
-making highlighting O(n²) (a ~6 000-line file took ~17 s at full CPU);
-that path now precomputes a `LineIndex` (`src/util.rs`) and binary-searches
-per offset. The same per-element pattern remains in
-`document_symbols.rs` (~20 calls, one per class/method/property/constant
-declaration) and `folding.rs` (~18 calls). On a large file with many
-declarations these add avoidable latency on every outline refresh and
-document open.
-
-**Fix:** Build a `LineIndex` once at the top of the document-symbols and
-folding handlers and convert every offset through it instead of calling
-`offset_to_position` directly. (`inlay_hints.rs`, `document_links.rs`,
-`references`, and `rename` also call `offset_to_position`, but those
-either run on demand or convert a bounded number of offsets, so they are
-lower priority — adopt `LineIndex` there too if they show up in
-profiles.)
-
----
-
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class
