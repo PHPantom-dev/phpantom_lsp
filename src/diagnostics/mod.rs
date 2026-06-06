@@ -658,12 +658,30 @@ impl Backend {
             return;
         }
 
+        // The native collectors are expensive (a full-file forward walk and
+        // type resolution — hundreds of ms to several seconds on a large
+        // file). They are pure CPU work and must never run inline on an async
+        // worker: editors pull both `textDocument/diagnostic` and
+        // `workspace/diagnostic` on every keystroke, and a handful of
+        // concurrent inline computes will occupy every async runtime thread,
+        // stalling delivery of completion and hover responses even though
+        // those handlers themselves finished. Run them on the blocking pool.
+
         // ── Phase 1: collect and cache fast diagnostics ─────────────
-        let mut fast_diagnostics = Vec::new();
-        let effective_content_owned: Option<String> =
-            self.blade_virtual_content.read().get(uri_str).cloned();
-        let effective_content = effective_content_owned.as_deref().unwrap_or(content);
-        self.collect_fast_diagnostics(uri_str, effective_content, &mut fast_diagnostics);
+        let fast_diagnostics = {
+            let backend = self.clone_for_blocking();
+            let uri = uri_str.to_string();
+            let content = content.to_string();
+            crate::server::run_blocking_cancel_safe(move || {
+                let mut out = Vec::new();
+                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
+                let effective = effective_owned.as_deref().unwrap_or(&content);
+                backend.collect_fast_diagnostics(&uri, effective, &mut out);
+                out
+            })
+            .await
+            .unwrap_or_default()
+        };
 
         {
             let mut cache = self.diag_last_fast.lock();
@@ -676,20 +694,26 @@ impl Backend {
         self.assemble_and_push(uri_str).await;
 
         // ── Phase 2: compute and cache slow diagnostics ─────────────
-        // The resolved-class cache guard must not cross an `.await`
-        // point (it contains a raw pointer and is !Send).  Scope it
-        // tightly around the synchronous diagnostic collection.
-        let mut slow_diagnostics = Vec::new();
-        {
-            let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
-                &self.resolved_class_cache,
-            );
-
-            let effective_content_owned: Option<String> =
-                self.blade_virtual_content.read().get(uri_str).cloned();
-            let effective_content = effective_content_owned.as_deref().unwrap_or(content);
-            self.collect_slow_diagnostics(uri_str, effective_content, &mut slow_diagnostics);
-        }
+        let slow_diagnostics = {
+            let backend = self.clone_for_blocking();
+            let uri = uri_str.to_string();
+            let content = content.to_string();
+            crate::server::run_blocking_cancel_safe(move || {
+                // The resolved-class cache guard contains a thread-local raw
+                // pointer; activate it on this blocking thread for the
+                // duration of the synchronous collection only.
+                let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
+                    &backend.resolved_class_cache,
+                );
+                let mut out = Vec::new();
+                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
+                let effective = effective_owned.as_deref().unwrap_or(&content);
+                backend.collect_slow_diagnostics(&uri, effective, &mut out);
+                out
+            })
+            .await
+            .unwrap_or_default()
+        };
 
         {
             let mut cache = self.diag_last_slow.lock();
@@ -866,19 +890,15 @@ impl Backend {
             return;
         }
 
-        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
-
-        if pull_mode {
-            // Invalidate the cached full diagnostics so the next pull
-            // triggers a fresh computation instead of returning stale
-            // results.  Do NOT remove the resultId — removing it resets
-            // the ID to 0 (via unwrap_or), which can match a stale
-            // previousResultId sent by the client and cause the pull
-            // handler to return "unchanged" with outdated diagnostics.
-            // The resultId is bumped naturally when assemble_and_push
-            // caches new results.
-            self.diag_last_full.lock().remove(&uri);
-        }
+        // In pull mode we deliberately KEEP the previously cached full set.
+        // The pull handler no longer computes on the request path (that
+        // wedged the transport — see `trigger_diagnostics_for_pull`), so the
+        // editor would otherwise flicker to empty between an edit and the
+        // background recompute. Keeping the stale set means a pull returns
+        // the old diagnostics until the worker recomputes, bumps the
+        // resultId, and requests a refresh, which makes the editor re-pull
+        // the fresh set. The resultId is bumped only by `assemble_and_push`,
+        // so the "unchanged" fast-path stays correct.
 
         // Both modes: queue for the debounced background worker.
         // In push mode the worker pushes the full assembled set.
@@ -959,7 +979,7 @@ impl Backend {
     /// both fast and slow collectors synchronously (no debounce) and
     /// caches the results.  The pull handler reads `diag_last_full`
     /// after this returns.
-    pub(crate) async fn trigger_diagnostics_for_pull(&self, uri_str: &str) {
+    pub(crate) fn trigger_diagnostics_for_pull(&self, uri_str: &str) {
         // Don't compute diagnostics before initialization is complete.
         // The pull handler will return empty results; once `initialized`
         // finishes it schedules all open files which populates the cache.
@@ -971,17 +991,23 @@ impl Backend {
             return;
         }
 
-        let content = {
-            let files = self.open_files.read();
-            match files.get(uri_str) {
-                Some(c) => c.clone(),
-                None => return,
-            }
-        };
-
-        // Run the full native diagnostic pipeline (fast + slow),
-        // cache per-source results, and push assembled diagnostics.
-        self.publish_diagnostics_for_file(uri_str, &content).await;
+        // NEVER compute on the request path. The native pass takes seconds on
+        // a large file, and editors pull both `textDocument/diagnostic` and
+        // `workspace/diagnostic` on every keystroke — far faster than the
+        // compute drains. A synchronous pull holds a tower-lsp concurrency
+        // slot for the whole compute, so a typing burst fills every slot and
+        // wedges the transport (it can no longer even read `$/cancelRequest`).
+        //
+        // Instead, ensure the debounced background worker will (re)compute
+        // this file off the async runtime; it caches the full set and
+        // requests a workspace diagnostic refresh when done. This pull
+        // returns whatever is currently cached (stale results are kept until
+        // the refresh, so the editor never flickers to empty).
+        {
+            let mut pending = self.diag_pending_uris.lock();
+            pending.insert(uri_str.to_string());
+        }
+        self.diag_notify.notify_one();
     }
 
     /// Long-lived background task that processes diagnostic requests.
@@ -1056,6 +1082,16 @@ impl Backend {
                     }
                 };
                 self.publish_diagnostics_for_file(uri, &content).await;
+            }
+
+            // In pull mode the freshly computed full set is now cached with a
+            // bumped resultId, but the editor doesn't know to ask for it. Ask
+            // it to re-pull so the new diagnostics replace the stale ones the
+            // pull handler has been returning during the recompute.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
             }
         }
     }
@@ -2857,6 +2893,36 @@ mod tests {
         assert!(
             range_after.is_some(),
             "Diagnostic after prologue should be kept"
+        );
+    }
+
+    /// A diagnostic pull must defer to the debounced background worker and
+    /// never run the expensive native pass on the request path. Computing
+    /// inline holds a tower-lsp concurrency slot for the full multi-second
+    /// pass, and editors pull on every keystroke — so a typing burst would
+    /// fill every slot and wedge the transport (the regression this guards).
+    #[test]
+    fn pull_diagnostics_defer_to_worker_and_never_compute_inline() {
+        use std::sync::atomic::Ordering;
+
+        let backend = crate::Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
+        backend
+            .supports_pull_diagnostics
+            .store(true, Ordering::Release);
+
+        let uri = "file:///defer.php";
+        backend.update_ast(uri, "<?php\nclass A { public function f(): void {} }\n");
+
+        backend.trigger_diagnostics_for_pull(uri);
+
+        assert!(
+            backend.diag_pending_uris.lock().contains(uri),
+            "pull must schedule the file for the background worker"
+        );
+        assert!(
+            !backend.diag_last_full.lock().contains_key(uri),
+            "pull must not compute diagnostics inline on the request path"
         );
     }
 }

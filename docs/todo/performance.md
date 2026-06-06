@@ -763,17 +763,38 @@ diagnostic layer.
 
 **Impact: Medium · Effort: Medium**
 
-The hard wedge — where the server stopped responding to *everything* under
-the editor's per-keystroke request barrage — has been fixed (the tower-lsp
-request-concurrency limit was raised from its default of 4, which had been
-blocking the transport's message-read loop, and the heavy interactive
-handlers now run on the blocking thread pool). The server now stays
-responsive and recovers as soon as typing pauses.
+Three causes have been fixed. The hard wedge (the server stopped responding
+to *everything* because the tower-lsp request-concurrency limit of 4 blocked
+the transport's message-read loop). The whole-file pile-up: `semanticTokens/full`
+(~260 ms) and `codeLens` (~140 ms) on a large file are re-issued on every
+keystroke and cannot be aborted once their `spawn_blocking` work starts, so a
+fast typist piled up dozens of full-file scans; whole-file requests are now
+coalesced per `(kind, uri)` so at most one runs per kind per file and
+superseded ones short-circuit. And the diagnostic wedge: the native
+diagnostic pass (seconds on a large file) ran **synchronously on the pull
+request that asked for it**, and editors pull both `textDocument/diagnostic`
+and `workspace/diagnostic` (which loops over every open file) on each
+keystroke — far faster than the pass drains. Each in-flight pull held a
+tower-lsp concurrency slot for the whole multi-second compute, so a typing
+burst filled every slot and the read loop could no longer even accept
+`$/cancelRequest`, wedging the server completely. The pull path now never
+computes: it returns the cached set immediately and defers to the single
+debounced background worker, which computes off the async runtime and
+requests a workspace diagnostic refresh when done.
 
-A residual remains: under a *sustained* full barrage (a fast typist firing
-completion + a resolve per item + both diagnostic kinds + semantic tokens on
-every keystroke), completion latency still climbs while the burst continues,
-because the resolution work funnels through coarse shared locks.
+Two residuals remain:
+
+1. **The diagnostic pass itself is very slow.** On a 6 k-line file each
+   collector takes seconds (`unknown_member` ~30 s, `type_error` ~66 s,
+   `deprecated` ~35 s, `argument_count` ~26 s — measured uncached; the live
+   path shares the resolved-class cache so it is faster but still multiple
+   seconds), and it recomputes on every edit. Responsiveness is now
+   decoupled from it, but diagnostic *results* still lag the edit by seconds.
+   This is the forward-walker / resolution algorithmic cost (see P20-P25),
+   not lock granularity.
+2. **Shared-resolution-lock contention.** Under a *sustained* full barrage,
+   completion latency still climbs while the burst continues, because the
+   resolution work funnels through coarse shared locks.
 
 - Completion's resolver and every `completionItem/resolve`, diagnostic, and
   semantic-token pass read `class_not_found_cache` (`resolution.rs:99`),
@@ -802,12 +823,11 @@ because the resolution work funnels through coarse shared locks.
    then extend under a brief `.write()`.
 
 **Reproduction:** drive the server over stdio against a warm-cache large
-file; per "keystroke" send a full-document `didChange` plus the whole
-request barrage (completion + ~13 resolves + both diagnostic kinds +
-semantic tokens) without waiting for responses, cancelling the superseded
-ones, at ~80 ms cadence. The server stays responsive (cheap requests remain
-instant), but completion latency grows for as long as the burst continues
-instead of staying flat.
+file; per "keystroke" send a full-document `didChange` plus the resolution
+barrage (completion + ~13 resolves + both diagnostic kinds) without waiting
+for responses, cancelling the superseded ones, at ~80 ms cadence. The server
+stays responsive (cheap requests remain instant), but completion latency
+grows for as long as the burst continues instead of staying flat.
 
 ---
 

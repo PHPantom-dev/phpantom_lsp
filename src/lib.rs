@@ -199,7 +199,6 @@ pub use virtual_members::resolve_class_fully;
 ///   `collect_deprecated_diagnostics`, `collect_unused_import_diagnostics`,
 ///   `collect_unknown_class_diagnostics`,
 ///   `collect_unknown_member_diagnostics` (includes unresolved-member-access logic)
-/// - `highlight` — `handle_document_highlight` (same-file symbol occurrence highlighting)
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -236,6 +235,9 @@ pub struct Backend {
     /// handler also verifies that the captured text is still current before
     /// updating shared maps.
     pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Coalescing state for expensive whole-file requests. See
+    /// [`WholeFileCoalesce`] for why this exists.
+    pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,
     pub(crate) client: Option<Client>,
     /// Whether to update ASTs synchronously.  Used for testing.
     pub(crate) sync_ast_updates: bool,
@@ -661,6 +663,70 @@ pub struct Backend {
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
 }
 
+/// Request-coalescing state for expensive whole-file requests (semantic
+/// tokens, code lens, document symbols, folding, links).
+///
+/// Editors re-issue these on every keystroke and cancel the superseded ones,
+/// but a `spawn_blocking` computation cannot be aborted once it starts, so a
+/// fast typist piles up many full-file scans (hundreds of ms each) that all
+/// run to completion and saturate every CPU core, starving the cheap
+/// interactive requests (completion, hover) until the user gives up waiting.
+///
+/// This coalesces by `(kind, uri)`: a global sequence stamps each request,
+/// a per-key async lock serialises computation so at most one runs per kind
+/// per file, and any request that finds itself no longer the latest when it
+/// acquires the lock short-circuits to the previous result instead of redoing
+/// the scan. A burst of N requests therefore performs at most two scans (the
+/// one already running plus the newest) rather than N.
+#[derive(Default)]
+pub(crate) struct WholeFileCoalesce {
+    /// Monotonic request counter shared across all keys.
+    seq: AtomicU64,
+    /// Latest request sequence seen per `"{kind}\0{uri}"` key.
+    latest: Mutex<HashMap<String, u64>>,
+    /// Per-key serialisation lock (async, held across the blocking compute).
+    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Last successfully computed result per key, returned to superseded
+    /// requests so the editor never briefly sees an empty result.
+    last: Mutex<HashMap<String, Arc<dyn std::any::Any + Send + Sync>>>,
+}
+
+impl WholeFileCoalesce {
+    /// Get (or create) the per-key async serialisation lock. Held across the
+    /// blocking compute so at most one computation per key runs at a time.
+    pub(crate) fn key_lock(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.locks.lock();
+        Arc::clone(
+            locks
+                .entry(key.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    }
+
+    /// Stamp a request with the next sequence number and record it as the
+    /// latest for `key`. Returns the stamped sequence.
+    pub(crate) fn stamp(&self, key: &str) -> u64 {
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.latest.lock().insert(key.to_string(), seq);
+        seq
+    }
+
+    /// Whether `seq` is still the latest request stamped for `key`.
+    pub(crate) fn is_latest(&self, key: &str, seq: u64) -> bool {
+        self.latest.lock().get(key).copied() == Some(seq)
+    }
+
+    /// Read the cached last result for `key`, if any.
+    pub(crate) fn last_result(&self, key: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.last.lock().get(key).cloned()
+    }
+
+    /// Store the last computed result for `key`.
+    pub(crate) fn store_result(&self, key: &str, value: Arc<dyn std::any::Any + Send + Sync>) {
+        self.last.lock().insert(key.to_string(), value);
+    }
+}
+
 impl Backend {
     /// Shared defaults for all Backend constructors.
     ///
@@ -681,6 +747,7 @@ impl Backend {
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
+            whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
@@ -762,6 +829,7 @@ impl Backend {
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
+            whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
@@ -1256,6 +1324,7 @@ impl Backend {
             symbol_maps: Arc::clone(&self.symbol_maps),
             parse_errors: Arc::clone(&self.parse_errors),
             did_change_parse_locks: Arc::clone(&self.did_change_parse_locks),
+            whole_file_coalesce: Arc::clone(&self.whole_file_coalesce),
             // RwLock fields are shared by Arc::clone — the diagnostic
             // worker reads them concurrently with the main Backend.
             client: self.client.clone(),

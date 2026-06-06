@@ -55,7 +55,7 @@ use crate::phar;
 /// Wrapping the blocking call in an inner `tokio::spawn` keeps it owned by a
 /// live task that always runs to completion, so the handle is never orphaned.
 /// Returns `None` only if the blocking task itself panicked.
-async fn run_blocking_cancel_safe<R, F>(f: F) -> Option<R>
+pub(crate) async fn run_blocking_cancel_safe<R, F>(f: F) -> Option<R>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -647,6 +647,16 @@ impl LanguageServer for Backend {
         self.open_files.write().remove(&uri);
         self.did_change_parse_locks.lock().remove(&uri);
 
+        // Drop coalescing state for this file so the maps don't grow unbounded
+        // across an editing session.
+        let suffix = format!("\u{0}{uri}");
+        {
+            let coalesce = &self.whole_file_coalesce;
+            coalesce.latest.lock().retain(|k, _| !k.ends_with(&suffix));
+            coalesce.locks.lock().retain(|k, _| !k.ends_with(&suffix));
+            coalesce.last.lock().retain(|k, _| !k.ends_with(&suffix));
+        }
+
         // Clean up Blade preprocessor state for the closed file.
         if self.is_blade_file(&uri) {
             self.blade_virtual_content.write().remove(&uri);
@@ -1157,10 +1167,14 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri.to_string();
-
-        self.handle_with_uri("document_symbol", &uri, |content| {
-            self.handle_document_symbol(&uri, content)
+        let backend = self.clone_for_blocking();
+        let u = uri.clone();
+        self.coalesced_whole_file("document_symbol", &uri, move || {
+            backend.handle_with_uri("document_symbol", &u, |content| {
+                backend.handle_document_symbol(&u, content)
+            })
         })
+        .await
     }
 
     #[allow(deprecated)] // SymbolInformation::deprecated is deprecated in the LSP types crate
@@ -1173,23 +1187,38 @@ impl LanguageServer for Backend {
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri.to_string();
-        self.handle_with_uri("folding_range", &uri, |content| {
-            self.handle_folding_range(content)
+        let backend = self.clone_for_blocking();
+        let u = uri.clone();
+        self.coalesced_whole_file("folding_range", &uri, move || {
+            backend.handle_with_uri("folding_range", &u, |content| {
+                backend.handle_folding_range(content)
+            })
         })
+        .await
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri.to_string();
-        self.handle_with_uri("code_lens", &uri, |content| {
-            self.handle_code_lens(&uri, content)
+        let backend = self.clone_for_blocking();
+        let u = uri.clone();
+        self.coalesced_whole_file("code_lens", &uri, move || {
+            backend.handle_with_uri("code_lens", &u, |content| {
+                backend.handle_code_lens(&u, content)
+            })
         })
+        .await
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         let uri = params.text_document.uri.to_string();
-        self.handle_with_uri("document_link", &uri, |content| {
-            self.handle_document_link(&uri, content)
+        let backend = self.clone_for_blocking();
+        let u = uri.clone();
+        self.coalesced_whole_file("document_link", &uri, move || {
+            backend.handle_with_uri("document_link", &u, |content| {
+                backend.handle_document_link(&u, content)
+            })
         })
+        .await
     }
 
     async fn selection_range(
@@ -1208,20 +1237,18 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri.to_string();
-        // Highlighting is requested on every keystroke and re-serializes the
-        // whole token array; keep it off the async runtime.
+        // Highlighting is requested on every keystroke, re-serializes the whole
+        // token array, and is one of the most expensive whole-file requests.
+        // Coalesce it so a typing burst cannot pile up scans that saturate the
+        // CPU and stall completion (see `coalesced_whole_file`).
         let backend = self.clone_for_blocking();
-        tokio::spawn(async move {
-            tokio::task::spawn_blocking(move || {
-                backend.handle_with_uri("semantic_tokens_full", &uri, |content| {
-                    backend.handle_semantic_tokens_full(&uri, content)
-                })
+        let u = uri.clone();
+        self.coalesced_whole_file("semantic_tokens_full", &uri, move || {
+            backend.handle_with_uri("semantic_tokens_full", &u, |content| {
+                backend.handle_semantic_tokens_full(&u, content)
             })
-            .await
-            .unwrap_or(Ok(None))
         })
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
@@ -1441,7 +1468,7 @@ impl LanguageServer for Backend {
         };
 
         if needs_compute {
-            self.trigger_diagnostics_for_pull(&uri_str).await;
+            self.trigger_diagnostics_for_pull(&uri_str);
         }
 
         let (diagnostics, result_id) = {
@@ -1524,7 +1551,7 @@ impl LanguageServer for Backend {
                 !cache.contains_key(uri_str.as_str())
             };
             if needs_compute {
-                self.trigger_diagnostics_for_pull(uri_str).await;
+                self.trigger_diagnostics_for_pull(uri_str);
             }
 
             let diagnostics = {
@@ -1646,6 +1673,56 @@ impl Backend {
         Ok(self
             .with_file_content(handler_name, uri, None, |content, _| f(content))
             .flatten())
+    }
+
+    /// Run an expensive whole-file request (`kind`) for `uri` with coalescing.
+    ///
+    /// The `compute` closure runs on the blocking pool. At most one
+    /// computation per `(kind, uri)` runs at a time; a request that is no
+    /// longer the most recent of its kind when it acquires the slot returns
+    /// the previous result instead of recomputing. This stops a keystroke
+    /// burst from piling up dozens of un-cancellable full-file scans that
+    /// would otherwise saturate every core and stall completion and hover.
+    ///
+    /// See [`WholeFileCoalesce`](crate::WholeFileCoalesce) for the rationale.
+    async fn coalesced_whole_file<T, F>(
+        &self,
+        kind: &str,
+        uri: &str,
+        compute: F,
+    ) -> Result<Option<T>>
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce() -> Result<Option<T>> + Send + 'static,
+    {
+        let key = format!("{kind}\u{0}{uri}");
+        let coalesce = &self.whole_file_coalesce;
+        let seq = coalesce.stamp(&key);
+
+        let lock = coalesce.key_lock(&key);
+        let _guard = lock.lock().await;
+
+        // A newer request of the same kind for this file arrived while we
+        // waited: it will produce the fresh result, so skip the scan and hand
+        // back the previous result. The editor superseded (and likely already
+        // cancelled) this request, so it discards whatever we return — but the
+        // cached value avoids any chance of a momentary empty result.
+        if !coalesce.is_latest(&key, seq) {
+            return Ok(coalesce
+                .last_result(&key)
+                .and_then(|any| any.downcast_ref::<T>().cloned()));
+        }
+
+        let result = run_blocking_cancel_safe(compute)
+            .await
+            .unwrap_or(Ok(None))?;
+        if let Some(value) = &result {
+            coalesce.store_result(
+                &key,
+                Arc::new(value.clone()) as Arc<dyn std::any::Any + Send + Sync>,
+            );
+        }
+        Ok(result)
     }
 
     // ── Initialization helpers ───────────────────────────────────────────
@@ -2544,5 +2621,91 @@ impl Backend {
                 idx.entry(name.clone()).or_insert_with(|| path.clone());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod coalesce_tests {
+    use crate::Backend;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// A burst of concurrent whole-file requests for the same `(kind, uri)`
+    /// must coalesce: only a small number actually compute, and the rest
+    /// short-circuit. This is the mechanism that stops a keystroke burst from
+    /// piling up un-cancellable full-file scans and starving completion.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn coalesced_whole_file_collapses_a_burst() {
+        const N: usize = 20;
+
+        let backend = Arc::new(Backend::new_test());
+        let computes = Arc::new(AtomicUsize::new(0));
+
+        // Fire N concurrent requests for the same kind+uri. Each "computation"
+        // is deliberately slow so the whole burst arrives while the first one
+        // is still running — exactly the editor's keystroke-burst pattern.
+        let mut handles = Vec::new();
+        for _ in 0..N {
+            let b = Arc::clone(&backend);
+            let c = Arc::clone(&computes);
+            handles.push(tokio::spawn(async move {
+                b.coalesced_whole_file("test_kind", "file:///burst.php", move || {
+                    let n = c.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(100));
+                    Ok(Some(n))
+                })
+                .await
+            }));
+        }
+
+        let mut results = Vec::new();
+        for h in handles {
+            results.push(h.await.unwrap().unwrap());
+        }
+
+        let computed = computes.load(Ordering::SeqCst);
+        assert!(computed >= 1, "at least one request must actually compute");
+        assert!(
+            computed < N,
+            "burst should coalesce: {computed} of {N} requests computed (no coalescing)"
+        );
+        // The latest request always gets a freshly computed value; superseded
+        // ones get either the cached value or None, but never block forever.
+        assert!(
+            results.iter().any(|r| r.is_some()),
+            "at least one request must return a result"
+        );
+    }
+
+    /// Requests for *different* files are not serialised against each other:
+    /// distinct `(kind, uri)` keys each compute independently.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn coalesced_whole_file_is_per_uri() {
+        let backend = Arc::new(Backend::new_test());
+        let computes = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for i in 0..4 {
+            let b = Arc::clone(&backend);
+            let c = Arc::clone(&computes);
+            let uri = format!("file:///file{i}.php");
+            handles.push(tokio::spawn(async move {
+                b.coalesced_whole_file("test_kind", &uri, move || {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    Ok(Some(i))
+                })
+                .await
+            }));
+        }
+        for h in handles {
+            let _ = h.await.unwrap().unwrap();
+        }
+
+        assert_eq!(
+            computes.load(Ordering::SeqCst),
+            4,
+            "each distinct file must compute independently"
+        );
     }
 }
