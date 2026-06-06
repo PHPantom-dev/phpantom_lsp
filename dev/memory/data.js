@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780726155238,
+  "lastUpdate": 1780727030723,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10403,6 +10403,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "375a7ee073b33f1390e821491145579190bb2100",
+          "message": "Use LineIndex for symbols and folding offsets\n\nReplace repeated `offset_to_position` rescans with a shared\n`LineIndex` in document symbols and folding range generation, and\nremove the completed performance todo item for this O(n²) hotspot.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T08:11:48+02:00",
+          "tree_id": "48e351415369797b5b87722d6adebfbd49644a6e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/375a7ee073b33f1390e821491145579190bb2100"
+        },
+        "date": 1780727029253,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52,
             "unit": "MiB"
           }
         ]
