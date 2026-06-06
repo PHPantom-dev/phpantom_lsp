@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Eloquent relation and column string completion.** Typing inside string arguments to `with()`, `load()`, `whereHas()`, and other Eloquent methods that accept relation names now offers relationship method names as completions, with dot-notation traversal for nested relations. Similarly, `where()`, `orderBy()`, `select()`, `pluck()`, and other column-accepting methods offer model column names (from `$casts`, `$fillable`, `@property` tags, timestamps, etc.).
 - **`model-property<T>` pseudo-type recognition.** The Larastan `model-property<Model>` type no longer triggers "unknown class" diagnostics. It is treated as a string subtype.
 
+### Changed
+
+- **Class lookups no longer fall back to a linear scan.** The O(n) fallback scan over all parsed files was dead code since the O(1) hash index is always populated first. Removing it eliminates a potential micro-stutter during initial indexing.
+
 ### Fixed
 
 - **The editor stays responsive during fast typing in large files.** Editors send a burst of requests on every keystroke (completion, a documentation lookup for each suggestion, diagnostics, code lens, semantic highlighting, and more). The server processed only a few at a time, so during continuous typing the burst backed up until the server stopped answering anything at all, including the completion the user was waiting on, and it only recovered after a restart. Now the burst is processed concurrently and every expensive request runs off the main loop: diagnostics (which re-analyze the whole file on each edit) compute in the background instead of on the request that asked for them, so a diagnostic pull returns immediately and never blocks the threads that deliver completion and hover, and repeated whole-file requests (semantic highlighting, code lens, the document outline, folding, document links) are collapsed so a fast typist's superseded requests no longer pile up and monopolize the CPU. Completion and other requests keep coming back while you type.

@@ -88,30 +88,6 @@ parallelisation, this item can be dropped.
 
 ---
 
-## P8. `find_class_in_uri_classes_index` linear fallback scan
-
-**Impact: Low · Effort: Low**
-
-The fast O(1) `fqn_index` lookup in `find_class_in_uri_classes_index` covers
-the common case. The slow fallback iterates every file in `uri_classes_index`
-linearly. The comment says this covers "race conditions during
-initial indexing" and anonymous classes.
-
-During initial indexing with many files open, the fallback could
-cause micro-stutters if the `fqn_index` has not been populated yet
-for a requested class. In steady state the fallback is rarely hit.
-
-### Fix
-
-Audit the code paths that can reach the fallback to determine
-whether they are still reachable after the `fqn_index` was added.
-If they are not, replace the fallback with a `None` return and a
-debug log. If they are, consider populating `fqn_index` earlier in
-the pipeline (e.g. during the byte-level scan phase) to close the
-window.
-
----
-
 ## P9. `resolved_class_cache` generic-arg specialisation
 
 **Impact: Medium · Effort: Medium**

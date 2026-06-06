@@ -1530,50 +1530,9 @@ impl Backend {
             return Some(Arc::clone(cls));
         }
 
-        // ── Slow fallback: linear scan of uri_classes_index ──
-        // Covers edge cases where the fqn_index has not been populated
-        // yet (e.g. anonymous classes, or race conditions during initial
-        // indexing).
-        let last_segment = short_name(class_name);
-        let expected_ns: Option<&str> = if class_name.contains('\\') {
-            Some(&class_name[..class_name.len() - last_segment.len() - 1])
-        } else {
-            None
-        };
-
-        let map = self.uri_classes_index.read();
-
-        for (_uri, classes) in map.iter() {
-            // Iterate ALL classes with the matching short name, not just
-            // the first.  A multi-namespace file can contain two classes
-            // with the same short name in different namespace blocks
-            // (e.g. `Illuminate\Database\Eloquent\Builder` and
-            // `Illuminate\Database\Query\Builder`).
-            for cls in classes.iter().filter(|c| c.name == last_segment) {
-                let class_ns = cls.file_namespace.as_deref();
-                if let Some(exp_ns) = expected_ns {
-                    // Use the per-class namespace (set during parsing)
-                    // rather than the file-level namespace.  This
-                    // correctly handles files with multiple namespace
-                    // blocks where different classes live under different
-                    // namespaces.
-                    if class_ns != Some(exp_ns) {
-                        continue;
-                    }
-                } else {
-                    // Bare-name lookup (no namespace in the query).
-                    // Only match classes that are themselves in the
-                    // global namespace.  Without this check, looking
-                    // up bare `"Carbon"` would incorrectly match
-                    // `Carbon\Carbon` (or any other namespaced class
-                    // whose short name happens to be `Carbon`).
-                    if class_ns.is_some() {
-                        continue;
-                    }
-                }
-                return Some(Arc::clone(cls));
-            }
-        }
+        // The fqn_class_index is always populated before (or at the
+        // same time as) uri_classes_index, so if the O(1) lookup above
+        // missed, a linear scan would not find it either.
         None
     }
 
