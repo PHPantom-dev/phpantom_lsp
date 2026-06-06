@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780725920192,
+  "lastUpdate": 1780726155238,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10369,6 +10369,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "abf958b29b0761dab3b8a75713ac2bf1fb1c56d5",
+          "message": "Optimize semantic token offset conversion with LineIndex\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T07:57:13+02:00",
+          "tree_id": "5db827257970d639173014b338137e4029aa857d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/abf958b29b0761dab3b8a75713ac2bf1fb1c56d5"
+        },
+        "date": 1780726153968,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.9,
             "unit": "MiB"
           }
         ]
