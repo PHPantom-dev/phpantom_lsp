@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780756378542,
+  "lastUpdate": 1780764634687,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10641,6 +10641,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6cb6c88dbe1de53a9912a084845a39736955bb15",
+          "message": "Preload guarded Composer helper files during init\n\nEagerly full-parse autoload \"files\" entries during indexing so\nfunctions wrapped in `function_exists` guards are available on first\nlookup instead of triggering a serial lazy-parse fallback.\n\nAdd integration coverage for guarded helper preloading, preserving\nalready-parsed files, and updated initialization expectations for\n`session()` and `app()`.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T18:37:21+02:00",
+          "tree_id": "818a579c8bfe033d06d474987ab09e52c2a6819b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6cb6c88dbe1de53a9912a084845a39736955bb15"
+        },
+        "date": 1780764632970,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.9,
             "unit": "MiB"
           }
         ]
