@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780735781820,
+  "lastUpdate": 1780746782821,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10471,6 +10471,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f2024c05bfadc97d443ecb9e3b58f84ed90881c8",
+          "message": "Use RwLock for resolved class cache reads\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-06T13:40:01+02:00",
+          "tree_id": "a0552fb988c26ef6a234825af8c07d4a383870d3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f2024c05bfadc97d443ecb9e3b58f84ed90881c8"
+        },
+        "date": 1780746782013,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.4,
             "unit": "MiB"
           }
         ]
