@@ -1227,7 +1227,19 @@ impl Backend {
                     Statement::Class(_)
                     | Statement::Interface(_)
                     | Statement::Trait(_)
-                    | Statement::Enum(_) => {
+                    | Statement::Enum(_)
+                    // Class-likes can also be declared inside top-level
+                    // conditional / control-flow blocks (version guards,
+                    // `if (! class_exists(...))` shims, etc.). Route these
+                    // through the extractor, which descends into the bodies.
+                    | Statement::If(_)
+                    | Statement::Block(_)
+                    | Statement::Try(_)
+                    | Statement::Switch(_)
+                    | Statement::While(_)
+                    | Statement::DoWhile(_)
+                    | Statement::For(_)
+                    | Statement::Foreach(_) => {
                         let mut top_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             std::iter::once(statement),
@@ -1241,6 +1253,11 @@ impl Backend {
                     _ => {}
                 }
             }
+
+            // A class-like declared in two branches of a conditional yields
+            // one entry per branch; keep the first so resolution is
+            // deterministic (see `dedup_class_likes_first_wins`).
+            Self::dedup_class_likes_first_wins(&mut result);
 
             result
         })

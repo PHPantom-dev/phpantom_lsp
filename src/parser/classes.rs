@@ -884,6 +884,25 @@ impl Backend {
     /// Recursively walk statements and extract class information.
     /// This handles classes at the top level as well as classes nested
     /// inside namespace declarations.
+    /// De-duplicate parsed class-likes by `(name, namespace)`, keeping the
+    /// first declaration in source order.
+    ///
+    /// A class-like declared in more than one branch of a conditional —
+    /// e.g. Doctrine's `ServiceEntityRepository`, defined differently for
+    /// ORM2 vs ORM3 inside an `if`/`else` version guard — yields one
+    /// [`ClassInfo`] per branch once we descend into conditional bodies.
+    /// Keeping the first declaration makes resolution deterministic and
+    /// matches PHPantom's existing first-occurrence-wins convention
+    /// (`classmap_scanner`, `find_class_by_name`, `fqn_uri_index`) as well
+    /// as PHPStan/Psalm. This must run before the classes reach
+    /// `fqn_class_index`, whose insert is last-wins and would otherwise pick
+    /// the wrong (later) branch.
+    pub(crate) fn dedup_class_likes_first_wins(items: &mut Vec<(ClassInfo, Option<String>)>) {
+        let mut seen: std::collections::HashSet<(Atom, Option<String>)> =
+            std::collections::HashSet::new();
+        items.retain(|(cls, ns)| seen.insert((cls.name, ns.clone())));
+    }
+
     pub(crate) fn extract_classes_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         classes: &mut Vec<ClassInfo>,
@@ -1336,6 +1355,94 @@ impl Backend {
                 Statement::Namespace(namespace) => {
                     Self::extract_classes_from_statements(
                         namespace.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                // Named class-likes can be declared inside conditional and
+                // control-flow blocks — most notably Doctrine's
+                // `ServiceEntityRepository`, defined inside an
+                // `if (! property_exists(EntityRepository::class, '_entityName'))`
+                // guard that selects the ORM2 vs ORM3 base class. Descend into
+                // these container bodies so such declarations are indexed with
+                // their parent class and `@extends` generics, not merely
+                // discovered by name. Anonymous classes nested in the
+                // non-container statements within these bodies are still
+                // collected via the `_` arm when the recursion reaches them.
+                Statement::If(if_stmt) => {
+                    Self::extract_classes_from_statements(
+                        if_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                    for else_if in if_stmt.body.else_if_statements() {
+                        Self::extract_classes_from_statements(else_if.iter(), classes, doc_ctx);
+                    }
+                    if let Some(else_stmts) = if_stmt.body.else_statements() {
+                        Self::extract_classes_from_statements(else_stmts.iter(), classes, doc_ctx);
+                    }
+                }
+                Statement::Block(block) => {
+                    Self::extract_classes_from_statements(
+                        block.statements.iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::Try(try_stmt) => {
+                    Self::extract_classes_from_statements(
+                        try_stmt.block.statements.iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                    for catch in try_stmt.catch_clauses.iter() {
+                        Self::extract_classes_from_statements(
+                            catch.block.statements.iter(),
+                            classes,
+                            doc_ctx,
+                        );
+                    }
+                    if let Some(finally) = &try_stmt.finally_clause {
+                        Self::extract_classes_from_statements(
+                            finally.block.statements.iter(),
+                            classes,
+                            doc_ctx,
+                        );
+                    }
+                }
+                Statement::Switch(switch_stmt) => {
+                    for case in switch_stmt.body.cases() {
+                        Self::extract_classes_from_statements(
+                            case.statements().iter(),
+                            classes,
+                            doc_ctx,
+                        );
+                    }
+                }
+                Statement::While(while_stmt) => {
+                    Self::extract_classes_from_statements(
+                        while_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::DoWhile(do_while) => {
+                    Self::extract_classes_from_statements(
+                        std::iter::once(do_while.statement),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::For(for_stmt) => {
+                    Self::extract_classes_from_statements(
+                        for_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::Foreach(foreach_stmt) => {
+                    Self::extract_classes_from_statements(
+                        foreach_stmt.body.statements().iter(),
                         classes,
                         doc_ctx,
                     );
@@ -2697,6 +2804,69 @@ mod tests {
         assert_eq!(
             parse_attribute_target_flags("SOME_UNKNOWN_CONST"),
             attribute_target::TARGET_ALL,
+        );
+    }
+
+    /// A class declared inside an `if` block (e.g. a version guard, like
+    /// Doctrine's `ServiceEntityRepository`) must be indexed with its native
+    /// parent and its `@extends Parent<Concrete>` generics — not merely
+    /// discovered by name.
+    #[test]
+    fn conditional_class_inside_if_is_extracted_with_parent_and_generics() {
+        let src = r#"<?php
+/** @template T of object */
+class Repo {}
+class Entity {}
+if (\PHP_VERSION_ID >= 80000) {
+    /** @extends Repo<Entity> */
+    class ConditionalRepo extends Repo {}
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let conditional = classes
+            .iter()
+            .find(|(c, _)| c.name == atom("ConditionalRepo"))
+            .map(|(c, _)| c)
+            .expect("class declared inside `if` should be indexed");
+
+        assert_eq!(
+            conditional.parent_class,
+            Some(atom("Repo")),
+            "conditional class should carry its native parent",
+        );
+        assert!(
+            conditional
+                .extends_generics
+                .iter()
+                .any(|(parent, args)| *parent == atom("Repo") && !args.is_empty()),
+            "conditional class should carry its `@extends Repo<Entity>` generics, got {:?}",
+            conditional.extends_generics,
+        );
+    }
+
+    /// When the same class name is declared in both branches of a conditional
+    /// (the Doctrine ORM2-vs-ORM3 shape), the first declaration in source
+    /// order wins and exactly one `ClassInfo` is produced.
+    #[test]
+    fn conditional_class_in_both_branches_keeps_first() {
+        let src = r#"<?php
+if (\defined('SOME_FLAG')) {
+    class Dup extends First {}
+} else {
+    class Dup extends Second {}
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let dups: Vec<_> = classes
+            .iter()
+            .filter(|(c, _)| c.name == atom("Dup"))
+            .collect();
+
+        assert_eq!(dups.len(), 1, "duplicate-branch class must be de-duplicated");
+        assert_eq!(
+            dups[0].0.parent_class,
+            Some(atom("First")),
+            "first (source-order) branch should win",
         );
     }
 
