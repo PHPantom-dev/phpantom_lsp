@@ -1232,3 +1232,108 @@ class Foo {
         "$count should be assigned from the extracted method's return value:\n{result}"
     );
 }
+
+#[test]
+fn variable_read_before_inner_write_is_param_and_return() {
+    // A variable that is read inside the selection *before* its first
+    // write inside the selection consumes the incoming value, so it must
+    // be passed as a parameter — even though it is also written and read
+    // after the selection (making it a return value too).
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class S {
+    public function search(array $subcategories, array $categories): array
+    {
+        if (!$subcategories) {
+            $ids = Repo::byCategories($categories)->all();
+            $subcategories = array_merge($subcategories, $ids);
+        }
+
+        if (!$subcategories) {
+            return [];
+        }
+        return $subcategories;
+    }
+}
+";
+    // Select the outer `if (!$subcategories) { ... }` block (lines 4-7).
+    let actions = get_code_actions(&backend, uri, content, 4, 8, 7, 9);
+    let action = find_extract_action(&actions).expect("should offer extract action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+
+    // $subcategories must be passed in (it is read before being written
+    // inside the selection) AND assigned from the return value.
+    assert!(
+        result.contains("$subcategories = $this->computeSubcategories($subcategories"),
+        "$subcategories must be both an argument and the assigned return value:\n{result}"
+    );
+    // The extracted method must declare $subcategories as a parameter so
+    // its body's reads resolve.
+    let extracted_start = result
+        .find("private function computeSubcategories")
+        .unwrap();
+    let extracted = &result[extracted_start..];
+    assert!(
+        extracted.contains("$subcategories")
+            && extracted[..extracted.find('{').unwrap()].contains("$subcategories"),
+        "extracted method signature must include $subcategories:\n{result}"
+    );
+    assert!(
+        extracted.contains("return $subcategories;"),
+        "extracted method should return $subcategories:\n{result}"
+    );
+}
+
+#[test]
+fn uniform_guard_value_referencing_local_uses_sentinel() {
+    // A guard `return <expr>;` whose expression references a variable
+    // that is local to the selection cannot be reproduced at the call
+    // site (the local is out of scope there).  The extraction must keep
+    // the expression inside the method and propagate it via a null
+    // sentinel instead of emitting `if (!extracted(…)) return <expr>;`.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class C {
+    public function show(Product $product): RedirectResponse
+    {
+        if ($product->redirect_id) {
+            $url = Slug::lookup($product->redirect_id);
+            if ($url) {
+                return redirect($url, 301);
+            }
+        }
+        return view('x');
+    }
+}
+";
+    // Select the outer `if ($product->redirect_id) { ... }` block (lines 4-9).
+    let actions = get_code_actions(&backend, uri, content, 4, 8, 9, 9);
+    let action = find_extract_action(&actions).expect("should offer extract action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+
+    // The call site must NOT reproduce the local-referencing expression.
+    let call_area = &result[..result.find("private function").unwrap()];
+    assert!(
+        !call_area.contains("$url"),
+        "call site must not reference the selection-local $url:\n{result}"
+    );
+    // It should propagate via the null sentinel.
+    assert!(
+        result.contains("if ($result !== null) return $result;"),
+        "call site should propagate the result through a null sentinel:\n{result}"
+    );
+    // The extracted method keeps the return expression inside, where $url
+    // is in scope.
+    let extracted_start = result.find("private function").unwrap();
+    let extracted = &result[extracted_start..];
+    assert!(
+        extracted.contains("return redirect($url, 301);"),
+        "extracted method should keep the original return expression:\n{result}"
+    );
+}

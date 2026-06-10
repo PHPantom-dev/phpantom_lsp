@@ -1841,6 +1841,35 @@ fn collect_returns_from_stmt<'a>(
     }
 }
 
+/// Whether a guard's return value is safe to reproduce verbatim at the
+/// call site.
+///
+/// `UniformGuards` re-emits the return expression at the call site
+/// (`if (!extracted(…)) return <value>;`).  That is only correct when the
+/// value is a side-effect-free literal or constant: it must not reference
+/// a variable (which could be local to the selection and out of scope at
+/// the call site) and must not be a call (which would run twice).  String
+/// literals are allowed even though they may contain `(`.
+fn is_reproducible_guard_value(value: &str) -> bool {
+    let v = value.trim();
+    if v.is_empty() {
+        return false;
+    }
+    // Any variable reference is risky — it may be selection-local.
+    if v.contains('$') {
+        return false;
+    }
+    // Quoted string literals are fine (their contents are inert).
+    let single = v.len() >= 2 && v.starts_with('\'') && v.ends_with('\'');
+    let double = v.len() >= 2 && v.starts_with('"') && v.ends_with('"');
+    if single || double {
+        return true;
+    }
+    // Numbers and constants (e.g. `42`, `Status::Bad`, `self::FOO`) are
+    // fine; a `(` indicates a call, which may have side effects.
+    !v.contains('(')
+}
+
 /// Classify the return strategy for a selection that contains return
 /// statements but does NOT end with one.
 ///
@@ -1907,23 +1936,29 @@ fn classify_guard_returns(
     let all_same = values.windows(2).all(|w| w[0].trim() == w[1].trim());
     if all_same {
         let value = values[0].trim().to_string();
-        // If the uniform value is `true` or `false`, we can use the
-        // inverse as the sentinel — the cleanest possible output.
         let lower = value.to_lowercase();
-        if lower == "false" || lower == "true" {
+        // `true`/`false`/`null` are always safe to reproduce at the call
+        // site: the extracted function returns bool and the call site
+        // does `if (!extracted(…)) return <value>;`.
+        if lower == "false" || lower == "true" || lower == "null" {
             return ReturnStrategy::UniformGuards(value);
         }
-        // If the uniform value is `null`, we can't use null as sentinel,
-        // but we can still use bool: the extracted function returns bool,
-        // and the call site does `if (!extracted()) return null;`.
-        if lower == "null" {
+        // Other uniform values can only be reproduced at the call site
+        // when they are side-effect-free literals or constants.  A value
+        // that references a variable or a call (e.g. `redirect($url)`)
+        // may depend on variables that are local to the selection and
+        // therefore out of scope at the call site, or it may have side
+        // effects that must not run twice.  Such a value is kept inside
+        // the extracted function via the null sentinel below.
+        if is_reproducible_guard_value(&value) {
             return ReturnStrategy::UniformGuards(value);
         }
-        // For other uniform values, if it's not null, bool flag works.
-        return ReturnStrategy::UniformGuards(value);
+        // Fall through to the null-sentinel strategy.
     }
 
-    // Case 3: Different values, none are null — use null sentinel.
+    // Case 3: Different (or non-reproducible) values, none are null —
+    // use null sentinel so the return expressions stay inside the
+    // extracted function and propagate through `$result`.
     if !any_returns_null {
         return ReturnStrategy::SentinelNull;
     }
@@ -2666,6 +2701,47 @@ mod tests {
         let end = php.find("echo 'ok';").unwrap() + "echo 'ok';".len();
         let strategy = analyse_returns(php, start, end, 0);
         assert_eq!(strategy, ReturnStrategy::SentinelNull);
+    }
+
+    #[test]
+    fn uniform_literal_guard_value_uses_uniform_guards() {
+        // A uniform literal return value (`42`) is safe to reproduce at
+        // the call site → UniformGuards.
+        let php = "<?php\nfunction foo($x, $y) {\n    if (!$x) return 42;\n    if (!$y) return 42;\n    echo 'ok';\n}\n";
+        let start = php.find("if (!$x)").unwrap();
+        let end = php.find("echo 'ok';").unwrap() + "echo 'ok';".len();
+        let strategy = analyse_returns(php, start, end, 0);
+        assert_eq!(strategy, ReturnStrategy::UniformGuards("42".to_string()));
+    }
+
+    #[test]
+    fn uniform_non_literal_guard_value_uses_sentinel() {
+        // A uniform return value that references a variable or a call
+        // cannot be reproduced at the call site (the variable may be
+        // selection-local).  It must use the null sentinel so the
+        // expression stays inside the extracted function.
+        let php = "<?php\nfunction foo($x) {\n    $u = lookup($x);\n    if ($u) {\n        return build($u);\n    }\n    echo 'ok';\n}\n";
+        let start = php.find("$u = lookup").unwrap();
+        let end = php.find("echo 'ok';").unwrap() + "echo 'ok';".len();
+        let strategy = analyse_returns(php, start, end, 0);
+        assert_eq!(strategy, ReturnStrategy::SentinelNull);
+    }
+
+    #[test]
+    fn reproducible_guard_value_classification() {
+        assert!(is_reproducible_guard_value("42"));
+        assert!(is_reproducible_guard_value("-1"));
+        assert!(is_reproducible_guard_value("3.14"));
+        assert!(is_reproducible_guard_value("'overflow'"));
+        assert!(is_reproducible_guard_value("\"text\""));
+        assert!(is_reproducible_guard_value("Status::Bad"));
+        assert!(is_reproducible_guard_value("self::FOO"));
+        // Variables and calls are not reproducible at the call site.
+        assert!(!is_reproducible_guard_value("$url"));
+        assert!(!is_reproducible_guard_value("redirect($url, 301)"));
+        assert!(!is_reproducible_guard_value("compute()"));
+        assert!(!is_reproducible_guard_value("$this->value"));
+        assert!(!is_reproducible_guard_value(""));
     }
 
     #[test]
