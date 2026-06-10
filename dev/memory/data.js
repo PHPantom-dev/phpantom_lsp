@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780772238763,
+  "lastUpdate": 1781088933446,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10709,6 +10709,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 57.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e5e6e32bd7de5c028f643bac954d830ceaf56079",
+          "message": "Extract function handles variable read-before-write correctly\n\nExtracting a selection that reads a variable before its first assignment\nnow passes\nthe variable as an argument, not just returning its final value. When\nthe return\nexpression references a local variable or has side effects, it is kept\ninside the\nextracted method and propagated via a null sentinel at the call site.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-10T12:42:15+02:00",
+          "tree_id": "f3631c7de5c0dfd5e396749e7301856d12e0ab3d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e5e6e32bd7de5c028f643bac954d830ceaf56079"
+        },
+        "date": 1781088932141,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.8,
             "unit": "MiB"
           }
         ]
