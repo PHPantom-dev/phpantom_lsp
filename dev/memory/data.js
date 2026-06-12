@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781277881828,
+  "lastUpdate": 1781280826919,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10777,6 +10777,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "404b7dfcdf65a21777b3b4f15c39a239f58bfcb8",
+          "message": "Add `decl_start_offset` to support resolving `self` references inside\nclass-level attributes\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-12T18:01:23+02:00",
+          "tree_id": "031de84b8d2157cf4733c42728951ee912c7c75c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/404b7dfcdf65a21777b3b4f15c39a239f58bfcb8"
+        },
+        "date": 1781280825512,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.2,
             "unit": "MiB"
           }
         ]
