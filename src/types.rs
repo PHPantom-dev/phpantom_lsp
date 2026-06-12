@@ -1476,6 +1476,18 @@ pub struct ClassInfo {
     /// `Position`.  A value of `0` means "not available" (e.g. for
     /// synthetic classes or anonymous classes) — callers return `None`.
     pub keyword_offset: u32,
+    /// Byte offset where the class declaration starts, including any
+    /// leading attribute lists.
+    ///
+    /// For `#[Route(...)] class Foo {}` this points at the `#[`, whereas
+    /// `keyword_offset` points at `class`. When the class has no
+    /// attributes this equals `keyword_offset`. A value of `0` means
+    /// "not available" (synthetic classes).
+    ///
+    /// Used to associate `self`/`static`/`parent` references that appear
+    /// inside class-level attributes (which sit *before* the keyword and
+    /// the body braces) with their enclosing class.
+    pub decl_start_offset: u32,
     /// The parent class name from the `extends` clause, if any.
     /// This is the raw name as written in source (e.g. "BaseClass", "Foo\\Bar").
     pub parent_class: Option<Atom>,

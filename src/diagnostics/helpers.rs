@@ -656,20 +656,36 @@ fn skip_ws(bytes: &[u8], mut pos: usize) -> usize {
     pos
 }
 
-/// Find the innermost class whose body span contains `offset`.
+/// Find the innermost class whose declaration span contains `offset`.
 ///
 /// Returns a reference to the `ClassInfo` with the smallest span that
 /// encloses `offset`, including anonymous classes.  Used for
 /// `$this`/`self`/`static` resolution inside diagnostic collectors.
+///
+/// The span runs from the declaration start (`decl_start_offset`, which
+/// includes any leading attribute lists) to the closing brace.  Using
+/// the declaration start rather than the body's opening brace lets
+/// `self::CONST` references inside class-level attributes — which sit
+/// before the `class` keyword — resolve to their enclosing class.
 pub(crate) fn find_innermost_enclosing_class(
     local_classes: &[Arc<ClassInfo>],
     offset: u32,
 ) -> Option<&ClassInfo> {
     local_classes
         .iter()
-        .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
-        .min_by_key(|c| c.end_offset.saturating_sub(c.start_offset))
-        .map(|c| c.as_ref())
+        .map(|c| {
+            // A value of 0 means "not available"; fall back to the body
+            // start so synthetic classes keep their original span.
+            let start = if c.decl_start_offset != 0 {
+                c.decl_start_offset
+            } else {
+                c.start_offset
+            };
+            (c, start)
+        })
+        .filter(|(c, start)| offset >= *start && offset <= c.end_offset)
+        .min_by_key(|(c, start)| c.end_offset.saturating_sub(*start))
+        .map(|(c, _)| c.as_ref())
 }
 
 /// Build a standard diagnostic with the common fields pre-filled.

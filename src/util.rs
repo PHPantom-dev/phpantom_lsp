@@ -856,12 +856,26 @@ pub fn position_to_char_offset(chars: &[char], position: Position) -> Option<usi
 /// nested inside a named class's method), the smallest (most specific)
 /// class is returned.  This ensures that `$this` inside an anonymous
 /// class body resolves to the anonymous class, not the outer class.
+///
+/// The span runs from the declaration start (`decl_start_offset`, which
+/// includes any leading attribute lists) to the closing brace, so a
+/// `self::` reference inside a class-level attribute — which sits before
+/// the body braces — still resolves to the class it decorates.
 pub(crate) fn find_class_at_offset(classes: &[Arc<ClassInfo>], offset: u32) -> Option<&ClassInfo> {
     classes
         .iter()
         .map(|c| c.as_ref())
-        .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
-        .min_by_key(|c| c.end_offset - c.start_offset)
+        .map(|c| {
+            let start = if c.decl_start_offset != 0 {
+                c.decl_start_offset
+            } else {
+                c.start_offset
+            };
+            (c, start)
+        })
+        .filter(|(c, start)| offset >= *start && offset <= c.end_offset)
+        .min_by_key(|(c, start)| c.end_offset.saturating_sub(*start))
+        .map(|(c, _)| c)
 }
 
 /// Find a class in a slice by name, preferring namespace-aware matching

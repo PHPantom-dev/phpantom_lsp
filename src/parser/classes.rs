@@ -939,6 +939,10 @@ impl Backend {
                     use_generics.extend(inline_use_generics);
 
                     let keyword_offset = class.class.span.start.offset;
+                    let decl_start_offset = class
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
 
@@ -987,6 +991,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class,
                         interfaces,
                         used_traits,
@@ -1076,6 +1081,10 @@ impl Backend {
                     );
 
                     let keyword_offset = iface.interface.span.start.offset;
+                    let decl_start_offset = iface
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = iface.left_brace.start.offset;
                     let end_offset = iface.right_brace.end.offset;
 
@@ -1093,6 +1102,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class,
                         interfaces: all_parents,
                         used_traits,
@@ -1158,6 +1168,10 @@ impl Backend {
                     );
 
                     let keyword_offset = trait_def.r#trait.span.start.offset;
+                    let decl_start_offset = trait_def
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = trait_def.left_brace.start.offset;
                     let end_offset = trait_def.right_brace.end.offset;
 
@@ -1175,6 +1189,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class: None,
                         interfaces: vec![],
                         used_traits,
@@ -1270,6 +1285,10 @@ impl Backend {
                     }
 
                     let keyword_offset = enum_def.r#enum.span.start.offset;
+                    let decl_start_offset = enum_def
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = enum_def.left_brace.start.offset;
                     let end_offset = enum_def.right_brace.end.offset;
 
@@ -1288,6 +1307,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class: None,
                         interfaces,
                         used_traits,
@@ -1400,6 +1420,7 @@ impl Backend {
             start_offset,
             end_offset,
             keyword_offset,
+            decl_start_offset: start_offset,
             parent_class,
             interfaces,
             used_traits,
