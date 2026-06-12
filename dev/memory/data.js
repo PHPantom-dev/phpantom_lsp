@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781088933446,
+  "lastUpdate": 1781277881828,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10743,6 +10743,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "15725d58502f483d94a9eca267e6f0fecd30cb93",
+          "message": "**Type resolution.** `@method` tags override inherited methods of the\nsame name, and null-coalesce assignment (`??=`) preserves the resolved\nunion type to avoid false unresolvable diagnostics.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-12T17:10:38+02:00",
+          "tree_id": "7d2433dcb8541baee6b91376f346067aed1bd2e5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/15725d58502f483d94a9eca267e6f0fecd30cb93"
+        },
+        "date": 1781277880867,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.4,
             "unit": "MiB"
           }
         ]
