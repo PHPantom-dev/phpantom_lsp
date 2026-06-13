@@ -1689,3 +1689,122 @@ async fn test_phpdoc_method_no_return_type_references() {
         "Should include the @method declaration on line 2"
     );
 }
+
+// ─── Constructor References ──────────────────────────────────────────
+
+#[tokio::test]
+async fn test_constructor_references_finds_instantiations() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///ctor.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // L0
+        "class Service {\n",                      // L1
+        "    public function __construct() {}\n", // L2
+        "}\n",                                    // L3
+        "$a = new Service();\n",                  // L4
+        "$b = new Service();\n",                  // L5
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "__construct" at line 2.
+    let locs = find_references(&backend, &uri, 2, 25, true).await;
+
+    // Both `new Service()` sites should be found.
+    let has_l4 = locs.iter().any(|l| l.range.start.line == 4);
+    let has_l5 = locs.iter().any(|l| l.range.start.line == 5);
+    assert!(
+        has_l4 && has_l5,
+        "Expected both `new Service()` instantiations (L4 + L5), got {:?}",
+        locs
+    );
+}
+
+#[tokio::test]
+async fn test_constructor_references_includes_inheriting_subclass() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///ctor_inherit.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // L0
+        "class Base {\n",                         // L1
+        "    public function __construct() {}\n", // L2
+        "}\n",                                    // L3
+        "class Child extends Base {}\n",          // L4
+        "$a = new Base();\n",                     // L5
+        "$b = new Child();\n",                    // L6
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on "__construct" at line 2.
+    let locs = find_references(&backend, &uri, 2, 25, true).await;
+
+    // `new Child()` inherits Base's constructor, so it counts.
+    let has_base = locs.iter().any(|l| l.range.start.line == 5);
+    let has_child = locs.iter().any(|l| l.range.start.line == 6);
+    assert!(
+        has_base && has_child,
+        "Expected `new Base()` (L5) and inherited `new Child()` (L6), got {:?}",
+        locs
+    );
+}
+
+#[tokio::test]
+async fn test_constructor_references_excludes_overriding_subclass() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///ctor_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // L0
+        "class Base {\n",                         // L1
+        "    public function __construct() {}\n", // L2
+        "}\n",                                    // L3
+        "class Child extends Base {\n",           // L4
+        "    public function __construct() {}\n", // L5
+        "}\n",                                    // L6
+        "$a = new Base();\n",                     // L7
+        "$b = new Child();\n",                    // L8
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on Base's "__construct" at line 2.
+    let locs = find_references(&backend, &uri, 2, 25, true).await;
+
+    // `new Child()` invokes Child's OWN constructor, so it must be excluded.
+    let has_base = locs.iter().any(|l| l.range.start.line == 7);
+    let has_child = locs.iter().any(|l| l.range.start.line == 8);
+    assert!(has_base, "Expected `new Base()` (L7), got {:?}", locs);
+    assert!(
+        !has_child,
+        "`new Child()` (L8) overrides the constructor and must be excluded, got {:?}",
+        locs
+    );
+}
+
+#[tokio::test]
+async fn test_constructor_references_finds_attribute_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///ctor_attr.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // L0
+        "#[\\Attribute]\n",                                 // L1
+        "class MyAttr {\n",                                 // L2
+        "    public function __construct(int $x = 0) {}\n", // L3
+        "}\n",                                              // L4
+        "#[MyAttr(1)]\n",                                   // L5
+        "class Target {}\n",                                // L6
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Click on MyAttr's "__construct" at line 3.
+    let locs = find_references(&backend, &uri, 3, 25, true).await;
+
+    // The `#[MyAttr(1)]` attribute usage on line 5 invokes the constructor.
+    let has_attr_usage = locs.iter().any(|l| l.range.start.line == 5);
+    assert!(
+        has_attr_usage,
+        "Expected the `#[MyAttr(1)]` attribute usage (L5) to be a constructor reference, got {:?}",
+        locs
+    );
+}
