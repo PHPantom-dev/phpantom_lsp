@@ -978,6 +978,60 @@ async fn test_goto_definition_variable_jumps_to_assignment() {
     }
 }
 
+#[tokio::test]
+async fn test_goto_definition_compact_string_jumps_to_variable_assignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_compact.php").unwrap();
+    let text = concat!(
+        "<?php\n",                       // 0
+        "function demo(): array {\n",    // 1
+        "    $user = 'alice';\n",        // 2
+        "    return compact('user');\n", // 3
+        "}\n",                           // 4
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve compact('user') to the $user assignment"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 2, "$user is assigned on line 2");
+            assert_eq!(
+                location.range.start.character, 4,
+                "$user starts at column 4"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
 /// When the cursor is on a variable at its definition site (the assignment),
 /// GTD should return the self-location so editors can fall back to Find References.
 #[tokio::test]

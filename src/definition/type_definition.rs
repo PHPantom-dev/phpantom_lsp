@@ -47,7 +47,7 @@ impl Backend {
         let function_loader = self.function_loader(&ctx);
 
         let resolved_types: Vec<PhpType> = match &symbol.kind {
-            SymbolKind::Variable { name } => {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 let in_static = self
                     .symbol_maps
                     .read()

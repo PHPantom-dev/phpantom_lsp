@@ -120,7 +120,7 @@ impl Backend {
         include_declaration: bool,
     ) -> Vec<Location> {
         match kind {
-            SymbolKind::Variable { name } => {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Property declarations use Variable spans (so GTD can
                 // jump to the type hint), but Find References should
                 // search for member accesses, not local variable uses.
@@ -330,26 +330,28 @@ impl Backend {
         let reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
 
         for span in &symbol_map.spans {
-            if let SymbolKind::Variable { name } = &span.kind {
-                if name != var_name {
-                    continue;
-                }
-                // Check that this variable is in a reachable scope.
-                let span_scope = symbol_map.find_variable_scope(name, span.start);
-                if !reachable_scopes.contains(&span_scope) {
-                    continue;
-                }
-                // Optionally skip declaration sites.
-                if !include_declaration && symbol_map.var_def_kind_at(name, span.start).is_some() {
-                    continue;
-                }
-                let start = offset_to_position(content, span.start as usize);
-                let end = offset_to_position(content, span.end as usize);
-                locations.push(Location {
-                    uri: parsed_uri.clone(),
-                    range: Range { start, end },
-                });
+            let name = match &span.kind {
+                SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => name,
+                _ => continue,
+            };
+            if name != var_name {
+                continue;
             }
+            // Check that this variable is in a reachable scope.
+            let span_scope = symbol_map.find_variable_scope(name, span.start);
+            if !reachable_scopes.contains(&span_scope) {
+                continue;
+            }
+            // Optionally skip declaration sites.
+            if !include_declaration && symbol_map.var_def_kind_at(name, span.start).is_some() {
+                continue;
+            }
+            let start = offset_to_position(content, span.start as usize);
+            let end = offset_to_position(content, span.end as usize);
+            locations.push(Location {
+                uri: parsed_uri.clone(),
+                range: Range { start, end },
+            });
         }
 
         // Also include var_def sites if include_declaration is set,
@@ -412,7 +414,9 @@ impl Backend {
             scope_ends: &HashMap<u32, u32>,
         ) -> bool {
             symbol_map.spans.iter().any(|s| {
-                if let SymbolKind::Variable { name } = &s.kind {
+                if let SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } =
+                    &s.kind
+                {
                     name == var_name
                         && scope_ends
                             .get(&scope_start)

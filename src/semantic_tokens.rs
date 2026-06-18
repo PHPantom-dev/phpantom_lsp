@@ -306,7 +306,7 @@ impl Backend {
                     (tt, mods)
                 }
 
-                SymbolKind::Variable { name } => {
+                SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                     // Check if this variable is a parameter.
                     let (tt, mut mods) =
                         self.classify_variable(name, span.start, symbol_map, uri, ctx);
