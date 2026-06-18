@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Static methods complete on instance access.** Member completion after `->` now offers a class's static methods alongside its instance methods, since PHP lets you call a static method through an instance (`$obj->make()`). Static properties remain excluded, as they are only reachable via `::`. Contributed by @calebdw in https://github.com/AJenbo/phpantom_lsp/pull/174.
 - **Array-callable navigation.** Method-name strings in array callables — `[Controller::class, 'method']` and `[$object, 'method']` — now resolve like a real member reference. This makes go-to-definition, find-references, and rename work on Laravel controller actions such as `Route::get('/', [IndexPageController::class, 'indexPage'])`.
 - **Array-callable method completion.** Typing inside the method-name string of an array callable (`[Controller::class, '|']`) now offers method name completions from the resolved class, including inherited and trait methods. Works with `Class::class` constants, `$this`, and typed variables. (thanks @calebdw)
 - **Magic methods complete when implemented.** Magic methods declared on a class (`__invoke`, `__toString`, `__call`, and the rest) are now offered in member completion, so explicit calls like `$x->__invoke()` autocomplete and support go-to-definition. They are sorted below the regular methods so they never appear at the top of the list.

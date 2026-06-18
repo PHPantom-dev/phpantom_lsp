@@ -283,7 +283,8 @@ pub(crate) fn build_method_label(method: &MethodInfo) -> String {
 /// Build completion items for a resolved class, filtered by access kind
 /// and visibility scope.
 ///
-/// - `Arrow` access: returns only non-static methods and properties.
+/// - `Arrow` access: returns both instance and static methods, but only
+///   non-static properties.
 /// - `DoubleColon` access: returns only static methods, static properties, and constants.
 /// - `ParentDoubleColon` access: returns both static and non-static methods,
 ///   static properties, and constants — but excludes private members.
@@ -352,7 +353,9 @@ pub(crate) fn build_completion_items(
         }
 
         let include = match access_kind {
-            AccessKind::Arrow => !method.is_static,
+            // PHP allows calling static methods through an instance, so
+            // surface them in `->` completion as well.
+            AccessKind::Arrow => true,
             // External `ClassName::` shows only static methods, but
             // `__construct` is an exception — it's an instance method
             // that is routinely called via `ClassName::__construct()`
