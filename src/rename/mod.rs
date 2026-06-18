@@ -130,7 +130,7 @@ impl Backend {
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
         // Find all references (including the declaration).
-        let locations = self.find_references(uri, content, position, true)?;
+        let locations = self.find_references_for_rename(uri, content, position, true)?;
 
         if locations.is_empty() {
             return None;
