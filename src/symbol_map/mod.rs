@@ -143,6 +143,17 @@ pub(crate) enum SymbolKind {
         name: String,
     },
 
+    /// A string literal argument inside `compact('var')` that references
+    /// a local variable by name.
+    ///
+    /// The span covers the string content inside the quotes so rename and
+    /// go-to-definition can treat it as a variable reference while still
+    /// replacing only the bare name text.
+    CompactVariable {
+        /// Variable name without `$` prefix.
+        name: String,
+    },
+
     /// Standalone function call name (not a method call).
     ///
     /// When `is_definition` is `true`, the span covers the function name

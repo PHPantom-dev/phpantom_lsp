@@ -41,7 +41,7 @@ impl Backend {
         let symbol_map = maps.get(uri)?;
 
         let highlights = match &span.kind {
-            SymbolKind::Variable { name } => {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Check if this is actually a property declaration — if
                 // so, highlight member accesses instead of local vars.
                 if let Some(VarDefKind::Property) = symbol_map.var_def_kind_at(name, span.start) {
@@ -111,27 +111,29 @@ impl Backend {
 
         // Collect from symbol spans.
         for span in &symbol_map.spans {
-            if let SymbolKind::Variable { name } = &span.kind {
-                if name != var_name {
-                    continue;
-                }
-                let span_scope = symbol_map.find_variable_scope(name, span.start);
-                if span_scope != scope_start {
-                    continue;
-                }
-                seen_offsets.insert(span.start);
-
-                let kind = if symbol_map.var_def_kind_at(name, span.start).is_some() {
-                    DocumentHighlightKind::WRITE
-                } else {
-                    DocumentHighlightKind::READ
-                };
-
-                highlights.push(DocumentHighlight {
-                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
-                    kind: Some(kind),
-                });
+            let name = match &span.kind {
+                SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => name,
+                _ => continue,
+            };
+            if name != var_name {
+                continue;
             }
+            let span_scope = symbol_map.find_variable_scope(name, span.start);
+            if span_scope != scope_start {
+                continue;
+            }
+            seen_offsets.insert(span.start);
+
+            let kind = if symbol_map.var_def_kind_at(name, span.start).is_some() {
+                DocumentHighlightKind::WRITE
+            } else {
+                DocumentHighlightKind::READ
+            };
+
+            highlights.push(DocumentHighlight {
+                range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
+                kind: Some(kind),
+            });
         }
 
         // Include var_def sites that may not have a matching Variable span

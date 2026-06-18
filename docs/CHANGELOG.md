@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Laravel custom Eloquent builder support.** Models using the `#[UseEloquentBuilder]` attribute now have their custom builder's methods forwarded as static methods on the model. `query()`, `newQuery()`, and `newModelQuery()` return the custom builder type with correct generic model substitution. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/118.
 - **Eloquent relation and column string completion.** Typing inside string arguments to `with()`, `load()`, `whereHas()`, and other Eloquent methods that accept relation names now offers relationship method names as completions, with dot-notation traversal for nested relations. Similarly, `where()`, `orderBy()`, `select()`, `pluck()`, and other column-accepting methods offer model column names (from `$casts`, `$fillable`, `@property` tags, timestamps, etc.).
 - **`model-property<T>` pseudo-type recognition.** The Larastan `model-property<Model>` type no longer triggers "unknown class" diagnostics. It is treated as a string subtype.
+- **`compact()` strings are linked to local variables.** A string argument to `compact('user')` is now treated as a reference to the matching local variable. Renaming the variable updates the string (and renaming from the string updates the variable and its other uses), find-references includes the string, and go-to-definition on the string jumps to the variable's assignment. Contributed by @calebdw in https://github.com/PHPantom-dev/phpantom_lsp/pull/159.
 
 ### Changed
 

@@ -160,6 +160,58 @@ async fn rename_variable_without_dollar_prefix() {
 }
 
 #[tokio::test]
+async fn rename_variable_updates_compact_string() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function demo(): array {\n",
+        "    $user = 'alice';\n",
+        "    return compact('user');\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 2, 6, "$person").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for variable rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let updated = apply_edits(text, &file_edits);
+    assert!(updated.contains("$person = 'alice';"));
+    assert!(updated.contains("compact('person')"));
+}
+
+#[tokio::test]
+async fn rename_from_compact_string_updates_variable() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function demo(): array {\n",
+        "    $user = 'alice';\n",
+        "    return compact('user');\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 3, 21, "person").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for compact rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let updated = apply_edits(text, &file_edits);
+    assert!(updated.contains("$person = 'alice';"));
+    assert!(updated.contains("compact('person')"));
+}
+
+#[tokio::test]
 async fn prepare_rename_variable() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test.php").unwrap();
@@ -181,6 +233,33 @@ async fn prepare_rename_variable() {
 
     if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = response {
         assert_eq!(placeholder, "$count");
+    } else {
+        panic!("Expected RangeWithPlaceholder response");
+    }
+}
+
+#[tokio::test]
+async fn prepare_rename_compact_string_uses_bare_name() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function demo(): array {\n",
+        "    $user = 'alice';\n",
+        "    return compact('user');\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let response = prepare_rename(&backend, &uri, 3, 21).await;
+    assert!(
+        response.is_some(),
+        "Expected prepare rename on compact string"
+    );
+
+    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = response {
+        assert_eq!(placeholder, "user");
     } else {
         panic!("Expected RangeWithPlaceholder response");
     }
