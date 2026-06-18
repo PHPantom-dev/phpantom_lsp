@@ -1154,10 +1154,10 @@ async fn test_var_property_chain_no_static_members() {
                 "Should include instance method 'get' from Cache. Got: {:?}",
                 labels
             );
-            // Static method `flush` should NOT appear for `->` access
+            // PHP allows calling static methods through an instance.
             assert!(
-                !labels.iter().any(|l| l.starts_with("flush")),
-                "Should NOT include static method 'flush' via ->. Got: {:?}",
+                labels.iter().any(|l| l.starts_with("flush")),
+                "Should include static method 'flush' via -> (PHP allows static calls via instance). Got: {:?}",
                 labels
             );
         }

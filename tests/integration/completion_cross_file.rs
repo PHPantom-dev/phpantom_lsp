@@ -959,10 +959,10 @@ async fn test_cross_file_classmap_resolution() {
                 "Should include instance method 'render' resolved via classmap, got {:?}",
                 method_names
             );
-            // Static method should not appear via ->
+            // PHP allows calling static methods through an instance.
             assert!(
-                !method_names.contains(&"create"),
-                "Should exclude static 'create' from -> access"
+                method_names.contains(&"create"),
+                "Should include static 'create' on -> access (PHP allows static calls via instance)"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

@@ -408,8 +408,8 @@ async fn test_completion_new_self_variable() {
                 "Should include non-static 'build'"
             );
             assert!(
-                !method_names.contains(&"create"),
-                "Should exclude static 'create' via ->"
+                method_names.contains(&"create"),
+                "Should include static 'create' via -> (PHP allows static calls via instance)"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),
