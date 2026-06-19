@@ -152,6 +152,8 @@ const TYPE_FIRST_KINDS: &[TagKind] = &[
     TagKind::PhpstanReturn,
     TagKind::PhpstanParam,
     TagKind::PhpstanVar,
+    TagKind::PhpstanRequireExtends,
+    TagKind::PhpstanRequireImplements,
     TagKind::PsalmReturn,
     TagKind::PsalmParam,
     TagKind::PsalmVar,

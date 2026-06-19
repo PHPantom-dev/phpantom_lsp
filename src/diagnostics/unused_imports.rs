@@ -347,6 +347,8 @@ const PHPDOC_TYPE_TAGS: &[&str] = &[
     "@psalm-var",
     "@phpstan-extends",
     "@phpstan-implements",
+    "@phpstan-require-extends",
+    "@phpstan-require-implements",
     "@psalm-extends",
     "@psalm-implements",
 ];
