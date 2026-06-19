@@ -697,6 +697,54 @@ fn docblock_nullable_type() {
 }
 
 #[test]
+fn docblock_phpstan_require_extends_produces_class_reference() {
+    let php = concat!(
+        "<?php\n",
+        "use Illuminate\\Http\\Resources\\Json\\JsonResource;\n",
+        "/** @phpstan-require-extends JsonResource */\n",
+        "trait GathersAuthorizations {}\n"
+    );
+    let map = parse_and_extract(php);
+    let docblock_start = php.find("/**").unwrap();
+    let name_in_doc = php[docblock_start..].find("JsonResource").unwrap() + docblock_start;
+
+    let hit = map.lookup(name_in_doc as u32);
+    assert!(
+        hit.is_some(),
+        "Should find JsonResource in require-extends docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "JsonResource");
+    } else {
+        panic!("Expected ClassReference for JsonResource");
+    }
+}
+
+#[test]
+fn docblock_phpstan_require_implements_produces_class_reference() {
+    let php = concat!(
+        "<?php\n",
+        "use Countable;\n",
+        "/** @phpstan-require-implements Countable */\n",
+        "trait GathersAuthorizations {}\n"
+    );
+    let map = parse_and_extract(php);
+    let docblock_start = php.find("/**").unwrap();
+    let name_in_doc = php[docblock_start..].find("Countable").unwrap() + docblock_start;
+
+    let hit = map.lookup(name_in_doc as u32);
+    assert!(
+        hit.is_some(),
+        "Should find Countable in require-implements docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "Countable");
+    } else {
+        panic!("Expected ClassReference for Countable");
+    }
+}
+
+#[test]
 fn docblock_fqn_type() {
     let php = concat!(
         "<?php\n",

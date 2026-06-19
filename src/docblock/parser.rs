@@ -544,6 +544,36 @@ mod tests {
     }
 
     #[test]
+    fn phpstan_require_extends_tag_parsed() {
+        let doc = "/**\n * @phpstan-require-extends JsonResource\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert_eq!(info.tags.len(), 1);
+        assert_eq!(info.tags[0].kind, TagKind::PhpstanRequireExtends);
+        assert_eq!(info.tags[0].name, "phpstan-require-extends");
+        assert_eq!(info.tags[0].description, "JsonResource");
+        assert!(
+            info.tags[0].description_span.start.offset < info.tags[0].description_span.end.offset,
+            "description span should be non-empty: {:?}",
+            info.tags[0].description_span
+        );
+    }
+
+    #[test]
+    fn phpstan_require_implements_tag_parsed() {
+        let doc = "/**\n * @phpstan-require-implements Countable\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert_eq!(info.tags.len(), 1);
+        assert_eq!(info.tags[0].kind, TagKind::PhpstanRequireImplements);
+        assert_eq!(info.tags[0].name, "phpstan-require-implements");
+        assert_eq!(info.tags[0].description, "Countable");
+        assert!(
+            info.tags[0].description_span.start.offset < info.tags[0].description_span.end.offset,
+            "description span should be non-empty: {:?}",
+            info.tags[0].description_span
+        );
+    }
+
+    #[test]
     fn multiline_return_description_uses_newlines() {
         let doc = "/**\n * @return array an array containing all the elements of arr1\n * after applying the callback function to each one.\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
