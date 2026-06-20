@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
+use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::ClassInfo;
 use crate::util::{
     build_fqn, collect_php_files_gitignore, find_class_at_offset, offset_to_position,
@@ -185,6 +185,27 @@ impl Backend {
                     member_name,
                 );
 
+                // Constructors are not invoked through member accesses
+                // (`$obj->__construct()`); they are invoked through
+                // `new ClassName(...)`.  An explicit `parent::__construct()`
+                // call still lands here, so route to the constructor finder
+                // seeded with the subject's resolved class(es).
+                if is_constructor_name(member_name) {
+                    let seeds = self
+                        .get_file_content(uri)
+                        .map(|content| {
+                            self.resolve_subject_to_fqns(
+                                subject_text,
+                                *is_static,
+                                &self.file_context(uri),
+                                span_start,
+                                &content,
+                            )
+                        })
+                        .unwrap_or_default();
+                    return self.find_constructor_references(&seeds, include_declaration);
+                }
+
                 self.find_member_references(
                     member_name,
                     *is_static,
@@ -201,6 +222,19 @@ impl Backend {
                 self.find_constant_references(name, include_declaration)
             }
             SymbolKind::MemberDeclaration { name, is_static } => {
+                // A constructor declaration's "references" are the
+                // `new ClassName(...)` instantiation sites (and `#[...]`
+                // attribute usages), not `->__construct()` member accesses
+                // (which don't exist in normal PHP code).
+                if is_constructor_name(name) {
+                    let ctx = self.file_context(uri);
+                    let seeds: Vec<String> =
+                        crate::util::find_class_at_offset(&ctx.classes, span_start)
+                            .map(|cc| vec![build_fqn(&cc.name, ctx.namespace.as_deref())])
+                            .unwrap_or_default();
+                    return self.find_constructor_references(&seeds, include_declaration);
+                }
+
                 // Resolve the enclosing class to scope the search.
                 let hierarchy =
                     self.resolve_member_declaration_hierarchy(uri, span_start, name, *is_static);
@@ -801,6 +835,208 @@ impl Backend {
 
         locations.dedup();
         locations
+    }
+
+    /// Find all references to a constructor (`__construct`).
+    ///
+    /// Unlike ordinary methods, constructors are not invoked through
+    /// member-access syntax (`$obj->__construct()`); the call sites are
+    /// `new ClassName(...)` instantiation expressions plus explicit
+    /// `parent::__construct()` / `self::__construct()` style calls.
+    ///
+    /// `owner_fqns` are the class(es) that declare the constructor under
+    /// the cursor.  A `new SubClass()` expression only invokes this
+    /// constructor when `SubClass` inherits it (i.e. does not declare its
+    /// own), so the search scope is expanded to inheriting descendants and
+    /// pruned at overriding ones (see
+    /// [`Self::collect_constructor_hierarchy`]).
+    fn find_constructor_references(
+        &self,
+        owner_fqns: &[String],
+        include_declaration: bool,
+    ) -> Vec<Location> {
+        if owner_fqns.is_empty() {
+            return Vec::new();
+        }
+
+        // Expand the owners to the set of classes whose instantiation
+        // invokes this same constructor (inheriting descendants), pruning
+        // at descendants that override it.
+        let scoped = self.collect_constructor_hierarchy(owner_fqns);
+        if scoped.is_empty() {
+            return Vec::new();
+        }
+
+        let mut locations = Vec::new();
+        let snapshot = self.user_file_symbol_maps();
+
+        for (file_uri, symbol_map) in &snapshot {
+            let resolved_names = self.resolved_names.read().get(file_uri).cloned();
+            let file_namespace = self.first_file_namespace(file_uri);
+            let file_use_map = std::cell::OnceCell::new();
+            let file_ctx = std::cell::OnceCell::new();
+
+            let Some(parsed_uri) = Url::parse(file_uri).ok() else {
+                continue;
+            };
+
+            let mut file_content: Option<Arc<String>> = None;
+
+            for span in &symbol_map.spans {
+                let matched = match &span.kind {
+                    // `new ClassName(...)` carries `ClassRefContext::New`;
+                    // `#[ClassName(...)]` attribute usages carry
+                    // `ClassRefContext::Attribute`.  Both invoke the
+                    // constructor.
+                    SymbolKind::ClassReference {
+                        name,
+                        is_fqn,
+                        context: ClassRefContext::New | ClassRefContext::Attribute,
+                    } => {
+                        let resolved = if *is_fqn {
+                            name
+                        } else if let Some(fqn) =
+                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
+                        {
+                            fqn
+                        } else {
+                            let use_map = file_use_map.get_or_init(|| {
+                                self.file_imports
+                                    .read()
+                                    .get(file_uri)
+                                    .cloned()
+                                    .unwrap_or_default()
+                            });
+                            &Self::resolve_to_fqn(name, use_map, &file_namespace)
+                        };
+                        scoped.contains(&normalize_fqn(strip_fqn_prefix(resolved)))
+                    }
+                    // Explicit constructor delegation written as
+                    // `parent::__construct()`, `self::__construct()`, or
+                    // `Foo::__construct()` lands here.  Resolve the subject
+                    // class and keep the call when it falls within the
+                    // constructor's owning hierarchy.
+                    SymbolKind::MemberAccess {
+                        subject_text,
+                        member_name,
+                        is_static,
+                        ..
+                    } if is_constructor_name(member_name) => {
+                        if file_content.is_none() {
+                            file_content = self.get_file_content_arc(file_uri);
+                        }
+                        match &file_content {
+                            Some(content) => {
+                                let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
+                                self.resolve_subject_to_fqns(
+                                    subject_text,
+                                    *is_static,
+                                    ctx,
+                                    span.start,
+                                    content,
+                                )
+                                .iter()
+                                .any(|fqn| scoped.contains(&normalize_fqn(strip_fqn_prefix(fqn))))
+                            }
+                            None => false,
+                        }
+                    }
+                    _ => false,
+                };
+
+                if matched {
+                    if file_content.is_none() {
+                        file_content = self.get_file_content_arc(file_uri);
+                    }
+                    if let Some(content) = &file_content {
+                        let start = offset_to_position(content, span.start as usize);
+                        let end = offset_to_position(content, span.end as usize);
+                        push_unique_location(&mut locations, &parsed_uri, start, end);
+                    }
+                }
+            }
+
+            // Optionally include the constructor declaration site(s).
+            if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
+                for class in &classes {
+                    let class_fqn = normalize_fqn(&class.fqn()).to_string();
+                    if !scoped.contains(&class_fqn) {
+                        continue;
+                    }
+
+                    for method in class.methods.iter() {
+                        if is_constructor_name(&method.name) && method.name_offset != 0 {
+                            if file_content.is_none() {
+                                file_content = self.get_file_content_arc(file_uri);
+                            }
+                            let Some(content) = &file_content else {
+                                break;
+                            };
+                            let offset = method.name_offset as usize;
+                            let start = offset_to_position(content, offset);
+                            let end = offset_to_position(content, offset + method.name.len());
+                            push_unique_location(&mut locations, &parsed_uri, start, end);
+                        }
+                    }
+                }
+            }
+        }
+
+        locations.sort_by(|a, b| {
+            a.uri
+                .as_str()
+                .cmp(b.uri.as_str())
+                .then(a.range.start.line.cmp(&b.range.start.line))
+                .then(a.range.start.character.cmp(&b.range.start.character))
+        });
+        locations.dedup();
+        locations
+    }
+
+    /// Expand the constructor owner class(es) into the full set of classes
+    /// whose instantiation (`new X(...)`) invokes the same constructor.
+    ///
+    /// Starting from `owner_fqns` (the class(es) that declare the
+    /// constructor under the cursor), walk down the inheritance tree and
+    /// include every descendant that does *not* declare its own
+    /// constructor (those inherit the owner's), pruning the walk at any
+    /// descendant that overrides it.
+    fn collect_constructor_hierarchy(&self, owner_fqns: &[String]) -> HashSet<String> {
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let declares_ctor = |fqn: &str| -> bool {
+            class_loader(fqn)
+                .map(|c| c.methods.iter().any(|m| is_constructor_name(&m.name)))
+                .unwrap_or(false)
+        };
+
+        let owners: Vec<String> = owner_fqns.iter().map(|f| normalize_fqn(f)).collect();
+        let mut result: HashSet<String> = owners.iter().cloned().collect();
+
+        // Walk down from each owner, including inheriting descendants and
+        // pruning at overrides.
+        let gti = self.gti_index.read();
+        let mut queue: std::collections::VecDeque<String> = owners.iter().cloned().collect();
+        let mut seen: HashSet<String> = owners.iter().cloned().collect();
+        while let Some(fqn) = queue.pop_front() {
+            if let Some(descendants) = gti.get(&fqn) {
+                for desc in descendants {
+                    let normalized = normalize_fqn(desc).to_string();
+                    if !seen.insert(normalized.clone()) {
+                        continue;
+                    }
+                    // A descendant that declares its own constructor uses a
+                    // different constructor — exclude it and stop walking
+                    // past it.
+                    if declares_ctor(&normalized) {
+                        continue;
+                    }
+                    result.insert(normalized.clone());
+                    queue.push_back(normalized);
+                }
+            }
+        }
+
+        result
     }
 
     /// Find all references to a member (method, property, or constant)
@@ -1789,6 +2025,13 @@ impl Backend {
 /// Normalise a class FQN: strip leading `\` if present.
 fn normalize_fqn(fqn: &str) -> String {
     strip_fqn_prefix(fqn).to_string()
+}
+
+/// Whether a member name is the PHP constructor (`__construct`).
+///
+/// PHP method names are case-insensitive, so `__CONSTRUCT` matches too.
+fn is_constructor_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("__construct")
 }
 
 /// Check whether a resolved class name matches the target FQN.

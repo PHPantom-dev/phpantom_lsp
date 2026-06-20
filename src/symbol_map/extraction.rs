@@ -1014,10 +1014,11 @@ fn extract_from_attribute_lists<'a>(
         for attr in attr_list.attributes.iter() {
             // The attribute name (e.g. `\Illuminate\...\CollectedBy`).
             let raw = bytes_to_str(attr.name.value()).to_string();
-            ctx.spans.push(class_ref_span(
+            ctx.spans.push(class_ref_span_ctx(
                 attr.name.span().start.offset,
                 attr.name.span().end.offset,
                 &raw,
+                ClassRefContext::Attribute,
             ));
 
             // Attribute arguments — also emit a CallSite so that

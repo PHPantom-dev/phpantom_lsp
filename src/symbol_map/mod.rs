@@ -94,6 +94,11 @@ pub(crate) enum ClassRefContext {
     TypeHint,
     /// In a `use` import statement at file level.
     UseImport,
+    /// As a PHP attribute (`#[Foo(...)]`).  Like `New`, this invokes the
+    /// class constructor, but — unlike `New` — it is valid on any
+    /// instantiable class and does not produce "cannot instantiate"
+    /// diagnostics.
+    Attribute,
 }
 
 #[derive(Debug, Clone)]

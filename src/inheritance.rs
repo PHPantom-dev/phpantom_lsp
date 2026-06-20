@@ -72,6 +72,27 @@ pub(crate) struct MergeDedup {
     pub constants: AtomSet,
 }
 
+/// Reserve the names of `@method` tags declared in `docblock` into the
+/// method dedup set.
+///
+/// A `@method` tag declares a method on the class that carries it.  That
+/// declaration overrides any method of the same name inherited from a
+/// superclass, exactly like a real overriding method would.  The virtual
+/// members themselves are synthesized later by the PHPDoc provider; this
+/// only stakes the claim so the inheritance walk stops merging the inherited
+/// real method over the `@method` declaration.
+fn reserve_method_tag_names(docblock: Option<&str>, dedup: &mut MergeDedup) {
+    let Some(doc) = docblock else {
+        return;
+    };
+    if !doc.contains("@method") {
+        return;
+    }
+    for m in crate::docblock::extract_method_tags(doc) {
+        dedup.methods.insert(m.name);
+    }
+}
+
 impl MergeDedup {
     /// Build from the members already present on a `ClassInfo`.
     fn from_class(class: &ClassInfo) -> Self {
@@ -338,6 +359,14 @@ pub(crate) fn resolve_class_with_inheritance(
     // addition is tracked in O(1) across all recursion levels.
     let mut dedup = MergeDedup::from_class(&merged);
 
+    // Stake a claim on the class's own `@method` tag names before merging
+    // any inherited members.  A `@method` declaration overrides a method of
+    // the same name inherited from a superclass, exactly like a real
+    // overriding method would (the virtual members themselves are
+    // synthesized later by the PHPDoc provider — here we only prevent the
+    // inheritance walk from merging the inherited real method over them).
+    reserve_method_tag_names(class.class_docblock.as_deref(), &mut dedup);
+
     // 1. Merge traits used by this class.
     //    PHP precedence: class methods > trait methods > inherited methods.
     //    Since `merged` already contains the class's own members, we only
@@ -391,6 +420,14 @@ pub(crate) fn resolve_class_with_inheritance(
         } else {
             break;
         };
+
+        // Stake a claim on this ancestor's `@method` tag names at its depth
+        // in the hierarchy, so that a real method of the same name inherited
+        // from a *farther* ancestor does not shadow the `@method`
+        // declaration.  Reserved before the ancestor's own members are
+        // merged so a real method on this same ancestor still wins over its
+        // own `@method` tag.
+        reserve_method_tag_names(parent.class_docblock.as_deref(), &mut dedup);
 
         // Build the substitution map for this parent level.
         //

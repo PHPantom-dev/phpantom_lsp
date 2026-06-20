@@ -3101,6 +3101,29 @@ public function test(): string {
 }
 
 #[test]
+fn no_diagnostic_for_self_const_in_class_level_attribute() {
+    // A `self::CONST` reference inside a class-level attribute sits
+    // *before* the `class` keyword and the body braces, so the
+    // enclosing class must be found via its declaration span (which
+    // includes the leading attribute) rather than the body span.
+    let php = r#"<?php
+#[Route(name: self::ROUTE)]
+class HealthCheckController
+{
+    public const string ROUTE = 'health-check';
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("ROUTE") || d.message.contains("could not be resolved")),
+        "expected no self::ROUTE diagnostic, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_method_on_anonymous_class_variable() {
     // When `$model = new class extends Foo { ... }` is used outside
     // the anonymous class body, member access on `$model` should

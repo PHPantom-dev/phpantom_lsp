@@ -348,16 +348,28 @@ impl ScopeMap {
                     result.return_values.push(var_name.clone());
                 }
             } else if has_write_inside && has_read_after {
-                // Written inside, read after → return value.
-                // Only treat as parameter if there's a write before (the
-                // initial value matters) or if it's read inside but its
-                // first write is *before* the range (meaning the read
-                // consumes an external value).  When the first write is
-                // inside the range the internal reads consume local
-                // assignments, so no parameter is needed.
-                let first_write_inside =
-                    first_write.is_some_and(|w| w.offset >= start && w.offset < end);
-                let needs_param = has_write_before || (has_read_inside && !first_write_inside);
+                // Written inside, read after → return value.  It is ALSO a
+                // parameter whenever the extracted code reads the variable's
+                // *incoming* value.  That happens when it was written before
+                // the range, or when a read inside the range occurs before
+                // the first pure write inside it (a read that consumes the
+                // value passed in).  A `+=`-style read-write also reads the
+                // incoming value, so a read-write that precedes any pure
+                // write counts too.
+                let first_pure_write_inside = frame_accesses
+                    .iter()
+                    .filter(|a| {
+                        a.offset >= start && a.offset < end && matches!(a.kind, AccessKind::Write)
+                    })
+                    .map(|a| a.offset)
+                    .min();
+                let reads_incoming_value = frame_accesses.iter().any(|a| {
+                    a.offset >= start
+                        && a.offset < end
+                        && matches!(a.kind, AccessKind::Read | AccessKind::ReadWrite)
+                        && first_pure_write_inside.is_none_or(|w| a.offset < w)
+                });
+                let needs_param = has_write_before || reads_incoming_value;
                 if needs_param && !result.parameters.contains(var_name) {
                     result.parameters.push(var_name.clone());
                 }

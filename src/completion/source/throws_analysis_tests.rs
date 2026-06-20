@@ -851,6 +851,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         start_offset: 0,
         end_offset: 0,
         keyword_offset: 0,
+        decl_start_offset: 0,
         parent_class: None,
         interfaces: Vec::new(),
         used_traits: Vec::new(),

@@ -4136,6 +4136,45 @@ fn process_compound_assignment<'b>(
         Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
         _ => return,
     };
+    // `??=` is handled separately: its result is the union of the LHS
+    // (with `null` stripped) and the RHS.  We combine the resolved types
+    // directly so the `class_info` already attached to each operand is
+    // preserved — collapsing to a freshly built union *type string* would
+    // discard it and force a re-resolution that fails for some subjects.
+    if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) {
+        let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+        let mut combined: Vec<ResolvedType> = Vec::new();
+        for lt in scope.get(&var_name) {
+            // Drop a bare `null` member — `??=` only keeps the LHS when it
+            // is non-null.
+            if lt.type_string.is_null() {
+                continue;
+            }
+            let mut kept = lt.clone();
+            if let Some(non_null) = kept.type_string.non_null_type() {
+                kept.type_string = non_null;
+            }
+            combined.push(kept);
+        }
+        combined.extend(rhs_types);
+        // Deduplicate by type string so an identical LHS/RHS type (e.g.
+        // `Foo|null ??= new Foo()`) does not produce a redundant union.
+        let mut seen: Vec<PhpType> = Vec::new();
+        combined.retain(|rt| {
+            if seen.contains(&rt.type_string) {
+                false
+            } else {
+                seen.push(rt.type_string.clone());
+                true
+            }
+        });
+        if !combined.is_empty() {
+            scope.set(&var_name, combined);
+        } else if !scope.contains(&var_name) {
+            scope.set_empty(&var_name);
+        }
+        return;
+    }
 
     let result_type = match &assignment.operator {
         AssignmentOperator::Concat(_) => PhpType::string(),
@@ -4155,24 +4194,7 @@ fn process_compound_assignment<'b>(
             let is_division = matches!(assignment.operator, AssignmentOperator::Division(_));
             infer_arithmetic_result_type(&lhs_types, &rhs_types, is_division)
         }
-        AssignmentOperator::Coalesce(_) => {
-            // ??= : result is union of LHS (stripped of null) and RHS.
-            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            let rhs_type = if rhs_types.is_empty() {
-                PhpType::mixed()
-            } else {
-                ResolvedType::types_joined(&rhs_types)
-            };
-            let lhs_types = scope.get(&var_name);
-            if lhs_types.is_empty() {
-                rhs_type
-            } else {
-                let lhs_type = ResolvedType::types_joined(lhs_types);
-                let non_null = lhs_type.non_null_type().unwrap_or(lhs_type.clone());
-                PhpType::Union(vec![non_null, rhs_type])
-            }
-        }
-        AssignmentOperator::Assign(_) => return, // already handled
+        AssignmentOperator::Coalesce(_) | AssignmentOperator::Assign(_) => return, // handled above / elsewhere
     };
 
     scope.set(&var_name, vec![ResolvedType::from_type_string(result_type)]);

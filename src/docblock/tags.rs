@@ -1297,8 +1297,19 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
 
     // Unwrap nullable wrappers for further analysis.  `?Foo` → `Foo`,
     // `Foo|null` → `Foo`.  For non-nullable types, use as-is.
-    let doc_inner = docblock_type.unwrap_nullable();
-    let native_inner = native_type.unwrap_nullable();
+    //
+    // `non_null_type()` strips nullability from BOTH representations — the
+    // `?Foo` (`Nullable`) form and the `Foo|null` (`Union` with a `null`
+    // member) form.  Plain `unwrap_nullable()` only handled the former, so a
+    // nullable-union native such as `object|null` reached the union branch
+    // below with its `null` member still attached.  Since `object` and `null`
+    // are both "scalar names", that branch then judged the whole type
+    // unrefinable and discarded a generic docblock return like
+    // `@psalm-return ?T`, leaving the bare native (`object|null`).
+    let doc_owned = docblock_type.non_null_type();
+    let doc_inner = doc_owned.as_ref().unwrap_or(docblock_type);
+    let native_owned = native_type.non_null_type();
+    let native_inner = native_owned.as_ref().unwrap_or(native_type);
 
     // If the docblock type is a bare, unparameterised primitive scalar
     // (`int`, `string`, `bool`, etc.), there's no value in overriding.
