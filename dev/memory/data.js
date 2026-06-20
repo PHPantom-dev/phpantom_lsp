@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781961967353,
+  "lastUpdate": 1781962623171,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10879,6 +10879,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 56,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "martin@srsen.sk",
+            "name": "Martin Sršeň",
+            "username": "MrSrsen"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "655f99baff0747f89d411d6d9345496c61dd8b64",
+          "message": "Substitute generic return types when the native hint is nullable\n\n`should_override_type_typed` used `unwrap_nullable()`, which only strips\nthe\n`?Foo` (Nullable) form and not the `Foo|null` (Union-with-null) form. A\nnullable-union native such as `object|null` therefore reached the union\nbranch with its `null` member attached; since `object` and `null` are\nboth\nscalar names, the branch judged the type unrefinable and discarded a\ngeneric\ndocblock return like `@psalm-return ?T`, leaving the bare native.\n\nUse `non_null_type()` (strips null from both Nullable and Union forms)\nso the\nnon-null part is analysed, matching the function's documented `Foo|null\n→ Foo`\nintent. Fixes inherited generic returns such as Doctrine's\n`ServiceEntityRepository<T>::find(): ?T` resolving to `object|null`.\n\nAdds an assert_type regression fixture.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-20T15:24:05+02:00",
+          "tree_id": "00447edb78a67ac4ce2666e12eae37d434190d58",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/655f99baff0747f89d411d6d9345496c61dd8b64"
+        },
+        "date": 1781962621220,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 58.2,
             "unit": "MiB"
           }
         ]
