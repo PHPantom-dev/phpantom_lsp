@@ -51,6 +51,31 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        self.find_references_with_member_mode(uri, content, position, include_declaration, true)
+    }
+
+    /// Like [`find_references`], but excludes unresolved member-call matches.
+    ///
+    /// Rename uses this stricter mode so same-named methods on unrelated or
+    /// unknown receiver types are not renamed conservatively.
+    pub(crate) fn find_references_for_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        self.find_references_with_member_mode(uri, content, position, include_declaration, false)
+    }
+
+    fn find_references_with_member_mode(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+        allow_unresolved_member_subjects: bool,
+    ) -> Option<Vec<Location>> {
         let start_total = std::time::Instant::now();
         tracing::info!(
             "Find References: starting at {} line {} char {}",
@@ -76,6 +101,7 @@ impl Backend {
                 content,
                 sym.start,
                 include_declaration,
+                allow_unresolved_member_subjects,
             );
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
@@ -118,6 +144,7 @@ impl Backend {
         content: &str,
         span_start: u32,
         include_declaration: bool,
+        allow_unresolved_member_subjects: bool,
     ) -> Vec<Location> {
         match kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -146,11 +173,15 @@ impl Backend {
                     // Resolve the enclosing class to scope the search.
                     let hierarchy =
                         self.resolve_member_declaration_hierarchy(uri, span_start, name, is_static);
+                    let declaration_scope =
+                        self.resolve_member_declaration_scope(uri, span_start, name, is_static);
                     return self.find_member_references(
                         name,
                         is_static,
                         include_declaration,
                         hierarchy.as_ref(),
+                        declaration_scope.as_ref(),
+                        allow_unresolved_member_subjects,
                     );
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
@@ -177,7 +208,7 @@ impl Backend {
             } => {
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
-                let hierarchy = self.resolve_member_access_hierarchy(
+                let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
                     uri,
                     subject_text,
                     *is_static,
@@ -211,6 +242,8 @@ impl Backend {
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
+                    declaration_scope.as_ref(),
+                    allow_unresolved_member_subjects,
                 )
             }
             SymbolKind::FunctionCall { name, .. } => {
@@ -238,11 +271,15 @@ impl Backend {
                 // Resolve the enclosing class to scope the search.
                 let hierarchy =
                     self.resolve_member_declaration_hierarchy(uri, span_start, name, *is_static);
+                let declaration_scope =
+                    self.resolve_member_declaration_scope(uri, span_start, name, *is_static);
                 self.find_member_references(
                     name,
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
+                    declaration_scope.as_ref(),
+                    allow_unresolved_member_subjects,
                 )
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -1060,6 +1097,8 @@ impl Backend {
         target_is_static: bool,
         include_declaration: bool,
         hierarchy: Option<&HashSet<String>>,
+        declaration_scope: Option<&HashSet<String>>,
+        allow_unresolved_subjects: bool,
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
@@ -1156,15 +1195,15 @@ impl Backend {
                                 span.start,
                                 content,
                             );
-                            if !subject_fqns.is_empty()
-                                && !subject_fqns.iter().any(|fqn| hier.contains(fqn))
-                            {
+                            if subject_fqns.is_empty() {
+                                if !allow_unresolved_subjects {
+                                    continue;
+                                }
+                            } else if !subject_fqns.iter().any(|fqn| hier.contains(fqn)) {
                                 // Subject resolved but none of the resolved
                                 // classes are in the target hierarchy — skip.
                                 continue;
                             }
-                            // If subject_fqns is empty, we couldn't resolve
-                            // the subject — include conservatively.
                         }
 
                         if file_content.is_none() {
@@ -1189,7 +1228,12 @@ impl Backend {
                         }
 
                         // Check if the enclosing class is in the hierarchy.
-                        if let Some(hier) = hierarchy {
+                        let declaration_filter = if *is_static == target_is_static {
+                            declaration_scope.or(hierarchy)
+                        } else {
+                            hierarchy
+                        };
+                        if let Some(hier) = declaration_filter {
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let enclosing =
                                 find_class_at_offset(&ctx.classes, span.start).or_else(|| {
@@ -1236,7 +1280,7 @@ impl Backend {
             if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
                 for class in &classes {
                     // Filter by hierarchy when available.
-                    if let Some(hier) = hierarchy {
+                    if let Some(hier) = declaration_scope.or(hierarchy) {
                         let class_fqn = class.fqn().to_string();
                         if !hier.contains(&class_fqn) {
                             continue;
@@ -1501,22 +1545,27 @@ impl Backend {
     ///
     /// Returns `Some(set_of_fqns)` when the subject can be resolved to at
     /// least one class, or `None` when resolution fails entirely.
-    fn resolve_member_access_hierarchy(
+    fn resolve_member_access_scopes(
         &self,
         uri: &str,
         subject_text: &str,
         is_static: bool,
         span_start: u32,
         member_name: &str,
-    ) -> Option<HashSet<String>> {
+    ) -> (Option<HashSet<String>>, Option<HashSet<String>>) {
         let ctx = self.file_context(uri);
-        let content = self.get_file_content(uri)?;
+        let Some(content) = self.get_file_content(uri) else {
+            return (None, None);
+        };
         let fqns =
             self.resolve_subject_to_fqns(subject_text, is_static, &ctx, span_start, &content);
         if fqns.is_empty() {
-            return None;
+            return (None, None);
         }
-        Some(self.collect_hierarchy_for_fqns(&fqns, Some(member_name), is_static))
+        (
+            Some(self.collect_hierarchy_for_fqns(&fqns)),
+            self.collect_declaring_seed_scope(&fqns, member_name, is_static),
+        )
     }
 
     /// Resolve the class hierarchy for a `MemberDeclaration` at a given offset.
@@ -1526,8 +1575,8 @@ impl Backend {
         &self,
         uri: &str,
         offset: u32,
-        member_name: &str,
-        is_static: bool,
+        _member_name: &str,
+        _is_static: bool,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
             .uri_classes_index
@@ -1546,7 +1595,34 @@ impl Backend {
                 .min_by_key(|c| c.start_offset)
         })?;
         let fqn = current_class.fqn().to_string();
-        Some(self.collect_hierarchy_for_fqns(&[fqn], Some(member_name), is_static))
+        Some(self.collect_hierarchy_for_fqns(&[fqn]))
+    }
+
+    fn resolve_member_declaration_scope(
+        &self,
+        uri: &str,
+        offset: u32,
+        member_name: &str,
+        is_static: bool,
+    ) -> Option<HashSet<String>> {
+        let classes: Vec<Arc<ClassInfo>> = self
+            .uri_classes_index
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let current_class = find_class_at_offset(&classes, offset).or_else(|| {
+            classes
+                .iter()
+                .map(|c| c.as_ref())
+                .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
+                .min_by_key(|c| c.start_offset)
+        })?;
+        self.collect_declaring_seed_scope(
+            &[current_class.fqn().to_string()],
+            member_name,
+            is_static,
+        )
     }
 
     /// Resolve a member access subject to zero or more class FQNs.
@@ -1612,12 +1688,7 @@ impl Backend {
     /// - All ancestor FQNs (parent chain, interfaces, traits)
     /// - All descendant FQNs (classes that extend/implement any class in
     ///   the hierarchy)
-    fn collect_hierarchy_for_fqns(
-        &self,
-        seed_fqns: &[String],
-        member_name: Option<&str>,
-        is_static: bool,
-    ) -> HashSet<String> {
+    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
         let mut hierarchy = HashSet::new();
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
@@ -1646,15 +1717,21 @@ impl Backend {
                 extensions.push(normalize_fqn(builder_fqn).to_string());
             }
         }
-        for ext_fqn in extensions {
+        for ext_fqn in &extensions {
             if hierarchy.insert(ext_fqn.clone()) {
-                self.collect_ancestors(&ext_fqn, &class_loader, &mut hierarchy);
+                self.collect_ancestors(ext_fqn, &class_loader, &mut hierarchy);
             }
         }
 
         // Bridge Laravel Builders back to their Models.
-        // If a class in the hierarchy is a custom builder, find which models
-        // use it and add them to the hierarchy.
+        // Only builder roots that are actually part of the original lookup
+        // should contribute models. A custom builder's ancestors include the
+        // base Eloquent builder, but that must not fan out into every model.
+        let builder_roots: HashSet<String> = seed_fqns
+            .iter()
+            .map(|fqn| normalize_fqn(fqn).to_string())
+            .chain(extensions.iter().cloned())
+            .collect();
         let mut model_seeds = Vec::new();
         {
             let class_index = self.fqn_class_index.read();
@@ -1666,10 +1743,10 @@ impl Backend {
                         .and_then(|b| b.base_name())
                         .map(normalize_fqn)
                     {
-                        if hierarchy.contains(normalized.as_str()) {
+                        if builder_roots.contains(normalized.as_str()) {
                             model_seeds.push(class_fqn.clone());
                         }
-                    } else if hierarchy
+                    } else if builder_roots
                         .contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
                     {
                         // All models use the base Eloquent Builder by default.
@@ -1678,24 +1755,24 @@ impl Backend {
                 }
             }
         }
-        for model_fqn in model_seeds {
-            if hierarchy.insert(normalize_fqn(&model_fqn).to_string()) {
-                self.collect_ancestors(&model_fqn, &class_loader, &mut hierarchy);
+        for model_fqn in &model_seeds {
+            if hierarchy.insert(normalize_fqn(model_fqn).to_string()) {
+                self.collect_ancestors(model_fqn, &class_loader, &mut hierarchy);
             }
         }
 
-        // Walk down: collect all descendants using the global GTI index.
-        // We only walk down from a class if it actually defines the member
-        // (or if no member name was provided).
+        // Walk down: collect descendants from the original target classes,
+        // not every ancestor. This keeps a concrete class rename from
+        // fanning out through an implemented interface into sibling classes.
         let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
-        if let Some(name) = member_name {
-            for fqn in &hierarchy {
-                if self.defines_member(fqn, name, is_static, &class_loader) {
-                    queue.push_back(fqn.clone());
-                }
-            }
-        } else {
-            queue.extend(hierarchy.iter().cloned());
+        for fqn in seed_fqns {
+            queue.push_back(normalize_fqn(fqn).to_string());
+        }
+        for ext_fqn in &extensions {
+            queue.push_back(ext_fqn.clone());
+        }
+        for model_fqn in &model_seeds {
+            queue.push_back(normalize_fqn(model_fqn).to_string());
         }
 
         let gti = self.gti_index.read();
@@ -1713,6 +1790,40 @@ impl Backend {
         hierarchy
     }
 
+    fn collect_declaring_seed_scope(
+        &self,
+        seed_fqns: &[String],
+        member_name: &str,
+        is_static: bool,
+    ) -> Option<HashSet<String>> {
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let declaring_seeds: Vec<String> = seed_fqns
+            .iter()
+            .map(|fqn| normalize_fqn(fqn).to_string())
+            .filter(|fqn| self.defines_member(fqn, member_name, is_static, &class_loader))
+            .collect();
+
+        if declaring_seeds.is_empty() {
+            return None;
+        }
+
+        let mut scope: HashSet<String> = declaring_seeds.iter().cloned().collect();
+        let mut queue: std::collections::VecDeque<String> = declaring_seeds.into();
+        let gti = self.gti_index.read();
+        while let Some(fqn) = queue.pop_front() {
+            if let Some(descendants) = gti.get(&fqn) {
+                for desc in descendants {
+                    let normalized = normalize_fqn(desc).to_string();
+                    if scope.insert(normalized.clone()) {
+                        queue.push_back(normalized);
+                    }
+                }
+            }
+        }
+
+        Some(scope)
+    }
+
     fn defines_member(
         &self,
         fqn: &str,
@@ -1724,7 +1835,6 @@ impl Backend {
             return false;
         };
 
-        // Real methods
         if cls
             .methods
             .iter()
@@ -1733,25 +1843,19 @@ impl Backend {
             return true;
         }
 
-        // Laravel forwarded methods
         if let Some(laravel) = cls.laravel() {
             if let Some(builder_cls) = laravel
                 .custom_builder
                 .as_ref()
                 .and_then(|b| b.base_name())
                 .and_then(class_loader)
-            {
-                // Forwarded methods are instance methods on the builder
-                // but called statically on the model.
-                if builder_cls
+                && builder_cls
                     .methods
                     .iter()
                     .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
-                {
-                    return true;
-                }
+            {
+                return true;
             }
-            // Standard builder forwarding
             if class_loader(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
                 .filter(|bc| {
                     bc.methods

@@ -875,6 +875,343 @@ async fn rename_method_does_not_leak_to_unrelated_class() {
 }
 
 #[tokio::test]
+async fn rename_private_method_excludes_unresolved_same_name_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Listener {\n",
+        "    private function recalculate(): void {}\n",
+        "    public function handle(): void {\n",
+        "        $this->recalculate();\n",
+        "    }\n",
+        "}\n",
+        "class Other {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+        "function demo($unknown, Other $other): void {\n",
+        "    $unknown->recalculate();\n",
+        "    $other->recalculate();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 2, 25, "calculate").await;
+    assert!(edit.is_some(), "Rename should produce edits");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("private function calculate(): void {}"),
+        "Private declaration should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$this->calculate()"),
+        "$this call should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$unknown->recalculate()"),
+        "Unresolved same-name call should remain unchanged; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$other->recalculate()"),
+        "Resolved unrelated class call should remain unchanged; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_listener_private_method_cross_file_stays_scoped() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///Listener.php").unwrap();
+    let uri_b = Url::parse("file:///Other.php").unwrap();
+    let uri_c = Url::parse("file:///Use.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "final class InvoiceListener {\n",
+        "    private function recalculate(): void {}\n",
+        "    public function handle(): void {\n",
+        "        $this->recalculate();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "class PricingService {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+    );
+
+    let text_c = concat!(
+        "<?php\n",
+        "function demo($unknown, PricingService $service): void {\n",
+        "    $unknown->recalculate();\n",
+        "    $service->recalculate();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+    open_file(&backend, &uri_c, text_c).await;
+
+    let edit = rename(&backend, &uri_a, 2, 25, "calculate").await;
+    assert!(edit.is_some(), "Rename should produce edits");
+
+    let edit = edit.unwrap();
+    let edits_a = edits_for_uri(&edit, &uri_a);
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    let edits_c = edits_for_uri(&edit, &uri_c);
+
+    let result_a = apply_edits(text_a, &edits_a);
+    let result_b = apply_edits(text_b, &edits_b);
+    let result_c = apply_edits(text_c, &edits_c);
+
+    assert!(
+        result_a.contains("private function calculate(): void {}"),
+        "Listener private method should be renamed; got:\n{}",
+        result_a
+    );
+    assert!(
+        result_a.contains("$this->calculate()"),
+        "Listener self-call should be renamed; got:\n{}",
+        result_a
+    );
+    assert!(
+        result_b.contains("public function recalculate(): void {}"),
+        "Unrelated class declaration should stay unchanged; got:\n{}",
+        result_b
+    );
+    assert!(
+        result_c.contains("$unknown->recalculate()"),
+        "Unknown receiver call should stay unchanged; got:\n{}",
+        result_c
+    );
+    assert!(
+        result_c.contains("$service->recalculate()"),
+        "Unrelated typed receiver call should stay unchanged; got:\n{}",
+        result_c
+    );
+}
+
+#[tokio::test]
+async fn rename_method_on_implementation_does_not_leak_to_sibling_implementors() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Recalculates {\n",
+        "    public function recalculate(): void;\n",
+        "}\n",
+        "class Listener implements Recalculates {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+        "class Worker implements Recalculates {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+        "function demo(Listener $listener, Worker $worker): void {\n",
+        "    $listener->recalculate();\n",
+        "    $worker->recalculate();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 5, 20, "calculate").await;
+    assert!(edit.is_some(), "Rename should produce edits");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains(
+            "class Listener implements Recalculates {\n    public function calculate(): void {}"
+        ),
+        "Implementation declaration should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$listener->calculate()"),
+        "Listener call should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("interface Recalculates {\n    public function recalculate(): void;"),
+        "Interface declaration should remain unchanged; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains(
+            "class Worker implements Recalculates {\n    public function recalculate(): void {}"
+        ),
+        "Sibling implementation should remain unchanged; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$worker->recalculate()"),
+        "Sibling call should remain unchanged; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_interface_method_updates_implementations_and_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Recalculates {\n",
+        "    public function recalculate(): void;\n",
+        "}\n",
+        "class Listener implements Recalculates {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+        "class Worker implements Recalculates {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+        "function demo(Recalculates $item, Listener $listener, Worker $worker): void {\n",
+        "    $item->recalculate();\n",
+        "    $listener->recalculate();\n",
+        "    $worker->recalculate();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 2, 20, "calculate").await;
+    assert!(edit.is_some(), "Rename should produce edits");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("interface Recalculates {\n    public function calculate(): void;"),
+        "Interface declaration should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains(
+            "class Listener implements Recalculates {\n    public function calculate(): void {}"
+        ),
+        "First implementation should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains(
+            "class Worker implements Recalculates {\n    public function calculate(): void {}"
+        ),
+        "Second implementation should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$item->calculate()"),
+        "Interface-typed call should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$listener->calculate()"),
+        "Listener call should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("$worker->calculate()"),
+        "Worker call should be renamed; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_child_override_stays_on_child_branch() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class BaseListener {\n",
+        "    protected function recalculate(): void {}\n",
+        "}\n",
+        "class InvoiceListener extends BaseListener {\n",
+        "    protected function recalculate(): void {\n",
+        "        $this->recalculate();\n",
+        "    }\n",
+        "}\n",
+        "class OrderListener extends BaseListener {\n",
+        "    protected function recalculate(): void {\n",
+        "        $this->recalculate();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 5, 24, "calculate").await;
+    assert!(edit.is_some(), "Rename should produce edits");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("class InvoiceListener extends BaseListener {\n    protected function calculate(): void {\n        $this->calculate();"),
+        "Child override should be renamed with its self-call; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("class BaseListener {\n    protected function recalculate(): void {}"),
+        "Parent declaration should remain unchanged; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("class OrderListener extends BaseListener {\n    protected function recalculate(): void {\n        $this->recalculate();"),
+        "Sibling override branch should remain unchanged; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_parent_method_updates_overrides_and_subclass_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class BaseJob {\n",
+        "    protected function recalculate(): void {}\n",
+        "}\n",
+        "class ChildJob extends BaseJob {\n",
+        "    protected function recalculate(): void {\n",
+        "        $this->recalculate();\n",
+        "    }\n",
+        "    public function run(): void {\n",
+        "        $this->recalculate();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 2, 24, "calculate").await;
+    assert!(edit.is_some(), "Rename should produce edits");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("class BaseJob {\n    protected function calculate(): void {}"),
+        "Parent declaration should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("class ChildJob extends BaseJob {\n    protected function calculate(): void {\n        $this->calculate();\n    }\n    public function run(): void {\n        $this->calculate();"),
+        "Override and subclass calls should be renamed; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn rename_method_includes_inherited_class() {
     // Renaming a method on a parent class should also rename it on
     // accesses through a child class.
