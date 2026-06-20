@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781280826919,
+  "lastUpdate": 1781961863562,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10811,6 +10811,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "djsmits12@gmail.com",
+            "name": "Remco Smits",
+            "username": "RemcoSmitsDev"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aaa90928fd9f18d47530092ca3d2ef747f7cfead",
+          "message": "Add constructor reference support for attributes (#155)",
+          "timestamp": "2026-06-20T15:12:17+02:00",
+          "tree_id": "2a1978cbae6098f04966e8d370a73354aadd26f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/aaa90928fd9f18d47530092ca3d2ef747f7cfead"
+        },
+        "date": 1781961861872,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.9,
             "unit": "MiB"
           }
         ]
