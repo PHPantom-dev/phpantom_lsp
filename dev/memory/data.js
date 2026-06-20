@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781965502380,
+  "lastUpdate": 1781966422866,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11015,6 +11015,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "05b3ab9a0ab40593c4b3c3846396463ee5345f7f",
+          "message": "fix(rename): scope member renames to resolved declarations",
+          "timestamp": "2026-06-20T16:27:04+02:00",
+          "tree_id": "7fc2039564b6fbfb134f8d44c5144b5db5bd0dca",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/05b3ab9a0ab40593c4b3c3846396463ee5345f7f"
+        },
+        "date": 1781966420838,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.6,
             "unit": "MiB"
           }
         ]
