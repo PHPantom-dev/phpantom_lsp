@@ -1951,3 +1951,241 @@ class Service {
         results
     );
 }
+
+// ─── Constructor reference tests ────────────────────────────────────────────
+
+/// Whether any returned location starts on the given zero-based line.
+fn has_location_on_line(results: &[tower_lsp::lsp_types::Location], line: u32) -> bool {
+    results.iter().any(|loc| loc.range.start.line == line)
+}
+
+/// Finding references to a base constructor includes the explicit
+/// `parent::__construct()` delegation call alongside the `new` sites.
+#[test]
+fn constructor_references_include_parent_call() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_parent.php";
+    let content = r#"<?php
+
+class Base {
+    public function __construct() {}
+}
+
+class Child extends Base {
+    public function __construct() {
+        parent::__construct();
+    }
+}
+
+$a = new Base();
+$b = new Child();
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on Base's `__construct` declaration (line 3).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 22), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "constructor_references_include_parent_call");
+
+    // Expected: the Base declaration (line 3), the `parent::__construct()`
+    // call (line 8), and `new Base()` (line 12).  `new Child()` invokes
+    // Child's own constructor, so it must NOT appear.
+    assert!(
+        has_location_on_line(&results, 3),
+        "missing constructor declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 8),
+        "missing parent::__construct() call: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 12),
+        "missing new Base() site: {results:#?}"
+    );
+    assert!(
+        !has_location_on_line(&results, 13),
+        "new Child() invokes Child's own constructor and must not appear: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (declaration + parent call + new Base), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+/// Clicking on the `parent::__construct()` call itself lists the call
+/// alongside the other references to that constructor (not just the
+/// subject's instantiation sites).
+#[test]
+fn constructor_references_from_parent_call_site() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_callsite.php";
+    let content = r#"<?php
+
+class Base {
+    public function __construct() {}
+}
+
+class Child extends Base {
+    public function __construct() {
+        parent::__construct();
+    }
+}
+
+$a = new Base();
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on the `__construct` member name in `parent::__construct()`
+    // (line 8).
+    let results = backend
+        .find_references(uri, content, Position::new(8, 18), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "constructor_references_from_parent_call_site");
+
+    assert!(
+        has_location_on_line(&results, 3),
+        "missing constructor declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 8),
+        "the parent::__construct() call should list itself: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 12),
+        "missing new Base() site: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (declaration + parent call + new Base), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+/// A `parent::__construct()` call references the *parent's* constructor,
+/// not the subclass's.  Finding references to the subclass constructor
+/// must therefore exclude the delegation call.
+#[test]
+fn constructor_references_exclude_parent_call_for_subclass() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_subclass.php";
+    let content = r#"<?php
+
+class Base {
+    public function __construct() {}
+}
+
+class Child extends Base {
+    public function __construct() {
+        parent::__construct();
+    }
+}
+
+$a = new Base();
+$b = new Child();
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on Child's own `__construct` declaration (line 7).
+    let results = backend
+        .find_references(uri, content, Position::new(7, 22), true)
+        .expect("should find references");
+
+    assert_no_duplicates(
+        &results,
+        "constructor_references_exclude_parent_call_for_subclass",
+    );
+
+    // Expected: Child's declaration (line 7) and `new Child()` (line 13).
+    // The `parent::__construct()` call references Base's constructor, not
+    // Child's, so it must NOT appear.
+    assert!(
+        has_location_on_line(&results, 7),
+        "missing Child constructor declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 13),
+        "missing new Child() site: {results:#?}"
+    );
+    assert!(
+        !has_location_on_line(&results, 8),
+        "parent::__construct() references the parent constructor, not Child's: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 references (declaration + new Child), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+/// Explicit `self::__construct()` and `Class::__construct()` forms are
+/// resolved and listed as constructor references.
+#[test]
+fn constructor_references_include_self_and_named_calls() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_self_named.php";
+    let content = r#"<?php
+
+class Widget {
+    public function __construct() {}
+
+    public function rebuild(): void {
+        self::__construct();
+    }
+}
+
+function make(): void {
+    Widget::__construct();
+}
+
+$w = new Widget();
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on Widget's `__construct` declaration (line 3).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 22), true)
+        .expect("should find references");
+
+    assert_no_duplicates(
+        &results,
+        "constructor_references_include_self_and_named_calls",
+    );
+
+    assert!(
+        has_location_on_line(&results, 3),
+        "missing constructor declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 6),
+        "missing self::__construct() call: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 11),
+        "missing Widget::__construct() call: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 14),
+        "missing new Widget() site: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        4,
+        "Expected 4 references (declaration + self + Widget + new), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}

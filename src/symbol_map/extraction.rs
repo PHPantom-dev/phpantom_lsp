@@ -1014,10 +1014,11 @@ fn extract_from_attribute_lists<'a>(
         for attr in attr_list.attributes.iter() {
             // The attribute name (e.g. `\Illuminate\...\CollectedBy`).
             let raw = bytes_to_str(attr.name.value()).to_string();
-            ctx.spans.push(class_ref_span(
+            ctx.spans.push(class_ref_span_ctx(
                 attr.name.span().start.offset,
                 attr.name.span().end.offset,
                 &raw,
+                ClassRefContext::Attribute,
             ));
 
             // Attribute arguments — also emit a CallSite so that
@@ -1889,6 +1890,13 @@ fn extract_from_expression<'a>(
                     Expression::Identifier(ident) => {
                         let name = bytes_to_str(ident.value()).to_string();
                         let name_clean = strip_fqn_prefix(&name).to_string();
+                        if name_clean.eq_ignore_ascii_case("compact") {
+                            try_emit_compact_string_spans(
+                                &func_call.argument_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
                         ctx.spans.push(SymbolSpan {
                             start: ident.span().start.offset,
                             end: ident.span().end.offset,
@@ -3363,6 +3371,42 @@ fn try_emit_laravel_string_span(
             key: key.to_string(),
         },
     });
+}
+
+/// If `argument_list` belongs to a `compact()` call, emit one
+/// [`SymbolKind::CompactVariable`] span per direct string-literal argument.
+fn try_emit_compact_string_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for arg in argument_list.arguments.iter() {
+        let Expression::Literal(literal::Literal::String(s)) = arg.value() else {
+            continue;
+        };
+        let inner_start = s.span.start.offset + 1;
+        let inner_end = s.span.end.offset - 1;
+        if inner_start >= inner_end || inner_end as usize > content.len() {
+            continue;
+        }
+
+        let name = if let Some(value) = s.value {
+            bytes_to_str(value)
+        } else {
+            &content[inner_start as usize..inner_end as usize]
+        };
+        if name.is_empty() {
+            continue;
+        }
+
+        spans.push(SymbolSpan {
+            start: inner_start,
+            end: inner_end,
+            kind: SymbolKind::CompactVariable {
+                name: name.to_string(),
+            },
+        });
+    }
 }
 
 /// Returns `true` if `name` is a method on Laravel's `Repository` config contract

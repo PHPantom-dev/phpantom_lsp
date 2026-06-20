@@ -82,8 +82,10 @@ impl Backend {
                 _ => continue,
             };
 
-            // Only check references with a known context.
-            if ref_ctx == ClassRefContext::Other {
+            // Only check references with a known context.  Attribute
+            // usages (`#[Foo]`) are valid on any instantiable class, so
+            // they are skipped just like `Other`.
+            if ref_ctx == ClassRefContext::Other || ref_ctx == ClassRefContext::Attribute {
                 continue;
             }
 
@@ -346,7 +348,7 @@ fn check_kind_in_context(
                 None
             }
         }
-        ClassRefContext::Other | ClassRefContext::UseImport => None,
+        ClassRefContext::Other | ClassRefContext::UseImport | ClassRefContext::Attribute => None,
     }
 }
 

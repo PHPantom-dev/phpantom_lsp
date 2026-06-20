@@ -490,7 +490,7 @@ impl Backend {
         let function_loader = self.function_loader(&ctx);
 
         match kind {
-            SymbolKind::Variable { name } => {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Suppress hover when the cursor is on a variable at its
                 // definition site where the type is already visible in
                 // the signature (properties, static/global declarations).

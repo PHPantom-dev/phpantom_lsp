@@ -646,6 +646,52 @@ class Consumer implements SomeInterface {}
     );
 }
 
+#[test]
+fn used_import_in_phpstan_require_extends_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_used_phpstan_require_extends.php";
+    let text = r#"<?php
+namespace App;
+
+use Illuminate\Http\Resources\Json\JsonResource;
+
+/** @phpstan-require-extends JsonResource */
+trait GathersAuthorizations {}
+"#;
+
+    let diags = unused_import_diagnostics(&backend, uri, text);
+    let unnecessary: Vec<_> = diags.iter().filter(|d| has_unnecessary_tag(d)).collect();
+
+    assert!(
+        unnecessary.is_empty(),
+        "Import used in @phpstan-require-extends should not be flagged, got: {:?}",
+        unnecessary
+    );
+}
+
+#[test]
+fn used_import_in_phpstan_require_implements_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_used_phpstan_require_implements.php";
+    let text = r#"<?php
+namespace App;
+
+use Countable;
+
+/** @phpstan-require-implements Countable */
+trait GathersAuthorizations {}
+"#;
+
+    let diags = unused_import_diagnostics(&backend, uri, text);
+    let unnecessary: Vec<_> = diags.iter().filter(|d| has_unnecessary_tag(d)).collect();
+
+    assert!(
+        unnecessary.is_empty(),
+        "Import used in @phpstan-require-implements should not be flagged, got: {:?}",
+        unnecessary
+    );
+}
+
 // ─── Multiple imports, some used some not ───────────────────────────────────
 
 #[test]
