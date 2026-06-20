@@ -209,7 +209,19 @@ impl Backend {
                                 Statement::Class(_)
                                 | Statement::Interface(_)
                                 | Statement::Trait(_)
-                                | Statement::Enum(_) => {
+                                | Statement::Enum(_)
+                                // Class-likes declared inside conditional /
+                                // control-flow blocks (e.g. Doctrine's
+                                // `ServiceEntityRepository` version guard) —
+                                // the extractor descends into the bodies.
+                                | Statement::If(_)
+                                | Statement::Block(_)
+                                | Statement::Try(_)
+                                | Statement::Switch(_)
+                                | Statement::While(_)
+                                | Statement::DoWhile(_)
+                                | Statement::For(_)
+                                | Statement::Foreach(_) => {
                                     Self::extract_classes_from_statements(
                                         std::iter::once(inner),
                                         &mut block_classes,
@@ -248,7 +260,18 @@ impl Backend {
                     Statement::Class(_)
                     | Statement::Interface(_)
                     | Statement::Trait(_)
-                    | Statement::Enum(_) => {
+                    | Statement::Enum(_)
+                    // Class-likes declared inside top-level conditional /
+                    // control-flow blocks — the extractor descends into the
+                    // bodies (and still collects anonymous classes within).
+                    | Statement::If(_)
+                    | Statement::Block(_)
+                    | Statement::Try(_)
+                    | Statement::Switch(_)
+                    | Statement::While(_)
+                    | Statement::DoWhile(_)
+                    | Statement::For(_)
+                    | Statement::Foreach(_) => {
                         let mut top_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             std::iter::once(statement),
@@ -261,8 +284,7 @@ impl Backend {
                     }
                     _ => {
                         // Walk other top-level statements (expression statements,
-                        // function declarations, control flow, etc.) for anonymous
-                        // classes.
+                        // function declarations, etc.) for anonymous classes.
                         let mut anon_classes = Vec::new();
                         Self::find_anonymous_classes_in_statement(
                             statement,
@@ -275,6 +297,11 @@ impl Backend {
                     }
                 }
             }
+
+            // A class-like declared in two branches of a conditional yields
+            // one entry per branch; keep the first so resolution is
+            // deterministic (see `dedup_class_likes_first_wins`).
+            Self::dedup_class_likes_first_wins(&mut classes_with_ns);
 
             // Extract standalone functions (including those inside if-guards
             // like `if (! function_exists('...'))`) using the shared helper
