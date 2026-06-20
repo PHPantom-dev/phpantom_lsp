@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781964815122,
+  "lastUpdate": 1781965502380,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10981,6 +10981,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 56.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "60ce94cd7d7b991297ac660fc9f46706a79a0f15",
+          "message": "feat(rename): link compact strings to local variables\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-20T16:12:31+02:00",
+          "tree_id": "fd90a239cebb43ca90911f6c50f042ad7224e0f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/60ce94cd7d7b991297ac660fc9f46706a79a0f15"
+        },
+        "date": 1781965501393,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55,
             "unit": "MiB"
           }
         ]
