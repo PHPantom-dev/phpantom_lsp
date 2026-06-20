@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781961863562,
+  "lastUpdate": 1781961967353,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10845,6 +10845,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e8b829e74311ba5efc3d834abc88565a88055f82",
+          "message": "fix(docblock): support phpstan require tag navigation\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-20T15:14:16+02:00",
+          "tree_id": "a482368bb1fd7b8c40d3d103f7edb7e7606c739b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e8b829e74311ba5efc3d834abc88565a88055f82"
+        },
+        "date": 1781961966515,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 56,
             "unit": "MiB"
           }
         ]
