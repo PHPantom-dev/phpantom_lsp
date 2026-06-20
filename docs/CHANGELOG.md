@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Analysis deadlock.** Lazily-parsed vendor files acquired two internal locks in the opposite order from the editor's file-change handler, causing a deadlock when both ran concurrently.
 - **External tool diagnostics on large files.** PHPStan, Mago, and PHPCS diagnostics no longer time out on files that produce a large report. Their output is now read while the tool is still running, so a report bigger than the operating system's pipe buffer can no longer stall the tool and force a timeout.
 - **Promote to constructor property.** Promoting a parameter whose property is declared together with others on one line (`private int $a, $b;`) no longer deletes the sibling properties. The action is now offered only when the property is declared on its own.
+- **`get_defined_vars()` counts as using every variable in scope.** A function or method that calls `get_defined_vars()` (for example to build a debug dump) no longer reports its local variables as unused, since the call reads all of them. Variables local to a nested closure or arrow function are still checked. Contributed by @calebdw in https://github.com/PHPantom-dev/phpantom_lsp/pull/158.
 
 ### Changed
 
