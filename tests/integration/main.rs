@@ -34,6 +34,7 @@ mod completion_class_name_context;
 mod completion_class_names;
 mod completion_closure_param_inference;
 mod completion_comments;
+mod completion_conditional_classes;
 mod completion_cross_file;
 mod completion_deprecated;
 mod completion_enums;

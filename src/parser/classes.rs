@@ -881,9 +881,6 @@ fn infer_relationship_from_method<'a>(
 }
 
 impl Backend {
-    /// Recursively walk statements and extract class information.
-    /// This handles classes at the top level as well as classes nested
-    /// inside namespace declarations.
     /// De-duplicate parsed class-likes by `(name, namespace)`, keeping the
     /// first declaration in source order.
     ///
@@ -903,6 +900,9 @@ impl Backend {
         items.retain(|(cls, ns)| seen.insert((cls.name, ns.clone())));
     }
 
+    /// Recursively walk statements and extract class information.
+    /// This handles classes at the top level as well as classes nested
+    /// inside namespace declarations.
     pub(crate) fn extract_classes_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         classes: &mut Vec<ClassInfo>,
@@ -2862,7 +2862,11 @@ if (\defined('SOME_FLAG')) {
             .filter(|(c, _)| c.name == atom("Dup"))
             .collect();
 
-        assert_eq!(dups.len(), 1, "duplicate-branch class must be de-duplicated");
+        assert_eq!(
+            dups.len(),
+            1,
+            "duplicate-branch class must be de-duplicated"
+        );
         assert_eq!(
             dups[0].0.parent_class,
             Some(atom("First")),
