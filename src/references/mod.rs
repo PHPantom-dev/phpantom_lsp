@@ -874,6 +874,7 @@ impl Backend {
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
+            let file_ctx = std::cell::OnceCell::new();
 
             let Some(parsed_uri) = Url::parse(file_uri).ok() else {
                 continue;
@@ -909,6 +910,36 @@ impl Backend {
                             &Self::resolve_to_fqn(name, use_map, &file_namespace)
                         };
                         scoped.contains(&normalize_fqn(strip_fqn_prefix(resolved)))
+                    }
+                    // Explicit constructor delegation written as
+                    // `parent::__construct()`, `self::__construct()`, or
+                    // `Foo::__construct()` lands here.  Resolve the subject
+                    // class and keep the call when it falls within the
+                    // constructor's owning hierarchy.
+                    SymbolKind::MemberAccess {
+                        subject_text,
+                        member_name,
+                        is_static,
+                        ..
+                    } if is_constructor_name(member_name) => {
+                        if file_content.is_none() {
+                            file_content = self.get_file_content_arc(file_uri);
+                        }
+                        match &file_content {
+                            Some(content) => {
+                                let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
+                                self.resolve_subject_to_fqns(
+                                    subject_text,
+                                    *is_static,
+                                    ctx,
+                                    span.start,
+                                    content,
+                                )
+                                .iter()
+                                .any(|fqn| scoped.contains(&normalize_fqn(strip_fqn_prefix(fqn))))
+                            }
+                            None => false,
+                        }
                     }
                     _ => false,
                 };

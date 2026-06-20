@@ -39,3 +39,4 @@ the fix is not yet observable for this pattern.)
 **Fix:** Teach the class indexer / current-class and scope detection to
 descend into control-flow blocks when locating the class-like declaration
 that encloses the cursor.
+
