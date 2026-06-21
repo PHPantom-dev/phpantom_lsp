@@ -1,9 +1,9 @@
-// test: static method hidden from instance -> access
+// test: static method shown on instance -> access
 // feature: completion
 // Adapted from phpactor WorseClassMemberCompletorTest 'shows static member on instance method'
-// PHPantom deliberately hides static-only members from -> access
+// PHP allows calling static methods through an instance, so completion should show them.
 // expect: hello(
-// expect_absent: goodbye(
+// expect: goodbye(
 ---
 <?php
 
