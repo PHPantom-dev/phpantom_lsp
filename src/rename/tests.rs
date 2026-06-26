@@ -186,6 +186,36 @@ async fn rename_variable_updates_compact_string() {
 }
 
 #[tokio::test]
+async fn rename_variable_updates_dynamic_property_selector() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function demo(object $message, string $type): void {\n",
+        "    $attribute = strtolower($type);\n",
+        "    if (empty($message->{$attribute})) {\n",
+        "        return;\n",
+        "    }\n",
+        "    echo $attribute;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 2, 6, "$field").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for variable rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let updated = apply_edits(text, &file_edits);
+    assert!(updated.contains("$field = strtolower($type);"));
+    assert!(updated.contains("$message->{$field}"));
+    assert!(updated.contains("echo $field;"));
+}
+
+#[tokio::test]
 async fn rename_from_compact_string_updates_variable() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test.php").unwrap();

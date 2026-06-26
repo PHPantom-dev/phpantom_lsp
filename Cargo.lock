@@ -1404,6 +1404,7 @@ dependencies = [
  "mago-php-version",
  "mago-span",
  "mago-syntax",
+ "mago-text-edit",
  "mago-type-syntax",
  "memchr",
  "parking_lot",

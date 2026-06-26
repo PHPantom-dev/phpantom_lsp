@@ -623,6 +623,22 @@ function foo() {
     }
 
     #[test]
+    fn no_diagnostic_when_variable_is_used_in_dynamic_property_access() {
+        let diags = collect(
+            r#"<?php
+function foo(object $message, string $type) {
+    $attribute = strtolower($type);
+    return $message->{$attribute};
+}
+"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "dynamic property selector should count as a read"
+        );
+    }
+
+    #[test]
     fn skips_unused_parameter() {
         // Parameters are intentionally not flagged until suppression
         // support is available — callbacks, interface implementations,

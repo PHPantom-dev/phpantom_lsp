@@ -1046,10 +1046,25 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
         Expression::Access(access) => match access {
             Access::Property(pa) => {
                 walk_expression(pa.object, collector);
-                // property selector is not a variable read
+                match &pa.property {
+                    ClassLikeMemberSelector::Identifier(_)
+                    | ClassLikeMemberSelector::Missing(_) => {}
+                    ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                    ClassLikeMemberSelector::Expression(selector) => {
+                        walk_expression(selector.expression, collector)
+                    }
+                }
             }
             Access::NullSafeProperty(pa) => {
                 walk_expression(pa.object, collector);
+                match &pa.property {
+                    ClassLikeMemberSelector::Identifier(_)
+                    | ClassLikeMemberSelector::Missing(_) => {}
+                    ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                    ClassLikeMemberSelector::Expression(selector) => {
+                        walk_expression(selector.expression, collector)
+                    }
+                }
             }
             Access::StaticProperty(spa) => {
                 walk_expression(spa.class, collector);
@@ -1354,9 +1369,23 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
         Expression::Access(Access::Property(pa)) => {
             // `$obj->prop = …` — $obj is read, prop is written.
             walk_expression(pa.object, collector);
+            match &pa.property {
+                ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
+                ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                ClassLikeMemberSelector::Expression(selector) => {
+                    walk_expression(selector.expression, collector)
+                }
+            }
         }
         Expression::Access(Access::NullSafeProperty(pa)) => {
             walk_expression(pa.object, collector);
+            match &pa.property {
+                ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
+                ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                ClassLikeMemberSelector::Expression(selector) => {
+                    walk_expression(selector.expression, collector)
+                }
+            }
         }
         Expression::Access(Access::StaticProperty(spa)) => {
             walk_expression(spa.class, collector);
