@@ -2342,8 +2342,17 @@ impl Backend {
         let autoload_files = composer::parse_autoload_files(project_root, vendor_dir);
         let autoload_count = autoload_files.len();
 
+        // Some frameworks (e.g. CakePHP) ship global function aliases in a
+        // `*_global.php` sibling that is loaded via the application
+        // bootstrap rather than Composer's `files` autoload, so it never
+        // appears in `autoload_files.php`. Seed those siblings too, so
+        // globals like `__()`/`h()` are indexed instead of resolving to
+        // "unknown function".
+        let sibling_globals = composer::discover_global_sibling_files(&autoload_files);
+
         // Work queue + visited set for following require_once chains.
         let mut file_queue: Vec<PathBuf> = autoload_files;
+        file_queue.extend(sibling_globals);
         let mut visited: HashSet<PathBuf> = HashSet::new();
 
         while let Some(file_path) = file_queue.pop() {
