@@ -21,7 +21,7 @@
 //! Composer JSON parsing is delegated to the [`mago_composer`] crate,
 //! which provides typed Rust structs for the full `composer.json` schema.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -340,6 +340,54 @@ pub fn parse_autoload_files(workspace_root: &Path, vendor_dir: &str) -> Vec<Path
     }
 
     files
+}
+
+/// Discover global-helper sibling files that frameworks load through their
+/// own bootstrap rather than Composer's `files` autoload.
+///
+/// Some frameworks split their global function aliases into a dedicated
+/// file that sits *beside* an autoloaded `functions.php` but is itself
+/// pulled in by the application bootstrap, not by Composer. CakePHP is the
+/// canonical case: `vendor/cakephp/cakephp/src/Core/functions.php` is in
+/// `autoload_files.php`, but the global aliases (`__`, `h`, `env`, `pr`,
+/// ...) live in the sibling `Core/functions_global.php`, which the app
+/// loads via `require CAKE . 'functions.php'` in `config/bootstrap.php`.
+/// Because that sibling never appears in `autoload_files.php`, its global
+/// functions are otherwise invisible to the indexer and every `__()` call
+/// resolves to "unknown function".
+///
+/// For each file already listed in `autoload_files.php`, this returns any
+/// sibling in the same directory whose name ends in `_global.php`, so the
+/// caller can scan it alongside the real autoload files. The lookup is
+/// anchored to existing autoload entries (one `read_dir` per unique
+/// directory) rather than a blind walk of `vendor/`, keeping it cheap.
+pub fn discover_global_sibling_files(autoload_files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut scanned_dirs = HashSet::new();
+    let mut seen_files = HashSet::new();
+
+    for file in autoload_files {
+        let Some(dir) = file.parent() else {
+            continue;
+        };
+        if !scanned_dirs.insert(dir.to_path_buf()) {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.ends_with("_global.php") && path.is_file() && seen_files.insert(path.clone()) {
+                out.push(path);
+            }
+        }
+    }
+
+    out
 }
 
 // ── PSR-4 path abstraction ─────────────────────────────────────────
@@ -971,6 +1019,59 @@ mod tests {
     }
 
     // ── detect_drupal_web_root ──────────────────────────────────────
+
+    #[test]
+    fn discovers_global_sibling_beside_autoload_file() {
+        // Mirrors CakePHP: an autoloaded `functions.php` sits next to a
+        // `functions_global.php` sibling that Composer never lists.
+        let dir = tempfile::tempdir().unwrap();
+        let core = dir.path().join("Core");
+        std::fs::create_dir_all(&core).unwrap();
+        let autoloaded = core.join("functions.php");
+        let sibling = core.join("functions_global.php");
+        std::fs::write(
+            &autoloaded,
+            "<?php\nnamespace Cake\\Core;\nfunction toBool() {}",
+        )
+        .unwrap();
+        std::fs::write(
+            &sibling,
+            "<?php\nif (!function_exists('__')) { function __() {} }",
+        )
+        .unwrap();
+
+        let found = discover_global_sibling_files(&[autoloaded]);
+        assert_eq!(found, vec![sibling]);
+    }
+
+    #[test]
+    fn discovers_global_sibling_scans_each_directory_once() {
+        // Two autoload entries in the same directory must not yield the
+        // sibling twice.
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let a = src.join("functions.php");
+        let b = src.join("helpers.php");
+        let sibling = src.join("functions_global.php");
+        std::fs::write(&a, "<?php").unwrap();
+        std::fs::write(&b, "<?php").unwrap();
+        std::fs::write(&sibling, "<?php").unwrap();
+
+        let found = discover_global_sibling_files(&[a, b]);
+        assert_eq!(found, vec![sibling]);
+    }
+
+    #[test]
+    fn discovers_global_sibling_returns_empty_without_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let autoloaded = src.join("functions.php");
+        std::fs::write(&autoloaded, "<?php").unwrap();
+
+        assert!(discover_global_sibling_files(&[autoloaded]).is_empty());
+    }
 
     #[test]
     fn drupal_not_detected_without_drupal_packages() {
