@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781966422866,
+  "lastUpdate": 1782749214640,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11044,6 +11044,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dereuromark@users.noreply.github.com",
+            "name": "Mark Scherer",
+            "username": "dereuromark"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8a288cd9765215c9b72623539f0caf3d29844e28",
+          "message": "Index framework global helpers loaded outside Composer autoload\n\nSome frameworks ship their global function aliases in a `*_global.php`\nfile that sits beside an autoloaded `functions.php` but is pulled in by\nthe application bootstrap rather than Composer's `files` autoload, so it\nnever appears in `autoload_files.php`. CakePHP is the canonical case:\n`src/Core/functions_global.php` defines `__`, `h`, `env`, `pr`, ... and\nis loaded via `require CAKE . 'functions.php'` in\n`config/bootstrap.php`.\n\nThe autoload-file scan only followed `autoload_files.php` and their\nrequire_once chains, so these globals were invisible and every `__()`\ncall reported \"unknown function\". On a real CakePHP 5 app this was about\n1000 of 1330 analyze findings (968 of them just `__`).\n\nSeed the scan with any `*_global.php` sibling of an autoload entry. The\nlookup is anchored to existing autoload entries (one read_dir per unique\ndirectory) instead of a blind walk of the vendor tree, and the existing\nfull-parse pass picks up the function_exists-guarded definitions.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-29T17:53:45+02:00",
+          "tree_id": "7f62ff13e0a6b288481f4d2196e382183e0e64f0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8a288cd9765215c9b72623539f0caf3d29844e28"
+        },
+        "date": 1782749213228,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.9,
             "unit": "MiB"
           },
           {
