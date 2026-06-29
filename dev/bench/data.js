@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781966193495,
+  "lastUpdate": 1782748997403,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -62399,6 +62399,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.056,
             "range": "± 0.021",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dereuromark@users.noreply.github.com",
+            "name": "Mark Scherer",
+            "username": "dereuromark"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8a288cd9765215c9b72623539f0caf3d29844e28",
+          "message": "Index framework global helpers loaded outside Composer autoload\n\nSome frameworks ship their global function aliases in a `*_global.php`\nfile that sits beside an autoloaded `functions.php` but is pulled in by\nthe application bootstrap rather than Composer's `files` autoload, so it\nnever appears in `autoload_files.php`. CakePHP is the canonical case:\n`src/Core/functions_global.php` defines `__`, `h`, `env`, `pr`, ... and\nis loaded via `require CAKE . 'functions.php'` in\n`config/bootstrap.php`.\n\nThe autoload-file scan only followed `autoload_files.php` and their\nrequire_once chains, so these globals were invisible and every `__()`\ncall reported \"unknown function\". On a real CakePHP 5 app this was about\n1000 of 1330 analyze findings (968 of them just `__`).\n\nSeed the scan with any `*_global.php` sibling of an autoload entry. The\nlookup is anchored to existing autoload entries (one read_dir per unique\ndirectory) instead of a blind walk of the vendor tree, and the existing\nfull-parse pass picks up the function_exists-guarded definitions.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-29T17:53:45+02:00",
+          "tree_id": "7f62ff13e0a6b288481f4d2196e382183e0e64f0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8a288cd9765215c9b72623539f0caf3d29844e28"
+        },
+        "date": 1782748995695,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 2.958,
+            "range": "± 0.074",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.047,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.12,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.163,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.242,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.25,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.897,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.703,
+            "range": "± 0.039",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.112,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.057,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.056,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.073,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.942,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.216,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.25,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.083,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.051,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.126,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.093,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.085,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.192,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.047,
+            "range": "± 0.031",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.526,
+            "range": "± 0.097",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.067,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.034,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.031,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 47.774,
+            "range": "± 0.267",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.106,
+            "range": "± 0.02",
             "unit": "ms"
           }
         ]
