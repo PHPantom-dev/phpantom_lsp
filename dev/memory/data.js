@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782749214640,
+  "lastUpdate": 1782843629472,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11083,6 +11083,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "cf244568be6e2e58902f0ba5f00fbe67095d5b22",
+          "message": "Fix type hierarchy registration and subtype expansion\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-06-30T20:07:28+02:00",
+          "tree_id": "4cd4e50b2c23078906cb24d001262851d4e5dcbd",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cf244568be6e2e58902f0ba5f00fbe67095d5b22"
+        },
+        "date": 1782843627902,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.7,
             "unit": "MiB"
           }
         ]
