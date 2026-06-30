@@ -1060,3 +1060,73 @@ async fn supertypes_items_have_nonzero_selection_range() {
         );
     }
 }
+
+// ─── Subtypes: completeness when some children already indexed ──────────────
+
+/// Subtypes must list every direct child even when one child file is
+/// already parsed (so it lives in the reverse inheritance index) while
+/// another child file has only been discovered on disk and not yet
+/// parsed.  Returning only the indexed children silently hides the rest.
+#[tokio::test]
+async fn subtypes_includes_unopened_children_when_some_are_indexed() {
+    let composer = r#"{
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        }
+    }"#;
+    let files = &[
+        (
+            "src/Repository.php",
+            "<?php\nnamespace App;\ninterface Repository {\n}\n",
+        ),
+        (
+            "src/UserRepository.php",
+            "<?php\nnamespace App;\nclass UserRepository implements Repository {\n}\n",
+        ),
+        (
+            "src/AdminRepository.php",
+            "<?php\nnamespace App;\nclass AdminRepository implements Repository {\n}\n",
+        ),
+    ];
+
+    let (backend, dir) = create_psr4_workspace(composer, files);
+
+    // Open the interface and ONE implementor.  Opening UserRepository
+    // parses it and records App\UserRepository as a child of
+    // App\Repository in the reverse inheritance index — but
+    // AdminRepository stays on disk, discovered only by a wider scan.
+    let iface_uri = Url::from_file_path(dir.path().join("src/Repository.php")).unwrap();
+    open(
+        &backend,
+        &iface_uri,
+        "<?php\nnamespace App;\ninterface Repository {\n}\n",
+    )
+    .await;
+    let user_uri = Url::from_file_path(dir.path().join("src/UserRepository.php")).unwrap();
+    open(
+        &backend,
+        &user_uri,
+        "<?php\nnamespace App;\nclass UserRepository implements Repository {\n}\n",
+    )
+    .await;
+
+    // Prepare on the `Repository` interface name (line 2, on the name).
+    let items = prepare_at(&backend, &iface_uri, 2, 12).await;
+    assert_eq!(items.len(), 1, "Should prepare on Repository interface");
+    assert_eq!(item_fqn(&items[0]), "App\\Repository");
+
+    let subs = subtypes_of(&backend, &items[0]).await;
+    let names = item_names(&subs);
+    assert!(
+        names.contains(&"UserRepository".to_string()),
+        "subtypes should include the already-indexed UserRepository, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"AdminRepository".to_string()),
+        "subtypes should include the unopened AdminRepository, got: {:?}",
+        names
+    );
+}

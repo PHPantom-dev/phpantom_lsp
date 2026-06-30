@@ -397,11 +397,7 @@ impl LanguageServer for Backend {
             .supports_type_hierarchy_dynamic_registration
             .load(Ordering::Acquire)
         {
-            registrations.push(Registration {
-                id: "type-hierarchy".to_string(),
-                method: "textDocument/prepareTypeHierarchy".to_string(),
-                register_options: None,
-            });
+            registrations.push(type_hierarchy_registration());
         }
 
         // Register file watchers for staleness detection.  The client
@@ -1588,6 +1584,27 @@ impl LanguageServer for Backend {
     }
 }
 
+fn type_hierarchy_registration() -> Registration {
+    Registration {
+        id: "type-hierarchy".to_string(),
+        method: "textDocument/prepareTypeHierarchy".to_string(),
+        register_options: Some(
+            serde_json::to_value(TypeHierarchyRegistrationOptions {
+                text_document_registration_options: TextDocumentRegistrationOptions {
+                    document_selector: Some(vec![DocumentFilter {
+                        language: Some("php".to_string()),
+                        scheme: None,
+                        pattern: None,
+                    }]),
+                },
+                type_hierarchy_options: TypeHierarchyOptions::default(),
+                static_registration_options: StaticRegistrationOptions::default(),
+            })
+            .expect("type hierarchy registration options serialize"),
+        ),
+    }
+}
+
 /// Convert a `Vec<Location>` into a `GotoDefinitionResponse`.
 ///
 /// Returns `Scalar` for a single location, `Array` for multiple, and
@@ -1600,6 +1617,26 @@ fn wrap_locations(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
             locations.into_iter().next().unwrap(),
         )),
         _ => Some(GotoDefinitionResponse::Array(locations)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_hierarchy_registration_includes_php_document_selector() {
+        let registration = type_hierarchy_registration();
+
+        assert_eq!(registration.id, "type-hierarchy");
+        assert_eq!(registration.method, "textDocument/prepareTypeHierarchy");
+
+        let options = registration
+            .register_options
+            .expect("type hierarchy registration should include options");
+        assert_eq!(options["documentSelector"][0]["language"], "php");
+        assert!(options["documentSelector"][0].get("scheme").is_none());
+        assert!(options["documentSelector"][0].get("pattern").is_none());
     }
 }
 

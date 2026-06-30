@@ -139,6 +139,13 @@ impl Backend {
 
         // direct_only = true so only immediate children are returned;
         // the client walks the tree one level at a time.
+        //
+        // We can't shortcut to the reverse inheritance index (`gti_index`)
+        // alone: it is populated only from files that have been fully
+        // parsed, so a parent may have one child already indexed while
+        // other children live in files discovered on disk but not yet
+        // parsed.  `find_implementors` uses `gti_index` as its first phase
+        // and then scans for the rest, so it returns the complete set.
         let implementors = self.find_implementors(short, &fqn, &class_loader, true, true);
 
         let mut result = Vec::new();
