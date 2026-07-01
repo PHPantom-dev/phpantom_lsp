@@ -3792,3 +3792,77 @@ fn docblock_star_wildcard_in_generic_produces_correct_spans() {
         }
     }
 }
+
+// ── array-callable spans ────────────────────────────────────────────
+
+#[test]
+fn array_callable_class_const_emits_member_access() {
+    // `[Controller::class, 'method']` — the Laravel route/controller-action
+    // shape. Cursor on the method string should resolve as a member access.
+    let php = "<?php\nRoute::get('/', [IndexPageController::class, 'indexPage']);\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("indexPage']").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method string");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static,
+            is_method_call,
+            ..
+        } => {
+            assert_eq!(subject_text, "IndexPageController");
+            assert_eq!(member_name, "indexPage");
+            assert!(*is_static);
+            assert!(*is_method_call);
+        }
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}
+
+#[test]
+fn array_callable_variable_emits_instance_member_access() {
+    // `[$this, 'method']` and `[$obj, 'method']` — instance-style callables.
+    let php = "<?php\n$cb = [$this, 'handle'];\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("handle']").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method string");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static,
+            ..
+        } => {
+            assert_eq!(subject_text, "$this");
+            assert_eq!(member_name, "handle");
+            assert!(!*is_static);
+        }
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}
+
+#[test]
+fn plain_two_string_array_is_not_a_callable() {
+    // `['foo', 'bar']` — a plain data array, not a callable. No span should
+    // be emitted over the second string.
+    let php = "<?php\n$x = ['foo', 'bar'];\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("bar']").unwrap() as u32;
+    assert!(
+        map.lookup(offset).is_none(),
+        "plain string array must not emit a member-access span"
+    );
+}
+
+#[test]
+fn array_callable_ignores_non_identifier_method_string() {
+    // `[$this, 'not a method']` — the second string is not an identifier.
+    let php = "<?php\n$x = [$this, 'not a method'];\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("not a method").unwrap() as u32;
+    assert!(
+        map.lookup(offset).is_none(),
+        "non-identifier string must not emit a member-access span"
+    );
+}

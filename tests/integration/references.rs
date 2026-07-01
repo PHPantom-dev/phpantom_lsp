@@ -205,6 +205,42 @@ class Baz {
 // ─── Member access tests ────────────────────────────────────────────────────
 
 #[test]
+fn array_callable_method_references() {
+    // A method referenced both directly and via an array callable
+    // (`[Foo::class, 'bar']`) should be found by find-references.
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_array_callable.php";
+    let content = r#"<?php
+
+class Foo {
+    public function bar(): void {}
+}
+
+Route::get('/', [Foo::class, 'bar']);
+
+$f = new Foo();
+$f->bar();
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `bar` in the method declaration (line 3).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 21), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "array_callable_method_references");
+    // 1 declaration + 1 array callable + 1 instance call.
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (declaration + array callable + call), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
 fn method_references_no_duplicates() {
     let backend = create_test_backend();
     let uri = "file:///tmp/test_refs_method.php";

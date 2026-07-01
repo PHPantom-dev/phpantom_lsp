@@ -2307,9 +2307,11 @@ fn extract_from_expression<'a>(
 
         // ── Array ──
         Expression::Array(array) => {
+            try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
+            try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {
@@ -3369,6 +3371,99 @@ fn try_emit_laravel_string_span(
         kind: SymbolKind::LaravelStringKey {
             kind,
             key: key.to_string(),
+        },
+    });
+}
+
+/// Detect an array-callable literal — `[Class::class, 'method']` or
+/// `[$object, 'method']` — and emit a [`SymbolKind::MemberAccess`] span over
+/// the method-name string so that go-to-definition, references, and rename
+/// treat it like a real `Class::method` / `$object->method` reference.
+///
+/// This is the shape Laravel routes use for controller actions
+/// (`Route::get('/', [IndexPageController::class, 'indexPage'])`), but the
+/// pattern is generic PHP (event listeners, `array_map`, etc.).
+///
+/// Only fires for a two-element array whose first element is a `::class`
+/// constant or a variable and whose second element is a plain string literal.
+fn try_emit_array_callable_span(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    // Exactly two positional (value) elements: `[<callee>, '<method>']`.
+    let mut values = elements.iter().filter_map(|el| match el {
+        ArrayElement::Value(v) => Some(v.value),
+        _ => None,
+    });
+    let (Some(first), Some(second), None) = (values.next(), values.next(), values.next()) else {
+        return;
+    };
+    // The whole array must have been exactly those two elements (no
+    // key/value or variadic entries mixed in).
+    if elements.iter().count() != 2 {
+        return;
+    }
+
+    // Second element must be a plain string literal — the method name.
+    let Expression::Literal(literal::Literal::String(s)) = second else {
+        return;
+    };
+
+    // First element determines the subject and access kind.
+    let (subject_text, is_static) = match first {
+        // `Class::class` — static-style access on the class name.
+        Expression::Access(Access::ClassConstant(cca)) => {
+            let is_class_const = matches!(
+                &cca.constant,
+                ClassLikeConstantSelector::Identifier(ident)
+                    if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
+            );
+            if !is_class_const {
+                return;
+            }
+            (expr_to_subject_text(cca.class), true)
+        }
+        // `$this` / `$object` — instance-style access.
+        Expression::Variable(Variable::Direct(dv)) => (bytes_to_str(dv.name).to_string(), false),
+        _ => return,
+    };
+    if subject_text.is_empty() {
+        return;
+    }
+
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let member_name = if let Some(value) = s.value {
+        bytes_to_str(value)
+    } else {
+        &content[inner_start as usize..inner_end as usize]
+    };
+    // Guard against non-identifier strings (e.g. `[$a, 'some text']`).
+    if member_name.is_empty()
+        || !member_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || member_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        return;
+    }
+
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::MemberAccess {
+            subject_text,
+            member_name: member_name.to_string(),
+            is_static,
+            is_method_call: true,
+            is_docblock_reference: false,
         },
     });
 }
