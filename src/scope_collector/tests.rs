@@ -532,6 +532,20 @@ function test() {
     assert_eq!(count_kind(&scope_map, "$config", AccessKind::Read), 1);
 }
 
+#[test]
+fn dynamic_property_selector_reads_variable() {
+    let php = r#"<?php
+function test(object $message, string $type) {
+    $attribute = strtolower($type);
+    return $message->{$attribute};
+}
+"#;
+    let scope_map = collect_from_function(php);
+
+    assert_eq!(count_kind(&scope_map, "$attribute", AccessKind::Write), 1);
+    assert_eq!(count_kind(&scope_map, "$attribute", AccessKind::Read), 1);
+}
+
 // ─── Unset ──────────────────────────────────────────────────────────────────
 
 #[test]

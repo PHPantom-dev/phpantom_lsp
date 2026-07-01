@@ -423,6 +423,37 @@ function test(): void {
     );
 }
 
+#[test]
+fn variable_references_include_dynamic_property_selector() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_dynamic_selector.php";
+    let content = r#"<?php
+
+function test(object $message, string $type): void {
+    $attribute = strtolower($type);
+    if (empty($message->{$attribute})) {
+        return;
+    }
+    echo $attribute;
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    let results = backend
+        .find_references(uri, content, Position::new(3, 5), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "variable_references_dynamic_selector");
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (definition + dynamic selector + echo), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
 // ─── Static member references ───────────────────────────────────────────────
 
 #[test]

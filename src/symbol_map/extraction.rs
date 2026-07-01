@@ -1767,6 +1767,34 @@ fn extract_from_hint_ctx(hint: &Hint<'_>, spans: &mut Vec<SymbolSpan>, ref_ctx: 
 
 // ─── Expression extractor ───────────────────────────────────────────────────
 
+fn extract_variable_symbol_spans<'a>(
+    var: &'a Variable<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    match var {
+        Variable::Direct(dv) => {
+            let raw = bytes_to_str(dv.name);
+            if raw == "$this" {
+                ctx.spans.push(SymbolSpan {
+                    start: dv.span.start.offset,
+                    end: dv.span.end.offset,
+                    kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
+                });
+            } else {
+                let name = raw.strip_prefix('$').unwrap_or(raw).to_string();
+                ctx.spans.push(SymbolSpan {
+                    start: dv.span.start.offset,
+                    end: dv.span.end.offset,
+                    kind: SymbolKind::Variable { name },
+                });
+            }
+        }
+        Variable::Indirect(iv) => extract_from_expression(iv.expression, ctx, scope_start),
+        Variable::Nested(nv) => extract_variable_symbol_spans(nv.variable, ctx, scope_start),
+    }
+}
+
 fn extract_from_expression<'a>(
     expr: &'a Expression<'a>,
     ctx: &mut ExtractionCtx<'a>,
@@ -2105,38 +2133,56 @@ fn extract_from_expression<'a>(
                     let subject_text = expr_to_subject_text(pa.object);
                     extract_from_expression(pa.object, ctx, scope_start);
 
-                    if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                        let member_name = bytes_to_str(ident.value).to_string();
-                        ctx.spans.push(SymbolSpan {
-                            start: ident.span.start.offset,
-                            end: ident.span.end.offset,
-                            kind: SymbolKind::MemberAccess {
-                                subject_text,
-                                member_name,
-                                is_static: false,
-                                is_method_call: false,
-                                is_docblock_reference: false,
-                            },
-                        });
+                    match &pa.property {
+                        ClassLikeMemberSelector::Identifier(ident) => {
+                            let member_name = bytes_to_str(ident.value).to_string();
+                            ctx.spans.push(SymbolSpan {
+                                start: ident.span.start.offset,
+                                end: ident.span.end.offset,
+                                kind: SymbolKind::MemberAccess {
+                                    subject_text,
+                                    member_name,
+                                    is_static: false,
+                                    is_method_call: false,
+                                    is_docblock_reference: false,
+                                },
+                            });
+                        }
+                        ClassLikeMemberSelector::Variable(var) => {
+                            extract_variable_symbol_spans(var, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Expression(selector) => {
+                            extract_from_expression(selector.expression, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Missing(_) => {}
                     }
                 }
                 Access::NullSafeProperty(pa) => {
                     let subject_text = expr_to_subject_text(pa.object);
                     extract_from_expression(pa.object, ctx, scope_start);
 
-                    if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                        let member_name = bytes_to_str(ident.value).to_string();
-                        ctx.spans.push(SymbolSpan {
-                            start: ident.span.start.offset,
-                            end: ident.span.end.offset,
-                            kind: SymbolKind::MemberAccess {
-                                subject_text,
-                                member_name,
-                                is_static: false,
-                                is_method_call: false,
-                                is_docblock_reference: false,
-                            },
-                        });
+                    match &pa.property {
+                        ClassLikeMemberSelector::Identifier(ident) => {
+                            let member_name = bytes_to_str(ident.value).to_string();
+                            ctx.spans.push(SymbolSpan {
+                                start: ident.span.start.offset,
+                                end: ident.span.end.offset,
+                                kind: SymbolKind::MemberAccess {
+                                    subject_text,
+                                    member_name,
+                                    is_static: false,
+                                    is_method_call: false,
+                                    is_docblock_reference: false,
+                                },
+                            });
+                        }
+                        ClassLikeMemberSelector::Variable(var) => {
+                            extract_variable_symbol_spans(var, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Expression(selector) => {
+                            extract_from_expression(selector.expression, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Missing(_) => {}
                     }
                 }
                 Access::StaticProperty(spa) => {
