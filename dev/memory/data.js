@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782866740121,
+  "lastUpdate": 1782971179443,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11151,6 +11151,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a3fb686d159af34d01ca95801254e0d248ac7ee2",
+          "message": "Handle case sensetivity (or rather the lack there off)\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-02T07:33:11+02:00",
+          "tree_id": "0606eee278b55eb19e923c1152792d4e52ac286b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a3fb686d159af34d01ca95801254e0d248ac7ee2"
+        },
+        "date": 1782971177820,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 60.4,
             "unit": "MiB"
           }
         ]
