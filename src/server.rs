@@ -375,17 +375,7 @@ impl LanguageServer for Backend {
                 .await;
         }
 
-        // Build workspace symbol maps in the background so the first
-        // workspace-wide references/rename request does not have to pay for
-        // parsing every unopened file interactively.  Skip this in headless
-        // test backends (no client) to keep integration tests deterministic.
-        if self.client.is_some() {
-            let backend = self.clone_for_blocking();
-            tokio::spawn(async move {
-                let _ =
-                    tokio::task::spawn_blocking(move || backend.ensure_workspace_indexed()).await;
-            });
-        }
+        self.start_full_background_index().await;
 
         // Spawn the background diagnostic worker. We build a shallow
         // clone of `self` that shares every `Arc`-wrapped field (maps,
@@ -856,7 +846,7 @@ impl LanguageServer for Backend {
         };
 
         if let Some(ref tok) = token {
-            self.progress_begin(tok, "Go to Implementation", Some("Scanning…".to_string()))
+            self.progress_begin(tok, "Go to Implementation", Some("Resolving…".to_string()))
                 .await;
         }
 
@@ -1730,6 +1720,16 @@ fn wrap_locations(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
     }
 }
 
+fn vendor_uri_prefixes_for_path(vendor_path: &std::path::Path) -> Vec<String> {
+    let mut prefixes = vec![format!("{}/", crate::util::path_to_uri(vendor_path))];
+    if let Ok(canonical) = vendor_path.canonicalize() {
+        prefixes.push(format!("{}/", crate::util::path_to_uri(&canonical)));
+    }
+    prefixes.sort();
+    prefixes.dedup();
+    prefixes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1753,6 +1753,91 @@ mod tests {
 // ─── Self-scan helpers ──────────────────────────────────────────────────────
 
 impl Backend {
+    pub(crate) async fn start_full_background_index(&self) {
+        // Headless test backends have no client; skip so integration tests
+        // stay deterministic instead of racing a background index thread.
+        if self.client.is_none() {
+            return;
+        }
+        if self.config().indexing.strategy() != IndexingStrategy::Full {
+            return;
+        }
+        if self.workspace_root.read().is_none() {
+            return;
+        }
+        if self.full_index_in_progress.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let progress_token = self.progress_create("phpantom/full-index").await;
+        if let Some(ref tok) = progress_token {
+            self.progress_begin(
+                tok,
+                "PHPantom: Full index",
+                Some("Parsing workspace files".to_string()),
+            )
+            .await;
+        }
+
+        let parse_backend = self.clone_for_blocking();
+        let progress_backend = self.clone_for_blocking();
+        tokio::spawn(async move {
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+            let indexed_files = tokio::task::spawn_blocking(move || {
+                let progress_tx = std::sync::Arc::new(std::sync::Mutex::new(progress_tx));
+                let report_progress = |percentage, message| {
+                    if let Ok(tx) = progress_tx.lock() {
+                        let _ = tx.send((percentage, message));
+                    }
+                };
+                parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
+                parse_backend.symbol_maps.read().len()
+            });
+            tokio::pin!(indexed_files);
+
+            let indexed_files = loop {
+                tokio::select! {
+                    Some((percentage, message)) = progress_rx.recv() => {
+                        if let Some(ref tok) = progress_token {
+                            progress_backend
+                                .progress_report(tok, percentage, Some(message))
+                                .await;
+                        }
+                    }
+                    result = &mut indexed_files => {
+                        break result.unwrap_or(0);
+                    }
+                }
+            };
+
+            while let Ok((percentage, message)) = progress_rx.try_recv() {
+                if let Some(ref tok) = progress_token {
+                    progress_backend
+                        .progress_report(tok, percentage, Some(message))
+                        .await;
+                }
+            }
+
+            progress_backend
+                .full_index_in_progress
+                .store(false, Ordering::Release);
+
+            if let Some(tok) = progress_token {
+                progress_backend
+                    .progress_end(&tok, Some(format!("Parsed {} files", indexed_files)))
+                    .await;
+            }
+
+            if progress_backend
+                .supports_pull_diagnostics
+                .load(Ordering::Acquire)
+                && let Some(ref client) = progress_backend.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
+        });
+    }
+
     /// Fetch the open-file content for `uri`, run `f` inside a panic
     /// guard, and return the result.
     ///
@@ -2808,16 +2893,18 @@ impl Backend {
             let mut paths = self.vendor_dir_paths.lock();
             paths.push(vendor_path.to_path_buf());
         }
-        // Store the URI prefix for URI-level skip logic (diagnostics,
-        // find references, rename).
-        let prefix = if let Ok(canonical) = vendor_path.canonicalize() {
-            format!("{}/", crate::util::path_to_uri(&canonical))
-        } else {
-            format!("{}/", crate::util::path_to_uri(vendor_path))
-        };
+        // Store URI prefixes for URI-level skip logic (diagnostics, find
+        // references, rename).  Keep both raw and canonical forms so macOS
+        // `/tmp` vs `/private/tmp` style aliases do not leak vendor files into
+        // workspace indexing.
+        let new_prefixes = vendor_uri_prefixes_for_path(vendor_path);
         {
             let mut prefixes = self.vendor_uri_prefixes.lock();
-            prefixes.push(prefix);
+            for prefix in new_prefixes {
+                if !prefixes.contains(&prefix) {
+                    prefixes.push(prefix);
+                }
+            }
         }
     }
 
@@ -2948,16 +3035,16 @@ impl Backend {
             let vendor_package_roots =
                 classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
             {
-                let vendor_uri_prefix = if let Ok(canonical) = vendor_path.canonicalize() {
-                    format!("{}/", crate::util::path_to_uri(&canonical))
-                } else {
-                    format!("{}/", crate::util::path_to_uri(&vendor_path))
-                };
+                let vendor_uri_prefixes = vendor_uri_prefixes_for_path(&vendor_path);
 
                 // Remove old vendor entries and insert new ones.
                 let mut idx = self.fqn_uri_index.write();
                 let mut origins = self.fqn_origin_index.write();
-                idx.retain(|_, v| !v.starts_with(&vendor_uri_prefix));
+                idx.retain(|_, v| {
+                    !vendor_uri_prefixes
+                        .iter()
+                        .any(|prefix| v.starts_with(prefix.as_str()))
+                });
                 for (fqn, path) in vendor_scan.classmap {
                     let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
                     origins.insert(fqn.clone(), origin);

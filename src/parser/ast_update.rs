@@ -10,10 +10,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::ParseErrorEntry;
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
-use crate::symbol_map::extract_symbol_map;
-use crate::types::TypeAliasDef;
+use crate::symbol_map::{SymbolMap, extract_symbol_map};
+use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan, TypeAliasDef};
 
 use mago_allocator::LocalArena;
 
@@ -22,7 +24,6 @@ use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
-use crate::types::ClassInfo;
 
 use super::DocblockCtx;
 
@@ -53,6 +54,33 @@ fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
         }
         Err(_) => f(&LocalArena::new()),
     })
+}
+
+pub(crate) enum AstIndexParseResult {
+    Update(AstIndexUpdate),
+    ParseFailed {
+        uri: String,
+        errors: Vec<ParseErrorEntry>,
+    },
+}
+
+pub(crate) struct AstIndexUpdate {
+    uri: String,
+    parse_errors: Vec<ParseErrorEntry>,
+    classes: Vec<ClassInfo>,
+    use_map: HashMap<String, String>,
+    resolved_names: Arc<OwnedResolvedNames>,
+    namespace_spans: Vec<NamespaceSpan>,
+    functions: Vec<FunctionInfo>,
+    defines: Vec<(String, DefineInfo)>,
+    symbol_map: Arc<SymbolMap>,
+}
+
+fn class_info_fqn(class: &ClassInfo) -> String {
+    match &class.file_namespace {
+        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, class.name),
+        _ => class.name.to_string(),
+    }
 }
 
 impl Backend {
@@ -118,12 +146,59 @@ impl Backend {
         }
     }
 
-    /// Inner implementation of [`update_ast`] that performs the actual
-    /// parsing and map updates.  Separated so that [`update_ast`] can
-    /// wrap the call in [`std::panic::catch_unwind`].
-    ///
-    /// Returns `true` when at least one class signature changed.
+    /// Inner implementation of [`update_ast`] that performs the actual parse
+    /// and publishes the resulting single-file update.
     fn update_ast_inner(&self, uri: &str, content: &str) -> bool {
+        let update = self.build_ast_index_update(uri, content);
+        self.apply_ast_index_updates_batch(vec![update])
+    }
+
+    pub(crate) fn parse_ast_index_update_for_index(
+        &self,
+        uri: &str,
+        content: &str,
+    ) -> AstIndexParseResult {
+        let uri_owned = uri.to_string();
+
+        match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
+            self.build_ast_index_update(uri, content)
+        }) {
+            Some(update) => AstIndexParseResult::Update(update),
+            None => AstIndexParseResult::ParseFailed {
+                uri: uri_owned,
+                errors: vec![("Parse failed (internal error)".to_string(), 0, 0)],
+            },
+        }
+    }
+
+    pub(crate) fn apply_ast_index_parse_results_batch(
+        &self,
+        results: Vec<AstIndexParseResult>,
+    ) -> bool {
+        if results.is_empty() {
+            return false;
+        }
+
+        let mut updates = Vec::new();
+        let mut failures = Vec::new();
+        for result in results {
+            match result {
+                AstIndexParseResult::Update(update) => updates.push(update),
+                AstIndexParseResult::ParseFailed { uri, errors } => failures.push((uri, errors)),
+            }
+        }
+
+        if !failures.is_empty() {
+            let mut parse_errors = self.parse_errors.write();
+            for (uri, errors) in failures {
+                parse_errors.insert(uri, errors);
+            }
+        }
+
+        self.apply_ast_index_updates_batch(updates)
+    }
+
+    fn build_ast_index_update(&self, uri: &str, content: &str) -> AstIndexUpdate {
         with_reusable_arena(|arena| {
             let file_id = mago_database::file::FileId::new(b"input.php");
             let program = parse_file_content(arena, file_id, content.as_bytes());
@@ -135,28 +210,20 @@ impl Backend {
             // the arena drop.
             let name_resolver = mago_names::resolver::NameResolver::new(arena);
             let mago_resolved = name_resolver.resolve(program);
-            let owned_resolved = crate::names::OwnedResolvedNames::from_resolved(&mago_resolved);
+            let owned_resolved = OwnedResolvedNames::from_resolved(&mago_resolved);
 
-            // Cache parse errors for the syntax-error diagnostic collector.
-            // Extract (message, start_byte, end_byte) tuples from the
-            // arena-allocated errors before the arena is dropped.
-            {
-                use mago_span::HasSpan;
-
-                let errors: Vec<(String, u32, u32)> = program
-                    .errors
-                    .iter()
-                    .map(|e| {
-                        let span = e.span();
-                        (
-                            super::error_format::format_parse_error(e),
-                            span.start.offset,
-                            span.end.offset,
-                        )
-                    })
-                    .collect();
-                self.parse_errors.write().insert(uri.to_string(), errors);
-            }
+            let parse_errors: Vec<ParseErrorEntry> = program
+                .errors
+                .iter()
+                .map(|e| {
+                    let span = e.span();
+                    (
+                        super::error_format::format_parse_error(e),
+                        span.start.offset,
+                        span.end.offset,
+                    )
+                })
+                .collect();
 
             let doc_ctx = DocblockCtx {
                 trivias: program.trivia.as_slice(),
@@ -177,7 +244,7 @@ impl Backend {
             let mut classes_with_ns: Vec<(ClassInfo, Option<String>)> = Vec::new();
             let mut use_map = HashMap::new();
             let mut namespace: Option<String> = None;
-            let mut namespace_spans: Vec<crate::types::NamespaceSpan> = Vec::new();
+            let mut namespace_spans: Vec<NamespaceSpan> = Vec::new();
 
             for statement in program.statements.iter() {
                 match statement {
@@ -194,7 +261,7 @@ impl Backend {
 
                         // Record the byte span of this namespace block.
                         let ns_span = ns.span();
-                        namespace_spans.push(crate::types::NamespaceSpan {
+                        namespace_spans.push(NamespaceSpan {
                             namespace: block_ns.clone(),
                             start: ns_span.start.offset,
                             end: ns_span.end.offset,
@@ -314,7 +381,6 @@ impl Backend {
             // Extract standalone functions (including those inside if-guards
             // like `if (! function_exists('...'))`) using the shared helper
             // which recurses into if/block statements.
-            let mut any_function_changed = false;
             let mut functions = Vec::new();
             // Update doc_ctx with the file's use-map and namespace so that
             // parameter default values (e.g. `Application::class`) can be
@@ -351,20 +417,6 @@ impl Backend {
                     crate::stub_patches::apply_class_stub_patches(cls);
                 }
             }
-            // Recall the standalone functions and defines this file contributed
-            // on its previous parse so that symbols the edit deleted or renamed
-            // can be evicted from the global maps.  Without this, deleting or
-            // renaming a `function foo()` or `define('X', …)` leaves the old
-            // entry behind for the whole session (stale completion, hover, and
-            // go-to-definition).
-            let (old_function_fqns, old_define_names) = self
-                .uri_globals_index
-                .read()
-                .get(uri)
-                .cloned()
-                .unwrap_or_default();
-            let mut new_function_fqns: Vec<String> = Vec::new();
-            let mut new_define_names: Vec<String> = Vec::new();
 
             if !functions.is_empty() {
                 // Resolve class-like names in function return types and
@@ -417,124 +469,6 @@ impl Backend {
                 }
             }
 
-            // Only take the write lock when this parse contributes functions
-            // or the previous parse did (so removals can be evicted).  The
-            // common case — a class file with no standalone functions that
-            // never had any — skips the lock and the eviction scan entirely.
-            if !functions.is_empty() || !old_function_fqns.is_empty() {
-                let mut fmap = self.global_functions.write();
-
-                // Snapshot old functions declared in this file before
-                // overwriting, so we can detect signature changes and
-                // trigger cross-file diagnostic invalidation.
-                let old_functions: Vec<(String, crate::types::FunctionInfo)> = fmap
-                    .iter()
-                    .filter(|(_, (file_uri, _))| file_uri == uri)
-                    .map(|(fqn, (_, info))| (fqn.to_string(), info.clone()))
-                    .collect();
-
-                // Remove old function entries for this URI so that
-                // renamed/deleted functions don't linger.
-                for (old_fqn, _) in &old_functions {
-                    fmap.remove(old_fqn);
-                }
-
-                for func_info in functions {
-                    let fqn = if let Some(ref ns) = func_info.namespace {
-                        format!("{}\\{}", ns, func_info.name)
-                    } else {
-                        func_info.name.to_string()
-                    };
-
-                    // Skip polyfill functions when a native stub exists.
-                    // Libraries like Laravel wrap helpers such as
-                    // `str_contains` in `if (! function_exists('…'))` guards
-                    // and mark them `@deprecated`.  On the configured PHP
-                    // version the native function exists, so the guard is
-                    // never entered and the polyfill is dead code.  Letting
-                    // the stub win ensures the correct signature, return
-                    // type, and deprecation status are used everywhere
-                    // (hover, completion, diagnostics).
-                    if func_info.is_polyfill
-                        && self.stub_function_index.read().contains_key(fqn.as_str())
-                    {
-                        continue;
-                    }
-
-                    // Check whether this function's signature changed
-                    // compared to the previous parse.  A change (or a
-                    // new function) means other open files that call it
-                    // may have stale diagnostics.
-                    //
-                    // **First-parse fast path**: when `old_functions` is
-                    // empty the file has never been parsed before.  New
-                    // functions appearing on first parse are not changes
-                    // — they mirror the class first-parse fast path.
-                    if !any_function_changed && !old_functions.is_empty() {
-                        match old_functions
-                            .iter()
-                            .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
-                        {
-                            Some((_, old_info)) => {
-                                if !old_info.signature_eq(&func_info) {
-                                    any_function_changed = true;
-                                }
-                            }
-                            None => {
-                                // New function — may affect callers.
-                                any_function_changed = true;
-                            }
-                        }
-                    }
-
-                    // Insert under the FQN only.  For namespaced functions
-                    // the FQN is `Namespace\name`; for global functions it
-                    // is just the bare name.  `resolve_function_name` already
-                    // builds namespace-qualified candidates, so a short-name
-                    // fallback entry is unnecessary and would cause collisions
-                    // when two namespaces define the same short name.
-                    new_function_fqns.push(fqn.clone());
-                    fmap.insert(fqn, (uri.to_string(), func_info));
-                }
-
-                // A function was removed from this file — callers may
-                // now reference an unknown function.
-                if !any_function_changed && !old_functions.is_empty() {
-                    let new_count = fmap
-                        .iter()
-                        .filter(|(_, (file_uri, _))| file_uri == uri)
-                        .count();
-                    if new_count != old_functions.len() {
-                        any_function_changed = true;
-                    }
-                }
-            } else {
-                // The file has no functions now.  If it previously had
-                // functions, remove the stale entries and flag a change
-                // so callers get fresh diagnostics.
-                //
-                // Scan under a read lock first: files that never declared
-                // a top-level function (most class files) hit this branch
-                // on every keystroke, and taking a write lock there would
-                // needlessly contend with the diagnostic threads reading
-                // the map.  Only escalate to a write lock when there is
-                // stale state to remove.
-                let old_fqns: Vec<String> = {
-                    let fmap = self.global_functions.read();
-                    fmap.iter()
-                        .filter(|(_, (file_uri, _))| file_uri == uri)
-                        .map(|(fqn, _)| fqn.to_string())
-                        .collect()
-                };
-                if !old_fqns.is_empty() {
-                    let mut fmap = self.global_functions.write();
-                    for fqn in &old_fqns {
-                        fmap.remove(fqn);
-                    }
-                    any_function_changed = true;
-                }
-            }
-
             // Extract define() constants from the already-parsed AST and
             // store them in the global_defines map so they appear in
             // completions.  This reuses the parse pass above rather than
@@ -545,47 +479,19 @@ impl Backend {
                 &mut define_entries,
                 content,
             );
-            if !define_entries.is_empty() || !old_define_names.is_empty() {
-                let mut dmap = self.global_defines.write();
-                for (name, offset, value) in define_entries {
-                    // Overwrite rather than `or_insert_with` so edits to an
-                    // existing `define`/`const` propagate: changing the value
-                    // updates hover, and inserting lines above it updates the
-                    // go-to-definition offset.
-                    new_define_names.push(name.clone());
-                    dmap.insert(
+            let defines: Vec<(String, DefineInfo)> = define_entries
+                .into_iter()
+                .map(|(name, offset, value)| {
+                    (
                         name,
-                        crate::types::DefineInfo {
+                        DefineInfo {
                             file_uri: uri.to_string(),
                             name_offset: offset,
                             value,
                         },
-                    );
-                }
-
-                // Evict names this file used to contribute but no longer does,
-                // guarding on the stored URI so a constant redefined in another
-                // file is not clobbered.
-                for old_name in &old_define_names {
-                    if new_define_names.contains(old_name) {
-                        continue;
-                    }
-                    if dmap.get(old_name).is_some_and(|d| d.file_uri == uri) {
-                        dmap.remove(old_name);
-                    }
-                }
-            }
-
-            // Record what this parse contributed so the next parse can evict
-            // whatever it removes.  Drop the entry entirely when the file has
-            // no globals, to avoid accumulating empty records for class files.
-            if new_function_fqns.is_empty() && new_define_names.is_empty() {
-                self.uri_globals_index.write().remove(uri);
-            } else {
-                self.uri_globals_index
-                    .write()
-                    .insert(uri.to_string(), (new_function_fqns, new_define_names));
-            }
+                    )
+                })
+                .collect();
 
             // Post-process: resolve parent_class short names to fully-qualified
             // names using the file's use_map and each class's own namespace so
@@ -642,262 +548,441 @@ impl Backend {
                 })
                 .collect();
 
-            let uri_string = uri.to_string();
-
-            // Collect old ClassInfo values (not just FQNs) before the uri_classes_index
-            // entry is overwritten.  These are compared against the new classes
-            // using `signature_eq` to decide whether each FQN's cache entry
-            // actually needs eviction (signature-level cache invalidation).
-            let old_classes_snapshot: Vec<crate::types::ClassInfo> = self
-                .uri_classes_index
-                .read()
-                .get(&uri_string)
-                .map(|v| {
-                    v.iter()
-                        .map(|c| crate::types::ClassInfo::clone(c))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let old_fqns: Vec<String> = old_classes_snapshot
-                .iter()
-                .filter(|c| !c.name.starts_with("__anonymous@"))
-                .map(|c| match &c.file_namespace {
-                    Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                    _ => c.name.to_string(),
-                })
-                .collect();
-
-            // Populate the fqn_uri_index with FQN → URI mappings for every class
-            // found in this file.  This enables reliable lookup of classes that
-            // don't follow PSR-4 conventions (e.g. classes defined in Composer
-            // autoload_files.php entries).
-            //
-            // Uses the per-class namespace (not the file-level namespace) so
-            // that files with multiple namespace blocks produce correct FQNs.
-            {
-                let mut idx = self.fqn_uri_index.write();
-                let mut fqn_idx = self.fqn_class_index.write();
-                // Remove stale entries from previous parses of this file.
-                // When a file's namespace changes (e.g. while the user is
-                // typing a namespace declaration), old FQNs linger under
-                // the previous namespace and pollute completions.
-                //
-                // Use targeted removes via old_fqns instead of a full
-                // retain() scan — O(old_classes) ~ O(1) vs O(fqn_uri_index).
-                for old_fqn in &old_fqns {
-                    idx.remove(old_fqn);
-                    fqn_idx.remove(old_fqn);
-                }
-
-                for (i, (class, class_ns)) in classes_with_ns.iter().enumerate() {
-                    // Anonymous classes (named `__anonymous@<offset>`) are
-                    // internal bookkeeping — they should never appear in
-                    // cross-file lookups or completion results.
-                    if class.name.starts_with("__anonymous@") {
-                        continue;
-                    }
-                    let fqn = if let Some(ns) = class_ns {
-                        format!("{}\\{}", ns, class.name)
-                    } else {
-                        class.name.to_string()
-                    };
-                    idx.insert(fqn.clone(), uri_string.clone());
-                    // The `classes` vec already has `file_namespace` set,
-                    // so use it for the fqn_index entry.
-                    fqn_idx.insert(fqn, Arc::new(classes[i].clone()));
-                }
-            }
-
-            // Remove newly-discovered FQNs from the negative-result cache
-            // so classes that just became available are not suppressed.
-            {
-                let nf_cache = self.class_not_found_cache.read();
-                if !nf_cache.is_empty() {
-                    drop(nf_cache);
-                    let mut nf_cache = self.class_not_found_cache.write();
-                    for (class, class_ns) in &classes_with_ns {
-                        if class.name.starts_with("__anonymous@") {
-                            continue;
-                        }
-                        let fqn = match class_ns {
-                            Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, class.name),
-                            _ => class.name.to_string(),
-                        };
-                        nf_cache.remove(&fqn);
-                    }
-                }
-            }
-
             // Build the precomputed symbol map while the AST is still alive.
             // This must happen before the `Program` (and its arena) are dropped.
-            let symbol_map = std::sync::Arc::new(extract_symbol_map(program, content));
+            let symbol_map = Arc::new(extract_symbol_map(program, content));
 
-            self.uri_classes_index.write().insert(
-                uri_string.clone(),
-                classes.into_iter().map(Arc::new).collect(),
-            );
-            self.parsed_uris.write().insert(uri_string.clone());
-
-            // Populate the global method store for O(1) method lookup.
-            self.evict_methods_for_fqns(&old_fqns);
-            self.evict_gti_for_fqns(&old_fqns);
-            if let Some(arc_classes) = self.uri_classes_index.read().get(&uri_string) {
-                self.populate_method_store(arc_classes);
-                self.populate_gti_index(arc_classes);
-            }
-
-            self.symbol_maps
-                .write()
-                .insert(uri_string.clone(), symbol_map);
-            self.file_imports
-                .write()
-                .insert(uri_string.clone(), use_map);
-            self.resolved_names
-                .write()
-                .insert(uri_string.clone(), Arc::new(owned_resolved));
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
             // (which will be None for files without namespace declarations).
             if namespace_spans.is_empty() {
-                namespace_spans.push(crate::types::NamespaceSpan {
+                namespace_spans.push(NamespaceSpan {
                     namespace: namespace.clone(),
                     start: 0,
                     end: content.len() as u32,
                 });
             }
-            self.file_namespaces
-                .write()
-                .insert(uri_string, namespace_spans);
 
-            // Selectively invalidate the resolved-class cache with
-            // signature-level granularity.
-            //
-            // Instead of evicting every FQN defined in this file on every
-            // keystroke, compare the old and new ClassInfo values using
-            // `signature_eq`.  When the signature has not changed (the
-            // overwhelmingly common case during normal editing inside a
-            // method body), the cache entry is kept warm.
-            //
-            // FQNs that only appear in the old set (renamed/removed classes)
-            // or only in the new set (newly added classes) are always evicted.
-            // FQNs present in both sets are evicted only when their signature
-            // differs.
-            //
-            // `evict_fqn` transitively evicts dependents (classes that
-            // extend/use/implement/mixin the changed class) so that
-            // cached child classes don't serve stale inherited members.
-            //
-            // **First-parse fast path**: when `old_fqns` is empty the file
-            // has never been parsed by `update_ast` before.  There are no
-            // stale cache entries to evict — any existing cache entries for
-            // these FQNs were populated by legitimate resolution paths
-            // (classmap / PSR-4 / stubs) reading the same on-disk content.
-            // Skipping eviction here eliminates the O(N²) cost of calling
-            // `evict_fqn` (which does a full cache scan + transitive
-            // dependent cascade) for every class during bulk operations
-            // like `analyse`.
-            let mut any_signature_changed = false;
-            let mut evicted_fqns: Vec<String> = Vec::new();
+            AstIndexUpdate {
+                uri: uri.to_string(),
+                parse_errors,
+                classes,
+                use_map,
+                resolved_names: Arc::new(owned_resolved),
+                namespace_spans,
+                functions,
+                defines,
+                symbol_map,
+            }
+        })
+    }
 
-            if !old_fqns.is_empty() {
-                let mut cache = self.resolved_class_cache.write();
-                // Collect new FQNs from the classes we just parsed.
-                let new_fqns: Vec<String> = classes_with_ns
+    pub(crate) fn apply_ast_index_updates_batch(&self, updates: Vec<AstIndexUpdate>) -> bool {
+        if updates.is_empty() {
+            return false;
+        }
+
+        struct PreparedAstIndexUpdate {
+            uri: String,
+            parse_errors: Vec<ParseErrorEntry>,
+            old_classes: Vec<ClassInfo>,
+            old_fqns: Vec<String>,
+            new_fqns: Vec<String>,
+            classes: Vec<Arc<ClassInfo>>,
+            use_map: HashMap<String, String>,
+            resolved_names: Arc<OwnedResolvedNames>,
+            namespace_spans: Vec<NamespaceSpan>,
+            functions: Vec<FunctionInfo>,
+            defines: Vec<(String, DefineInfo)>,
+            symbol_map: Arc<SymbolMap>,
+            old_function_fqns: Vec<String>,
+            old_define_names: Vec<String>,
+            new_function_fqns: Vec<String>,
+            new_define_names: Vec<String>,
+        }
+
+        let old_classes_by_update: Vec<Vec<ClassInfo>> = {
+            let uri_classes = self.uri_classes_index.read();
+            updates
+                .iter()
+                .map(|update| {
+                    uri_classes
+                        .get(&update.uri)
+                        .map(|classes| {
+                            classes
+                                .iter()
+                                .map(|class| ClassInfo::clone(class))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                })
+                .collect()
+        };
+
+        // Recall the standalone functions and defines each file contributed
+        // on its previous parse so that symbols an edit deleted or renamed
+        // can be evicted from the global maps.  Without this, deleting or
+        // renaming a `function foo()` or `define('X', …)` leaves the old
+        // entry behind for the whole session (stale completion, hover, and
+        // go-to-definition).
+        let old_globals_by_update: Vec<(Vec<String>, Vec<String>)> = {
+            let uri_globals = self.uri_globals_index.read();
+            updates
+                .iter()
+                .map(|update| uri_globals.get(&update.uri).cloned().unwrap_or_default())
+                .collect()
+        };
+
+        let mut prepared = Vec::with_capacity(updates.len());
+        let mut all_old_fqns = Vec::new();
+        let mut all_new_fqns = Vec::new();
+        let mut all_classes = Vec::new();
+
+        for ((update, old_classes), (old_function_fqns, old_define_names)) in updates
+            .into_iter()
+            .zip(old_classes_by_update)
+            .zip(old_globals_by_update)
+        {
+            let old_fqns: Vec<String> = old_classes
+                .iter()
+                .filter(|class| !class.name.starts_with("__anonymous@"))
+                .map(class_info_fqn)
+                .collect();
+            let classes: Vec<Arc<ClassInfo>> = update.classes.into_iter().map(Arc::new).collect();
+            let new_fqns: Vec<String> = classes
+                .iter()
+                .filter(|class| !class.name.starts_with("__anonymous@"))
+                .map(|class| class.fqn().to_string())
+                .collect();
+
+            all_old_fqns.extend(old_fqns.iter().cloned());
+            all_new_fqns.extend(new_fqns.iter().cloned());
+            all_classes.extend(classes.iter().cloned());
+
+            prepared.push(PreparedAstIndexUpdate {
+                uri: update.uri,
+                parse_errors: update.parse_errors,
+                old_classes,
+                old_fqns,
+                new_fqns,
+                classes,
+                use_map: update.use_map,
+                resolved_names: update.resolved_names,
+                namespace_spans: update.namespace_spans,
+                functions: update.functions,
+                defines: update.defines,
+                symbol_map: update.symbol_map,
+                old_function_fqns,
+                old_define_names,
+                new_function_fqns: Vec::new(),
+                new_define_names: Vec::new(),
+            });
+        }
+
+        all_old_fqns.sort();
+        all_old_fqns.dedup();
+        all_new_fqns.sort();
+        all_new_fqns.dedup();
+
+        {
+            let mut parse_errors = self.parse_errors.write();
+            for update in &mut prepared {
+                parse_errors.insert(update.uri.clone(), std::mem::take(&mut update.parse_errors));
+            }
+        }
+
+        {
+            let mut idx = self.fqn_uri_index.write();
+            let mut fqn_idx = self.fqn_class_index.write();
+
+            for old_fqn in &all_old_fqns {
+                idx.remove(old_fqn);
+                fqn_idx.remove(old_fqn);
+            }
+
+            for update in &prepared {
+                for class in &update.classes {
+                    if class.name.starts_with("__anonymous@") {
+                        continue;
+                    }
+                    let fqn = class.fqn().to_string();
+                    idx.insert(fqn.clone(), update.uri.clone());
+                    fqn_idx.insert(fqn, Arc::clone(class));
+                }
+            }
+        }
+
+        {
+            let nf_cache = self.class_not_found_cache.read();
+            if !nf_cache.is_empty() {
+                drop(nf_cache);
+                let mut nf_cache = self.class_not_found_cache.write();
+                for fqn in &all_new_fqns {
+                    nf_cache.remove(fqn);
+                }
+            }
+        }
+
+        // Only touch a file's function entries when this parse contributes
+        // functions or the previous parse did (so removals can be evicted).
+        // The common case — a class file with no standalone functions that
+        // never had any — skips the snapshot scan below entirely.
+        let mut any_function_changed = false;
+        {
+            let mut fmap = self.global_functions.write();
+            for update in &mut prepared {
+                if update.functions.is_empty() && update.old_function_fqns.is_empty() {
+                    continue;
+                }
+
+                // Snapshot old functions declared in this file before
+                // overwriting, so we can detect signature changes and
+                // trigger cross-file diagnostic invalidation.
+                let old_functions: Vec<(String, FunctionInfo)> = fmap
                     .iter()
-                    .filter(|(c, _)| !c.name.starts_with("__anonymous@"))
-                    .map(|(c, ns)| match ns {
-                        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                        _ => c.name.to_string(),
-                    })
+                    .filter(|(_, (file_uri, _))| *file_uri == update.uri)
+                    .map(|(fqn, (_, info))| (fqn.to_string(), info.clone()))
                     .collect();
 
-                // Evict old FQNs that no longer exist (renames / removals),
-                // or whose signature changed.
-                for (i, fqn) in old_fqns.iter().enumerate() {
-                    let old_cls = &old_classes_snapshot[old_classes_snapshot
-                        .iter()
-                        .position(|c| {
-                            !c.name.starts_with("__anonymous@") && {
-                                let f = match &c.file_namespace {
-                                    Some(ns) if !ns.is_empty() => {
-                                        format!("{}\\{}", ns, c.name)
-                                    }
-                                    _ => c.name.to_string(),
-                                };
-                                f == *fqn
+                // Remove old function entries for this URI so that
+                // renamed/deleted functions don't linger.
+                for (old_fqn, _) in &old_functions {
+                    fmap.remove(old_fqn);
+                }
+
+                for func_info in std::mem::take(&mut update.functions) {
+                    let fqn = if let Some(ref ns) = func_info.namespace {
+                        format!("{}\\{}", ns, &func_info.name)
+                    } else {
+                        func_info.name.to_string()
+                    };
+
+                    // Skip polyfill functions when a native stub exists.
+                    // Libraries like Laravel wrap helpers such as
+                    // `str_contains` in `if (! function_exists('…'))` guards
+                    // and mark them `@deprecated`.  On the configured PHP
+                    // version the native function exists, so the guard is
+                    // never entered and the polyfill is dead code.  Letting
+                    // the stub win ensures the correct signature, return
+                    // type, and deprecation status are used everywhere
+                    // (hover, completion, diagnostics).
+                    if func_info.is_polyfill
+                        && self.stub_function_index.read().contains_key(fqn.as_str())
+                    {
+                        continue;
+                    }
+
+                    // Check whether this function's signature changed
+                    // compared to the previous parse.  A change (or a new
+                    // function) means other open files that call it may
+                    // have stale diagnostics.
+                    //
+                    // **First-parse fast path**: when `old_functions` is
+                    // empty the file has never been parsed before.  New
+                    // functions appearing on first parse are not changes
+                    // — they mirror the class first-parse fast path.
+                    if !any_function_changed && !old_functions.is_empty() {
+                        match old_functions
+                            .iter()
+                            .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
+                        {
+                            Some((_, old_info)) => {
+                                if !old_info.signature_eq(&func_info) {
+                                    any_function_changed = true;
+                                }
                             }
-                        })
-                        .unwrap_or(i)];
-
-                    // Find the matching new class by FQN.
-                    let new_cls = classes_with_ns.iter().find(|(c, ns)| {
-                        !c.name.starts_with("__anonymous@") && {
-                            let f = match ns {
-                                Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                                _ => c.name.to_string(),
-                            };
-                            f == *fqn
+                            None => {
+                                // New function — may affect callers.
+                                any_function_changed = true;
+                            }
                         }
-                    });
+                    }
 
-                    match new_cls {
-                        Some((new, _)) if old_cls.signature_eq(new) => {
-                            // Signature unchanged — keep the cache entry warm.
-                        }
+                    // Insert under the FQN only.  For namespaced functions
+                    // the FQN is `Namespace\name`; for global functions it
+                    // is just the bare name.  `resolve_function_name` already
+                    // builds namespace-qualified candidates, so a short-name
+                    // fallback entry is unnecessary and would cause collisions
+                    // when two namespaces define the same short name.
+                    update.new_function_fqns.push(fqn.clone());
+                    fmap.insert(fqn, (update.uri.clone(), func_info));
+                }
+
+                // A function was removed from this file — callers may
+                // now reference an unknown function.
+                if !any_function_changed && !old_functions.is_empty() {
+                    let new_count = fmap
+                        .iter()
+                        .filter(|(_, (file_uri, _))| *file_uri == update.uri)
+                        .count();
+                    if new_count != old_functions.len() {
+                        any_function_changed = true;
+                    }
+                }
+            }
+        }
+
+        {
+            let mut dmap = self.global_defines.write();
+            for update in &mut prepared {
+                if update.defines.is_empty() && update.old_define_names.is_empty() {
+                    continue;
+                }
+
+                for (name, define) in std::mem::take(&mut update.defines) {
+                    // Overwrite rather than `or_insert_with` so edits to an
+                    // existing `define`/`const` propagate: changing the value
+                    // updates hover, and inserting lines above it updates the
+                    // go-to-definition offset.
+                    update.new_define_names.push(name.clone());
+                    dmap.insert(name, define);
+                }
+
+                // Evict names this file used to contribute but no longer
+                // does, guarding on the stored URI so a constant redefined
+                // in another file is not clobbered.
+                for old_name in &update.old_define_names {
+                    if update.new_define_names.contains(old_name) {
+                        continue;
+                    }
+                    if dmap.get(old_name).is_some_and(|d| d.file_uri == update.uri) {
+                        dmap.remove(old_name);
+                    }
+                }
+            }
+        }
+
+        // Record what each file contributed so the next parse can evict
+        // whatever it removes.  Drop the entry entirely when the file has
+        // no globals, to avoid accumulating empty records for class files.
+        {
+            let mut globals_index = self.uri_globals_index.write();
+            for update in &prepared {
+                if update.new_function_fqns.is_empty() && update.new_define_names.is_empty() {
+                    globals_index.remove(&update.uri);
+                } else {
+                    globals_index.insert(
+                        update.uri.clone(),
+                        (
+                            update.new_function_fqns.clone(),
+                            update.new_define_names.clone(),
+                        ),
+                    );
+                }
+            }
+        }
+
+        self.evict_methods_for_fqns(&all_old_fqns);
+        self.evict_gti_for_fqns(&all_old_fqns);
+        self.populate_method_store(&all_classes);
+        self.populate_gti_index(&all_classes);
+
+        // Selectively invalidate the resolved-class cache with
+        // signature-level granularity.  Full indexing usually hits the
+        // first-parse fast path (`old_fqns` is empty), so this stays cheap
+        // during background indexing while preserving edit-time semantics.
+        let mut any_signature_changed = false;
+        let mut evicted_fqns = Vec::new();
+        {
+            let mut cache = self.resolved_class_cache.write();
+            for update in &prepared {
+                if update.old_fqns.is_empty() {
+                    continue;
+                }
+
+                for fqn in &update.old_fqns {
+                    let old_cls = update
+                        .old_classes
+                        .iter()
+                        .find(|class| class_info_fqn(class) == *fqn);
+                    let new_cls = update
+                        .classes
+                        .iter()
+                        .find(|class| class.fqn().as_str() == fqn);
+
+                    match (old_cls, new_cls) {
+                        (Some(old), Some(new)) if old.signature_eq(new) => {}
                         _ => {
-                            // Signature changed or class was removed — evict.
-                            let evicted = crate::virtual_members::evict_fqn(&mut cache, fqn);
-                            evicted_fqns.extend(evicted);
+                            evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                             any_signature_changed = true;
                         }
                     }
                 }
 
-                // Evict new FQNs that did not exist before (new classes).
-                for fqn in &new_fqns {
-                    if !old_fqns.contains(fqn) {
-                        let evicted = crate::virtual_members::evict_fqn(&mut cache, fqn);
-                        evicted_fqns.extend(evicted);
+                for fqn in &update.new_fqns {
+                    if !update.old_fqns.contains(fqn) {
+                        evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                         any_signature_changed = true;
                     }
                 }
             }
+        }
+        evicted_fqns.sort();
+        evicted_fqns.dedup();
 
-            // Dedup evicted FQNs before repopulation.
-            evicted_fqns.sort();
-            evicted_fqns.dedup();
+        {
+            let mut uri_classes = self.uri_classes_index.write();
+            let mut parsed_uris = self.parsed_uris.write();
+            for update in &mut prepared {
+                uri_classes.insert(update.uri.clone(), std::mem::take(&mut update.classes));
+                parsed_uris.insert(update.uri.clone());
+            }
+        }
 
-            // ── ER4: Eagerly re-populate evicted classes ─────────────────
-            if !evicted_fqns.is_empty() {
-                // Toposort just the evicted subset using their current
-                // (just-parsed) ClassInfo from uri_classes_index.
-                let sorted = {
-                    let uri_classes = self.uri_classes_index.read();
-                    let iter = uri_classes
-                        .values()
-                        .flat_map(|classes| classes.iter())
-                        .filter(|c| evicted_fqns.contains(&c.fqn().to_string()))
-                        .map(|c| (c.fqn().to_string(), c.as_ref()));
-                    crate::toposort::toposort_classes(iter)
-                };
-
-                let class_loader =
-                    |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-                crate::virtual_members::populate_from_sorted(
-                    &sorted,
-                    &self.resolved_class_cache,
-                    &class_loader,
+        {
+            let mut imports = self.file_imports.write();
+            let mut resolved_names = self.resolved_names.write();
+            let mut namespaces = self.file_namespaces.write();
+            for update in &mut prepared {
+                imports.insert(update.uri.clone(), std::mem::take(&mut update.use_map));
+                resolved_names.insert(update.uri.clone(), Arc::clone(&update.resolved_names));
+                namespaces.insert(
+                    update.uri.clone(),
+                    std::mem::take(&mut update.namespace_spans),
                 );
             }
+        }
 
-            let changed = any_signature_changed || any_function_changed;
+        if !evicted_fqns.is_empty() {
+            let sorted = {
+                let uri_classes = self.uri_classes_index.read();
+                let iter = uri_classes
+                    .values()
+                    .flat_map(|classes| classes.iter())
+                    .filter(|class| evicted_fqns.contains(&class.fqn().to_string()))
+                    .map(|class| (class.fqn().to_string(), class.as_ref()));
+                crate::toposort::toposort_classes(iter)
+            };
 
-            if changed {
-                self.member_completion_cache.lock().clear();
+            let class_loader =
+                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+            crate::virtual_members::populate_from_sorted(
+                &sorted,
+                &self.resolved_class_cache,
+                &class_loader,
+            );
+        }
+
+        let changed = any_signature_changed || any_function_changed;
+
+        if changed {
+            self.member_completion_cache.lock().clear();
+        }
+
+        let reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
+            .iter()
+            .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
+            .collect();
+        self.reindex_references_for_symbol_maps_batch(reference_items);
+
+        {
+            let mut symbol_maps = self.symbol_maps.write();
+            for update in prepared {
+                symbol_maps.insert(update.uri, update.symbol_map);
             }
+        }
 
-            changed
-        })
+        changed
     }
 
     /// Resolve `parent_class` short names in a list of `ClassInfo` to
@@ -1439,6 +1524,7 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::Backend;
 
     /// Changing a function's parameter type should cause `update_ast` to
@@ -1573,6 +1659,25 @@ mod tests {
         assert!(
             changed,
             "Class method return type change must still be detected"
+        );
+    }
+
+    #[test]
+    fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
+        let backend = Backend::new_test();
+        assert!(!backend.apply_ast_index_parse_results_batch(Vec::new()));
+
+        let uri = "file:///project/src/Broken.php";
+        let changed =
+            backend.apply_ast_index_parse_results_batch(vec![AstIndexParseResult::ParseFailed {
+                uri: uri.to_string(),
+                errors: vec![("Parse failed (internal error)".to_string(), 10, 20)],
+            }]);
+
+        assert!(!changed);
+        assert_eq!(
+            backend.parse_errors.read().get(uri).cloned(),
+            Some(vec![("Parse failed (internal error)".to_string(), 10, 20)])
         );
     }
 }

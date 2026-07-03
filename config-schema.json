@@ -43,14 +43,14 @@
       "properties": {
         "strategy": {
           "type": "string",
-          "description": "The indexing strategy for class discovery. \"composer\" (default): use Composer's classmap, fall back to self-scan. \"self\": scan all PHP files, ignore classmap. \"full\": background-parse all files (not yet implemented). \"none\": no proactive scanning, classmap only.",
+          "description": "The indexing strategy for class discovery. \"full\" (default): scan PHP files, then background-parse user files to populate symbol and reference indexes. \"composer\": use Composer's classmap, fall back to self-scan. \"self\": scan all PHP files, ignore classmap. \"none\": no proactive scanning, classmap only.",
           "enum": [
             "composer",
             "self",
             "full",
             "none"
           ],
-          "default": "composer"
+          "default": "full"
         }
       }
     },

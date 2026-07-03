@@ -638,10 +638,10 @@ fn scan_directories_ignores_non_php_files() {
 // ─── Config strategy tests ─────────────────────────────────────────────────
 
 #[test]
-fn config_strategy_defaults_to_composer() {
+fn config_strategy_defaults_to_full() {
     use phpantom_lsp::config::{Config, IndexingStrategy};
     let config: Config = toml::from_str("").unwrap();
-    assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
+    assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
 }
 
 #[test]

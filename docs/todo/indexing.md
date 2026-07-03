@@ -67,20 +67,26 @@ Four indexing strategies, selectable via `.phpantom.toml`:
 
 ```toml
 [indexing]
-# "composer" (default) - merged classmap + self-scan
-# "self"    - always self-scan, ignore composer classmap
-# "full"    - background-parse all project files for rich intelligence
-# "none"    - no proactive scanning
-strategy = "composer"
+# "full"     (default) - background-parse all project files for rich intelligence
+# "composer"           - merged classmap + self-scan
+# "self"               - always self-scan, ignore composer classmap
+# "none"               - no proactive scanning
+strategy = "full"
 ```
 
-### `"composer"` (default)
+### `"full"` (default)
+
+Background-parse user PHP files for rich intelligence after discovery.
+This is the zero-config experience and populates the symbol/reference
+indexes used by workspace-wide navigation.
+
+### `"composer"`
 
 Merged classmap + self-scan. Load Composer's classmap (if it exists)
 as a skip set, then self-scan all PSR-4 and vendor directories for
 anything the classmap missed. Whatever the classmap already covers is
 a free performance win; whatever it's missing, we find ourselves. No
-completeness heuristic needed. This is the zero-config experience.
+completeness heuristic needed.
 
 ### `"self"`
 
@@ -246,7 +252,8 @@ scanning, and complete completion item detail.
 
 ### Trigger
 
-When `strategy = "full"` is set in `.phpantom.toml`.
+By default. Users can opt out with `strategy = "composer"`, `"self"`, or
+`"none"` in `.phpantom.toml`.
 
 ### Design: self + second pass
 
@@ -299,9 +306,9 @@ Each stage improves on the last without blocking the previous one.
 
 Currently we store `ClassInfo`, `FunctionInfo`, and `SymbolMap`
 structs that are not as lean as they could be. For a 21K-file
-codebase, full indexing will use meaningful RAM. This is acceptable
-because it's an opt-in mode, but we should profile and trim struct
-sizes over time. The aim is to stay under 512 MB for a full project.
+codebase, full indexing will use meaningful RAM. Since full indexing is
+the default, we should profile and trim struct sizes over time. The aim
+is to stay under 512 MB for a full project.
 
 The performance prerequisites above (P1 `Arc<ClassInfo>`,
 `Arc<String>`, `Arc<SymbolMap>`) directly reduce memory usage by
@@ -315,11 +322,9 @@ With the full index populated, `workspace/symbol` becomes a simple
 filter over the uri_classes_index and global_functions maps. No additional
 infrastructure needed.
 
-In other modes, workspace symbols still works but only returns results
+When full indexing is disabled, workspace symbols still works but only returns results
 from already-parsed files (opened files, on-demand resolutions, stubs).
-When the user invokes workspace symbols outside of full mode, show a
-one-time hint suggesting they enable `strategy = "full"` in
-`.phpantom.toml` for complete coverage.
+Complete coverage requires the default `strategy = "full"`.
 
 ---
 

@@ -287,10 +287,11 @@ This creates a `.phpantom.toml` in the current directory. Currently supported se
 
 [indexing]
 # How PHPantom discovers classes across the workspace.
-#   "composer" (default) - use Composer classmap, self-scan on fallback
-#   "self"    - always self-scan, ignore Composer classmap
-#   "none"    - no proactive scanning, Composer classmap only
-# strategy = "composer"
+#   "full"     (default) - scan PHP files and background-parse user files
+#   "composer"           - use Composer classmap, self-scan on fallback
+#   "self"               - always self-scan, ignore Composer classmap
+#   "none"               - no proactive scanning, Composer classmap only
+# strategy = "full"
 
 [formatting]
 # Explicit path to an external formatter: always use this tool and skip
@@ -327,23 +328,24 @@ For the full list of `[formatter]` options (presets, brace placement, blank-line
 
 ### Indexing Strategy
 
-By default, PHPantom trusts Composer's autoloader to determine which classes exist in your project. This is intentional: it means completions, diagnostics, and go-to-definition reflect what your code will actually see at runtime. Classes that aren't autoloadable don't appear, because using them would be an error.
+By default, PHPantom builds a full workspace index: it discovers PHP files, then background-parses user files to populate symbol maps and the reference candidate index. This gives complete cross-file references, implementation lookup, and workspace-wide navigation without per-feature scanning.
 
 The `strategy` setting controls this behaviour:
 
 | Strategy | Behaviour |
 | --- | --- |
-| `"composer"` (default) | Use Composer's classmap when available, self-scan to fill gaps. Results match what `composer dump-autoload` knows about. |
+| `"full"` (default) | Scan PHP files, then background-parse user files to populate symbol and reference indexes. |
+| `"composer"` | Use Composer's classmap when available, self-scan to fill gaps. Results stay closer to what `composer dump-autoload` knows about. |
 | `"self"` | Ignore Composer's classmap entirely and scan every PHP file in the workspace. Discovers all classes regardless of autoloading. |
 | `"none"` | Use only Composer's classmap with no fallback scanning. The most conservative option. |
 
-Most projects should leave this at the default. Change it to `"self"` if your project loads classes outside of Composer (custom autoloaders, `require_once`, legacy inclusion patterns). Be aware that `"self"` will also surface vendor-internal classes and potential duplicates that Composer's autoloader would never load.
+Most projects should leave this at the default. Change it to `"composer"` or `"none"` only if you want a lighter or more Composer-constrained index.
 
 ### Classes from other files are not found
 
-PHPantom resolves cross-file classes through Composer's autoloading rules (PSR-4 mappings and the generated classmap). If a class exists in your project but PHPantom reports it as unknown, the most common causes are:
+PHPantom resolves cross-file classes through the full workspace index by default. If a class exists in your project but PHPantom reports it as unknown, the most common causes are:
 
-1. **The class isn't Composer-autoloadable.** If your project loads classes via `require_once`, `include`, or a custom autoloader alongside Composer, those classes won't be discovered by default. Set `strategy = "self"` in `.phpantom.toml` to scan all files.
+1. **The file is excluded from the workspace walk.** Check ignored directories and `.gitignore` rules. If you explicitly set `strategy = "composer"` or `"none"`, classes outside Composer's autoload rules may be skipped.
 
 2. **Composer's classmap is stale.** Run `composer dump-autoload` to regenerate it. PHPantom reads the classmap at startup.
 

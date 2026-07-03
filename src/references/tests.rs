@@ -474,6 +474,25 @@ async fn test_constant_references() {
     );
 }
 
+#[tokio::test]
+async fn test_define_constant_references_use_reference_index_snapshot() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///constants.php").unwrap();
+    let text = concat!(
+        "<?php\n",                        // L0
+        "define('APP_FLAG', true);\n",    // L1
+        "if (APP_FLAG) { echo 'on'; }\n"  // L2
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let locs = find_references(&backend, &uri, 2, 4, false).await;
+    assert!(
+        locs.iter().any(|loc| loc.range.start.line == 2),
+        "Expected bare APP_FLAG usage to be found through constant references, got {locs:?}"
+    );
+}
+
 // ─── self / static / parent References ──────────────────────────────────────
 
 #[tokio::test]
@@ -2047,4 +2066,315 @@ async fn test_macro_registration_references_include_unresolved_chain_call() {
         }),
         "expected unresolved chain macro call to be included: {locs:?}"
     );
+}
+
+#[test]
+fn workspace_indexing_batch_merges_disk_files() {
+    use crate::reference_index::ReferenceIndexKey;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(src.join("Contracts")).expect("contracts dir");
+    std::fs::create_dir_all(src.join("Impl")).expect("impl dir");
+
+    std::fs::write(
+        src.join("Contracts/Service.php"),
+        "<?php\nnamespace App\\Contracts;\ninterface Service {}\n",
+    )
+    .expect("service file");
+    std::fs::write(
+        src.join("Impl/A.php"),
+        "<?php\nnamespace App\\Impl;\nuse App\\Contracts\\Service;\nclass A implements Service { public function run(): void {} }\n",
+    )
+    .expect("a file");
+    std::fs::write(
+        src.join("Impl/B.php"),
+        "<?php\nnamespace App\\Impl;\nclass B extends A {}\n",
+    )
+    .expect("b file");
+    std::fs::write(
+        src.join("Use.php"),
+        "<?php\nnamespace App;\nuse App\\Impl\\A;\nfunction helper(): void {}\ndefine('APP_FLAG', 'yes');\n$a = new A();\n$a->run();\nhelper();\n",
+    )
+    .expect("use file");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    backend.ensure_workspace_indexed();
+
+    assert!(
+        backend
+            .workspace_indexed
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+    assert_eq!(
+        backend.symbol_maps.read().len(),
+        4,
+        "all disk files should publish symbol maps through the batch merge"
+    );
+    assert!(
+        backend
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Contracts\\Service")
+    );
+    assert!(backend.fqn_class_index.read().contains_key("App\\Impl\\A"));
+    assert!(backend.global_functions.read().contains_key("App\\helper"));
+    assert!(backend.global_defines.read().contains_key("APP_FLAG"));
+
+    let service_children = backend
+        .gti_index
+        .read()
+        .get("App\\Contracts\\Service")
+        .cloned()
+        .unwrap_or_default();
+    assert!(service_children.contains(&"App\\Impl\\A".to_string()));
+
+    let use_uri = crate::util::path_to_uri(&src.join("Use.php"));
+    let class_candidates = backend
+        .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Impl\\A".to_string())])
+        .expect("reference index should be active after workspace indexing");
+    assert!(class_candidates.contains(&use_uri));
+
+    let member_candidates = backend
+        .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Member {
+            name: "run".to_string(),
+            is_static: false,
+        }])
+        .expect("reference index should be active after workspace indexing");
+    assert!(member_candidates.contains(&use_uri));
+
+    let function_snapshot =
+        backend.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Function(
+            "App\\helper".to_string(),
+        )]);
+    assert_eq!(
+        function_snapshot.len(),
+        1,
+        "reference-key snapshots should use the reference index instead of cloning every user file"
+    );
+    assert_eq!(function_snapshot[0].0, use_uri);
+}
+
+#[test]
+fn indexing_work_order_processes_largest_files_first() {
+    assert_eq!(
+        super::largest_first_work_order(&[10, 1, 50, 3]),
+        vec![2, 0, 3, 1]
+    );
+}
+
+#[test]
+fn reference_key_snapshot_falls_back_until_workspace_index_ready() {
+    use crate::reference_index::ReferenceIndexKey;
+
+    let backend = Backend::new_test();
+    let matching_uri = "file:///project/src/Use.php";
+    let unrelated_uri = "file:///project/src/Other.php";
+
+    backend.update_ast(
+        matching_uri,
+        "<?php\nnamespace App;\nfunction helper(): void {}\nhelper();\n",
+    );
+    backend.update_ast(unrelated_uri, "<?php\nnamespace App;\nclass Other {}\n");
+
+    let snapshot =
+        backend.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Function(
+            "App\\helper".to_string(),
+        )]);
+    let uris: std::collections::HashSet<_> = snapshot.into_iter().map(|(uri, _)| uri).collect();
+
+    assert!(
+        !backend
+            .workspace_indexed
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+    assert!(uris.contains(matching_uri));
+    assert!(
+        uris.contains(unrelated_uri),
+        "before the full-index flag is ready, reference scans must fall back to all user files"
+    );
+}
+
+#[test]
+fn user_file_symbol_maps_exclude_vendor_and_stubs() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let vendor = dir.path().join("vendor");
+    std::fs::create_dir_all(&vendor).expect("vendor dir");
+
+    let backend = Backend::new_test();
+    backend.add_vendor_dir(&vendor);
+
+    let user_uri = "file:///project/src/User.php";
+    let vendor_uri = crate::util::path_to_uri(&vendor.join("Package.php"));
+    backend.update_ast(user_uri, "<?php\nnamespace App;\nclass User {}\n");
+    backend.update_ast(&vendor_uri, "<?php\nnamespace Vendor;\nclass Package {}\n");
+    backend.update_ast("phpantom-stub://core.php", "<?php\nclass StubClass {}\n");
+    backend.update_ast(
+        "phpantom-stub-fn://core.php",
+        "<?php\nfunction stub_fn(): void {}\n",
+    );
+
+    let snapshot = backend.user_file_symbol_maps();
+    let uris: std::collections::HashSet<_> = snapshot.into_iter().map(|(uri, _)| uri).collect();
+
+    assert!(uris.contains(user_uri));
+    assert!(!uris.contains(&vendor_uri));
+    assert!(!uris.contains("phpantom-stub://core.php"));
+    assert!(!uris.contains("phpantom-stub-fn://core.php"));
+}
+
+#[test]
+fn workspace_index_progress_covers_known_files_and_refresh_walks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+
+    let known_path = src.join("Known.php");
+    let disk_path = src.join("Disk.php");
+    std::fs::write(&known_path, "<?php\nnamespace App;\nclass Known {}\n").expect("known file");
+    std::fs::write(&disk_path, "<?php\nnamespace App;\nclass Disk {}\n").expect("disk file");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    backend.fqn_uri_index.write().insert(
+        "App\\Known".to_string(),
+        crate::util::path_to_uri(&known_path),
+    );
+
+    let progress = std::sync::Mutex::new(Vec::new());
+    backend.ensure_workspace_indexed_with_progress(Some(&|percentage, message| {
+        progress
+            .lock()
+            .expect("progress lock")
+            .push((percentage, message));
+    }));
+
+    let messages: Vec<String> = progress
+        .lock()
+        .expect("progress lock")
+        .iter()
+        .map(|(_, message)| message.clone())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message == "Preparing workspace index")
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.starts_with("Parsing indexed files"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.starts_with("Parsing workspace files"))
+    );
+    assert_eq!(
+        progress
+            .lock()
+            .expect("progress lock")
+            .last()
+            .map(|(pct, _)| *pct),
+        Some(100)
+    );
+    assert!(backend.fqn_class_index.read().contains_key("App\\Known"));
+    assert!(backend.fqn_class_index.read().contains_key("App\\Disk"));
+
+    let refresh_path = src.join("Refresh.php");
+    std::fs::write(&refresh_path, "<?php\nnamespace App;\nclass Refresh {}\n")
+        .expect("refresh file");
+    backend.ensure_workspace_indexed_with_progress(None);
+    assert!(backend.fqn_class_index.read().contains_key("App\\Refresh"));
+}
+
+#[test]
+fn parse_files_parallel_with_progress_merges_large_batches() {
+    let backend = Backend::new_test();
+    let files = (0..3)
+        .map(|idx| {
+            (
+                format!("file:///project/src/File{idx}.php"),
+                Some(format!("<?php\nnamespace App;\nclass File{idx} {{}}\n")),
+            )
+        })
+        .collect();
+    let progress = std::sync::Mutex::new(Vec::new());
+
+    backend.parse_files_parallel_with_progress(
+        files,
+        Some(&|done, total, done_units, total_units| {
+            progress
+                .lock()
+                .expect("progress lock")
+                .push((done, total, done_units, total_units));
+        }),
+    );
+
+    for idx in 0..3 {
+        assert!(
+            backend
+                .fqn_class_index
+                .read()
+                .contains_key(format!("App\\File{idx}").as_str())
+        );
+    }
+    assert!(progress.lock().expect("progress lock").iter().any(
+        |(done, total, done_units, total_units)| {
+            *done == 3 && *total == 3 && *done_units == *total_units
+        }
+    ));
+}
+
+#[test]
+fn parse_paths_parallel_with_progress_handles_small_batches_and_missing_files() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let first = dir.path().join("First.php");
+    let missing = dir.path().join("Missing.php");
+    std::fs::write(&first, "<?php\nnamespace App;\nclass First {}\n").expect("first file");
+
+    let backend = Backend::new_test();
+    let work = vec![
+        (crate::util::path_to_uri(&first), first),
+        (crate::util::path_to_uri(&missing), missing),
+    ];
+    let progress = std::sync::Mutex::new(Vec::new());
+    backend.parse_paths_parallel_with_progress(
+        &work,
+        Some(&|done, total, done_units, total_units| {
+            progress
+                .lock()
+                .expect("progress lock")
+                .push((done, total, done_units, total_units));
+        }),
+    );
+
+    assert!(backend.fqn_class_index.read().contains_key("App\\First"));
+    assert!(progress.lock().expect("progress lock").iter().any(
+        |(done, total, done_units, total_units)| {
+            *done == 2 && *total == 2 && *done_units == *total_units
+        }
+    ));
+}
+
+#[test]
+fn workspace_parse_percentage_handles_empty_and_weighted_totals() {
+    assert_eq!(super::workspace_parse_percentage(0, 0), 95);
+    assert_eq!(super::workspace_parse_percentage(0, 200), 5);
+    assert_eq!(super::workspace_parse_percentage(100, 200), 50);
+    assert_eq!(super::workspace_parse_percentage(200, 200), 95);
+    assert_eq!(super::workspace_parse_percentage(500, 200), 95);
+}
+
+#[test]
+fn index_progress_weight_prefers_supplied_and_open_file_content() {
+    let backend = Backend::new_test();
+    let uri = "file:///project/src/Open.php";
+
+    assert_eq!(backend.index_progress_weight_for_uri(uri, Some("")), 1);
+
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new("abcdef".to_string()));
+    assert_eq!(backend.index_progress_weight_for_uri(uri, None), 6);
 }

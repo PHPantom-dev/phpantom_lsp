@@ -31,9 +31,9 @@ PHPantom is built in layers. Each layer is independently useful and independentl
 - **Layer 1: Single file.** Parse the open file, extract classes/functions/symbols. Completion, hover, and go-to-definition work within the file with no cross-file resolution at all.
 - **Layer 2: On-demand resolution.** When a symbol references a class in another file, resolve it through the `fqn_uri_index` or PSR-4 and parse that file. Only the files actually needed are touched.
 - **Layer 3: FQN-to-URI index.** A name-to-URI index covering the whole project. Enables class name completion and O(1) cross-file lookup. Built from Composer's classmap or self-generated via a fast byte-level scan.
-- **Layer 4: Full index (opt-in).** Background-parse every file in the fqn_uri_index. Enables workspace symbols, fast find-references, and rich completion item detail.
+- **Layer 4: Full index (default).** Background-parse every file in the fqn_uri_index. Enables workspace symbols, fast find-references, and rich completion item detail.
 
-Each layer builds on the one below it. A bug in the FQN index doesn't break single-file completion. A slow full index doesn't block on-demand resolution. New features can be developed and tested against the lower layers without waiting for a full project scan. This is also why PHPantom starts fast: Layer 0-2 are ready in milliseconds, Layer 3 takes seconds, and Layer 4 (when enabled) fills in over the following minute.
+Each layer builds on the one below it. A bug in the FQN index doesn't break single-file completion. A slow full index doesn't block on-demand resolution. New features can be developed and tested against the lower layers without waiting for a full project scan. This is also why PHPantom starts fast: Layer 0-2 are ready in milliseconds, Layer 3 takes seconds, and Layer 4 fills in afterward.
 
 ## Module Layout
 
@@ -687,9 +687,9 @@ Scanning is parallelised using a two-phase approach: directory walks collect fil
 
 The indexing strategy is configurable via `[indexing] strategy` in `.phpantom.toml`:
 
-- **`"composer"`** (default) — merged classmap + self-scan. Load Composer's classmap (if it exists) as a skip set, then self-scan all PSR-4 and vendor directories for anything the classmap missed. Whatever the classmap already covers is a free performance win; whatever it's missing, we find ourselves. No completeness heuristic needed.
+- **`"full"`** (default) — same discovery as `"self"`, then background-parses user PHP files to populate symbol maps and the reference candidate index.
+- **`"composer"`** — merged classmap + self-scan. Load Composer's classmap (if it exists) as a skip set, then self-scan all PSR-4 and vendor directories for anything the classmap missed. Whatever the classmap already covers is a free performance win; whatever it's missing, we find ourselves. No completeness heuristic needed.
 - **`"self"`** — always self-scan, ignoring Composer's classmap entirely. Equivalent to the merged approach with an empty skip set.
-- **`"full"`** — same as `"self"` for now; reserved for future background indexing.
 - **`"none"`** — no proactive scanning; uses Composer's classmap if present but never self-scans to fill gaps.
 
 The merged pipeline works in three steps: (1) load `autoload_classmap.php` into a `HashMap<String, PathBuf>`, (2) collect the classmap's file paths into a `HashSet<PathBuf>` skip set, (3) self-scan all PSR-4 and vendor directories, skipping files already in the skip set. The result is a merged index: classmap entries for everything Composer already knew about, plus self-scanned entries for everything it missed. When the classmap is complete (the common case), the self-scanner walks directories but skips every file, finishing almost instantly. When the classmap is empty or absent, it falls back to a full self-scan. When the classmap is partial (e.g. vendor classes only), vendor files are skipped and only user code is scanned. Every state of the classmap helps.

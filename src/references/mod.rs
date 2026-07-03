@@ -24,12 +24,14 @@
 //! same name are excluded.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
+use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::ClassInfo;
 use crate::util::{
@@ -346,7 +348,18 @@ impl Backend {
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
             SymbolKind::LaravelStringKey { kind, key } => {
-                let snapshot = self.user_file_symbol_maps();
+                let snapshot = if include_declaration
+                    && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
+                {
+                    self.user_file_symbol_maps()
+                } else {
+                    self.user_file_symbol_maps_for_reference_keys(&[
+                        ReferenceIndexKey::LaravelString {
+                            kind: kind.clone(),
+                            key: key.to_string(),
+                        },
+                    ])
+                };
                 laravel::find_laravel_string_key_references(
                     self,
                     kind,
@@ -899,13 +912,29 @@ impl Backend {
     /// reference scanners use this to restrict results to user code.
     pub(crate) fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
         self.ensure_workspace_indexed();
+        self.user_file_symbol_maps_matching(None)
+    }
 
+    fn user_file_symbol_maps_for_reference_keys(
+        &self,
+        keys: &[ReferenceIndexKey],
+    ) -> Vec<(String, Arc<SymbolMap>)> {
+        self.ensure_workspace_indexed();
+        let candidate_uris = self.reference_candidate_uris_for_keys(keys);
+        self.user_file_symbol_maps_matching(candidate_uris.as_ref())
+    }
+
+    fn user_file_symbol_maps_matching(
+        &self,
+        candidate_uris: Option<&HashSet<String>>,
+    ) -> Vec<(String, Arc<SymbolMap>)> {
         let vendor_prefixes = self.vendor_uri_prefixes.lock().clone();
 
         let maps = self.symbol_maps.read();
         maps.iter()
             .filter(|(uri, _)| {
-                !uri.starts_with("phpantom-stub://")
+                candidate_uris.is_none_or(|uris| uris.contains(uri.as_str()))
+                    && !uri.starts_with("phpantom-stub://")
                     && !uri.starts_with("phpantom-stub-fn://")
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
             })
@@ -924,8 +953,8 @@ impl Backend {
         let target = strip_fqn_prefix(target_fqn);
         let target_short = crate::util::short_name(target);
 
-        // Snapshot user-file symbol maps (excludes vendor and stubs).
-        let snapshot = self.user_file_symbol_maps();
+        let candidate_keys = class_candidate_keys(target, target_short);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
 
         for (file_uri, symbol_map) in &snapshot {
             // Prefer mago-names resolved_names for FQN resolution (byte-offset
@@ -1086,7 +1115,21 @@ impl Backend {
         }
 
         let mut locations = Vec::new();
-        let snapshot = self.user_file_symbol_maps();
+        let mut candidate_keys = Vec::new();
+        for fqn in &scoped {
+            candidate_keys.extend(class_candidate_keys(fqn, crate::util::short_name(fqn)));
+        }
+        candidate_keys.extend([
+            ReferenceIndexKey::Member {
+                name: "__construct".to_string(),
+                is_static: true,
+            },
+            ReferenceIndexKey::Member {
+                name: "__construct".to_string(),
+                is_static: false,
+            },
+        ]);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
 
         for (file_uri, symbol_map) in &snapshot {
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
@@ -1279,7 +1322,8 @@ impl Backend {
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
-        let snapshot = self.user_file_symbol_maps();
+        let candidate_keys = member_candidate_keys(target_member, target_is_static, hierarchy);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
 
         for (file_uri, symbol_map) in &snapshot {
             // First pass: name-only check to avoid unnecessary work.
@@ -1523,7 +1567,8 @@ impl Backend {
         // Input boundary: callers may pass FQNs with a leading `\`.
         let target = strip_fqn_prefix(target_fqn);
 
-        let snapshot = self.user_file_symbol_maps();
+        let candidate_keys = function_candidate_keys(target, target_short);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
 
         for (file_uri, symbol_map) in &snapshot {
             // Prefer mago-names resolved_names; lazy-load use_map only
@@ -1639,7 +1684,10 @@ impl Backend {
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
-        let snapshot = self.user_file_symbol_maps();
+        let snapshot =
+            self.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Constant(
+                target_name.to_string(),
+            )]);
 
         for (file_uri, symbol_map) in &snapshot {
             // First pass: name-only check.
@@ -2157,7 +2205,16 @@ impl Backend {
     /// via the fqn_uri_index.  The vendor directory (read from
     /// skipped during the filesystem walk.
     pub(crate) fn ensure_workspace_indexed(&self) {
+        self.ensure_workspace_indexed_with_progress(None);
+    }
+
+    pub(crate) fn ensure_workspace_indexed_with_progress(
+        &self,
+        progress: Option<&(dyn Fn(u32, String) + Sync)>,
+    ) {
+        let _workspace_index_guard = self.workspace_index_lock.lock();
         let start = std::time::Instant::now();
+        report_workspace_index_progress(progress, 1, "Preparing workspace index");
         // Collect URIs that already have symbol maps.
         let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
@@ -2179,19 +2236,6 @@ impl Backend {
             })
             .collect();
 
-        if !phase1_uris.is_empty() {
-            tracing::info!(
-                "ensure_workspace_indexed: Phase 1 parsing {} files",
-                phase1_uris.len()
-            );
-            self.parse_files_parallel(
-                phase1_uris
-                    .iter()
-                    .map(|uri| (uri.as_str(), None::<&str>))
-                    .collect(),
-            );
-        }
-
         // ── Phase 2: workspace directory scan ───────────────────────────
         //
         // Even after the initial scan, repeat the walk so newly-created PHP
@@ -2199,13 +2243,11 @@ impl Backend {
         // The existing-URI filter below keeps this cheap by parsing only files
         // that are not already in `symbol_maps`.
         let workspace_root = self.workspace_root.read().clone();
-
-        if let Some(root) = workspace_root {
+        let phase1_uri_set: HashSet<&str> = phase1_uris.iter().map(|uri| uri.as_str()).collect();
+        let phase2_work = if let Some(root) = workspace_root.clone() {
             let vendor_dir_paths = self.vendor_dir_paths.lock().clone();
 
-            // Re-read existing URIs after phase 1 may have added more.
-            let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
-
+            report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
             let php_files = collect_php_files_gitignore(&root, &vendor_dir_paths);
             tracing::info!(
@@ -2214,55 +2256,140 @@ impl Backend {
                 walk_start.elapsed()
             );
 
-            let phase2_work: Vec<(String, PathBuf)> = php_files
+            php_files
                 .into_iter()
                 .filter_map(|path| {
                     let uri = crate::util::path_to_uri(&path);
-                    if existing_uris.contains(&uri) {
+                    if existing_uris.contains(&uri) || phase1_uri_set.contains(uri.as_str()) {
                         None
                     } else {
                         Some((uri, path))
                     }
                 })
-                .collect();
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let total_to_parse = phase1_uris.len() + phase2_work.len();
+        let phase1_units: u64 = phase1_uris
+            .iter()
+            .map(|uri| self.index_progress_weight_for_uri(uri, None))
+            .sum();
+        let phase2_units: u64 = phase2_work
+            .iter()
+            .map(|(_, path)| index_progress_weight_for_path(path))
+            .sum();
+        let total_parse_units = phase1_units.saturating_add(phase2_units).max(1);
+        report_workspace_index_progress(
+            progress,
+            5,
+            format!("Queued {total_to_parse} PHP files for indexing"),
+        );
+
+        if !phase1_uris.is_empty() {
+            tracing::info!(
+                "ensure_workspace_indexed: Phase 1 parsing {} files",
+                phase1_uris.len()
+            );
+            self.parse_files_parallel_with_progress(
+                phase1_uris
+                    .iter()
+                    .map(|uri| (uri.to_string(), None::<String>))
+                    .collect(),
+                Some(&|done_files, _phase_total, done_units, _phase_units| {
+                    report_workspace_index_progress(
+                        progress,
+                        workspace_parse_percentage(done_units, total_parse_units),
+                        format!("Parsing indexed files ({done_files}/{total_to_parse})"),
+                    );
+                }),
+            );
+        }
+
+        if workspace_root.is_some() {
+            report_workspace_index_progress(
+                progress,
+                workspace_parse_percentage(phase1_units, total_parse_units),
+                format!(
+                    "Indexed known files ({}/{total_to_parse})",
+                    phase1_uris.len()
+                ),
+            );
 
             if !phase2_work.is_empty() {
                 tracing::info!(
                     "ensure_workspace_indexed: Phase 2 parsing {} files",
                     phase2_work.len()
                 );
-                self.parse_paths_parallel(&phase2_work);
+                let parsed_before_phase2 = phase1_uris.len();
+                let units_before_phase2 = phase1_units;
+                self.parse_paths_parallel_with_progress(
+                    &phase2_work,
+                    Some(&|done_files, _phase_total, done_units, _phase_units| {
+                        let total_done = parsed_before_phase2 + done_files;
+                        let total_units_done = units_before_phase2.saturating_add(done_units);
+                        report_workspace_index_progress(
+                            progress,
+                            workspace_parse_percentage(total_units_done, total_parse_units),
+                            format!("Parsing workspace files ({total_done}/{total_to_parse})"),
+                        );
+                    }),
+                );
             }
+            report_workspace_index_progress(progress, 99, "Finalizing workspace index");
             self.workspace_indexed
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        report_workspace_index_progress(progress, 100, "Workspace index ready");
         tracing::info!("ensure_workspace_indexed: total time {:?}", start.elapsed());
     }
 
     /// Parse a batch of files in parallel using OS threads.
     ///
     /// Each entry is `(uri, optional_content)`.  When `content` is `None`,
-    /// the file is loaded via [`get_file_content`].  The expensive parsing
-    /// step runs without any locks held; only the brief map insertions at
-    /// the end of [`update_ast`] acquire write locks.
+    /// the file is loaded via [`get_file_content`].  Workers parse files into
+    /// owned index updates, then a single merge publishes the whole batch.
     ///
     /// Uses [`std::thread::scope`] for structured concurrency so that all
     /// spawned threads are guaranteed to finish before this method returns.
     /// The thread count is capped at the number of available CPU cores.
-    fn parse_files_parallel(&self, files: Vec<(&str, Option<&str>)>) {
+    fn parse_files_parallel_with_progress(
+        &self,
+        files: Vec<(String, Option<String>)>,
+        progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+    ) {
         if files.is_empty() {
             return;
         }
+        let total = files.len();
+        let parsed = AtomicUsize::new(0);
+        let weights: Vec<u64> = files
+            .iter()
+            .map(|(uri, content)| self.index_progress_weight_for_uri(uri, content.as_deref()))
+            .collect();
+        let total_units = weights.iter().copied().sum::<u64>().max(1);
+        let parsed_units = AtomicU64::new(0);
 
         // For very small batches, avoid thread overhead.
         if files.len() <= 2 {
-            for (uri, content) in &files {
-                if let Some(c) = content {
-                    self.update_ast(uri, c);
-                } else if let Some(c) = self.get_file_content(uri) {
-                    self.update_ast(uri, &c);
+            let mut results = Vec::with_capacity(files.len());
+            for (idx, (uri, content)) in files.iter().enumerate() {
+                let content = content.clone().or_else(|| self.get_file_content(uri));
+                if let Some(content) = content {
+                    results.push(self.parse_ast_index_update_for_index(uri, &content));
                 }
+                report_weighted_parse_progress(
+                    progress,
+                    &parsed,
+                    &parsed_units,
+                    weights[idx],
+                    total,
+                    total_units,
+                );
             }
+            report_weighted_merge_progress(progress, total, total_units);
+            self.apply_ast_index_parse_results_batch(results);
             return;
         }
 
@@ -2270,49 +2397,114 @@ impl Backend {
             .map(|n| n.get())
             .unwrap_or(4)
             .min(files.len());
+        let next = AtomicUsize::new(0);
+        let work_order = largest_first_work_order(&weights);
 
-        let chunks: Vec<Vec<(&str, Option<&str>)>> = {
-            let chunk_size = files.len().div_ceil(n_threads);
-            files.chunks(chunk_size).map(|c| c.to_vec()).collect()
-        };
-
-        std::thread::scope(|s| {
-            for chunk in &chunks {
-                let handle = std::thread::Builder::new()
+        let files_ref = &files;
+        let weights_ref = &weights;
+        let work_order_ref = &work_order;
+        let mut results = std::thread::scope(|s| {
+            let mut handles = Vec::with_capacity(n_threads);
+            for _ in 0..n_threads {
+                let parsed = &parsed;
+                let parsed_units = &parsed_units;
+                let next = &next;
+                let files = files_ref;
+                let weights = weights_ref;
+                let work_order = work_order_ref;
+                match std::thread::Builder::new()
                     .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
-                        for (uri, content) in chunk {
-                            if let Some(c) = content {
-                                self.update_ast(uri, c);
-                            } else if let Some(c) = self.get_file_content(uri) {
-                                self.update_ast(uri, &c);
+                        let mut local_results = Vec::new();
+                        loop {
+                            let work_idx = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(&idx) = work_order.get(work_idx) else {
+                                break;
+                            };
+                            let Some((uri, content)) = files.get(idx) else {
+                                break;
+                            };
+
+                            let content = content.clone().or_else(|| self.get_file_content(uri));
+                            if let Some(content) = content {
+                                local_results.push((
+                                    idx,
+                                    self.parse_ast_index_update_for_index(uri, &content),
+                                ));
                             }
+                            report_weighted_parse_progress(
+                                progress,
+                                parsed,
+                                parsed_units,
+                                weights[idx],
+                                total,
+                                total_units,
+                            );
                         }
-                    });
-                if let Err(e) = handle {
-                    tracing::error!("failed to spawn parse thread: {e}");
+                        local_results
+                    }) {
+                    Ok(handle) => handles.push(handle),
+                    Err(e) => tracing::error!("failed to spawn parse thread: {e}"),
                 }
             }
+
+            handles
+                .into_iter()
+                .flat_map(|handle| {
+                    handle.join().unwrap_or_else(|_| {
+                        tracing::error!("parse thread panicked during workspace indexing");
+                        Vec::new()
+                    })
+                })
+                .collect::<Vec<_>>()
         });
+        results.sort_by_key(|(idx, _)| *idx);
+        report_weighted_merge_progress(progress, total, total_units);
+        self.apply_ast_index_parse_results_batch(
+            results.into_iter().map(|(_, result)| result).collect(),
+        );
     }
 
     /// Parse a batch of files from disk paths in parallel.
     ///
-    /// Each entry is `(uri, path)`.  The file is read from disk and
-    /// parsed in a worker thread.  Uses [`std::thread::scope`] for
-    /// structured concurrency.
-    pub(crate) fn parse_paths_parallel(&self, files: &[(String, PathBuf)]) {
+    /// Each entry is `(uri, path)`.  The file is read from disk and parsed in
+    /// a worker thread.  Work is pulled from a shared atomic counter so large
+    /// files cannot leave one fixed chunk as the long tail.
+    pub(crate) fn parse_paths_parallel_with_progress(
+        &self,
+        files: &[(String, PathBuf)],
+        progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+    ) {
         if files.is_empty() {
             return;
         }
+        let total = files.len();
+        let parsed = AtomicUsize::new(0);
+        let weights: Vec<u64> = files
+            .iter()
+            .map(|(_, path)| index_progress_weight_for_path(path))
+            .collect();
+        let total_units = weights.iter().copied().sum::<u64>().max(1);
+        let parsed_units = AtomicU64::new(0);
 
         // For very small batches, avoid thread overhead.
         if files.len() <= 2 {
-            for (uri, path) in files {
+            let mut results = Vec::with_capacity(files.len());
+            for (idx, (uri, path)) in files.iter().enumerate() {
                 if let Ok(content) = std::fs::read_to_string(path) {
-                    self.update_ast(uri, &content);
+                    results.push(self.parse_ast_index_update_for_index(uri, &content));
                 }
+                report_weighted_parse_progress(
+                    progress,
+                    &parsed,
+                    &parsed_units,
+                    weights[idx],
+                    total,
+                    total_units,
+                );
             }
+            report_weighted_merge_progress(progress, total, total_units);
+            self.apply_ast_index_parse_results_batch(results);
             return;
         }
 
@@ -2320,28 +2512,83 @@ impl Backend {
             .map(|n| n.get())
             .unwrap_or(4)
             .min(files.len());
+        let next = AtomicUsize::new(0);
+        let work_order = largest_first_work_order(&weights);
 
-        let chunks: Vec<&[(String, PathBuf)]> = {
-            let chunk_size = files.len().div_ceil(n_threads);
-            files.chunks(chunk_size).collect()
-        };
-
-        std::thread::scope(|s| {
-            for chunk in &chunks {
-                let handle = std::thread::Builder::new()
+        let weights_ref = &weights;
+        let work_order_ref = &work_order;
+        let mut results = std::thread::scope(|s| {
+            let mut handles = Vec::with_capacity(n_threads);
+            for _ in 0..n_threads {
+                let parsed = &parsed;
+                let parsed_units = &parsed_units;
+                let next = &next;
+                let weights = weights_ref;
+                let work_order = work_order_ref;
+                match std::thread::Builder::new()
                     .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
-                        for (uri, path) in *chunk {
+                        let mut local_results = Vec::new();
+                        loop {
+                            let work_idx = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(&idx) = work_order.get(work_idx) else {
+                                break;
+                            };
+                            let Some((uri, path)) = files.get(idx) else {
+                                break;
+                            };
+
                             if let Ok(content) = std::fs::read_to_string(path) {
-                                self.update_ast(uri, &content);
+                                local_results.push((
+                                    idx,
+                                    self.parse_ast_index_update_for_index(uri, &content),
+                                ));
                             }
+                            report_weighted_parse_progress(
+                                progress,
+                                parsed,
+                                parsed_units,
+                                weights[idx],
+                                total,
+                                total_units,
+                            );
                         }
-                    });
-                if let Err(e) = handle {
-                    tracing::error!("failed to spawn parse thread: {e}");
+                        local_results
+                    }) {
+                    Ok(handle) => handles.push(handle),
+                    Err(e) => tracing::error!("failed to spawn parse thread: {e}"),
                 }
             }
+
+            handles
+                .into_iter()
+                .flat_map(|handle| {
+                    handle.join().unwrap_or_else(|_| {
+                        tracing::error!("parse thread panicked during workspace indexing");
+                        Vec::new()
+                    })
+                })
+                .collect::<Vec<_>>()
         });
+        results.sort_by_key(|(idx, _)| *idx);
+        report_weighted_merge_progress(progress, total, total_units);
+        self.apply_ast_index_parse_results_batch(
+            results.into_iter().map(|(_, result)| result).collect(),
+        );
+    }
+
+    fn index_progress_weight_for_uri(&self, uri: &str, content: Option<&str>) -> u64 {
+        if let Some(content) = content {
+            return (content.len() as u64).max(1);
+        }
+        if let Some(content) = self.open_files.read().get(uri) {
+            return (content.len() as u64).max(1);
+        }
+        Url::parse(uri)
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+            .map(|path| index_progress_weight_for_path(&path))
+            .unwrap_or(1)
     }
 }
 
@@ -2384,6 +2631,117 @@ fn class_names_match(resolved: &str, target: &str, target_short: &str) -> bool {
         return resolved == target_short;
     }
     false
+}
+
+fn class_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
+    symbol_candidate_names(target, target_short)
+        .into_iter()
+        .map(ReferenceIndexKey::Class)
+        .collect()
+}
+
+fn function_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
+    symbol_candidate_names(target, target_short)
+        .into_iter()
+        .map(ReferenceIndexKey::Function)
+        .collect()
+}
+
+fn symbol_candidate_names(target: &str, target_short: &str) -> Vec<String> {
+    let mut keys = vec![
+        strip_fqn_prefix(target).to_string(),
+        strip_fqn_prefix(target_short).to_string(),
+    ];
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn member_candidate_keys(
+    target_member: &str,
+    target_is_static: bool,
+    hierarchy: Option<&HashSet<String>>,
+) -> Vec<ReferenceIndexKey> {
+    let mut keys = vec![ReferenceIndexKey::Member {
+        name: target_member.to_string(),
+        is_static: target_is_static,
+    }];
+    if hierarchy.is_some() {
+        keys.push(ReferenceIndexKey::Member {
+            name: target_member.to_string(),
+            is_static: !target_is_static,
+        });
+    }
+    keys
+}
+
+fn report_workspace_index_progress(
+    progress: Option<&(dyn Fn(u32, String) + Sync)>,
+    percentage: u32,
+    message: impl Into<String>,
+) {
+    if let Some(progress) = progress {
+        progress(percentage.min(100), message.into());
+    }
+}
+
+fn workspace_parse_percentage(done: u64, total: u64) -> u32 {
+    if total == 0 {
+        return 95;
+    }
+
+    5 + ((done.saturating_mul(90) / total).min(90) as u32)
+}
+
+fn report_weighted_parse_progress(
+    progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+    parsed: &AtomicUsize,
+    parsed_units: &AtomicU64,
+    weight: u64,
+    total: usize,
+    total_units: u64,
+) {
+    let done = parsed.fetch_add(1, Ordering::Relaxed) + 1;
+    let done_units = parsed_units.fetch_add(weight, Ordering::Relaxed) + weight;
+    let file_report_every = (total / 100).max(1);
+    let unit_report_every = (total_units / 100).max(1);
+    let crossed_unit_boundary =
+        done_units == total_units || done_units % unit_report_every < weight.min(unit_report_every);
+
+    if done == 1 || done == total || done.is_multiple_of(file_report_every) || crossed_unit_boundary
+    {
+        report_weighted_progress(progress, done, total, done_units, total_units);
+    }
+}
+
+fn report_weighted_merge_progress(
+    progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+    total: usize,
+    total_units: u64,
+) {
+    report_weighted_progress(progress, total, total, total_units, total_units);
+}
+
+fn report_weighted_progress(
+    progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+    done: usize,
+    total: usize,
+    done_units: u64,
+    total_units: u64,
+) {
+    if let Some(progress) = progress {
+        progress(done, total, done_units, total_units);
+    }
+}
+
+fn largest_first_work_order(weights: &[u64]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..weights.len()).collect();
+    order.sort_by_key(|&idx| std::cmp::Reverse(weights[idx]));
+    order
+}
+
+fn index_progress_weight_for_path(path: &Path) -> u64 {
+    path.metadata().map(|meta| meta.len()).unwrap_or(1).max(1)
 }
 
 #[cfg(test)]

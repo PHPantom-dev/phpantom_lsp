@@ -339,13 +339,14 @@ impl PhpcsConfig {
 pub struct IndexingConfig {
     /// The indexing strategy.
     ///
-    /// - `"composer"` (default) — use Composer's classmap when available,
+    /// - `"full"` (default) — same discovery as `"self"`, then
+    ///   background-parse every user PHP file to populate symbol and
+    ///   reference indexes.
+    /// - `"composer"` — use Composer's classmap when available,
     ///   fall back to self-scan when it is missing or incomplete.
     /// - `"self"` — scan every PHP file under the workspace root,
     ///   ignoring Composer's generated classmap and PSR-4 mappings.
     ///   Vendor packages are still scanned via `installed.json`.
-    /// - `"full"` — background-parse every PHP file for rich intelligence
-    ///   (not yet implemented, treated as `"self"` for now).
     /// - `"none"` — no proactive scanning. Still uses Composer's classmap
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
@@ -361,20 +362,20 @@ impl IndexingConfig {
 /// The indexing strategy that controls class discovery behaviour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IndexingStrategy {
+    /// Background-parse every PHP file for rich intelligence.
+    #[default]
+    Full,
     /// Merged classmap + self-scan.  Load Composer's classmap (if it
     /// exists) as a skip set, then self-scan all PSR-4 and vendor
     /// directories for anything the classmap missed.  Whatever the
     /// classmap already covers is a free performance win; whatever it's
     /// missing, we find ourselves.  No completeness heuristic needed.
-    #[default]
     Composer,
     /// Scan every PHP file under the workspace root, ignoring
     /// Composer's generated classmap and PSR-4 mappings entirely.
     /// The vendor directory is scanned separately (via
     /// `installed.json`) since it is typically gitignored.
     SelfScan,
-    /// Background-parse every PHP file for rich intelligence.
-    Full,
     /// No proactive scanning.  Uses Composer's classmap if present but
     /// never self-scans to fill gaps.
     None,
@@ -585,7 +586,7 @@ mod tests {
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
         assert!(config.diagnostics.ignore.is_empty());
-        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.formatting.timeout.is_none());
@@ -615,7 +616,7 @@ mod tests {
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
         assert!(config.diagnostics.ignore.is_empty());
-        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.phpstan.command.is_none());
@@ -633,7 +634,7 @@ mod tests {
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
-        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.phpstan.command.is_none());
@@ -985,12 +986,12 @@ analyze-timeout = 45000
     }
 
     #[test]
-    fn indexing_strategy_defaults_to_composer() {
+    fn indexing_strategy_defaults_to_full() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(&path, "[indexing]\n").unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
     }
 
     #[test]

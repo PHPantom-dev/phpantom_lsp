@@ -31,6 +31,7 @@ use std::path::PathBuf;
 ///    walk the class's interfaces and parent abstract classes to find the
 ///    prototype method declaration and return its location.
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
 
@@ -38,6 +39,7 @@ use super::member::MemberKind;
 use super::point_location;
 use crate::Backend;
 use crate::completion::resolver::ResolutionCtx;
+use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, find_class_at_offset, position_to_offset, short_name};
@@ -656,6 +658,14 @@ impl Backend {
         let mut result: Vec<ClassInfo> = Vec::new();
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
+        let workspace_index_ready = if self.config().indexing.strategy() == IndexingStrategy::Full {
+            if !self.workspace_indexed.load(Ordering::Acquire) {
+                self.ensure_workspace_indexed();
+            }
+            self.workspace_indexed.load(Ordering::Acquire)
+        } else {
+            self.workspace_indexed.load(Ordering::Acquire)
+        };
 
         // ── Phase 1: GTI index lookup ───────────────────────────────────
         // Use the reverse inheritance index for O(1) lookup of classes
@@ -704,6 +714,10 @@ impl Backend {
                 seen_fqns.insert(child_fqn.clone());
                 result.push(Arc::unwrap_or_clone(cls));
             }
+        }
+
+        if workspace_index_ready {
+            return result;
         }
 
         // ── Phase 2: scan fqn_uri_index for classes not yet in uri_classes_index ────
@@ -1166,5 +1180,161 @@ impl Backend {
         let parsed_uri = Url::parse(&class_uri).ok()?;
 
         Some(point_location(parsed_uri, position))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tower_lsp::lsp_types::{Position, Url};
+
+    use super::*;
+    use crate::config::{Config, IndexingStrategy};
+
+    #[test]
+    fn full_indexed_implementation_uses_gti_without_vendor_fallback() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let src = dir.path().join("src");
+        let vendor = dir.path().join("vendor");
+        fs::create_dir_all(src.join("Contracts")).expect("src contracts dir");
+        fs::create_dir_all(src.join("Impl")).expect("src impl dir");
+        fs::create_dir_all(vendor.join("Pkg")).expect("vendor pkg dir");
+
+        let interface_php = concat!(
+            "<?php\n",
+            "namespace App\\Contracts;\n",
+            "interface Service {}\n",
+        );
+        let user_impl_php = concat!(
+            "<?php\n",
+            "namespace App\\Impl;\n",
+            "use App\\Contracts\\Service;\n",
+            "class UserService implements Service {}\n",
+        );
+        let vendor_impl_php = concat!(
+            "<?php\n",
+            "namespace Vendor\\Pkg;\n",
+            "use App\\Contracts\\Service;\n",
+            "class VendorService implements Service {}\n",
+        );
+
+        let interface_path = src.join("Contracts/Service.php");
+        let user_impl_path = src.join("Impl/UserService.php");
+        let vendor_impl_path = vendor.join("Pkg/VendorService.php");
+        fs::write(&interface_path, interface_php).expect("interface file");
+        fs::write(&user_impl_path, user_impl_php).expect("user impl file");
+        fs::write(&vendor_impl_path, vendor_impl_php).expect("vendor impl file");
+
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+        backend.add_vendor_dir(&vendor);
+        let mut config = Config::default();
+        config.indexing.strategy = Some(IndexingStrategy::Full);
+        backend.set_config(config);
+
+        backend.fqn_uri_index.write().insert(
+            "Vendor\\Pkg\\VendorService".to_string(),
+            Url::from_file_path(&vendor_impl_path)
+                .expect("vendor uri")
+                .to_string(),
+        );
+
+        let interface_uri = Url::from_file_path(&interface_path).expect("interface uri");
+        backend.update_ast(interface_uri.as_str(), interface_php);
+
+        let locations = backend
+            .resolve_implementation(
+                interface_uri.as_str(),
+                interface_php,
+                Position {
+                    line: 2,
+                    character: 12,
+                },
+            )
+            .expect("user implementation should be found");
+
+        assert_eq!(
+            locations.len(),
+            1,
+            "full index should use GTI and avoid vendor fallback results: {locations:?}",
+        );
+        assert_eq!(
+            locations[0].uri,
+            Url::from_file_path(&user_impl_path).expect("user impl uri")
+        );
+    }
+
+    #[test]
+    fn non_full_indexed_implementation_uses_ready_gti_without_fallback() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let src = dir.path().join("src");
+        let vendor = dir.path().join("vendor");
+        fs::create_dir_all(src.join("Contracts")).expect("src contracts dir");
+        fs::create_dir_all(src.join("Impl")).expect("src impl dir");
+        fs::create_dir_all(vendor.join("Pkg")).expect("vendor pkg dir");
+
+        let interface_php = concat!(
+            "<?php\n",
+            "namespace App\\Contracts;\n",
+            "interface Service {}\n",
+        );
+        let user_impl_php = concat!(
+            "<?php\n",
+            "namespace App\\Impl;\n",
+            "use App\\Contracts\\Service;\n",
+            "class UserService implements Service {}\n",
+        );
+        let vendor_impl_php = concat!(
+            "<?php\n",
+            "namespace Vendor\\Pkg;\n",
+            "use App\\Contracts\\Service;\n",
+            "class VendorService implements Service {}\n",
+        );
+
+        let interface_path = src.join("Contracts/Service.php");
+        let user_impl_path = src.join("Impl/UserService.php");
+        let vendor_impl_path = vendor.join("Pkg/VendorService.php");
+        fs::write(&interface_path, interface_php).expect("interface file");
+        fs::write(&user_impl_path, user_impl_php).expect("user impl file");
+        fs::write(&vendor_impl_path, vendor_impl_php).expect("vendor impl file");
+
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+        backend.add_vendor_dir(&vendor);
+        let mut config = Config::default();
+        config.indexing.strategy = Some(IndexingStrategy::Composer);
+        backend.set_config(config);
+        backend
+            .workspace_indexed
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        backend.fqn_uri_index.write().insert(
+            "Vendor\\Pkg\\VendorService".to_string(),
+            Url::from_file_path(&vendor_impl_path)
+                .expect("vendor uri")
+                .to_string(),
+        );
+
+        let interface_uri = Url::from_file_path(&interface_path).expect("interface uri");
+        let user_impl_uri = Url::from_file_path(&user_impl_path).expect("user impl uri");
+        backend.update_ast(interface_uri.as_str(), interface_php);
+        backend.update_ast(user_impl_uri.as_str(), user_impl_php);
+
+        let locations = backend
+            .resolve_implementation(
+                interface_uri.as_str(),
+                interface_php,
+                Position {
+                    line: 2,
+                    character: 12,
+                },
+            )
+            .expect("user implementation should be found from the ready GTI index");
+
+        assert_eq!(
+            locations.len(),
+            1,
+            "ready non-full indexing should return GTI results without falling back to vendor scans"
+        );
+        assert_eq!(locations[0].uri, user_impl_uri);
     }
 }
