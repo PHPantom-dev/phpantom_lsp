@@ -12,6 +12,8 @@
 ///   named-argument completion)
 /// - **builder**: Building LSP `CompletionItem`s from resolved class info
 /// - **named_args**: Named argument completion inside function/method call parens
+/// - **array_callable**: Method name completion inside array callable strings
+///   (`[Class::class, '` → suggest class methods)
 /// - **array_shape**: Array shape key completion (`$arr['` → suggest known keys)
 ///   and raw variable type resolution for array shape value chaining
 /// - **eloquent_string**: Eloquent relation dot-notation and column name string
@@ -71,6 +73,7 @@
 /// top-level `crate::inheritance` module since it is shared infrastructure
 /// used by completion, definition, and future features (hover, references).
 // ─── Top-level modules ──────────────────────────────────────────────────────
+pub(crate) mod array_callable;
 pub mod array_shape;
 pub(crate) mod builder;
 pub(crate) mod call_resolution;

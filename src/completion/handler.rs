@@ -385,6 +385,19 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── Array callable method completion ────────────────────
+            // Like array shape and Eloquent string completion, this
+            // triggers inside string literals — specifically the
+            // method-name string in `[Class::class, 'method']`.
+            if matches!(
+                string_ctx,
+                StringContext::InStringLiteral | StringContext::NotInString
+            ) && let Some(response) =
+                self.try_array_callable_completion(&uri, &content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
             if matches!(string_ctx, StringContext::InStringLiteral) {
                 return Ok(None);
             }
