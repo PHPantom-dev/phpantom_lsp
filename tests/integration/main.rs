@@ -23,6 +23,7 @@ mod code_lens;
 mod completion_access_kind;
 mod completion_anonymous_classes;
 mod completion_array_access_generics;
+mod completion_array_callable;
 mod completion_array_shapes;
 mod completion_attributes;
 mod completion_basic;
