@@ -40,6 +40,18 @@ use crate::util::{
 };
 use crate::virtual_members::laravel;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReferenceSearchMode {
+    References,
+    Rename,
+}
+
+impl ReferenceSearchMode {
+    fn include_declaring_interfaces(self) -> bool {
+        matches!(self, ReferenceSearchMode::References)
+    }
+}
+
 impl Backend {
     /// Entry point for `textDocument/references`.
     ///
@@ -53,7 +65,13 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        self.find_references_inner(uri, content, position, include_declaration)
+        self.find_references_inner(
+            uri,
+            content,
+            position,
+            include_declaration,
+            ReferenceSearchMode::References,
+        )
     }
 
     /// Like [`find_references`], but kept separate for rename-specific call
@@ -65,7 +83,13 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        self.find_references_inner(uri, content, position, include_declaration)
+        self.find_references_inner(
+            uri,
+            content,
+            position,
+            include_declaration,
+            ReferenceSearchMode::Rename,
+        )
     }
 
     fn find_references_inner(
@@ -74,6 +98,7 @@ impl Backend {
         content: &str,
         position: Position,
         include_declaration: bool,
+        mode: ReferenceSearchMode,
     ) -> Option<Vec<Location>> {
         let start_total = std::time::Instant::now();
         tracing::info!(
@@ -100,6 +125,7 @@ impl Backend {
                 content,
                 sym.start,
                 include_declaration,
+                mode,
             );
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
@@ -142,6 +168,7 @@ impl Backend {
         content: &str,
         span_start: u32,
         include_declaration: bool,
+        mode: ReferenceSearchMode,
     ) -> Vec<Location> {
         match kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -168,10 +195,11 @@ impl Backend {
                         });
 
                     // Resolve the enclosing class to scope the search.
-                    let hierarchy =
-                        self.resolve_member_declaration_hierarchy(uri, span_start, name, is_static);
-                    let declaration_scope =
-                        self.resolve_member_declaration_scope(uri, span_start, name, is_static);
+                    let hierarchy = self.resolve_member_declaration_hierarchy(
+                        uri, span_start, name, is_static, mode,
+                    );
+                    let declaration_scope = self
+                        .resolve_member_declaration_scope(uri, span_start, name, is_static, mode);
                     return self.find_member_references(
                         name,
                         is_static,
@@ -211,6 +239,7 @@ impl Backend {
                     *is_static,
                     span_start,
                     member_name,
+                    mode,
                 );
 
                 // Constructors are not invoked through member accesses
@@ -298,10 +327,10 @@ impl Backend {
                 }
 
                 // Resolve the enclosing class to scope the search.
-                let hierarchy =
-                    self.resolve_member_declaration_hierarchy(uri, span_start, name, *is_static);
+                let hierarchy = self
+                    .resolve_member_declaration_hierarchy(uri, span_start, name, *is_static, mode);
                 let declaration_scope =
-                    self.resolve_member_declaration_scope(uri, span_start, name, *is_static);
+                    self.resolve_member_declaration_scope(uri, span_start, name, *is_static, mode);
                 self.find_member_references(
                     name,
                     *is_static,
@@ -1791,6 +1820,7 @@ impl Backend {
         is_static: bool,
         span_start: u32,
         member_name: &str,
+        mode: ReferenceSearchMode,
     ) -> (Option<HashSet<String>>, Option<HashSet<String>>) {
         let ctx = self.file_context(uri);
         let Some(content) = self.reference_file_content(uri) else {
@@ -1808,7 +1838,12 @@ impl Backend {
             );
         }
         let member_scope = self
-            .collect_member_receiver_scope(&fqns, member_name, is_static)
+            .collect_member_receiver_scope(
+                &fqns,
+                member_name,
+                is_static,
+                mode.include_declaring_interfaces(),
+            )
             .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&fqns));
         (Some(member_scope.clone()), Some(member_scope))
     }
@@ -1822,6 +1857,7 @@ impl Backend {
         offset: u32,
         member_name: &str,
         is_static: bool,
+        mode: ReferenceSearchMode,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
             .uri_classes_index
@@ -1841,8 +1877,13 @@ impl Backend {
         })?;
         let fqn = current_class.fqn().to_string();
         Some(
-            self.collect_member_receiver_scope(std::slice::from_ref(&fqn), member_name, is_static)
-                .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn])),
+            self.collect_member_receiver_scope(
+                std::slice::from_ref(&fqn),
+                member_name,
+                is_static,
+                mode.include_declaring_interfaces(),
+            )
+            .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn])),
         )
     }
 
@@ -1852,6 +1893,7 @@ impl Backend {
         offset: u32,
         member_name: &str,
         is_static: bool,
+        mode: ReferenceSearchMode,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
             .uri_classes_index
@@ -1870,6 +1912,7 @@ impl Backend {
             &[current_class.fqn().to_string()],
             member_name,
             is_static,
+            mode.include_declaring_interfaces(),
         )
     }
 
@@ -2085,6 +2128,7 @@ impl Backend {
         seed_fqns: &[String],
         member_name: &str,
         is_static: bool,
+        include_declaring_interfaces: bool,
     ) -> Option<HashSet<String>> {
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
         let mut roots = HashSet::new();
@@ -2094,14 +2138,16 @@ impl Backend {
             let normalized = normalize_fqn(fqn).to_string();
             if self.defines_member(&normalized, member_name, is_static, &class_loader) {
                 roots.insert(normalized.clone());
-                self.collect_declaring_member_interfaces(
-                    &normalized,
-                    member_name,
-                    is_static,
-                    &class_loader,
-                    &mut roots,
-                    &mut seen,
-                );
+                if include_declaring_interfaces {
+                    self.collect_declaring_member_interfaces(
+                        &normalized,
+                        member_name,
+                        is_static,
+                        &class_loader,
+                        &mut roots,
+                        &mut seen,
+                    );
+                }
             } else {
                 self.collect_declaring_member_ancestors(
                     &normalized,
