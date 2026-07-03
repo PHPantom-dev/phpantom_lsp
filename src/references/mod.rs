@@ -53,13 +53,11 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        self.find_references_with_member_mode(uri, content, position, include_declaration, true)
+        self.find_references_inner(uri, content, position, include_declaration)
     }
 
-    /// Like [`find_references`], but excludes unresolved member-call matches.
-    ///
-    /// Rename uses this stricter mode so same-named methods on unrelated or
-    /// unknown receiver types are not renamed conservatively.
+    /// Like [`find_references`], but kept separate for rename-specific call
+    /// sites that need the same precise member filtering.
     pub(crate) fn find_references_for_rename(
         &self,
         uri: &str,
@@ -67,16 +65,15 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        self.find_references_with_member_mode(uri, content, position, include_declaration, false)
+        self.find_references_inner(uri, content, position, include_declaration)
     }
 
-    fn find_references_with_member_mode(
+    fn find_references_inner(
         &self,
         uri: &str,
         content: &str,
         position: Position,
         include_declaration: bool,
-        allow_unresolved_member_subjects: bool,
     ) -> Option<Vec<Location>> {
         let start_total = std::time::Instant::now();
         tracing::info!(
@@ -103,7 +100,6 @@ impl Backend {
                 content,
                 sym.start,
                 include_declaration,
-                allow_unresolved_member_subjects,
             );
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
@@ -146,7 +142,6 @@ impl Backend {
         content: &str,
         span_start: u32,
         include_declaration: bool,
-        allow_unresolved_member_subjects: bool,
     ) -> Vec<Location> {
         match kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -183,7 +178,6 @@ impl Backend {
                         include_declaration,
                         hierarchy.as_ref(),
                         declaration_scope.as_ref(),
-                        allow_unresolved_member_subjects,
                     );
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
@@ -226,7 +220,7 @@ impl Backend {
                 // seeded with the subject's resolved class(es).
                 if is_constructor_name(member_name) {
                     let seeds = self
-                        .get_file_content(uri)
+                        .reference_file_content(uri)
                         .map(|content| {
                             self.resolve_subject_to_fqns(
                                 subject_text,
@@ -246,7 +240,6 @@ impl Backend {
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.as_ref(),
-                    allow_unresolved_member_subjects,
                 );
 
                 if *is_method_call && include_declaration {
@@ -315,7 +308,6 @@ impl Backend {
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.as_ref(),
-                    allow_unresolved_member_subjects,
                 )
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -369,13 +361,9 @@ impl Backend {
                 )
             }
 
-            SymbolKind::LaravelMacroString { name } => self.find_laravel_macro_references(
-                uri,
-                span_start,
-                name,
-                include_declaration,
-                allow_unresolved_member_subjects,
-            ),
+            SymbolKind::LaravelMacroString { name } => {
+                self.find_laravel_macro_references(uri, span_start, name, include_declaration)
+            }
 
             SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => Vec::new(),
         }
@@ -387,7 +375,6 @@ impl Backend {
         span_start: u32,
         name: &str,
         include_declaration: bool,
-        _allow_unresolved_subjects: bool,
     ) -> Vec<Location> {
         let targets = {
             let index = self.laravel_macros.read();
@@ -942,6 +929,24 @@ impl Backend {
             .collect()
     }
 
+    fn reference_file_content(&self, uri: &str) -> Option<String> {
+        if self.is_blade_file(uri)
+            && let Some(content) = self.blade_virtual_content.read().get(uri)
+        {
+            return Some(content.clone());
+        }
+        self.get_file_content(uri)
+    }
+
+    fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
+        if self.is_blade_file(uri)
+            && let Some(content) = self.blade_virtual_content.read().get(uri)
+        {
+            return Some(Arc::new(content.clone()));
+        }
+        self.get_file_content_arc(uri)
+    }
+
     /// Find all references to a class/interface/trait/enum across all files.
     ///
     /// Matches `ClassReference` spans whose resolved FQN equals `target_fqn`,
@@ -1057,7 +1062,7 @@ impl Backend {
 
                 if matched {
                     if file_content.is_none() {
-                        file_content = self.get_file_content_arc(file_uri);
+                        file_content = self.reference_file_content_arc(file_uri);
                     }
                     if let Some(ref content) = file_content {
                         let start = offset_to_position(content, span.start as usize);
@@ -1184,7 +1189,7 @@ impl Backend {
                         ..
                     } if is_constructor_name(member_name) => {
                         if file_content.is_none() {
-                            file_content = self.get_file_content_arc(file_uri);
+                            file_content = self.reference_file_content_arc(file_uri);
                         }
                         match &file_content {
                             Some(content) => {
@@ -1207,7 +1212,7 @@ impl Backend {
 
                 if matched {
                     if file_content.is_none() {
-                        file_content = self.get_file_content_arc(file_uri);
+                        file_content = self.reference_file_content_arc(file_uri);
                     }
                     if let Some(content) = &file_content {
                         let start = offset_to_position(content, span.start as usize);
@@ -1228,7 +1233,7 @@ impl Backend {
                     for method in class.methods.iter() {
                         if is_constructor_name(&method.name) && method.name_offset != 0 {
                             if file_content.is_none() {
-                                file_content = self.get_file_content_arc(file_uri);
+                                file_content = self.reference_file_content_arc(file_uri);
                             }
                             let Some(content) = &file_content else {
                                 break;
@@ -1306,7 +1311,9 @@ impl Backend {
     /// When `hierarchy` is `Some`, only references where the subject
     /// resolves to a class in the given set of FQNs are returned.  When
     /// the subject cannot be resolved (e.g. a complex expression or an
-    /// untyped variable), the reference is conservatively included.
+    /// untyped variable), the reference is skipped; accepting every
+    /// unresolved `$x->method()` makes common names such as `find` unusably
+    /// noisy in large projects.
     ///
     /// When `hierarchy` is `None`, all references with a matching member
     /// name and static-ness are returned (the v1 behaviour, kept as a
@@ -1318,7 +1325,6 @@ impl Backend {
         include_declaration: bool,
         hierarchy: Option<&HashSet<String>>,
         declaration_scope: Option<&HashSet<String>>,
-        allow_unresolved_subjects: bool,
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
@@ -1405,7 +1411,7 @@ impl Backend {
                         // Check if the subject belongs to the target hierarchy.
                         if let Some(hier) = hierarchy {
                             if file_content.is_none() {
-                                file_content = self.get_file_content_arc(file_uri);
+                                file_content = self.reference_file_content_arc(file_uri);
                             }
                             let Some(ref content) = file_content else {
                                 break;
@@ -1420,7 +1426,7 @@ impl Backend {
                                 content,
                             );
                             if subject_fqns.is_empty() {
-                                if !allow_unresolved_subjects {
+                                if !unresolved_member_subject_matches_scope(subject_text, hier) {
                                     continue;
                                 }
                             } else if !subject_fqns.iter().any(|fqn| hier.contains(fqn)) {
@@ -1431,7 +1437,7 @@ impl Backend {
                         }
 
                         if file_content.is_none() {
-                            file_content = self.get_file_content_arc(file_uri);
+                            file_content = self.reference_file_content_arc(file_uri);
                         }
                         let Some(ref content) = file_content else {
                             break;
@@ -1484,7 +1490,7 @@ impl Backend {
                             }
 
                             if file_content.is_none() {
-                                file_content = self.get_file_content_arc(file_uri);
+                                file_content = self.reference_file_content_arc(file_uri);
                             }
                             let Some(ref content) = file_content else {
                                 break;
@@ -1524,7 +1530,7 @@ impl Backend {
                             && prop.name_offset != 0
                         {
                             if file_content.is_none() {
-                                file_content = self.get_file_content_arc(file_uri);
+                                file_content = self.reference_file_content_arc(file_uri);
                             }
                             let Some(ref content) = file_content else {
                                 break;
@@ -1650,7 +1656,7 @@ impl Backend {
                         || crate::util::short_name(resolved_normalized) == target_short
                     {
                         if file_content.is_none() {
-                            file_content = self.get_file_content_arc(file_uri);
+                            file_content = self.reference_file_content_arc(file_uri);
                         }
                         if let Some(ref content) = file_content {
                             let start = offset_to_position(content, span.start as usize);
@@ -1725,7 +1731,7 @@ impl Backend {
 
                 if matched {
                     if file_content.is_none() {
-                        file_content = self.get_file_content_arc(file_uri);
+                        file_content = self.reference_file_content_arc(file_uri);
                     }
                     if let Some(ref content) = file_content {
                         let start = offset_to_position(content, span.start as usize);
@@ -1787,7 +1793,7 @@ impl Backend {
         member_name: &str,
     ) -> (Option<HashSet<String>>, Option<HashSet<String>>) {
         let ctx = self.file_context(uri);
-        let Some(content) = self.get_file_content(uri) else {
+        let Some(content) = self.reference_file_content(uri) else {
             return (None, None);
         };
         let fqns =
@@ -1801,10 +1807,10 @@ impl Backend {
                 Some(self.collect_macro_declaring_scope(&macro_targets)),
             );
         }
-        (
-            Some(self.collect_hierarchy_for_fqns(&fqns)),
-            self.collect_declaring_seed_scope(&fqns, member_name, is_static),
-        )
+        let member_scope = self
+            .collect_member_receiver_scope(&fqns, member_name, is_static)
+            .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&fqns));
+        (Some(member_scope.clone()), Some(member_scope))
     }
 
     /// Resolve the class hierarchy for a `MemberDeclaration` at a given offset.
@@ -1814,8 +1820,8 @@ impl Backend {
         &self,
         uri: &str,
         offset: u32,
-        _member_name: &str,
-        _is_static: bool,
+        member_name: &str,
+        is_static: bool,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
             .uri_classes_index
@@ -1834,7 +1840,10 @@ impl Backend {
                 .min_by_key(|c| c.start_offset)
         })?;
         let fqn = current_class.fqn().to_string();
-        Some(self.collect_hierarchy_for_fqns(&[fqn]))
+        Some(
+            self.collect_member_receiver_scope(std::slice::from_ref(&fqn), member_name, is_static)
+                .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn])),
+        )
     }
 
     fn resolve_member_declaration_scope(
@@ -1857,7 +1866,7 @@ impl Backend {
                 .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
                 .min_by_key(|c| c.start_offset)
         })?;
-        self.collect_declaring_seed_scope(
+        self.collect_member_receiver_scope(
             &[current_class.fqn().to_string()],
             member_name,
             is_static,
@@ -1915,8 +1924,50 @@ impl Backend {
                     }
                 })
                 .collect(),
-            None => Vec::new(),
+            None => self.resolve_static_laravel_builder_subject_to_fqns(
+                subject_text,
+                use_map,
+                namespace,
+                &class_loader,
+            ),
         }
+    }
+
+    fn resolve_static_laravel_builder_subject_to_fqns(
+        &self,
+        subject_text: &str,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let expr = crate::subject_expr::SubjectExpr::parse(subject_text);
+        let Some((class_name, method_name)) = static_call_root(&expr) else {
+            return Vec::new();
+        };
+        if !is_laravel_builder_static_entrypoint(method_name) {
+            return Vec::new();
+        }
+
+        let class_fqn = normalize_fqn(&Self::resolve_to_fqn(class_name, use_map, namespace));
+        let Some(class_info) = class_loader(&class_fqn) else {
+            return Vec::new();
+        };
+        let Some(laravel) = class_info.laravel() else {
+            return Vec::new();
+        };
+
+        let mut fqns = vec![class_fqn];
+        if let Some(builder_fqn) = laravel
+            .custom_builder
+            .as_ref()
+            .and_then(|builder| builder.base_name())
+            .map(normalize_fqn)
+        {
+            fqns.push(builder_fqn.to_string());
+        }
+        fqns.sort();
+        fqns.dedup();
+        fqns
     }
 
     /// Collect the full class hierarchy (ancestors and descendants) for
@@ -2029,25 +2080,142 @@ impl Backend {
         hierarchy
     }
 
-    fn collect_declaring_seed_scope(
+    fn collect_member_receiver_scope(
         &self,
         seed_fqns: &[String],
         member_name: &str,
         is_static: bool,
     ) -> Option<HashSet<String>> {
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-        let declaring_seeds: Vec<String> = seed_fqns
-            .iter()
-            .map(|fqn| normalize_fqn(fqn).to_string())
-            .filter(|fqn| self.defines_member(fqn, member_name, is_static, &class_loader))
-            .collect();
+        let mut roots = HashSet::new();
+        let mut seen = HashSet::new();
 
-        if declaring_seeds.is_empty() {
+        for fqn in seed_fqns {
+            let normalized = normalize_fqn(fqn).to_string();
+            if self.defines_member(&normalized, member_name, is_static, &class_loader) {
+                roots.insert(normalized);
+            } else {
+                self.collect_declaring_member_ancestors(
+                    &normalized,
+                    member_name,
+                    is_static,
+                    &class_loader,
+                    &mut roots,
+                    &mut seen,
+                );
+            }
+        }
+
+        if roots.is_empty() {
             return None;
         }
 
-        let mut scope: HashSet<String> = declaring_seeds.iter().cloned().collect();
-        let mut queue: std::collections::VecDeque<String> = declaring_seeds.into();
+        self.extend_laravel_member_roots(&mut roots);
+        Some(self.collect_descendants_for_roots(roots))
+    }
+
+    fn extend_laravel_member_roots(&self, roots: &mut HashSet<String>) {
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let initial_roots: Vec<String> = roots.iter().cloned().collect();
+        let mut candidate_roots: HashSet<String> = initial_roots.iter().cloned().collect();
+        let mut builder_roots: HashSet<String> = HashSet::new();
+        if candidate_roots.contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN) {
+            builder_roots.insert(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN.to_string());
+        }
+
+        for fqn in &initial_roots {
+            if let Some(cls) = class_loader(fqn)
+                && let Some(builder_fqn) = cls
+                    .laravel()
+                    .and_then(|l| l.custom_builder.as_ref())
+                    .and_then(|b| b.base_name())
+                    .map(normalize_fqn)
+            {
+                let builder = builder_fqn.to_string();
+                roots.insert(builder.clone());
+                candidate_roots.insert(builder.clone());
+                builder_roots.insert(builder);
+            }
+        }
+
+        let mut model_roots = Vec::new();
+        {
+            let class_index = self.fqn_class_index.read();
+            for (class_fqn, class_info) in class_index.iter() {
+                if let Some(laravel) = class_info.laravel() {
+                    if let Some(builder_fqn) = laravel
+                        .custom_builder
+                        .as_ref()
+                        .and_then(|b| b.base_name())
+                        .map(normalize_fqn)
+                    {
+                        if candidate_roots.contains(&builder_fqn) {
+                            model_roots.push(normalize_fqn(class_fqn).to_string());
+                            builder_roots.insert(builder_fqn);
+                        }
+                    } else if candidate_roots
+                        .contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
+                    {
+                        model_roots.push(normalize_fqn(class_fqn).to_string());
+                        builder_roots.insert(
+                            crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN.to_string(),
+                        );
+                    }
+                }
+            }
+        }
+
+        roots.extend(model_roots);
+        for builder in builder_roots {
+            self.collect_ancestors(&builder, &class_loader, roots);
+        }
+    }
+
+    fn collect_declaring_member_ancestors(
+        &self,
+        fqn: &str,
+        member_name: &str,
+        is_static: bool,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        roots: &mut HashSet<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        let normalized = normalize_fqn(fqn).to_string();
+        if !seen.insert(normalized.clone()) {
+            return;
+        }
+        let Some(cls) = class_loader(&normalized) else {
+            return;
+        };
+
+        let ancestors = cls
+            .parent_class
+            .iter()
+            .chain(cls.interfaces.iter())
+            .chain(cls.used_traits.iter())
+            .chain(cls.mixins.iter())
+            .map(|name| normalize_fqn(name).to_string())
+            .collect::<Vec<_>>();
+
+        for ancestor in ancestors {
+            if self.defines_member(&ancestor, member_name, is_static, class_loader) {
+                roots.insert(ancestor);
+            } else {
+                self.collect_declaring_member_ancestors(
+                    &ancestor,
+                    member_name,
+                    is_static,
+                    class_loader,
+                    roots,
+                    seen,
+                );
+            }
+        }
+    }
+
+    fn collect_descendants_for_roots(&self, roots: HashSet<String>) -> HashSet<String> {
+        let mut scope = roots.clone();
+        let mut queue: std::collections::VecDeque<String> = roots.into_iter().collect();
         let gti = self.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
@@ -2059,8 +2227,7 @@ impl Backend {
                 }
             }
         }
-
-        Some(scope)
+        scope
     }
 
     fn collect_macro_declaring_targets(
@@ -2122,6 +2289,14 @@ impl Backend {
             .iter()
             .any(|m| m.name.eq_ignore_ascii_case(name) && m.is_static == is_static)
         {
+            return true;
+        }
+
+        let property_name = name.strip_prefix('$').unwrap_or(name);
+        if cls.properties.iter().any(|p| {
+            p.name.as_str().strip_prefix('$').unwrap_or(p.name.as_str()) == property_name
+                && p.is_static == is_static
+        }) {
             return true;
         }
 
@@ -2595,6 +2770,86 @@ impl Backend {
 /// Normalise a class FQN: strip leading `\` if present.
 fn normalize_fqn(fqn: &str) -> String {
     strip_fqn_prefix(fqn).to_string()
+}
+
+fn static_call_root(expr: &crate::subject_expr::SubjectExpr) -> Option<(&str, &str)> {
+    match expr {
+        crate::subject_expr::SubjectExpr::CallExpr { callee, .. } => static_call_root(callee),
+        crate::subject_expr::SubjectExpr::MethodCall { base, .. } => static_call_root(base),
+        crate::subject_expr::SubjectExpr::StaticMethodCall { class, method } => {
+            Some((class.as_str(), method.as_str()))
+        }
+        _ => None,
+    }
+}
+
+fn unresolved_member_subject_matches_scope(subject_text: &str, scope: &HashSet<String>) -> bool {
+    let Some(subject_name) = unresolved_member_subject_name(subject_text) else {
+        return false;
+    };
+    let subject_key = normalized_member_subject_key(&subject_name);
+    if subject_key.is_empty() {
+        return false;
+    }
+
+    scope.iter().any(|fqn| {
+        member_scope_name_keys(crate::util::short_name(fqn))
+            .into_iter()
+            .any(|key| key == subject_key)
+    })
+}
+
+fn unresolved_member_subject_name(subject_text: &str) -> Option<String> {
+    match crate::subject_expr::SubjectExpr::parse(subject_text) {
+        crate::subject_expr::SubjectExpr::Variable(name) => {
+            Some(name.trim_start_matches('$').to_string())
+        }
+        crate::subject_expr::SubjectExpr::PropertyChain { property, .. } => Some(property),
+        _ => None,
+    }
+}
+
+fn member_scope_name_keys(short_name: &str) -> Vec<String> {
+    let mut names = vec![short_name.to_string()];
+    for suffix in ["Repository", "Gateway"] {
+        if let Some(stem) = short_name.strip_suffix(suffix) {
+            names.push(format!("{stem}{suffix}"));
+            if suffix == "Repository" {
+                names.push(format!("{stem}Repo"));
+            }
+        }
+    }
+
+    names
+        .into_iter()
+        .map(|name| normalized_member_subject_key(&name))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+fn normalized_member_subject_key(name: &str) -> String {
+    name.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn is_laravel_builder_static_entrypoint(method_name: &str) -> bool {
+    matches!(
+        method_name.to_ascii_lowercase().as_str(),
+        "query"
+            | "newquery"
+            | "where"
+            | "wherein"
+            | "wherenull"
+            | "wherenotnull"
+            | "orderby"
+            | "select"
+            | "with"
+            | "without"
+            | "latest"
+            | "oldest"
+    )
 }
 
 /// Whether a member name is the PHP constructor (`__construct`).

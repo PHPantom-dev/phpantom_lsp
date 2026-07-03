@@ -1382,9 +1382,11 @@ async fn test_self_static_method_references_scoped() {
 }
 
 #[tokio::test]
-async fn test_unresolvable_variable_included_conservatively() {
-    // When a variable's type cannot be resolved, the reference should
-    // be included conservatively rather than dropped.
+async fn test_unresolvable_variable_excluded_when_member_scope_known() {
+    // Once a member search has a resolved receiver scope, unresolved
+    // receivers with the same member name should not be included. In large
+    // projects, common methods such as `find` otherwise match unrelated
+    // untyped services and repositories.
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test.php").unwrap();
     let text = concat!(
@@ -1409,10 +1411,81 @@ async fn test_unresolvable_variable_included_conservatively() {
         "Should find $a->save() on L5; got lines: {:?}",
         lines
     );
-    // $unknown has no type hint — should be included conservatively.
     assert!(
-        lines.contains(&6),
-        "Should conservatively include $unknown->save() on L6 (unresolvable type); got lines: {:?}",
+        !lines.contains(&6),
+        "Should NOT include unresolved $unknown->save() on L6; got lines: {:?}",
+        lines
+    );
+}
+
+#[tokio::test]
+async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                          // L0
+        "class ServiceEntityRepository {\n",                                // L1
+        "    public function find(int $id): object {}\n",                   // L2
+        "}\n",                                                              // L3
+        "class NotificationRepository extends ServiceEntityRepository {\n", // L4
+        "    public function find(int $id): object {}\n",                   // L5
+        "}\n",                                                              // L6
+        "class UserRepository extends ServiceEntityRepository {\n",         // L7
+        "    public function find(int $id): object {}\n",                   // L8
+        "}\n",                                                              // L9
+        "function demo(NotificationRepository $notifications, ServiceEntityRepository $base, UserRepository $users, $managerRegistry, $unknown): void {\n", // L10
+        "    $notifications->find(1);\n", // L11
+        "    $base->find(2);\n",          // L12
+        "    $users->find(3);\n",         // L13
+        "    $notificationRepository = $managerRegistry->getManager()->getRepository(NotificationImpl::class);\n", // L14
+        "    $notificationRepository->find(4);\n", // L15
+        "    $unknown->find(5);\n",                // L16
+        "}\n",                                     // L17
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let locs = find_references(&backend, &uri, 5, 21, true).await;
+    let lines: Vec<u32> = locs.iter().map(|l| l.range.start.line).collect();
+
+    assert!(
+        lines.contains(&5),
+        "Should include NotificationRepository::find declaration on L5; got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&11),
+        "Should include $notifications->find() on L11; got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&15),
+        "Should include unresolved but clearly named $notificationRepository->find() on L15; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&2),
+        "Should NOT include base ServiceEntityRepository::find declaration on L2; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&8),
+        "Should NOT include sibling UserRepository::find declaration on L8; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&12),
+        "Should NOT include base-typed $base->find() on L12; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&13),
+        "Should NOT include sibling $users->find() on L13; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&16),
+        "Should NOT include unresolved $unknown->find() on L16; got lines: {:?}",
         lines
     );
 }
