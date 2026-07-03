@@ -2093,7 +2093,15 @@ impl Backend {
         for fqn in seed_fqns {
             let normalized = normalize_fqn(fqn).to_string();
             if self.defines_member(&normalized, member_name, is_static, &class_loader) {
-                roots.insert(normalized);
+                roots.insert(normalized.clone());
+                self.collect_declaring_member_interfaces(
+                    &normalized,
+                    member_name,
+                    is_static,
+                    &class_loader,
+                    &mut roots,
+                    &mut seen,
+                );
             } else {
                 self.collect_declaring_member_ancestors(
                     &normalized,
@@ -2112,6 +2120,39 @@ impl Backend {
 
         self.extend_laravel_member_roots(&mut roots);
         Some(self.collect_descendants_for_roots(roots))
+    }
+
+    fn collect_declaring_member_interfaces(
+        &self,
+        fqn: &str,
+        member_name: &str,
+        is_static: bool,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        roots: &mut HashSet<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        let normalized = normalize_fqn(fqn).to_string();
+        if !seen.insert(normalized.clone()) {
+            return;
+        }
+        let Some(cls) = class_loader(&normalized) else {
+            return;
+        };
+
+        for iface in &cls.interfaces {
+            let iface_fqn = normalize_fqn(iface).to_string();
+            if self.defines_member(&iface_fqn, member_name, is_static, class_loader) {
+                roots.insert(iface_fqn.clone());
+            }
+            self.collect_declaring_member_interfaces(
+                &iface_fqn,
+                member_name,
+                is_static,
+                class_loader,
+                roots,
+                seen,
+            );
+        }
     }
 
     fn extend_laravel_member_roots(&self, roots: &mut HashSet<String>) {

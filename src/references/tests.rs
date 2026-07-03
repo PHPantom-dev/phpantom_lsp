@@ -1491,6 +1491,69 @@ async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
 }
 
 #[tokio::test]
+async fn test_concrete_method_references_include_interface_typed_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                           // L0
+        "namespace App;\n",                                                  // L1
+        "class Notification {}\n",                                           // L2
+        "interface NotificationGateway {\n",                                 // L3
+        "    public function insert(Notification $notification): void;\n",   // L4
+        "}\n",                                                               // L5
+        "interface UserGateway {\n",                                         // L6
+        "    public function insert(Notification $notification): void;\n",   // L7
+        "}\n",                                                               // L8
+        "class NotificationRepository implements NotificationGateway {\n",   // L9
+        "    public function insert(Notification $notification): void {}\n", // L10
+        "}\n",                                                               // L11
+        "class AddNotification {\n",                                         // L12
+        "    public function __construct(private readonly NotificationGateway $notificationGateway) {}\n", // L13
+        "    public function execute(Notification $notification): void {\n", // L14
+        "        $this->notificationGateway->insert($notification);\n",      // L15
+        "    }\n",                                                           // L16
+        "}\n",                                                               // L17
+        "class AddUser {\n",                                                 // L18
+        "    public function __construct(private readonly UserGateway $userGateway) {}\n", // L19
+        "    public function execute(Notification $notification): void {\n", // L20
+        "        $this->userGateway->insert($notification);\n",              // L21
+        "    }\n",                                                           // L22
+        "}\n",                                                               // L23
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let locs = find_references(&backend, &uri, 10, 21, true).await;
+    let lines: Vec<u32> = locs.iter().map(|l| l.range.start.line).collect();
+
+    assert!(
+        lines.contains(&4),
+        "Should include NotificationGateway::insert declaration on L4; got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&10),
+        "Should include NotificationRepository::insert declaration on L10; got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&15),
+        "Should include interface-typed $notificationGateway->insert() on L15; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&7),
+        "Should NOT include unrelated UserGateway::insert declaration on L7; got lines: {:?}",
+        lines
+    );
+    assert!(
+        !lines.contains(&21),
+        "Should NOT include unrelated $userGateway->insert() on L21; got lines: {:?}",
+        lines
+    );
+}
+
+#[tokio::test]
 async fn test_this_method_references_excludes_unrelated() {
     // $this->method() inside one class should not match $this->method()
     // inside an unrelated class with the same method name.
