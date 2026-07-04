@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783127852371,
+  "lastUpdate": 1783128946639,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11243,6 +11243,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9c304a5b9d20bde39bff940130b9ed8caed02026"
         },
         "date": 1783127850897,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 61.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d0f9077c5360d81c92b5a030eae2cdd63cefb429",
+          "message": "feat(completion): array callable method completion\n\nAdd method name completion inside array callable strings. When the\ncursor is inside the method-name string of [Class::class, '|'] or\n[$obj, '|'], the LSP now offers method completions from the resolved\nclass.\n\nDetection handles ::class constants, $this, typed variables,\nnamespaced classes, whitespace variations, and unclosed strings.\n\nCompletion reuses the standard member-completion builder so items have\nidentical formatting to regular -> / :: member completions: label\ndetails, return type, deprecation tags, and data for lazy documentation\nresolve. Insert text is post-processed to strip snippet parentheses\nsince we are inserting into a string literal.\n\nWorks with both instance and static methods.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-04T03:22:49+02:00",
+          "tree_id": "9538d0b3974cf362f553010d292db6ebeceb5265",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d0f9077c5360d81c92b5a030eae2cdd63cefb429"
+        },
+        "date": 1783128945406,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
