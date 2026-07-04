@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783129389978,
+  "lastUpdate": 1783129805516,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11321,6 +11321,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 60,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "399b2b15afa9aa1f5c0fc3a671970b08da30ea38",
+          "message": "feat(completion): include static methods on instance access\n\nCloses #162\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-04T03:36:47+02:00",
+          "tree_id": "215b769798e49acb6c905c7be06e08af676dd66e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/399b2b15afa9aa1f5c0fc3a671970b08da30ea38"
+        },
+        "date": 1783129803957,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 61.5,
             "unit": "MiB"
           }
         ]
