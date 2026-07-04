@@ -328,7 +328,7 @@ fn extract_array_map_element_type(
     };
 
     if let Some(ref parsed) = return_hint
-        && parsed.base_name().is_some()
+        && !parsed.is_untyped()
     {
         return return_hint;
     }
