@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783133660327,
+  "lastUpdate": 1783138464180,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -64319,6 +64319,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.123,
             "range": "± 0.02",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "31cc5e22506b38502c6285c99968bf55dcfdcfad",
+          "message": "fix(diagnostics): resolve literal types for argument type checking\n\nFixes #180 — string/int/float literal expressions passed as arguments\nare now narrowed to their precise literal type (e.g. `'desc'` becomes\n`PhpType::Literal(\"'desc'\")`) instead of the widened base type\n(`string`). This allows literal values to correctly match PHPDoc\nliteral-union parameter types like `'asc'|'desc'`.\n\nAlso fixes `is_string_subtype()` and `is_int_subtype()` to handle\n`PhpType::Union` — a union of string/int literals (e.g.\n`'asc'|'desc'`) is now recognised as a string/int subtype, allowing\nPHPDoc `@param` annotations with literal unions to properly override\nnative scalar type hints.\n\nThe narrowing is applied only in the diagnostic argument-collection\npath (not in general variable resolution) to avoid changing inferred\ntypes for array shapes and list element tracking.\n\nIncludes 8 new integration tests covering correct and incorrect\nstring, integer, and float literals against literal-union parameters,\nplus precise numeric-string checking (`'42'` passes, `'hello'` is\nflagged).\n\nCloses #180\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-04T06:04:59+02:00",
+          "tree_id": "404d4ae1f0957556ac34ea0df1d4bb95a479c855",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/31cc5e22506b38502c6285c99968bf55dcfdcfad"
+        },
+        "date": 1783138463291,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 5.581,
+            "range": "± 0.057",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.042,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.108,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.155,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.229,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.243,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.921,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.836,
+            "range": "± 0.035",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.118,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.051,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.05,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.065,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.899,
+            "range": "± 0.029",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.23,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.265,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.072,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.049,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.121,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.09,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.072,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.191,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.039,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.412,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.047,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.035,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.033,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 46.054,
+            "range": "± 0.114",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.094,
+            "range": "± 0.009",
             "unit": "ms"
           }
         ]
