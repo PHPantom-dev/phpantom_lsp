@@ -75,6 +75,7 @@
 mod change_visibility;
 mod convert_switch_to_match;
 mod convert_to_arrow_function;
+mod convert_to_closure;
 mod convert_to_instance_variable;
 pub(crate) mod cursor_context;
 mod extract_constant;
@@ -241,8 +242,9 @@ impl Backend {
         // ── Simplify with null coalescing / null-safe operator ──────────
         self.collect_simplify_null_actions(uri, content, params, &mut actions);
 
-        // ── Convert to arrow function ───────────────────────────────────
+        // ── Convert to arrow function / closure ─────────────────────────
         self.collect_convert_to_arrow_function_actions(uri, content, params, &mut actions);
+        self.collect_convert_to_closure_actions(uri, content, params, &mut actions);
 
         // ── Convert switch to match expression ──────────────────────────
         self.collect_convert_switch_to_match_actions(uri, content, params, &mut actions);

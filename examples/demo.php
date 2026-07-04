@@ -3585,6 +3585,30 @@ class ConvertToArrowFunctionDemo
     }
 }
 
+class ConvertToClosureDemo
+{
+    public function demo(): void
+    {
+        // Try: place cursor on `fn` and use code action "Convert to closure"
+        $double = fn(int $x): int => $x * 2;
+
+        // Arrow with captured outer variable — converted closure gets use()
+        $base = 10;
+        $add = fn(int $x) => $x + $base;
+
+        // Static arrow function
+        $staticFn = static fn(string $s): string => strtoupper($s);
+
+        // Arrow as callback — trigger inside the arrow function
+        $result = array_map(fn(string $s) => strtoupper($s), ['a', 'b']);
+
+        // Multiple captured variables
+        $prefix = 'hello';
+        $suffix = 'world';
+        $greet = fn(string $sep) => $prefix . $sep . $suffix;
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
