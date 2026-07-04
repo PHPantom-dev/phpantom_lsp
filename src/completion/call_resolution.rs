@@ -793,7 +793,7 @@ impl Backend {
 
         let effective_args_text = call_args_text.or(args_text_from_parse);
 
-        match effective {
+        let result = match effective {
             // ── Constructor: `new ClassName` or `new ClassName()` ────
             SubjectExpr::NewExpr { class_name } => {
                 let resolved_class_name =
@@ -875,7 +875,31 @@ impl Backend {
 
             // ── Anything else doesn't resolve to a callable ─────────
             _ => None,
+        };
+
+        // ── Call-result invocation ──────────────────────────────────
+        // When the original expression was a `CallExpr`, the resolved
+        // target describes the inner callee (e.g. `makeCallable`), but
+        // the actual call is on the callee's *return value*:
+        //
+        //   makeCallable('1', '2')('test')
+        //   ^^^^^^^^^^^^^^^^^^^^^^^^       ← inner callee resolved above
+        //                          ^^^^^^^ ← outer call on the return value
+        //
+        // If the return type is a typed callable (`callable(string): T`)
+        // use its parameter signature.  For bare `callable` without a
+        // parameter spec, flag `accepts_any_args` so that argument-count
+        // diagnostics are suppressed and inlay hints don't show the
+        // wrong parameter names.
+        if matches!(&parsed, SubjectExpr::CallExpr { .. })
+            && let Some(ref target) = result
+            && let Some(ref return_type) = target.return_type
+            && let Some(invoked) = callable_type_as_target(return_type)
+        {
+            return Some(invoked);
         }
+
+        result
     }
 
     /// Resolve the return type of a call expression given a structured
@@ -2801,5 +2825,66 @@ impl Backend {
         }
 
         None
+    }
+}
+
+/// Convert a callable `PhpType` to a `ResolvedCallableTarget`.
+///
+/// Used when a function/method returns a callable type and that return
+/// value is immediately invoked: `makeCallable('1', '2')('test')`.
+///
+/// - `PhpType::Callable { params, return_type, .. }` (typed callable like
+///   `callable(string): string`) -> params are converted to `ParameterInfo`.
+/// - `PhpType::Named("callable")` or `PhpType::Named("Closure")` (bare
+///   callable without parameter specification) -> returns a target with
+///   `accepts_any_args: true` so diagnostics are suppressed.
+/// - Other types -> returns `None` (not a callable).
+fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarget> {
+    match return_type {
+        PhpType::Callable {
+            params,
+            return_type,
+            ..
+        } => {
+            let parameters: Vec<ParameterInfo> = params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| ParameterInfo {
+                    name: crate::atom::atom(&format!("$param{}", i + 1)),
+                    is_required: !p.optional && !p.variadic,
+                    type_hint: Some(p.type_hint.clone()),
+                    native_type_hint: None,
+                    description: None,
+                    default_value: None,
+                    is_variadic: p.variadic,
+                    is_reference: false,
+                    closure_this_type: None,
+                })
+                .collect();
+            Some(ResolvedCallableTarget {
+                parameters,
+                return_type: return_type.as_deref().cloned(),
+                accepts_any_args: false,
+            })
+        }
+        PhpType::Named(name)
+            if name.eq_ignore_ascii_case("callable") || name.eq_ignore_ascii_case("Closure") =>
+        {
+            Some(ResolvedCallableTarget {
+                parameters: vec![],
+                return_type: None,
+                accepts_any_args: true,
+            })
+        }
+        PhpType::Union(members) => {
+            for member in members {
+                if let Some(target) = callable_type_as_target(member) {
+                    return Some(target);
+                }
+            }
+            None
+        }
+        PhpType::Nullable(inner) => callable_type_as_target(inner),
+        _ => None,
     }
 }
