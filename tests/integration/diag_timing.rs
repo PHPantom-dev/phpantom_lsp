@@ -721,9 +721,9 @@ class RefundCallback {
     let relevant: Vec<_> = out
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unresolved_member_access")
-            })
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
+            )
         })
         .collect();
 
