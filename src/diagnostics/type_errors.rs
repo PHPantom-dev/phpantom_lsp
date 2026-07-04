@@ -16,11 +16,13 @@ use mago_span::HasSpan;
 use mago_syntax::ast::argument::Argument;
 use mago_syntax::ast::call::Call;
 use mago_syntax::ast::expression::Expression;
+use mago_syntax::ast::literal::Literal;
 use mago_syntax::ast::statement::Statement;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::{with_parse_cache, with_parsed_program};
@@ -300,13 +302,21 @@ fn is_type_compatible(
     // ── PHP type juggling: int → string ─────────────────────────
     // PHP coerces int to string in many contexts (concatenation,
     // function calls with declare(strict_types=0)).  Since we can't
-    // know the strict_types setting, stay silent.
+    // know the strict_types setting, stay silent.  Also covers
+    // integer literals (e.g. `42` passed to `string`).
     if let PhpType::Named(sup) = param_type
         && sup.eq_ignore_ascii_case("string")
-        && let PhpType::Named(sub) = arg_type
-        && matches!(sub.to_ascii_lowercase().as_str(), "int" | "integer")
     {
-        return true;
+        let is_int_like = match arg_type {
+            PhpType::Named(sub) => {
+                matches!(sub.to_ascii_lowercase().as_str(), "int" | "integer")
+            }
+            PhpType::Literal(lit) => lit.parse::<i64>().is_ok(),
+            _ => false,
+        };
+        if is_int_like {
+            return true;
+        }
     }
 
     // ── PHP type juggling: numeric-string → float/int ───────────
@@ -1441,6 +1451,34 @@ impl Backend {
                         let arg_ctx = var_ctx.with_cursor_offset(start as u32);
                         let ty = resolve_expression_type(arg_expr, &arg_ctx)
                             .unwrap_or_else(PhpType::untyped);
+                        // Narrow scalar literals to their precise literal
+                        // type so that e.g. `'desc'` matches `'asc'|'desc'`
+                        // and `2` matches `1|2|3`.  The general expression
+                        // resolver returns the widened base type (`string`,
+                        // `int`, `float`) which is correct for variable
+                        // tracking, but for argument diagnostics we need
+                        // the exact value to compare against literal types.
+                        //
+                        // Numeric literals use the parsed value rather than
+                        // the raw source text so that non-decimal forms
+                        // (`0xFF`, `0b1010`, `0o17`, `1_000`) still match
+                        // `int`/`float`/`numeric` parameters and decimal
+                        // literal unions (`1|2|3`).  The raw text would not
+                        // parse back into a number and would be flagged as
+                        // an incompatible argument.
+                        let ty = match arg_expr {
+                            Expression::Literal(Literal::String(s)) => {
+                                PhpType::Literal(bytes_to_str(s.raw).to_string())
+                            }
+                            Expression::Literal(Literal::Integer(i)) => match i.value {
+                                Some(value) => PhpType::Literal(value.to_string()),
+                                None => ty,
+                            },
+                            Expression::Literal(Literal::Float(f)) => {
+                                PhpType::Literal(f.value.into_inner().to_string())
+                            }
+                            _ => ty,
+                        };
                         // Resolve any short class names in the arg type
                         // to FQN via the class loader.  Variable
                         // resolution may return raw docblock names

@@ -739,6 +739,9 @@ impl PhpType {
                 name.to_ascii_lowercase().as_str(),
                 "class-string" | "interface-string" | "model-property"
             ),
+            PhpType::Union(members) => {
+                !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
+            }
             _ => false,
         }
     }
@@ -767,17 +770,26 @@ impl PhpType {
                 !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit())
             }
             PhpType::Nullable(inner) => inner.is_int_subtype(),
+            PhpType::Union(members) => {
+                !members.is_empty() && members.iter().all(|m| m.is_int_subtype())
+            }
             _ => false,
         }
     }
 
-    /// Whether this type is `float` or `double` (case-insensitive).
+    /// Whether this type is `float`, `double`, a float literal, or a
+    /// union of float subtypes (case-insensitive).
     ///
-    /// This is currently identical to [`is_float`], but exists for
-    /// symmetry with [`is_string_subtype`] and [`is_int_subtype`] and
-    /// may be extended with float refinement types in the future.
+    /// Extends [`is_float`] with literal and union handling for
+    /// symmetry with [`is_string_subtype`] and [`is_int_subtype`].
     pub fn is_float_subtype(&self) -> bool {
-        self.is_float()
+        match self {
+            PhpType::Literal(s) => s.parse::<f64>().is_ok(),
+            PhpType::Union(members) => {
+                !members.is_empty() && members.iter().all(|m| m.is_float_subtype())
+            }
+            _ => self.is_float(),
+        }
     }
 
     /// Whether this type is `object` (case-insensitive).
