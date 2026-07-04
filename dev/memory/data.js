@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783128946639,
+  "lastUpdate": 1783129389978,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11287,6 +11287,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 61.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d04de94fa8f589f662d793329685413b5819b544",
+          "message": "fix(rename): handle variables in dynamic property selectors\n\nDynamic property selectors like `$message->{$attribute}` were only\npartially\nwalked. The scope collector skipped selector expressions when tracking\nlocal\nvariable reads, which caused false `unused_variable` diagnostics for the\nselector variable.\n\nThe symbol map extractor also ignored non-identifier property selectors,\nso\nfind-references and rename missed variable occurrences inside dynamic\nproperty\naccesses. Renaming `$attribute` updated plain variable uses but not the\nselector inside `$message->{$attribute}`.\n\nWalk selector expressions during scope collection and emit variable\nsymbol\nspans for dynamic property selectors in the symbol map. Add regression\ntests\ncovering unused-variable diagnostics, references, and rename behavior\nfor this\npattern.\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-04T03:30:09+02:00",
+          "tree_id": "b133a776a7449de17b6968c8a135e8242db90e04",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d04de94fa8f589f662d793329685413b5819b544"
+        },
+        "date": 1783129389117,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 60,
             "unit": "MiB"
           }
         ]
