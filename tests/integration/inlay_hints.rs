@@ -1420,3 +1420,31 @@ makeCallable('1', '2')('test');
         a_count, line6_labels
     );
 }
+
+#[tokio::test]
+async fn callable_return_invocation_fully_qualified_closure() {
+    // The fully-qualified `\Closure` return type spelling must be
+    // recognised the same way as bare `Closure` and `callable`.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_invoke.php").unwrap();
+    let text = r#"<?php
+function makeClosure(string $a, string $b): \Closure
+{
+    return fn (string $c) => "$a $b $c";
+}
+
+makeClosure('1', '2')('test');
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+
+    let line6_hints = hints_at_line(&hints, 6);
+    let line6_labels: Vec<String> = line6_hints.iter().map(|h| hint_label(h)).collect();
+
+    let a_count = line6_labels.iter().filter(|l| *l == "a:").count();
+    assert_eq!(
+        a_count, 1,
+        "Should have exactly 1 'a:' hint (outer call only), got {}: {:?}",
+        a_count, line6_labels
+    );
+}

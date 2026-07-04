@@ -2850,7 +2850,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 .iter()
                 .enumerate()
                 .map(|(i, p)| ParameterInfo {
-                    name: crate::atom::atom(&format!("$param{}", i + 1)),
+                    name: atom(&format!("$param{}", i + 1)),
                     is_required: !p.optional && !p.variadic,
                     type_hint: Some(p.type_hint.clone()),
                     native_type_hint: None,
