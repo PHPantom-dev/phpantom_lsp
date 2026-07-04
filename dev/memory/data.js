@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783133877111,
+  "lastUpdate": 1783138695877,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11389,6 +11389,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 61.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "31cc5e22506b38502c6285c99968bf55dcfdcfad",
+          "message": "fix(diagnostics): resolve literal types for argument type checking\n\nFixes #180 — string/int/float literal expressions passed as arguments\nare now narrowed to their precise literal type (e.g. `'desc'` becomes\n`PhpType::Literal(\"'desc'\")`) instead of the widened base type\n(`string`). This allows literal values to correctly match PHPDoc\nliteral-union parameter types like `'asc'|'desc'`.\n\nAlso fixes `is_string_subtype()` and `is_int_subtype()` to handle\n`PhpType::Union` — a union of string/int literals (e.g.\n`'asc'|'desc'`) is now recognised as a string/int subtype, allowing\nPHPDoc `@param` annotations with literal unions to properly override\nnative scalar type hints.\n\nThe narrowing is applied only in the diagnostic argument-collection\npath (not in general variable resolution) to avoid changing inferred\ntypes for array shapes and list element tracking.\n\nIncludes 8 new integration tests covering correct and incorrect\nstring, integer, and float literals against literal-union parameters,\nplus precise numeric-string checking (`'42'` passes, `'hello'` is\nflagged).\n\nCloses #180\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-04T06:04:59+02:00",
+          "tree_id": "404d4ae1f0957556ac34ea0df1d4bb95a479c855",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/31cc5e22506b38502c6285c99968bf55dcfdcfad"
+        },
+        "date": 1783138693883,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.4,
             "unit": "MiB"
           }
         ]
