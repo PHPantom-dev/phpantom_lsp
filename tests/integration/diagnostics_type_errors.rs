@@ -1078,10 +1078,9 @@ function test(): void {
 }
 
 #[test]
-fn no_diagnostic_for_non_numeric_string_literal_to_numeric_string() {
-    // String literals resolve as bare `string` in the expression resolver,
-    // so we cannot distinguish numeric from non-numeric at the type level.
-    // Conservative: stay silent because the string *might* be numeric.
+fn flags_non_numeric_string_literal_to_numeric_string() {
+    // String literals are now narrowed to their literal type in argument
+    // diagnostics, so we CAN prove `'hello'` is not a numeric-string.
     let php = r#"<?php
 /** @param numeric-string $v */
 function takes_numeric_string(string $v): void {}
@@ -1092,8 +1091,26 @@ function test(): void {
 "#;
     let diags = collect(php);
     assert!(
+        has_type_error(&diags),
+        "Should flag non-numeric string literal 'hello' passed to numeric-string param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_numeric_string_literal_to_numeric_string_precise() {
+    // A numeric string literal like '42' IS a valid numeric-string.
+    let php = r#"<?php
+/** @param numeric-string $v */
+function takes_numeric_string(string $v): void {}
+
+function test(): void {
+    takes_numeric_string('42');
+}
+"#;
+    let diags = collect(php);
+    assert!(
         !has_type_error(&diags),
-        "Should not flag string literal passed to numeric-string param (conservative), got: {diags:?}"
+        "Should not flag numeric string literal '42' passed to numeric-string param, got: {diags:?}"
     );
 }
 
@@ -3861,5 +3878,155 @@ class TestCase {
     assert!(
         msgs.is_empty(),
         "Property narrowed via instanceof should be accepted as MockInterface, got: {msgs:?}"
+    );
+}
+
+// ─── Literal string matching literal type in union ──────────────────────────
+
+#[test]
+fn no_false_positive_for_string_literal_matching_literal_type() {
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function orderBy(string $column, string $direction): void {}
+
+function test(): void {
+    orderBy('id', 'desc');
+    orderBy('name', 'asc');
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "String literal 'desc' should match literal type 'desc' in union, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_string_literal_for_literal_type() {
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function orderBy(string $column, string $direction): void {}
+
+function test(): void {
+    orderBy('id', 'invalid');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "String literal 'invalid' should NOT match 'asc'|'desc', got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_int_literal_matching_literal_type() {
+    let php = r#"<?php
+/** @param 1|2|3 $mode */
+function setMode(int $mode): void {}
+
+function test(): void {
+    setMode(2);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Integer literal 2 should match literal type 2 in union, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_int_literal_for_literal_type() {
+    let php = r#"<?php
+/** @param 1|2|3 $mode */
+function setMode(int $mode): void {}
+
+function test(): void {
+    setMode(99);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Integer literal 99 should NOT match 1|2|3, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_float_literal_matching_literal_type() {
+    let php = r#"<?php
+/** @param 1.5|2.5|3.5 $rate */
+function setRate(float $rate): void {}
+
+function test(): void {
+    setRate(2.5);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Float literal 2.5 should match literal type 2.5 in union, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_float_literal_for_literal_type() {
+    let php = r#"<?php
+/** @param 1.5|2.5|3.5 $rate */
+function setRate(float $rate): void {}
+
+function test(): void {
+    setRate(9.9);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Float literal 9.9 should NOT match 1.5|2.5|3.5, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_non_decimal_int_literals_matching_int_param() {
+    // Hex, binary, octal, and underscore-separated integer literals are
+    // narrowed to their parsed value, so they still satisfy an `int`
+    // parameter (their raw source text would not parse back into a number).
+    let php = r#"<?php
+function takes_int(int $x): void {}
+
+function test(): void {
+    takes_int(0xFF);
+    takes_int(0b1010);
+    takes_int(1_000);
+    takes_int(0o17);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Non-decimal int literals should match int param, got: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_hex_literal_matching_decimal_literal_union() {
+    // `0x2` is value 2, which is a member of the decimal literal union.
+    let php = r#"<?php
+/** @param 1|2|3 $mode */
+function setMode(int $mode): void {}
+
+function test(): void {
+    setMode(0x2);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Hex literal 0x2 should match decimal literal 2 in union, got: {msgs:?}"
     );
 }
