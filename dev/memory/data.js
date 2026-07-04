@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783129805516,
+  "lastUpdate": 1783133877111,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11355,6 +11355,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 61.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "49514663cb372223ed2e90912f3882602cae8e30",
+          "message": "feat(code-action): convert arrow function to closure\n\nAdd a refactor.rewrite code action that converts arrow functions to\nanonymous closures: `fn($x) => $x * 2` becomes\n`function($x) { return $x * 2; }`.\n\nVariables from the outer scope used in the expression are automatically\ndetected and captured via a `use()` clause. `$this` is excluded since\nclosures bind it automatically (unless static). Nested arrow functions\nare handled by extending the parameter exclusion set.\n\nPreserves:\n- static keyword\n- Return type hints\n- Parameter type hints\n\nIncludes 10 unit tests covering: simple expressions, type hints,\nstatic arrows, single/multiple variable capture, $this exclusion,\nparameter exclusion, method calls with captures, and deduplication.\n\nCloses #148\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-04T04:44:50+02:00",
+          "tree_id": "6275e493402db7f8e802c2b9281d2e3d6452c0d2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/49514663cb372223ed2e90912f3882602cae8e30"
+        },
+        "date": 1783133875592,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 61.6,
             "unit": "MiB"
           }
         ]
