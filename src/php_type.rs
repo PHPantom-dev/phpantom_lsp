@@ -102,11 +102,88 @@ pub enum PhpType {
     /// Index access type: `T[K]`.
     IndexAccess(Box<PhpType>, Box<PhpType>),
 
-    /// A literal type: integer (`42`), float (`3.14`), or string (`'foo'`).
-    Literal(String),
+    /// A literal scalar type with preserved kind and source text.
+    Literal(LiteralValue),
 
     /// Fallback for anything we cannot parse or do not yet map.
     Raw(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Int(String),
+    Float(String),
+    String(String),
+}
+
+impl LiteralValue {
+    pub fn int(raw: impl Into<String>) -> Self {
+        Self::Int(raw.into())
+    }
+
+    pub fn float(raw: impl Into<String>) -> Self {
+        Self::Float(raw.into())
+    }
+
+    pub fn string_raw(raw: impl Into<String>) -> Self {
+        Self::String(raw.into())
+    }
+
+    pub fn string_value(value: impl AsRef<str>) -> Self {
+        Self::String(format!(
+            "'{}'",
+            value.as_ref().replace('\\', "\\\\").replace('\'', "\\'")
+        ))
+    }
+
+    pub fn as_raw(&self) -> String {
+        match self {
+            LiteralValue::Int(raw) | LiteralValue::Float(raw) | LiteralValue::String(raw) => {
+                raw.clone()
+            }
+        }
+    }
+
+    pub fn string_content(&self) -> Option<&str> {
+        let LiteralValue::String(raw) = self else {
+            return None;
+        };
+        crate::util::unquote_php_string(raw).or(Some(raw.as_str()))
+    }
+
+    pub fn parse_i64(&self) -> Option<i64> {
+        match self {
+            LiteralValue::Int(raw) => parse_php_int_literal(raw),
+            _ => None,
+        }
+    }
+
+    pub fn parse_f64(&self) -> Option<f64> {
+        match self {
+            LiteralValue::Float(raw) => parse_php_float_literal(raw),
+            _ => None,
+        }
+    }
+
+    pub fn is_numeric_string(&self) -> bool {
+        // Validate the string *content* as a PHP numeric string
+        // (`is_numeric`), not as a PHP source literal.  Underscores,
+        // hex/binary/octal prefixes, and leading `0` octal are only
+        // meaningful in source code; the runtime string `'0xFF'` or
+        // `'1_000'` is not numeric.
+        self.string_content()
+            .is_some_and(|content| content.parse::<i64>().is_ok() || content.parse::<f64>().is_ok())
+    }
+}
+
+impl fmt::Display for LiteralValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LiteralValue::Int(raw) | LiteralValue::Float(raw) | LiteralValue::String(raw) => {
+                write!(f, "{raw}")
+            }
+        }
+    }
 }
 
 /// A single field in an array or object shape.
@@ -154,6 +231,22 @@ impl PhpType {
     /// `bool` type.
     pub fn bool() -> PhpType {
         PhpType::Named("bool".to_owned())
+    }
+
+    pub fn literal_int(raw: impl Into<String>) -> PhpType {
+        PhpType::Literal(LiteralValue::int(raw))
+    }
+
+    pub fn literal_float(raw: impl Into<String>) -> PhpType {
+        PhpType::Literal(LiteralValue::float(raw))
+    }
+
+    pub fn literal_string_raw(raw: impl Into<String>) -> PhpType {
+        PhpType::Literal(LiteralValue::string_raw(raw))
+    }
+
+    pub fn literal_string_value(value: impl AsRef<str>) -> PhpType {
+        PhpType::Literal(LiteralValue::string_value(value))
     }
 
     /// `true` type.
@@ -701,14 +794,12 @@ impl PhpType {
 
     /// Whether this type is a literal string value (e.g. `'hello'`, `"world"`).
     pub fn is_string_literal(&self) -> bool {
-        matches!(self, PhpType::Literal(s) if
-            (s.starts_with('\'') && s.ends_with('\''))
-            || (s.starts_with('"') && s.ends_with('"')))
+        matches!(self, PhpType::Literal(LiteralValue::String(_)))
     }
 
     /// Whether this type is a literal integer value (e.g. `42`, `-1`).
     pub fn is_int_literal(&self) -> bool {
-        matches!(self, PhpType::Literal(s) if s.parse::<i64>().is_ok())
+        matches!(self, PhpType::Literal(LiteralValue::Int(_)))
     }
 
     /// Whether this type is `string` or any PHPDoc string refinement (case-insensitive).
@@ -733,7 +824,7 @@ impl PhpType {
                     | "non-falsy-string"
             ),
             PhpType::ClassString(_) | PhpType::InterfaceString(_) => true,
-            PhpType::Literal(s) => s.starts_with('\'') || s.starts_with('"'),
+            PhpType::Literal(LiteralValue::String(_)) => true,
             PhpType::Nullable(inner) => inner.is_string_subtype(),
             PhpType::Generic(name, _) => matches!(
                 name.to_ascii_lowercase().as_str(),
@@ -764,11 +855,7 @@ impl PhpType {
                     | "non-zero-int"
             ),
             PhpType::IntRange(_, _) => true,
-            PhpType::Literal(s) => {
-                // Integer literals: optional leading minus, then digits only.
-                let trimmed = s.strip_prefix('-').unwrap_or(s);
-                !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit())
-            }
+            PhpType::Literal(LiteralValue::Int(_)) => true,
             PhpType::Nullable(inner) => inner.is_int_subtype(),
             PhpType::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_int_subtype())
@@ -784,7 +871,7 @@ impl PhpType {
     /// symmetry with [`is_string_subtype`] and [`is_int_subtype`].
     pub fn is_float_subtype(&self) -> bool {
         match self {
-            PhpType::Literal(s) => s.parse::<f64>().is_ok(),
+            PhpType::Literal(LiteralValue::Float(_)) => true,
             PhpType::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_float_subtype())
             }
@@ -1132,23 +1219,14 @@ impl PhpType {
                 }
                 Some(native.join("&"))
             }
-            PhpType::Array(_) => Some("array".to_string()),
-            PhpType::ClassString(_) => Some("string".to_string()),
-            PhpType::InterfaceString(_) => Some("string".to_string()),
-            PhpType::IntRange(_, _) => Some("int".to_string()),
-            PhpType::Literal(s) => {
-                // Literal int/float/string/bool → the base scalar type.
-                if s.parse::<i64>().is_ok() {
-                    Some("int".to_string())
-                } else if s.parse::<f64>().is_ok() {
-                    Some("float".to_string())
-                } else if s.starts_with('\'') || s.starts_with('"') {
-                    Some("string".to_string())
-                } else {
-                    None
-                }
+            PhpType::Array(_) | PhpType::ArrayShape(_) => Some("array".to_string()),
+            PhpType::ClassString(_)
+            | PhpType::InterfaceString(_)
+            | PhpType::Literal(LiteralValue::String(_)) => Some("string".to_string()),
+            PhpType::IntRange(_, _) | PhpType::Literal(LiteralValue::Int(_)) => {
+                Some("int".to_string())
             }
-            PhpType::ArrayShape(_) => Some("array".to_string()),
+            PhpType::Literal(LiteralValue::Float(_)) => Some("float".to_string()),
             PhpType::ObjectShape(_) => Some("object".to_string()),
             PhpType::Callable { kind, .. } => Some(kind.clone()),
             // Conditionals, key-of, value-of, index-access, and raw
@@ -1224,22 +1302,14 @@ impl PhpType {
                     Some(PhpType::Intersection(deduped))
                 }
             }
-            PhpType::Array(_) => Some(PhpType::array()),
-            PhpType::ClassString(_) => Some(PhpType::string()),
-            PhpType::InterfaceString(_) => Some(PhpType::string()),
-            PhpType::IntRange(_, _) => Some(PhpType::int()),
-            PhpType::Literal(s) => {
-                if s.parse::<i64>().is_ok() {
-                    Some(PhpType::int())
-                } else if s.parse::<f64>().is_ok() {
-                    Some(PhpType::float())
-                } else if s.starts_with('\'') || s.starts_with('"') {
-                    Some(PhpType::string())
-                } else {
-                    None
-                }
+            PhpType::Array(_) | PhpType::ArrayShape(_) => Some(PhpType::array()),
+            PhpType::ClassString(_)
+            | PhpType::InterfaceString(_)
+            | PhpType::Literal(LiteralValue::String(_)) => Some(PhpType::string()),
+            PhpType::IntRange(_, _) | PhpType::Literal(LiteralValue::Int(_)) => {
+                Some(PhpType::int())
             }
-            PhpType::ArrayShape(_) => Some(PhpType::array()),
+            PhpType::Literal(LiteralValue::Float(_)) => Some(PhpType::float()),
             PhpType::ObjectShape(_) => Some(PhpType::object()),
             PhpType::Callable { kind, .. } => Some(PhpType::Named(kind.clone())),
             PhpType::Conditional { .. }
@@ -3294,16 +3364,16 @@ fn normalize_alias(name: &str) -> &str {
 }
 
 /// Check whether a literal type is a subtype of a given supertype.
-fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
+fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> bool {
     match supertype {
-        PhpType::Literal(other_lit) => lit == other_lit,
+        PhpType::Literal(other_lit) => literals_equal(lit, other_lit),
         PhpType::IntRange(min, max) => lit
-            .parse::<i64>()
-            .is_ok_and(|value| int_literal_is_within_range(value, min, max)),
+            .parse_i64()
+            .is_some_and(|value| int_literal_is_within_range(value, min, max)),
         PhpType::Named(sup) => {
             let sup_l = sup.to_ascii_lowercase();
             // Integer literal → int (and its supertypes).
-            if lit.parse::<i64>().is_ok() {
+            if matches!(lit, LiteralValue::Int(_)) {
                 return matches!(
                     sup_l.as_str(),
                     "int"
@@ -3317,20 +3387,14 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
                 );
             }
             // Float literal → float (and its supertypes).
-            if lit.parse::<f64>().is_ok() {
+            if matches!(lit, LiteralValue::Float(_)) {
                 return matches!(
                     sup_l.as_str(),
                     "float" | "double" | "numeric" | "number" | "scalar"
                 );
             }
             // String literal → string (and its supertypes).
-            if lit.starts_with('\'') || lit.starts_with('"') {
-                if lit.len() < 2 {
-                    return false;
-                }
-                // Extract the content between the quotes.
-                let content = &lit[1..lit.len() - 1];
-
+            if let Some(content) = lit.string_content() {
                 if matches!(
                     sup_l.as_str(),
                     "string" | "literal-string" | "scalar" | "array-key"
@@ -3357,9 +3421,7 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
                 }
 
                 // Numeric-string: the content parses as a number.
-                if sup_l == "numeric-string"
-                    && (content.parse::<i64>().is_ok() || content.parse::<f64>().is_ok())
-                {
+                if sup_l == "numeric-string" && lit.is_numeric_string() {
                     return true;
                 }
 
@@ -3371,7 +3433,18 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
     }
 }
 
-fn int_literal_is_within_range(value: i64, min: &str, max: &str) -> bool {
+fn literals_equal(left: &LiteralValue, right: &LiteralValue) -> bool {
+    match (left, right) {
+        (LiteralValue::Int(_), LiteralValue::Int(_)) => left.parse_i64() == right.parse_i64(),
+        (LiteralValue::Float(_), LiteralValue::Float(_)) => left.parse_f64() == right.parse_f64(),
+        (LiteralValue::String(_), LiteralValue::String(_)) => {
+            left.string_content() == right.string_content()
+        }
+        _ => left == right,
+    }
+}
+
+pub(crate) fn int_literal_is_within_range(value: i64, min: &str, max: &str) -> bool {
     let min_ok = match min.trim().to_ascii_lowercase().as_str() {
         "min" => true,
         min => min.parse::<i64>().is_ok_and(|bound| value >= bound),
@@ -3382,6 +3455,73 @@ fn int_literal_is_within_range(value: i64, min: &str, max: &str) -> bool {
     };
 
     min_ok && max_ok
+}
+
+fn literal_number_type(raw: String) -> PhpType {
+    if parse_php_int_literal(&raw).is_some() {
+        PhpType::literal_int(raw)
+    } else {
+        PhpType::literal_float(raw)
+    }
+}
+
+fn parse_php_int_literal(raw: &str) -> Option<i64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (negative, body) = if let Some(rest) = trimmed.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, trimmed)
+    };
+
+    let clean = body.replace('_', "");
+    let (radix, digits) = if let Some(rest) = clean
+        .strip_prefix("0x")
+        .or_else(|| clean.strip_prefix("0X"))
+    {
+        (16, rest)
+    } else if let Some(rest) = clean
+        .strip_prefix("0b")
+        .or_else(|| clean.strip_prefix("0B"))
+    {
+        (2, rest)
+    } else if let Some(rest) = clean
+        .strip_prefix("0o")
+        .or_else(|| clean.strip_prefix("0O"))
+    {
+        (8, rest)
+    } else if clean.len() > 1
+        && clean.starts_with('0')
+        && clean.bytes().all(|b| (b'0'..=b'7').contains(&b))
+    {
+        (8, &clean[1..])
+    } else {
+        (10, clean.as_str())
+    };
+
+    if digits.is_empty() {
+        return None;
+    }
+
+    let unsigned = i64::from_str_radix(digits, radix).ok()?;
+    if negative {
+        unsigned.checked_neg()
+    } else {
+        Some(unsigned)
+    }
+}
+
+fn parse_php_float_literal(raw: &str) -> Option<f64> {
+    let clean = raw.trim().replace('_', "");
+    if clean.is_empty() {
+        return None;
+    }
+    clean.parse::<f64>().ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -4106,13 +4246,13 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         ast::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
 
         // -- Literal types ----------------------------------------------------
-        ast::Type::LiteralInt(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
-        ast::Type::LiteralFloat(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
-        ast::Type::LiteralString(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
+        ast::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw).to_string()),
+        ast::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw).to_string()),
+        ast::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw).to_string()),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
-        ast::Type::Negated(n) => PhpType::Literal(format!("-{}", n.number)),
-        ast::Type::Posited(p) => PhpType::Literal(format!("+{}", p.number)),
+        ast::Type::Negated(n) => literal_number_type(format!("-{}", n.number)),
+        ast::Type::Posited(p) => literal_number_type(format!("+{}", p.number)),
 
         // -- Keyword types → Named -------------------------------------------
         ast::Type::Mixed(k)
@@ -4214,7 +4354,7 @@ fn evaluate_key_of(resolved: &PhpType) -> PhpType {
             let keys: Vec<PhpType> = entries
                 .iter()
                 .filter_map(|e| e.key.as_ref())
-                .map(|k| PhpType::Literal(k.clone()))
+                .map(PhpType::literal_string_value)
                 .collect();
             match keys.len() {
                 0 => PhpType::Named("never".to_string()),
@@ -4277,15 +4417,9 @@ fn evaluate_value_of(resolved: &PhpType) -> PhpType {
 fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
     if let PhpType::ArrayShape(entries) = base {
         // If index is a literal string key, look it up directly.
-        if let PhpType::Literal(key) | PhpType::Named(key) = index {
-            // Strip surrounding quotes from string literals (e.g. 'name' → name)
-            let bare_key = key
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
-                .or_else(|| key.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                .unwrap_or(key);
+        if let Some(bare_key) = literal_or_named_shape_key(index) {
             for entry in entries {
-                if entry.key.as_deref() == Some(bare_key) {
+                if entry.key.as_deref() == Some(bare_key.as_str()) {
                     return entry.value_type.clone();
                 }
             }
@@ -4294,14 +4428,9 @@ fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
         if let PhpType::Union(members) = index {
             let mut values: Vec<PhpType> = Vec::new();
             for member in members {
-                if let PhpType::Literal(key) | PhpType::Named(key) = member {
-                    let bare_key = key
-                        .strip_prefix('\'')
-                        .and_then(|s| s.strip_suffix('\''))
-                        .or_else(|| key.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                        .unwrap_or(key);
+                if let Some(bare_key) = literal_or_named_shape_key(member) {
                     for entry in entries {
-                        if entry.key.as_deref() == Some(bare_key)
+                        if entry.key.as_deref() == Some(bare_key.as_str())
                             && !values.contains(&entry.value_type)
                         {
                             values.push(entry.value_type.clone());
@@ -4329,6 +4458,14 @@ fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
         }
     }
     PhpType::IndexAccess(Box::new(base.clone()), Box::new(index.clone()))
+}
+
+fn literal_or_named_shape_key(ty: &PhpType) -> Option<String> {
+    match ty {
+        PhpType::Literal(lit) => lit.string_content().map(ToOwned::to_owned),
+        PhpType::Named(key) => Some(key.clone()),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5312,13 +5449,13 @@ mod tests {
     #[test]
     fn literal_int() {
         let ty = PhpType::parse("42");
-        assert_eq!(ty, PhpType::Literal("42".to_owned()));
+        assert_eq!(ty, PhpType::literal_int("42"));
     }
 
     #[test]
     fn literal_string() {
         let ty = PhpType::parse("'foo'");
-        assert_eq!(ty, PhpType::Literal("'foo'".to_owned()));
+        assert_eq!(ty, PhpType::literal_string_raw("'foo'"));
     }
 
     // ─── extract_value_type tests ───────────────────────────────────────────
@@ -6804,37 +6941,39 @@ mod tests {
 
         #[test]
         fn literal_int_is_subtype_of_int() {
-            assert!(PhpType::Literal("42".into()).is_subtype_of(&PhpType::int()));
+            assert!(PhpType::literal_int("42").is_subtype_of(&PhpType::int()));
         }
 
         #[test]
         fn literal_string_is_subtype_of_string() {
-            assert!(PhpType::Literal("'hello'".into()).is_subtype_of(&PhpType::string()));
+            assert!(PhpType::literal_string_raw("'hello'").is_subtype_of(&PhpType::string()));
         }
 
         #[test]
         fn literal_int_is_subtype_of_float() {
-            assert!(PhpType::Literal("42".into()).is_subtype_of(&PhpType::float()));
+            assert!(PhpType::literal_int("42").is_subtype_of(&PhpType::float()));
         }
 
         #[test]
         fn literal_numeric_string_is_subtype_of_numeric_string() {
             assert!(
-                PhpType::Literal("'0.00'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+                PhpType::literal_string_raw("'0.00'")
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
             );
         }
 
         #[test]
         fn literal_integer_string_is_subtype_of_numeric_string() {
             assert!(
-                PhpType::Literal("'42'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+                PhpType::literal_string_raw("'42'")
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
             );
         }
 
         #[test]
         fn literal_non_numeric_string_is_not_subtype_of_numeric_string() {
             assert!(
-                !PhpType::Literal("'hello'".into())
+                !PhpType::literal_string_raw("'hello'")
                     .is_subtype_of(&PhpType::parse("numeric-string"))
             );
         }
@@ -6842,41 +6981,61 @@ mod tests {
         #[test]
         fn literal_empty_string_is_not_subtype_of_non_empty_string() {
             assert!(
-                !PhpType::Literal("''".into()).is_subtype_of(&PhpType::parse("non-empty-string"))
+                !PhpType::literal_string_raw("''")
+                    .is_subtype_of(&PhpType::parse("non-empty-string"))
             );
         }
 
         #[test]
         fn literal_non_empty_string_is_subtype_of_non_empty_string() {
             assert!(
-                PhpType::Literal("'foo'".into()).is_subtype_of(&PhpType::parse("non-empty-string"))
+                PhpType::literal_string_raw("'foo'")
+                    .is_subtype_of(&PhpType::parse("non-empty-string"))
             );
         }
 
         #[test]
         fn literal_string_is_subtype_of_truthy_string() {
             assert!(
-                PhpType::Literal("'foo'".into()).is_subtype_of(&PhpType::parse("truthy-string"))
+                PhpType::literal_string_raw("'foo'")
+                    .is_subtype_of(&PhpType::parse("truthy-string"))
             );
         }
 
         #[test]
         fn literal_zero_string_is_not_subtype_of_truthy_string() {
             assert!(
-                !PhpType::Literal("'0'".into()).is_subtype_of(&PhpType::parse("truthy-string"))
+                !PhpType::literal_string_raw("'0'").is_subtype_of(&PhpType::parse("truthy-string"))
             );
         }
 
         #[test]
         fn literal_empty_string_is_not_subtype_of_truthy_string() {
-            assert!(!PhpType::Literal("''".into()).is_subtype_of(&PhpType::parse("truthy-string")));
+            assert!(
+                !PhpType::literal_string_raw("''").is_subtype_of(&PhpType::parse("truthy-string"))
+            );
         }
 
         #[test]
         fn literal_negative_numeric_string_is_subtype_of_numeric_string() {
             assert!(
-                PhpType::Literal("'-3.14'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+                PhpType::literal_string_raw("'-3.14'")
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
             );
+        }
+
+        #[test]
+        fn literal_source_syntax_string_is_not_subtype_of_numeric_string() {
+            // A runtime string is numeric per PHP's is_numeric, which does
+            // not accept underscores or hex/binary/octal prefixes even
+            // though they are valid in PHP source literals.
+            for raw in ["'1_000'", "'0xFF'", "'0b101'", "'0o17'"] {
+                assert!(
+                    !PhpType::literal_string_raw(raw)
+                        .is_subtype_of(&PhpType::parse("numeric-string")),
+                    "{raw} should not be a numeric-string"
+                );
+            }
         }
 
         // ── IntRange subtyping ──────────────────────────────────────────
@@ -6889,16 +7048,41 @@ mod tests {
         #[test]
         fn integer_literal_is_subtype_of_int_range() {
             assert!(
-                PhpType::Literal("10000".into())
+                PhpType::literal_int("10000")
                     .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
             );
             assert!(
-                PhpType::Literal("1".into())
+                PhpType::literal_int("1")
                     .is_subtype_of(&PhpType::IntRange("1".into(), "59".into(),))
             );
             assert!(
-                !PhpType::Literal("0".into())
+                !PhpType::literal_int("0")
                     .is_subtype_of(&PhpType::IntRange("1".into(), "59".into(),))
+            );
+        }
+
+        #[test]
+        fn float_literal_is_not_subtype_of_int_range() {
+            assert!(
+                !PhpType::literal_float("1.0")
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
+            );
+        }
+
+        #[test]
+        fn php_integer_literal_syntaxes_compare_by_value() {
+            assert!(PhpType::literal_int("0x10").is_subtype_of(&PhpType::literal_int("16")));
+            assert!(PhpType::literal_int("0b1010").is_subtype_of(&PhpType::literal_int("10")));
+            assert!(PhpType::literal_int("0o10").is_subtype_of(&PhpType::literal_int("8")));
+            assert!(PhpType::literal_int("1_000").is_subtype_of(&PhpType::literal_int("1000")));
+        }
+
+        #[test]
+        fn php_float_literal_syntaxes_compare_by_value() {
+            assert!(PhpType::literal_float("1.0").is_subtype_of(&PhpType::literal_float("1.00")));
+            assert!(PhpType::literal_float("1e3").is_subtype_of(&PhpType::literal_float("1000.0")));
+            assert!(
+                PhpType::literal_float("1_2.5e2").is_subtype_of(&PhpType::literal_float("1250.0"))
             );
         }
 
@@ -7693,17 +7877,17 @@ mod tests {
 
         #[test]
         fn is_string_literal_single_quoted() {
-            assert!(PhpType::Literal("'hello'".to_owned()).is_string_literal());
+            assert!(PhpType::literal_string_raw("'hello'").is_string_literal());
         }
 
         #[test]
         fn is_string_literal_double_quoted() {
-            assert!(PhpType::Literal("\"world\"".to_owned()).is_string_literal());
+            assert!(PhpType::literal_string_raw("\"world\"").is_string_literal());
         }
 
         #[test]
         fn is_string_literal_false_for_int() {
-            assert!(!PhpType::Literal("42".to_owned()).is_string_literal());
+            assert!(!PhpType::literal_int("42").is_string_literal());
         }
 
         #[test]
@@ -7713,17 +7897,17 @@ mod tests {
 
         #[test]
         fn is_int_literal_positive() {
-            assert!(PhpType::Literal("42".to_owned()).is_int_literal());
+            assert!(PhpType::literal_int("42").is_int_literal());
         }
 
         #[test]
         fn is_int_literal_negative() {
-            assert!(PhpType::Literal("-1".to_owned()).is_int_literal());
+            assert!(PhpType::literal_int("-1").is_int_literal());
         }
 
         #[test]
         fn is_int_literal_false_for_string() {
-            assert!(!PhpType::Literal("'hello'".to_owned()).is_int_literal());
+            assert!(!PhpType::literal_string_raw("'hello'").is_int_literal());
         }
 
         #[test]

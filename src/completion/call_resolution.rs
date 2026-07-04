@@ -2095,7 +2095,7 @@ impl Backend {
                     crate::completion::variable::rhs_resolution::insert_or_union(
                         &mut subs,
                         tpl_name.to_string(),
-                        PhpType::Literal(trimmed.to_string()),
+                        PhpType::literal_string_raw(trimmed.to_string()),
                     );
                     continue;
                 }

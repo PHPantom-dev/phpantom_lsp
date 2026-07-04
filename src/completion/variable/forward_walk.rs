@@ -9435,15 +9435,9 @@ fn infer_callable_params_for_call(
 /// Non-literal types are returned unchanged.
 fn widen_literal(ty: &PhpType) -> PhpType {
     match ty {
-        PhpType::Literal(s) if s.parse::<i64>().is_ok() => PhpType::int(),
-        PhpType::Literal(s)
-            if (s.starts_with('\'') && s.ends_with('\''))
-                || (s.starts_with('"') && s.ends_with('"')) =>
-        {
-            PhpType::string()
-        }
-        PhpType::Literal(s) if s.parse::<f64>().is_ok() => PhpType::float(),
-        PhpType::Literal(s) if s == "true" || s == "false" => PhpType::bool(),
+        PhpType::Literal(crate::php_type::LiteralValue::Int(_)) => PhpType::int(),
+        PhpType::Literal(crate::php_type::LiteralValue::String(_)) => PhpType::string(),
+        PhpType::Literal(crate::php_type::LiteralValue::Float(_)) => PhpType::float(),
         _ => ty.clone(),
     }
 }

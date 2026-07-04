@@ -1066,7 +1066,7 @@ Every type check is classified into one of three buckets:
 - **Nullable to non-nullable** (`?Carbon` to `Carbon`). The developer may have null-checked before the call. We cannot see the guard clause from the call site alone.
 - **Bare array to typed array** (`array` to `array<string>`). A bare `array` is untyped. It might contain strings. We cannot prove otherwise.
 - **Stringable objects to string** (`HtmlString` to `string`). PHP calls `__toString()` at runtime. We follow PHP's runtime behaviour.
-- **Int to string**. PHP coerces integers to strings in many contexts and we cannot know the `strict_types` setting.
+- **Int to string** (without `strict_types`). PHP coerces integers to strings in many contexts. When `declare(strict_types=1)` is present in the calling file, this coercion is flagged as a type error.
 - **`list<X>` and `array<int, X>`**. Used interchangeably in practice. array<int, X> might have sequential-keys in actuality.
 - **Interface to concrete subtype** (`CarbonInterface` to `Carbon`). The interface is broader, but in practice the value is almost always the expected concrete type.
 

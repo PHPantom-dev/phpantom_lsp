@@ -413,9 +413,11 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         tpl,
                     )
                 }
-            } else if let PhpType::Literal(s) = condition.as_ref() {
-                // Strip quotes from the literal to get the expected value.
-                let expected = crate::util::unquote_php_string(s).unwrap_or(s);
+            } else if let PhpType::Literal(lit) = condition.as_ref() {
+                let expected = lit
+                    .string_content()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| lit.as_raw());
 
                 // Check if the argument is a quoted string literal
                 // matching the expected value (e.g. `'foo'` or `"foo"`).
@@ -428,7 +430,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     } else {
                         None
                     };
-                    if arg_value == Some(expected) {
+                    if arg_value == Some(expected.as_str()) {
                         return resolve_conditional_with_text_args_and_defaults(
                             then_type,
                             params,
@@ -865,9 +867,11 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 }
-            } else if let PhpType::Literal(s) = condition.as_ref() {
-                // Strip quotes from the literal to get the expected value.
-                let expected = crate::util::unquote_php_string(s).unwrap_or(s);
+            } else if let PhpType::Literal(lit) = condition.as_ref() {
+                let expected = lit
+                    .string_content()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| lit.as_raw());
 
                 // Check if the argument is a string literal matching
                 // the expected value.
@@ -885,7 +889,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                                 .unwrap_or(crate::atom::bytes_to_str(lit_str.raw))
                                 .to_string()
                             });
-                        inner == *expected
+                        inner == expected
                     }
                     _ => false,
                 };
@@ -1100,11 +1104,19 @@ fn try_resolve_with_template_default(
         default_value.is_string_literal()
     } else if condition.is_int() {
         default_value.is_int_literal()
-    } else if let PhpType::Literal(s) = condition {
-        let expected = crate::util::unquote_php_string(s).unwrap_or(s);
+    } else if let PhpType::Literal(lit) = condition {
+        let expected = lit
+            .string_content()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| lit.as_raw());
         match default_value {
-            PhpType::Literal(dv) => dv == expected,
-            PhpType::Named(dv) => dv == expected,
+            PhpType::Literal(dv) => {
+                dv.string_content()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| dv.as_raw())
+                    == expected
+            }
+            PhpType::Named(dv) => dv == &expected,
             _ => false,
         }
     } else if let PhpType::Named(s) = condition {

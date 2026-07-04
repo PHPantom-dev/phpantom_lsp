@@ -815,7 +815,7 @@ fn resolve_magic_get_return_type(class: &ClassInfo, prop_name: &str) -> Option<P
         // (e.g. key-of<array{a: int, b: string}> → 'a'|'b').
         // We infer the template value as a literal string matching the
         // property name.
-        method_subs.insert(tparam.to_string(), PhpType::Literal(prop_name.to_string()));
+        method_subs.insert(tparam.to_string(), PhpType::literal_string_value(prop_name));
     }
 
     let resolved = return_type.substitute(&method_subs);

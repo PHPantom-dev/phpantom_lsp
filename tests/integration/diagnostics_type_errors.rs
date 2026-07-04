@@ -4094,6 +4094,61 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_false_positive_for_binary_and_octal_literals_matching_decimal_literal_union() {
+    let php = r#"<?php
+/** @param 2|8|10 $mode */
+function setMode(int $mode): void {}
+
+function test(): void {
+    setMode(0b10);
+    setMode(0o10);
+    setMode(1_0);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Binary, octal, and underscored int literals should match decimal literal unions, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_scientific_float_literal_matching_decimal_literal_union() {
+    let php = r#"<?php
+/** @param 1000.0|2000.0 $value */
+function setValue(float $value): void {}
+
+function test(): void {
+    setValue(1e3);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Scientific float literal 1e3 should match decimal literal 1000.0 in union, got: {msgs:?}"
+    );
+}
+#[test]
+fn no_false_positive_for_single_quoted_string_matching_double_quoted_literal_union() {
+    let php = r#"<?php
+/** @param "select"|"from"|"join" $type */
+function addBinding(array $bindings, string $type): void {}
+
+function test(): void {
+    addBinding([], 'select');
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Single-quoted string literal should match double-quoted literal union member, got: {msgs:?}"
+    );
+}
+
 // ─── array_map callback return type (#147) ──────────────────────────────────
 
 #[test]
@@ -4145,5 +4200,255 @@ function run(array $items): void {
     assert!(
         msgs.is_empty(),
         "array_map should infer return type from body expression, got: {msgs:?}"
+    );
+}
+
+// ─── strict_types=1 detection ───────────────────────────────────────────────
+
+#[test]
+fn strict_types_flags_int_passed_to_string() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_string(string $s): void {}
+
+function test(): void {
+    $x = 42;
+    takes_string($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, int passed to string should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_int_passed_to_string() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(): void {
+    $x = 42;
+    takes_string($x);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Without strict_types, int passed to string should be allowed, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn strict_types_allows_int_passed_to_float() {
+    // int → float is the one exception under strict_types=1
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_float(float $f): void {}
+
+function test(): void {
+    $x = 42;
+    takes_float($x);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Under strict_types=1, int passed to float should still be allowed, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_numeric_string_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param numeric-string $v */
+function takes_numeric(string $v): void {}
+
+function test(): void {
+    takes_int(42);
+}
+
+function takes_int(int $n): void {}
+
+function test2(): void {
+    $x = '42';
+    takes_int($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, string passed to int should be flagged even if numeric, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_does_not_affect_concatenation() {
+    // strict_types only affects scalar type declarations (function params,
+    // return types, property assignments).  String concatenation with `.`
+    // always coerces implicitly regardless of strict_types.
+    let php = r#"<?php
+declare(strict_types=1);
+
+function test(): void {
+    $x = 42;
+    $s = 'count: ' . $x;
+    echo $s;
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Concatenation should not be affected by strict_types, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_int_literal_passed_to_string_param() {
+    // Even an integer literal (not just a variable) should be flagged
+    // under strict_types=1 when passed to a string parameter.
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_string(string $s): void {}
+
+function test(): void {
+    takes_string(42);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, int literal 42 passed to string param should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_float_passed_to_string() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_string(string $s): void {}
+
+function test(): void {
+    $x = 3.14;
+    takes_string($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, float passed to string should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_float_passed_to_string() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(): void {
+    takes_string(1.0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, float passed to string should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_numeric_string_literal_to_int() {
+    let php = r#"<?php
+function takes_int(int $n): void {}
+
+function test(): void {
+    takes_int('42');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, numeric string literal passed to int should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_numeric_string_literal_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $n): void {}
+
+function test(): void {
+    takes_int('42');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, numeric string literal passed to int should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn int_range_rejects_float_literal() {
+    let php = r#"<?php
+/** @param int<0, max> $micros */
+function takes_range($micros): void {}
+
+function test(): void {
+    takes_range(1.0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Float literal should not satisfy int range parameter, got: {diags:?}"
+    );
+}
+
+#[test]
+fn int_range_accepts_hex_integer_literal() {
+    let php = r#"<?php
+/** @param int<0, 32> $value */
+function takes_range($value): void {}
+
+function test(): void {
+    takes_range(0x10);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Hex integer literal within range should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn int_range_accepts_binary_octal_and_underscored_integer_literals() {
+    let php = r#"<?php
+/** @param int<0, 32> $value */
+function takes_range($value): void {}
+
+function test(): void {
+    takes_range(0b10000);
+    takes_range(0o20);
+    takes_range(1_6);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Binary, octal, and underscored integer literals within range should be allowed, got: {diags:?}"
     );
 }

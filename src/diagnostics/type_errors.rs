@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
+use mago_syntax::ast::Program;
 use mago_syntax::ast::argument::Argument;
 use mago_syntax::ast::call::Call;
 use mago_syntax::ast::expression::Expression;
@@ -26,7 +27,7 @@ use crate::atom::bytes_to_str;
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::{with_parse_cache, with_parsed_program};
-use crate::php_type::{PhpType, is_array_like_name};
+use crate::php_type::{LiteralValue, PhpType, int_literal_is_within_range, is_array_like_name};
 use crate::types::{ClassInfo, ResolvedCallableTarget};
 use crate::util::is_subtype_of_typed;
 
@@ -71,6 +72,7 @@ fn is_type_compatible(
     arg_type: &PhpType,
     param_type: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
 ) -> bool {
     // ── Architecture note ───────────────────────────────────────
     //
@@ -218,7 +220,7 @@ fn is_type_compatible(
     if let PhpType::Union(members) = arg_type
         && members
             .iter()
-            .any(|m| is_type_compatible(m, param_type, class_loader))
+            .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
     {
         return true;
     }
@@ -231,7 +233,7 @@ fn is_type_compatible(
     if let PhpType::Union(members) = param_type
         && members
             .iter()
-            .any(|m| is_type_compatible(arg_type, m, class_loader))
+            .any(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
     {
         return true;
     }
@@ -262,7 +264,7 @@ fn is_type_compatible(
     // (instanceof, assert, if-check).  We can't prove the null
     // path actually reaches here, so stay silent.
     if let PhpType::Nullable(inner) = arg_type
-        && is_type_compatible(inner, param_type, class_loader)
+        && is_type_compatible(inner, param_type, class_loader, strict_types)
     {
         return true;
     }
@@ -270,7 +272,7 @@ fn is_type_compatible(
     // ── Non-nullable arg → nullable param: YES ──────────────────
     // Passing `X` where `?X` is expected is always valid.
     if let PhpType::Nullable(inner) = param_type
-        && is_type_compatible(arg_type, inner, class_loader)
+        && is_type_compatible(arg_type, inner, class_loader, strict_types)
     {
         return true;
     }
@@ -299,43 +301,72 @@ fn is_type_compatible(
         }
     }
 
-    // ── PHP type juggling: int → string ─────────────────────────
-    // PHP coerces int to string in many contexts (concatenation,
-    // function calls with declare(strict_types=0)).  Since we can't
-    // know the strict_types setting, stay silent.  Also covers
-    // integer literals (e.g. `42` passed to `string`).
-    if let PhpType::Named(sup) = param_type
+    // ── PHP type juggling: int/float → string ───────────────────
+    // PHP coerces ints and floats to strings in many contexts
+    // (concatenation,
+    // function calls with declare(strict_types=0)).  Under
+    // strict_types=1 this is a TypeError, so we flag it.  Also
+    // covers numeric literals (e.g. `42` or `1.0` passed to `string`).
+    if !strict_types
+        && let PhpType::Named(sup) = param_type
         && sup.eq_ignore_ascii_case("string")
     {
-        let is_int_like = match arg_type {
+        let is_numeric_like = match arg_type {
             PhpType::Named(sub) => {
-                matches!(sub.to_ascii_lowercase().as_str(), "int" | "integer")
+                matches!(
+                    sub.to_ascii_lowercase().as_str(),
+                    "int" | "integer" | "float" | "double"
+                )
             }
-            PhpType::Literal(lit) => lit.parse::<i64>().is_ok(),
+            PhpType::Literal(LiteralValue::Int(_) | LiteralValue::Float(_)) => true,
             _ => false,
         };
-        if is_int_like {
+        if is_numeric_like {
             return true;
         }
     }
 
-    // ── PHP type juggling: numeric-string → float/int ───────────
+    // ── PHP type juggling: numeric-string → float/int[/range] ───
     // PHP coerces numeric strings to numbers in arithmetic and
-    // function calls.
-    if let PhpType::Named(sub) = arg_type
-        && sub.eq_ignore_ascii_case("numeric-string")
-        && let PhpType::Named(sup) = param_type
-        && matches!(
-            sup.to_ascii_lowercase().as_str(),
-            "float" | "double" | "int" | "integer" | "numeric"
-        )
-    {
-        return true;
+    // function calls.  Under strict_types=1 string-to-int/float
+    // coercion is forbidden.
+    if !strict_types {
+        let arg_is_numeric_string = match arg_type {
+            PhpType::Named(sub) => sub.eq_ignore_ascii_case("numeric-string"),
+            PhpType::Literal(LiteralValue::String(s)) => {
+                LiteralValue::string_raw(s.clone()).is_numeric_string()
+            }
+            _ => false,
+        };
+        if arg_is_numeric_string {
+            match param_type {
+                PhpType::Named(sup)
+                    if matches!(
+                        sup.to_ascii_lowercase().as_str(),
+                        "float" | "double" | "int" | "integer" | "numeric"
+                    ) =>
+                {
+                    return true;
+                }
+                PhpType::IntRange(min, max)
+                    if let PhpType::Literal(LiteralValue::String(s)) = arg_type
+                        && LiteralValue::string_raw(s.clone())
+                            .string_content()
+                            .and_then(|content| content.parse::<i64>().ok())
+                            .is_some_and(|value| int_literal_is_within_range(value, min, max)) =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
     }
 
     // ── PHP type juggling: numeric → float/int ──────────────────
     // `numeric` is `int|float|numeric-string`; it can always be
-    // coerced to float or int.
+    // coerced to float or int.  Under strict_types=1 the
+    // numeric-string component would fail, but int→float is still
+    // valid, so we stay silent regardless.
     if let PhpType::Named(sub) = arg_type
         && sub.eq_ignore_ascii_case("numeric")
         && let PhpType::Named(sup) = param_type
@@ -397,7 +428,7 @@ fn is_type_compatible(
             let all_args_compatible = args_arg
                 .iter()
                 .zip(args_param.iter())
-                .all(|(a, p)| is_type_compatible(a, p, class_loader));
+                .all(|(a, p)| is_type_compatible(a, p, class_loader, strict_types));
             if all_args_compatible {
                 return true;
             }
@@ -421,7 +452,7 @@ fn is_type_compatible(
             && param_is_array
             && args_arg.len() == 1
             && args_param.len() == 2
-            && is_type_compatible(&args_arg[0], &args_param[1], class_loader)
+            && is_type_compatible(&args_arg[0], &args_param[1], class_loader, strict_types)
         {
             return true;
         }
@@ -430,7 +461,7 @@ fn is_type_compatible(
             && param_is_list
             && args_arg.len() == 2
             && args_param.len() == 1
-            && is_type_compatible(&args_arg[1], &args_param[0], class_loader)
+            && is_type_compatible(&args_arg[1], &args_param[0], class_loader, strict_types)
         {
             return true;
         }
@@ -443,7 +474,7 @@ fn is_type_compatible(
             && param_is_array
             && args_arg.len() == 2
             && args_param.len() == 1
-            && is_type_compatible(&args_arg[1], &args_param[0], class_loader)
+            && is_type_compatible(&args_arg[1], &args_param[0], class_loader, strict_types)
         {
             return true;
         }
@@ -455,7 +486,7 @@ fn is_type_compatible(
             && param_is_array
             && args_arg.len() == 1
             && args_param.len() == 2
-            && is_type_compatible(&args_arg[0], &args_param[1], class_loader)
+            && is_type_compatible(&args_arg[0], &args_param[1], class_loader, strict_types)
         {
             return true;
         }
@@ -481,7 +512,7 @@ fn is_type_compatible(
     {
         let mixed = PhpType::mixed();
         let val = args.last().unwrap_or(&mixed);
-        if is_type_compatible(val, inner, class_loader) {
+        if is_type_compatible(val, inner, class_loader, strict_types) {
             return true;
         }
     }
@@ -495,7 +526,7 @@ fn is_type_compatible(
     {
         let mixed = PhpType::mixed();
         let val = args.last().unwrap_or(&mixed);
-        if is_type_compatible(inner, val, class_loader) {
+        if is_type_compatible(inner, val, class_loader, strict_types) {
             return true;
         }
     }
@@ -507,7 +538,7 @@ fn is_type_compatible(
         && name.eq_ignore_ascii_case("list")
         && args.len() == 1
         && let PhpType::Array(inner) = param_type
-        && is_type_compatible(&args[0], inner, class_loader)
+        && is_type_compatible(&args[0], inner, class_loader, strict_types)
     {
         return true;
     }
@@ -519,7 +550,7 @@ fn is_type_compatible(
         && let PhpType::Generic(name, args) = param_type
         && name.eq_ignore_ascii_case("list")
         && args.len() == 1
-        && is_type_compatible(inner, &args[0], class_loader)
+        && is_type_compatible(inner, &args[0], class_loader, strict_types)
     {
         return true;
     }
@@ -630,11 +661,22 @@ fn is_type_compatible(
                     .iter()
                     .find(|ae| ae.key == pe.key)
                     .is_none_or(|ae| {
-                        is_type_compatible(&ae.value_type, &pe.value_type, class_loader)
+                        is_type_compatible(
+                            &ae.value_type,
+                            &pe.value_type,
+                            class_loader,
+                            strict_types,
+                        )
                     });
             }
             arg_entries.iter().any(|ae| {
-                ae.key == pe.key && is_type_compatible(&ae.value_type, &pe.value_type, class_loader)
+                ae.key == pe.key
+                    && is_type_compatible(
+                        &ae.value_type,
+                        &pe.value_type,
+                        class_loader,
+                        strict_types,
+                    )
             })
         });
         if all_param_keys_satisfied {
@@ -715,6 +757,28 @@ fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
             "true" | "false"
         )
     )
+}
+
+/// Returns `true` when the file declares `strict_types=1`.
+///
+/// Scans the top-level statements of the parsed program for a
+/// `declare(strict_types=1)` directive.  In PHP this must appear as
+/// the very first statement (after `<?php`), but we check all
+/// top-level statements for robustness.
+fn has_strict_types(program: &Program<'_>) -> bool {
+    for stmt in program.statements.iter() {
+        if let Statement::Declare(declare) = stmt {
+            for item in declare.items.iter() {
+                if bytes_to_str(item.name.value).eq_ignore_ascii_case("strict_types")
+                    && let Expression::Literal(Literal::Integer(i)) = item.value
+                    && bytes_to_str(i.raw) == "1"
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Returns `true` when the type is any form of array (bare, generic,
@@ -1401,8 +1465,10 @@ impl Backend {
         // Walk the AST once, collect argument expressions, and resolve
         // their types — all inside the `with_parsed_program` closure so
         // AST references never escape the arena lifetime.
-        let resolved_map: HashMap<u32, ResolvedCallArgs> =
+        let (resolved_map, strict_types): (HashMap<u32, ResolvedCallArgs>, bool) =
             with_parsed_program(content, "type_error_diagnostics", |program, _content| {
+                let strict_types = has_strict_types(program);
+
                 // Phase 1: walk the AST and collect raw argument expressions
                 // keyed by args_start offset.
                 let mut expr_map: HashMap<u32, Vec<(&Expression<'_>, usize, usize)>> =
@@ -1468,14 +1534,14 @@ impl Backend {
                         // an incompatible argument.
                         let ty = match arg_expr {
                             Expression::Literal(Literal::String(s)) => {
-                                PhpType::Literal(bytes_to_str(s.raw).to_string())
+                                PhpType::literal_string_raw(bytes_to_str(s.raw).to_string())
                             }
                             Expression::Literal(Literal::Integer(i)) => match i.value {
-                                Some(value) => PhpType::Literal(value.to_string()),
+                                Some(value) => PhpType::literal_int(value.to_string()),
                                 None => ty,
                             },
                             Expression::Literal(Literal::Float(f)) => {
-                                PhpType::Literal(f.value.into_inner().to_string())
+                                PhpType::literal_float(bytes_to_str(f.raw).to_string())
                             }
                             _ => ty,
                         };
@@ -1510,7 +1576,7 @@ impl Backend {
                         },
                     );
                 }
-                result
+                (result, strict_types)
             });
 
         // Call-expression resolution cache: avoids re-resolving the
@@ -1670,7 +1736,7 @@ impl Backend {
                 }
 
                 // Check compatibility.
-                if is_type_compatible(arg_type, param_type, &class_loader) {
+                if is_type_compatible(arg_type, param_type, &class_loader, strict_types) {
                     continue;
                 }
 
