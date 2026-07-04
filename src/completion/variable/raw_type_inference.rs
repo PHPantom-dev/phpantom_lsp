@@ -15,6 +15,7 @@ use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
 use crate::completion::resolver::VarResolutionCtx;
+use crate::types::ResolvedType;
 
 /// Infer the raw PHPStan-style type string for an array literal
 /// (`[…]` or `array(…)`) by examining its keys and resolving value
@@ -333,8 +334,92 @@ fn extract_array_map_element_type(
         return return_hint;
     }
 
-    // Fallback: use the input array's element type.
+    // No explicit return type — try to infer it from the callback body
+    // by resolving the body expression with the callback parameter
+    // seeded to the input array's element type.
     let arr_expr = super::resolution::nth_arg_expr(args, 1)?;
-    let raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-    raw.extract_value_type(true).cloned()
+    let input_raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
+    let input_element = input_raw.extract_value_type(true)?.clone();
+
+    if let Some(inferred) = infer_callback_return_type(callback_expr, &input_element, ctx) {
+        return Some(inferred);
+    }
+
+    // Final fallback: use the input array's element type.
+    Some(input_element)
+}
+
+/// Infer the return type of a callback (arrow function or closure) by
+/// resolving its body expression with the first parameter seeded to
+/// `param_type`.
+///
+/// For arrow functions: resolves `arrow.expression` directly.
+/// For closures: finds the first `return` statement and resolves its
+/// expression.
+fn infer_callback_return_type(
+    callback_expr: &Expression<'_>,
+    param_type: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let (param_name, body_expr) = match callback_expr {
+        Expression::ArrowFunction(arrow) => {
+            let param = arrow.parameter_list.parameters.first()?;
+            let name = bytes_to_str(param.variable.name).to_string();
+            (name, arrow.expression)
+        }
+        Expression::Closure(closure) => {
+            let param = closure.parameter_list.parameters.first()?;
+            let name = bytes_to_str(param.variable.name).to_string();
+            // Find the first return statement's expression.
+            let ret_expr = closure.body.statements.iter().find_map(|stmt| {
+                if let Statement::Return(ret) = stmt {
+                    ret.value.as_ref()
+                } else {
+                    None
+                }
+            })?;
+            (name, *ret_expr)
+        }
+        _ => return None,
+    };
+
+    // Build a scope resolver that maps the callback parameter to the
+    // input element type.  Include ClassInfo when available so that
+    // property access resolution can find the class members.
+    let resolved_param = if let Some(class_name) = param_type.base_name() {
+        if let Some(cls) = (ctx.class_loader)(class_name) {
+            vec![ResolvedType::from_both(param_type.clone(), (*cls).clone())]
+        } else {
+            vec![ResolvedType::from_type_string(param_type.clone())]
+        }
+    } else {
+        vec![ResolvedType::from_type_string(param_type.clone())]
+    };
+    let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
+        if var == param_name {
+            resolved_param.clone()
+        } else {
+            vec![]
+        }
+    };
+
+    // Create a synthetic context with the scope resolver.
+    let body_offset = body_expr.span().start.offset;
+    let infer_ctx = VarResolutionCtx {
+        var_name: "",
+        current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: body_offset,
+        class_loader: ctx.class_loader,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: None,
+        top_level_scope: None,
+        branch_aware: false,
+        match_arm_narrowing: std::collections::HashMap::new(),
+        scope_var_resolver: Some(&scope_resolver),
+    };
+
+    super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)
 }

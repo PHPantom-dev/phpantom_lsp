@@ -4058,3 +4058,29 @@ function run(array $items): void {
         "array_map with scalar return type should infer list<string>, got: {msgs:?}"
     );
 }
+
+#[test]
+fn no_false_positive_for_array_map_inferred_return_type() {
+    // array_map(fn($item) => $item->id, $items) — no explicit return
+    // type hint.  The LSP should infer the return type from the body
+    // expression: $item->id is string, so the result is list<string>.
+    let php = r#"<?php
+class Item {
+    public function __construct(public string $id) {}
+}
+
+/** @param list<string> $ids */
+function takesStrings(array $ids): void {}
+
+/** @param list<Item> $items */
+function run(array $items): void {
+    takesStrings(array_map(fn($item) => $item->id, $items));
+}
+"#;
+    let diags = collect_with_stubs(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "array_map should infer return type from body expression, got: {msgs:?}"
+    );
+}
