@@ -4030,3 +4030,31 @@ function test(): void {
         "Hex literal 0x2 should match decimal literal 2 in union, got: {msgs:?}"
     );
 }
+
+// ─── array_map callback return type (#147) ──────────────────────────────────
+
+#[test]
+fn no_false_positive_for_array_map_with_scalar_return_type() {
+    // array_map(fn(Item): string => ..., $items) should produce
+    // list<string>, not list<Item>.  The callback's return type
+    // determines the output element type.
+    let php = r#"<?php
+class Item {
+    public function __construct(public string $id) {}
+}
+
+/** @param list<string> $ids */
+function takesStrings(array $ids): void {}
+
+/** @param list<Item> $items */
+function run(array $items): void {
+    takesStrings(array_map(fn(Item $item): string => $item->id, $items));
+}
+"#;
+    let diags = collect_with_stubs(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "array_map with scalar return type should infer list<string>, got: {msgs:?}"
+    );
+}
