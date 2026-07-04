@@ -457,6 +457,11 @@ const PHPSTAN_CLASS_TAGS: &[TagDef] = &[
         detail: "PHPStan: require implementing a specific interface",
         label: Some("@phpstan-require-implements InterfaceName"),
     },
+    TagDef {
+        tag: "@phpstan-sealed",
+        detail: "PHPStan: restrict which classes may extend/implement this class",
+        label: Some("@phpstan-sealed ClassName|OtherClass"),
+    },
 ];
 
 const PHPSTAN_PROPERTY_TAGS: &[TagDef] = &[];

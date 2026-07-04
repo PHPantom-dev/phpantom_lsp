@@ -171,7 +171,7 @@ const TYPE_FIRST_KINDS: &[TagKind] = &[
 /// listed here because `mago-docblock` now maps them to dedicated
 /// `TagKind::PsalmReturn` / `PsalmParam` / `PsalmVar` variants (handled
 /// in `TYPE_FIRST_KINDS` above).
-const TYPE_FIRST_OTHER_NAMES: &[&str] = &[];
+const TYPE_FIRST_OTHER_NAMES: &[&str] = &["phpstan-sealed"];
 
 use crate::docblock::templates::{TEMPLATE_KINDS, variance_for};
 

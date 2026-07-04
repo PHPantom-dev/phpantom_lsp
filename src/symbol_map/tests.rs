@@ -745,6 +745,43 @@ fn docblock_phpstan_require_implements_produces_class_reference() {
 }
 
 #[test]
+fn docblock_phpstan_sealed_produces_class_references() {
+    let php = concat!(
+        "<?php\n",
+        "use App\\FooClass;\n",
+        "use App\\BarClass;\n",
+        "/** @phpstan-sealed FooClass|BarClass */\n",
+        "class BaseClass {}\n"
+    );
+    let map = parse_and_extract(php);
+    let docblock_start = php.find("/**").unwrap();
+    let foo_in_doc = php[docblock_start..].find("FooClass").unwrap() + docblock_start;
+
+    let hit = map.lookup(foo_in_doc as u32);
+    assert!(
+        hit.is_some(),
+        "Should find FooClass in @phpstan-sealed docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "FooClass");
+    } else {
+        panic!("Expected ClassReference for FooClass");
+    }
+
+    let bar_in_doc = php[docblock_start..].find("BarClass").unwrap() + docblock_start;
+    let hit2 = map.lookup(bar_in_doc as u32);
+    assert!(
+        hit2.is_some(),
+        "Should find BarClass in @phpstan-sealed docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit2.unwrap().kind {
+        assert_eq!(name, "BarClass");
+    } else {
+        panic!("Expected ClassReference for BarClass");
+    }
+}
+
+#[test]
 fn docblock_fqn_type() {
     let php = concat!(
         "<?php\n",

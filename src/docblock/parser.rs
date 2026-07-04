@@ -574,6 +574,18 @@ mod tests {
     }
 
     #[test]
+    fn phpstan_sealed_tag_parsed() {
+        let doc = "/**\n * @phpstan-sealed FooClass|BarClass\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert_eq!(info.tags.len(), 1);
+        // mago-docblock doesn't have a dedicated variant for @phpstan-sealed,
+        // so it falls through to TagKind::Other.
+        assert_eq!(info.tags[0].kind, TagKind::Other);
+        assert_eq!(info.tags[0].name, "phpstan-sealed");
+        assert_eq!(info.tags[0].description, "FooClass|BarClass");
+    }
+
+    #[test]
     fn multiline_return_description_uses_newlines() {
         let doc = "/**\n * @return array an array containing all the elements of arr1\n * after applying the callback function to each one.\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");

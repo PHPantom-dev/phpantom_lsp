@@ -104,6 +104,7 @@ const TYPE_TAGS: &[&str] = &[
     "phpstan-assert-if-false",
     "phpstan-require-extends",
     "phpstan-require-implements",
+    "phpstan-sealed",
     "psalm-param",
     "psalm-return",
 ];
