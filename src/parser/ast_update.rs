@@ -306,6 +306,7 @@ impl Backend {
             // Extract standalone functions (including those inside if-guards
             // like `if (! function_exists('...'))`) using the shared helper
             // which recurses into if/block statements.
+            let mut any_function_changed = false;
             let mut functions = Vec::new();
             // Update doc_ctx with the file's use-map and namespace so that
             // parameter default values (e.g. `Application::class`) can be
@@ -374,6 +375,22 @@ impl Backend {
                 }
 
                 let mut fmap = self.global_functions.write();
+
+                // Snapshot old functions declared in this file before
+                // overwriting, so we can detect signature changes and
+                // trigger cross-file diagnostic invalidation.
+                let old_functions: Vec<(String, crate::types::FunctionInfo)> = fmap
+                    .iter()
+                    .filter(|(_, (file_uri, _))| file_uri == uri)
+                    .map(|(fqn, (_, info))| (fqn.to_string(), info.clone()))
+                    .collect();
+
+                // Remove old function entries for this URI so that
+                // renamed/deleted functions don't linger.
+                for (old_fqn, _) in &old_functions {
+                    fmap.remove(old_fqn);
+                }
+
                 for func_info in functions {
                     let fqn = if let Some(ref ns) = func_info.namespace {
                         format!("{}\\{}", ns, &func_info.name)
@@ -396,6 +413,32 @@ impl Backend {
                         continue;
                     }
 
+                    // Check whether this function's signature changed
+                    // compared to the previous parse.  A change (or a
+                    // new function) means other open files that call it
+                    // may have stale diagnostics.
+                    //
+                    // **First-parse fast path**: when `old_functions` is
+                    // empty the file has never been parsed before.  New
+                    // functions appearing on first parse are not changes
+                    // — they mirror the class first-parse fast path.
+                    if !any_function_changed && !old_functions.is_empty() {
+                        match old_functions
+                            .iter()
+                            .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
+                        {
+                            Some((_, old_info)) => {
+                                if !old_info.signature_eq(&func_info) {
+                                    any_function_changed = true;
+                                }
+                            }
+                            None => {
+                                // New function — may affect callers.
+                                any_function_changed = true;
+                            }
+                        }
+                    }
+
                     // Insert under the FQN only.  For namespaced functions
                     // the FQN is `Namespace\name`; for global functions it
                     // is just the bare name.  `resolve_function_name` already
@@ -403,6 +446,34 @@ impl Backend {
                     // fallback entry is unnecessary and would cause collisions
                     // when two namespaces define the same short name.
                     fmap.insert(fqn, (uri.to_string(), func_info));
+                }
+
+                // A function was removed from this file — callers may
+                // now reference an unknown function.
+                if !any_function_changed && !old_functions.is_empty() {
+                    let new_count = fmap
+                        .iter()
+                        .filter(|(_, (file_uri, _))| file_uri == uri)
+                        .count();
+                    if new_count != old_functions.len() {
+                        any_function_changed = true;
+                    }
+                }
+            } else {
+                // The file has no functions now.  If it previously had
+                // functions, remove the stale entries and flag a change
+                // so callers get fresh diagnostics.
+                let mut fmap = self.global_functions.write();
+                let old_fqns: Vec<String> = fmap
+                    .iter()
+                    .filter(|(_, (file_uri, _))| file_uri == uri)
+                    .map(|(fqn, _)| fqn.to_string())
+                    .collect();
+                if !old_fqns.is_empty() {
+                    for fqn in &old_fqns {
+                        fmap.remove(fqn);
+                    }
+                    any_function_changed = true;
                 }
             }
 
@@ -731,11 +802,13 @@ impl Backend {
                 );
             }
 
-            if any_signature_changed {
+            let changed = any_signature_changed || any_function_changed;
+
+            if changed {
                 self.member_completion_cache.lock().clear();
             }
 
-            any_signature_changed
+            changed
         })
     }
 
@@ -1266,5 +1339,145 @@ impl Backend {
         } else {
             name.to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Backend;
+
+    /// Changing a function's parameter type should cause `update_ast` to
+    /// return `true` (signature changed), triggering cross-file
+    /// diagnostic invalidation.  This is the exact scenario from
+    /// GitHub issue #123.
+    #[test]
+    fn update_ast_detects_function_param_type_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///test2.php";
+
+        let v1 = "<?php\nfunction bar(null $x) {\n    return $x;\n}\n";
+        let changed = backend.update_ast(uri, v1);
+        // First parse — no old functions to compare against.
+        assert!(!changed, "First parse should not report a change");
+
+        let v2 = "<?php\nfunction bar(string $x) {\n    return $x;\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(
+            changed,
+            "Changing parameter type null→string must be detected"
+        );
+    }
+
+    /// Changing a function's return type should be detected.
+    #[test]
+    fn update_ast_detects_function_return_type_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction helper(): int {\n    return 42;\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction helper(): string {\n    return 'hello';\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Changing return type int→string must be detected");
+    }
+
+    /// Changing only the function body (not the signature) should NOT
+    /// trigger cross-file invalidation.
+    #[test]
+    fn update_ast_ignores_function_body_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction helper(int $x): int {\n    return $x + 1;\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction helper(int $x): int {\n    return $x + 2;\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(
+            !changed,
+            "Body-only change should not report a signature change"
+        );
+    }
+
+    /// Adding a new function should be detected as a change.
+    #[test]
+    fn update_ast_detects_new_function() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction foo(): void {}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction foo(): void {}\nfunction bar(): void {}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Adding a new function must be detected");
+    }
+
+    /// Removing a function should be detected as a change.
+    #[test]
+    fn update_ast_detects_removed_function() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction foo(): void {}\nfunction bar(): void {}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction foo(): void {}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Removing a function must be detected");
+    }
+
+    /// Adding a parameter to a function should be detected.
+    #[test]
+    fn update_ast_detects_added_parameter() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction greet(string $name): string {\n    return $name;\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction greet(string $name, string $greeting = 'Hello'): string {\n    return \"$greeting $name\";\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Adding a parameter must be detected");
+    }
+
+    /// Verify that stale function entries are cleaned up when a file
+    /// is re-parsed without the function.
+    #[test]
+    fn update_ast_cleans_up_stale_functions() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction old_helper(): void {}\n";
+        backend.update_ast(uri, v1);
+        assert!(
+            backend.global_functions.read().get("old_helper").is_some(),
+            "Function should be registered after first parse"
+        );
+
+        let v2 = "<?php\n// function removed\n";
+        backend.update_ast(uri, v2);
+        assert!(
+            backend.global_functions.read().get("old_helper").is_none(),
+            "Stale function should be removed after re-parse"
+        );
+    }
+
+    /// Class signature changes should still be detected (regression guard).
+    #[test]
+    fn update_ast_still_detects_class_signature_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///MyClass.php";
+
+        let v1 = "<?php\nclass MyClass {\n    public function foo(): int { return 1; }\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nclass MyClass {\n    public function foo(): string { return 'a'; }\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(
+            changed,
+            "Class method return type change must still be detected"
+        );
     }
 }

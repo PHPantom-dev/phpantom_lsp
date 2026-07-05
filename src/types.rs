@@ -1175,6 +1175,45 @@ impl FunctionInfo {
     pub fn native_return_type_str(&self) -> Option<String> {
         self.native_return_type.as_ref().map(|t| t.to_string())
     }
+
+    /// Compare two `FunctionInfo` values for signature equality.
+    ///
+    /// Returns `true` when the public-facing signature (name, parameters,
+    /// return types, template params, deprecation, throws) is identical.
+    /// Fields that don't affect callers (description, links, name_offset)
+    /// are intentionally excluded.
+    ///
+    /// Used by `update_ast` to detect cross-file invalidation: when a
+    /// standalone function's signature changes, all open files that may
+    /// call it need fresh diagnostics.
+    pub fn signature_eq(&self, other: &FunctionInfo) -> bool {
+        if self.name != other.name
+            || self.return_type != other.return_type
+            || self.native_return_type != other.native_return_type
+            || self.conditional_return != other.conditional_return
+            || self.deprecation_message != other.deprecation_message
+            || self.deprecated_replacement != other.deprecated_replacement
+            || self.template_params != other.template_params
+            || self.template_bindings != other.template_bindings
+            || self.template_param_bounds != other.template_param_bounds
+            || self.type_assertions != other.type_assertions
+            || self.throws != other.throws
+            || self.namespace != other.namespace
+        {
+            return false;
+        }
+
+        if self.parameters.len() != other.parameters.len() {
+            return false;
+        }
+        for (a, b) in self.parameters.iter().zip(other.parameters.iter()) {
+            if !a.signature_eq(b) {
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 // ─── PHPStan Type Assertions ────────────────────────────────────────────────
@@ -3403,5 +3442,155 @@ mod tests {
         rt.replace_type(PhpType::Named("string".to_owned()));
         assert_eq!(rt.type_string, PhpType::Named("string".to_owned()));
         assert!(rt.class_info.is_none());
+    }
+
+    // ── FunctionInfo::signature_eq ──────────────────────────────────
+
+    /// Helper: create a minimal FunctionInfo for testing signature_eq.
+    fn func(name: &str) -> FunctionInfo {
+        FunctionInfo {
+            name: atom(name),
+            name_offset: 0,
+            parameters: Vec::new(),
+            return_type: None,
+            native_return_type: None,
+            description: None,
+            return_description: None,
+            links: Vec::new(),
+            see_refs: Vec::new(),
+            namespace: None,
+            conditional_return: None,
+            type_assertions: Vec::new(),
+            deprecation_message: None,
+            deprecated_replacement: None,
+            template_params: Vec::new(),
+            template_bindings: Vec::new(),
+            template_param_bounds: Default::default(),
+            throws: Vec::new(),
+            is_polyfill: false,
+        }
+    }
+
+    #[test]
+    fn func_signature_eq_identical() {
+        let a = func("bar");
+        let b = func("bar");
+        assert!(a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_name() {
+        let a = func("bar");
+        let b = func("baz");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_return_type() {
+        let mut a = func("bar");
+        a.return_type = Some(PhpType::parse("int"));
+        let mut b = func("bar");
+        b.return_type = Some(PhpType::parse("string"));
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_native_return_type() {
+        let mut a = func("bar");
+        a.native_return_type = Some(PhpType::parse("int"));
+        let b = func("bar");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_param_type() {
+        let mut a = func("bar");
+        a.parameters = vec![param("$x", "null")];
+        let mut b = func("bar");
+        b.parameters = vec![param("$x", "string")];
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_param_count() {
+        let mut a = func("bar");
+        a.parameters = vec![param("$x", "int")];
+        let mut b = func("bar");
+        b.parameters = vec![param("$x", "int"), param("$y", "string")];
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_deprecation() {
+        let mut a = func("bar");
+        a.deprecation_message = Some("Use baz() instead".to_string());
+        let b = func("bar");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_template_params() {
+        let mut a = func("bar");
+        a.template_params = vec![atom("T")];
+        let b = func("bar");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_throws() {
+        let mut a = func("bar");
+        a.throws = vec![PhpType::parse("RuntimeException")];
+        let b = func("bar");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_namespace() {
+        let mut a = func("bar");
+        a.namespace = Some("App".to_string());
+        let b = func("bar");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_different_conditional_return() {
+        let mut a = func("bar");
+        a.conditional_return = Some(PhpType::int());
+        let b = func("bar");
+        assert!(!a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_ignores_name_offset() {
+        let mut a = func("bar");
+        a.name_offset = 100;
+        let mut b = func("bar");
+        b.name_offset = 200;
+        assert!(a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_ignores_description() {
+        let mut a = func("bar");
+        a.description = Some("Does things".to_string());
+        let mut b = func("bar");
+        b.description = Some("Different description".to_string());
+        assert!(a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_ignores_links() {
+        let mut a = func("bar");
+        a.links = vec!["https://example.com".to_string()];
+        let b = func("bar");
+        assert!(a.signature_eq(&b));
+    }
+
+    #[test]
+    fn func_signature_eq_ignores_is_polyfill() {
+        let mut a = func("bar");
+        a.is_polyfill = true;
+        let b = func("bar");
+        assert!(a.signature_eq(&b));
     }
 }

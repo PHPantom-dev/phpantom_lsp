@@ -164,8 +164,16 @@ impl LanguageServer for Backend {
                     completion_item: None,
                 }),
                 inlay_hint_provider: Some(OneOf::Left(true)),
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::INCREMENTAL),
+                        will_save: None,
+                        will_save_wait_until: None,
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(false),
+                        })),
+                    },
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -667,6 +675,28 @@ impl LanguageServer for Backend {
 
         self.log(MessageType::INFO, format!("Closed file: {}", uri))
             .await;
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+
+        // If the client sent the full text on save, update our copy.
+        if let Some(text) = params.text {
+            let text = Arc::new(text);
+            self.open_files
+                .write()
+                .insert(uri.clone(), Arc::clone(&text));
+            self.update_ast(&uri, &text);
+        }
+
+        // A save is a reliable sync point: re-diagnose the saved file
+        // and all other open files.  This catches cross-file changes
+        // (e.g. a function signature change in test2.php that affects
+        // diagnostics in test.php) and provides a fallback for editors
+        // (like Neovim) where didChange alone may not trigger a
+        // visible diagnostic refresh.
+        self.schedule_diagnostics(uri.clone());
+        self.schedule_diagnostics_for_open_files(&uri);
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
