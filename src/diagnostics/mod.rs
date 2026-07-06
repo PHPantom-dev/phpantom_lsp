@@ -613,24 +613,6 @@ fn scope_has_throws_tag(scope: &str, short_name: &str) -> bool {
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
 
-/// How long to wait after the last keystroke before running PHPStan.
-/// Longer than the normal debounce because PHPStan is extremely
-/// expensive.  We want the user to be truly idle before spawning it.
-const PHPSTAN_DEBOUNCE_MS: u64 = 2_000;
-
-/// How long to wait after the last keystroke before running PHPCS.
-/// Same rationale as [`PHPSTAN_DEBOUNCE_MS`]: PHPCS is an external
-/// process, so we wait for the user to be idle.
-const PHPCS_DEBOUNCE_MS: u64 = 2_000;
-
-/// How long to wait after the last keystroke before running `mago lint`.
-/// Same debounce as PHPCS — Mago lint is fast (AST-level rules).
-const MAGO_LINT_DEBOUNCE_MS: u64 = 2_000;
-
-/// How long to wait after the last keystroke before running `mago analyze`.
-/// Same debounce as PHPStan — Mago analyze is slower (type-aware).
-const MAGO_ANALYZE_DEBOUNCE_MS: u64 = 2_000;
-
 impl Backend {
     /// Deliver diagnostics for a single file.
     ///
@@ -846,7 +828,9 @@ impl Backend {
             // Push only fast diagnostics so the editor sees syntax
             // errors and unused-import warnings instantly.  The full
             // set (fast + slow + external) is cached in `diag_last_full`
-            // for the next pull response.
+            // for the next pull response.  After caching, the caller
+            // sends `workspace/diagnostic/refresh` so the editor
+            // re-pulls the updated set.
             let fast_only = {
                 let cache = self.diag_last_fast.lock();
                 cache.get(uri_str).cloned().unwrap_or_default()
@@ -911,10 +895,22 @@ impl Backend {
         self.diag_version.fetch_add(1, Ordering::Release);
         self.diag_notify.notify_one();
 
-        // Both modes: schedule external tool runs.  In pull mode the
-        // external tools still use their own debounce timers because
-        // they are expensive and the IDE may send many pulls in
-        // quick succession.
+        // External tools (PHPStan, PHPCS, Mago) are NOT scheduled here.
+        // They are expensive (seconds per run) and would block save-
+        // triggered runs due to the serialization guarantee (one process
+        // at a time).
+    }
+
+    /// Schedule all external tool runs (PHPStan, PHPCS, Mago) for a
+    /// single file.
+    ///
+    /// External tools are expensive (seconds per run) and at most one
+    /// process runs at a time per tool, so triggering them on every
+    /// keystroke would block save-triggered runs.
+    pub(crate) fn schedule_external_diagnostics(&self, uri: String) {
+        if !self.init_complete.load(Ordering::Acquire) {
+            return;
+        }
         self.schedule_phpstan(uri.clone());
         self.schedule_phpcs(uri.clone());
         self.schedule_mago_lint(uri.clone());
@@ -1101,8 +1097,7 @@ impl Backend {
     /// Schedule a PHPStan run for a single file.
     ///
     /// Only the most recent file is kept: if the user switches files or
-    /// types rapidly, earlier requests are superseded.  This is
-    /// intentional — PHPStan is too slow to queue up multiple files.
+    /// saves rapidly, earlier requests are superseded.
     fn schedule_phpstan(&self, uri: String) {
         *self.phpstan_pending_uri.lock() = Some(uri);
         self.phpstan_notify.notify_one();
@@ -1147,33 +1142,11 @@ impl Backend {
             // Drain any extra stored permits so that notifications
             // that arrived between the last run finishing and this
             // `notified()` call don't cause an immediate second run.
-            // `Notify::notify_one()` stores at most one permit, but
-            // multiple `schedule_phpstan` calls during debounce or
-            // execution could leave one behind.
-            //
-            // We consume it by polling a fresh `notified()` with a
-            // zero timeout — if there's a stored permit it resolves
-            // immediately, otherwise it times out harmlessly.
             let _ = tokio::time::timeout(std::time::Duration::ZERO, self.phpstan_notify.notified())
                 .await;
 
-            // ── Step 2: debounce (longer than normal diagnostics) ───
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(PHPSTAN_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-                // More edits arrived — loop and debounce again.
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.phpstan_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.phpstan_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1279,6 +1252,14 @@ impl Backend {
             // Assemble and push so the editor sees fresh PHPStan
             // results merged with cached native diagnostics.
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new PHPStan results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -1335,23 +1316,8 @@ impl Backend {
             let _ =
                 tokio::time::timeout(std::time::Duration::ZERO, self.phpcs_notify.notified()).await;
 
-            // ── Step 2: debounce ────────────────────────────────────
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(PHPCS_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-                // More edits arrived — loop and debounce again.
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.phpcs_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.phpcs_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1444,6 +1410,14 @@ impl Backend {
             // Assemble and push so the editor sees fresh PHPCS
             // results merged with cached native diagnostics.
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new PHPCS results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -1484,22 +1458,8 @@ impl Backend {
                 tokio::time::timeout(std::time::Duration::ZERO, self.mago_lint_notify.notified())
                     .await;
 
-            // ── Step 2: debounce ────────────────────────────────────
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(MAGO_LINT_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.mago_lint_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.mago_lint_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1580,6 +1540,14 @@ impl Backend {
             }
 
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new Mago lint results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -1622,23 +1590,8 @@ impl Backend {
             )
             .await;
 
-            // ── Step 2: debounce (longer — type-aware analysis) ─────
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(MAGO_ANALYZE_DEBOUNCE_MS))
-                    .await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.mago_analyze_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.mago_analyze_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1719,6 +1672,14 @@ impl Backend {
             }
 
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new Mago analyze results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
