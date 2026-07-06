@@ -153,22 +153,32 @@ jobs:
           path: phpantom_lsp-${{ matrix.target }}.${{ matrix.archive }}
 
   release:
-    name: Create Release
+    name: Attach assets to draft
     needs: build
     runs-on: ubuntu-latest
+    # Only attach assets while the release is still a draft.
+    if: github.event.release.draft
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Upload assets to release
+      - name: Attach assets to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          UPLOAD_URL: ${{ github.event.release.upload_url }}
         run: |
+          # Strip the "{?name,label}" template suffix from the upload URL.
+          url="${UPLOAD_URL%%\{*}"
           for file in artifacts/*; do
-            gh release upload "${{ github.event.release.tag_name }}" "$file" --clobber
+            name="$(basename "$file")"
+            echo "Uploading $name"
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$file" \
+              "$url?name=$name"
           done
