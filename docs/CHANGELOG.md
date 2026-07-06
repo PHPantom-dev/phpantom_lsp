@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`update` command.** A new `phpantom_lsp update` subcommand downloads the latest release from GitHub and replaces the current binary. Supports `--check` (dry run, exit code 1 if update available) and `--no-confirm` (for CI). Handles `.tar.gz` (Unix) and `.zip` (Windows) archives across all 6 supported platforms. Contributed by @calebdw in https://github.com/PHPantom-dev/phpantom_lsp/pull/194.
 - **Static methods complete on instance access.** Member completion after `->` now offers a class's static methods alongside its instance methods, since PHP lets you call a static method through an instance (`$obj->make()`). Static properties remain excluded, as they are only reachable via `::`. Contributed by @calebdw in https://github.com/AJenbo/phpantom_lsp/pull/174.
 - **Array-callable navigation.** Method-name strings in array callables — `[Controller::class, 'method']` and `[$object, 'method']` — now resolve like a real member reference. This makes go-to-definition, find-references, and rename work on Laravel controller actions such as `Route::get('/', [IndexPageController::class, 'indexPage'])`.
 - **Array-callable method completion.** Typing inside the method-name string of an array callable (`[Controller::class, '|']`) now offers method name completions from the resolved class, including inherited and trait methods. Works with `Class::class` constants, `$this`, and typed variables. (thanks @calebdw)

@@ -118,6 +118,24 @@ enum Command {
 
     /// Create a default .phpantom.toml configuration file in the current directory.
     Init,
+
+    /// Check for updates or upgrade to the latest version.
+    ///
+    /// Downloads the latest release from GitHub and replaces the current
+    /// binary.  Use --check to see if an update is available without
+    /// installing it.
+    Update {
+        /// Check for updates but do not install them.
+        ///
+        /// Exits with code 0 if already up-to-date, or code 1 if an
+        /// update is available.
+        #[arg(long, short)]
+        check: bool,
+
+        /// Skip the confirmation prompt before replacing the binary.
+        #[arg(long)]
+        no_confirm: bool,
+    },
 }
 
 /// Minimum severity level for the analyze command.
@@ -186,6 +204,28 @@ async fn main() {
                 }
                 Err(e) => {
                     eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Command::Update { check, no_confirm }) => {
+            use phpantom_lsp::self_update::{self, UpdateStatus};
+            match self_update::run(check, no_confirm) {
+                Ok(UpdateStatus::UpToDate(v)) => {
+                    eprintln!("Already up-to-date ({v})");
+                }
+                Ok(UpdateStatus::UpdateAvailable(_)) => {
+                    // Exit with code 1 to signal "update available" so
+                    // scripts can branch on `update --check`.
+                    std::process::exit(1);
+                }
+                Ok(UpdateStatus::Updated(_)) => {}
+                Err(self_update::UpdateError::Cancelled) => {
+                    eprintln!("Update cancelled.");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
             }

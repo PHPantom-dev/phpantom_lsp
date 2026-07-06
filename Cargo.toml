@@ -34,6 +34,11 @@ parking_lot = "0.12"
 tempfile = "3"
 toml = "1"
 etcetera = "0.11"
+ureq = "3"
+tar = "0.4"
+flate2 = "1"
+self-replace = "1"
+zip = "2"
 
 [build-dependencies]
 ureq = "3"

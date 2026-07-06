@@ -149,6 +149,7 @@ mod rename;
 mod resolution;
 pub(crate) mod scope_collector;
 mod selection_range;
+pub mod self_update;
 mod semantic_tokens;
 mod server;
 mod signature_help;
