@@ -592,16 +592,13 @@ impl LanguageServer for Backend {
         // keystroke; `update_ast` already tolerates stale maps when
         // incomplete code cannot be parsed.
         if self.sync_ast_updates {
-            let changed = self.update_ast(&uri, &text);
-            if changed {
-                self.schedule_diagnostics_for_open_files(&uri);
-            }
+            self.update_ast(&uri, &text);
             self.schedule_diagnostics(uri.clone());
         } else {
             let backend = self.clone_for_blocking();
             tokio::spawn(async move {
                 let uri_for_diagnostics = uri.clone();
-                let signature_changed = tokio::task::spawn_blocking(move || {
+                let result = tokio::task::spawn_blocking(move || {
                     let parse_lock = {
                         let mut locks = backend.did_change_parse_locks.lock();
                         Arc::clone(
@@ -617,11 +614,11 @@ impl LanguageServer for Backend {
                         .get(&uri)
                         .is_some_and(|current| Arc::ptr_eq(current, &text));
                     if !is_latest_text {
-                        return false;
+                        return;
                     }
 
                     let started = std::time::Instant::now();
-                    let changed = backend.update_ast(&uri, &text);
+                    backend.update_ast(&uri, &text);
                     let elapsed = started.elapsed();
                     if elapsed >= std::time::Duration::from_millis(100) {
                         tracing::debug!(
@@ -630,15 +627,11 @@ impl LanguageServer for Backend {
                             elapsed
                         );
                     }
-                    if changed {
-                        backend.schedule_diagnostics_for_open_files(&uri);
-                    }
                     backend.schedule_diagnostics(uri_for_diagnostics);
-                    changed
                 })
                 .await;
 
-                if let Err(err) = signature_changed {
+                if let Err(err) = result {
                     tracing::error!("PHPantom: didChange parse task failed: {}", err);
                 }
             });
