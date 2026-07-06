@@ -106,18 +106,28 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/refs/tags");
 
     // ── Git version string ──────────────────────────────────────────
+    // Explicit override:  release CI sets PHPANTOM_GIT_VERSION to the
+    //                     release tag, since the tag does not exist yet
+    //                     when building a draft release (and shallow
+    //                     checkouts have no tags for `git describe`).
     // On a release tag:  "0.6.0"
     // Between tags:      "0.6.0-186-g37a901ed"  (commits ahead + hash)
     // No tags at all:    "g37a901ed"             (just the hash)
     // Dirty worktree:    any of the above + "-dirty"
     // No git at all:     falls back to CARGO_PKG_VERSION (crates.io builds)
-    let git_version = std::process::Command::new("git")
-        .args(["describe", "--tags", "--always", "--dirty"])
-        .output()
+    println!("cargo:rerun-if-env-changed=PHPANTOM_GIT_VERSION");
+    let git_version = env::var("PHPANTOM_GIT_VERSION")
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            std::process::Command::new("git")
+                .args(["describe", "--tags", "--always", "--dirty"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+        })
         .unwrap_or_else(|| env::var("CARGO_PKG_VERSION").unwrap_or_default());
     println!("cargo:rustc-env=PHPANTOM_GIT_VERSION={git_version}");
 

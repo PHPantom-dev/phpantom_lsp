@@ -209,12 +209,17 @@ async fn main() {
             }
         }
         Some(Command::Update { check, no_confirm }) => {
-            use phpantom_lsp::self_update;
+            use phpantom_lsp::self_update::{self, UpdateStatus};
             match self_update::run(check, no_confirm) {
-                Ok(()) => {}
-                Err(self_update::UpdateError::AlreadyUpToDate(v)) => {
+                Ok(UpdateStatus::UpToDate(v)) => {
                     eprintln!("Already up-to-date ({v})");
                 }
+                Ok(UpdateStatus::UpdateAvailable(_)) => {
+                    // Exit with code 1 to signal "update available" so
+                    // scripts can branch on `update --check`.
+                    std::process::exit(1);
+                }
+                Ok(UpdateStatus::Updated(_)) => {}
                 Err(self_update::UpdateError::Cancelled) => {
                     eprintln!("Update cancelled.");
                     std::process::exit(1);

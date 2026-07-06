@@ -14,6 +14,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    # Assets can only be attached while the release is a draft, so
+    # skip the build entirely for releases created already-published.
+    if: github.event.release.draft
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +61,11 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
+        env:
+          # Embed the release tag as the version. The tag itself does
+          # not exist until the release is published, so `git describe`
+          # cannot produce it while building a draft's assets.
+          PHPANTOM_GIT_VERSION: ${{ github.event.release.tag_name }}
         run: cargo build --release --target ${{ matrix.target }}
 
       # --- macOS: import certificate and sign the binary ---

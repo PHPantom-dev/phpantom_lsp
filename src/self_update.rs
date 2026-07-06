@@ -6,6 +6,7 @@
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
+use std::time::Duration;
 
 const REPO_OWNER: &str = "PHPantom-dev";
 const REPO_NAME: &str = "phpantom_lsp";
@@ -27,8 +28,6 @@ pub enum UpdateError {
     NoAsset(String),
     /// I/O error (download, extract, replace).
     Io(io::Error),
-    /// The current binary is already up-to-date.
-    AlreadyUpToDate(String),
     /// User cancelled.
     Cancelled,
 }
@@ -40,7 +39,6 @@ impl fmt::Display for UpdateError {
             Self::Json(msg) => write!(f, "JSON parse error: {msg}"),
             Self::NoAsset(msg) => write!(f, "{msg}"),
             Self::Io(e) => write!(f, "I/O error: {e}"),
-            Self::AlreadyUpToDate(v) => write!(f, "Already up-to-date ({v})"),
             Self::Cancelled => write!(f, "Update cancelled"),
         }
     }
@@ -54,11 +52,22 @@ impl From<io::Error> for UpdateError {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+/// Outcome of a successful update check or install.
+#[derive(Debug)]
+pub enum UpdateStatus {
+    /// The current binary is already the latest release.
+    UpToDate(String),
+    /// An update is available but was not installed (`--check` mode).
+    UpdateAvailable(String),
+    /// The binary was replaced with the given release version.
+    Updated(String),
+}
+
 /// Run the self-update flow.
 ///
 /// - `check_only`: if true, only check for updates without installing.
 /// - `no_confirm`: if true, skip the confirmation prompt.
-pub fn run(check_only: bool, no_confirm: bool) -> Result<(), UpdateError> {
+pub fn run(check_only: bool, no_confirm: bool) -> Result<UpdateStatus, UpdateError> {
     let target = current_target()?;
 
     eprintln!("Current version: {VERSION}");
@@ -72,19 +81,16 @@ pub fn run(check_only: bool, no_confirm: bool) -> Result<(), UpdateError> {
     eprintln!("Latest release: {} ({})", release.tag, release.version);
 
     // 2. Compare versions.
-    if !is_newer(&release.version) {
-        return Err(UpdateError::AlreadyUpToDate(release.version));
-    }
-
-    if check_only {
-        eprintln!();
-        eprintln!("Update available: {VERSION} -> {}", release.version);
-        // Exit with code 1 to signal "update available" (like mago).
-        std::process::exit(1);
+    if !is_newer(VERSION, &release.version) {
+        return Ok(UpdateStatus::UpToDate(release.version));
     }
 
     eprintln!();
     eprintln!("Update available: {VERSION} -> {}", release.version);
+
+    if check_only {
+        return Ok(UpdateStatus::UpdateAvailable(release.version));
+    }
 
     // 3. Find the matching asset.
     let archive_ext = if target.contains("windows") {
@@ -150,7 +156,7 @@ pub fn run(check_only: bool, no_confirm: bool) -> Result<(), UpdateError> {
         release.tag, release.version
     );
 
-    Ok(())
+    Ok(UpdateStatus::Updated(release.version))
 }
 
 // ─── Platform detection ─────────────────────────────────────────────────────
@@ -178,12 +184,13 @@ fn current_target() -> Result<String, UpdateError> {
     Ok(target.to_string())
 }
 
-/// Check whether `release_version` is strictly newer than the current
-/// build version.  Compares only the `major.minor.patch` components,
-/// ignoring git suffixes like `-72-g49514663-dirty`.  A dev build
-/// whose base version matches the release is considered up-to-date.
-fn is_newer(release_version: &str) -> bool {
-    let current = parse_semver(VERSION.strip_prefix('v').unwrap_or(VERSION));
+/// Check whether `release_version` is strictly newer than
+/// `current_version`.  Compares only the `major.minor.patch`
+/// components, ignoring git suffixes like `-72-g49514663-dirty`.  A dev
+/// build whose base version matches the release is considered
+/// up-to-date.
+fn is_newer(current_version: &str, release_version: &str) -> bool {
+    let current = parse_semver(current_version.strip_prefix('v').unwrap_or(current_version));
     let release = parse_semver(release_version.strip_prefix('v').unwrap_or(release_version));
     release > current
 }
@@ -223,7 +230,13 @@ struct Asset {
 fn fetch_latest_release() -> Result<Release, UpdateError> {
     let url = format!("https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest");
 
-    let response = ureq::get(&url)
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .new_agent();
+
+    let response = agent
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", &format!("{BIN_NAME}/{VERSION}"))
         .call()
@@ -269,7 +282,17 @@ fn parse_release_json(json: &str) -> Result<Release, UpdateError> {
 // ─── Download ───────────────────────────────────────────────────────────────
 
 fn download_asset(url: &str, dest: &std::path::Path) -> Result<(), UpdateError> {
-    let response = ureq::get(url)
+    // No global timeout: the binary download may legitimately take a
+    // while on slow connections. Connect and response-header timeouts
+    // still prevent an indefinite hang on an unresponsive server.
+    let agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .build()
+        .new_agent();
+
+    let response = agent
+        .get(url)
         .header("User-Agent", &format!("{BIN_NAME}/{VERSION}"))
         .call()
         .map_err(|e| UpdateError::Http(e.to_string()))?;
@@ -369,3 +392,9 @@ fn extract_from_zip(
         "Binary '{expected_name}' not found in archive"
     )))
 }
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[path = "self_update_tests.rs"]
+mod tests;
