@@ -690,6 +690,11 @@ impl LanguageServer for Backend {
         // visible diagnostic refresh.
         self.schedule_diagnostics(uri.clone());
         self.schedule_diagnostics_for_open_files(&uri);
+
+        // External tools (PHPStan, PHPCS, Mago) are expensive and
+        // serialized, so they are only triggered on save — not on
+        // every keystroke.  This is the only place they are scheduled.
+        self.schedule_external_diagnostics(uri);
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
