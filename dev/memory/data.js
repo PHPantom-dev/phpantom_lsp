@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783393923505,
+  "lastUpdate": 1783394188861,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11593,6 +11593,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d83e2e1ecd0a560fab2c274280d381c4e9913bb4",
+          "message": "fix(diagnostics): resolve callable return type for call-result invocations (#189)\n\nSigned-off-by: Anders Jenbo <anders@jenbo.dk>\nCo-authored-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-06T22:02:01-05:00",
+          "tree_id": "6c0b2ce1156bdf1c1d12c9482cffc01b70473441",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d83e2e1ecd0a560fab2c274280d381c4e9913bb4"
+        },
+        "date": 1783394187922,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62,
             "unit": "MiB"
           }
         ]
