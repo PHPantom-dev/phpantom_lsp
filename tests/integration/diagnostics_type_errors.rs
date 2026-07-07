@@ -2718,6 +2718,55 @@ function test(): void {
 }
 
 #[test]
+fn no_false_positive_for_conditionable_when_with_integer_and_callback_param() {
+    let php = r#"<?php
+trait Conditionable {
+    /**
+     * @template TWhenParameter
+     * @template TWhenReturnType
+     * @param (\Closure($this): TWhenParameter)|TWhenParameter|null $value
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $callback
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $default
+     * @return $this|TWhenReturnType
+     */
+    public function when($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+}
+
+class Request {
+    public function integer(string $key): int {
+        return 1;
+    }
+}
+
+class Builder {
+    use Conditionable;
+
+    public function whereHas(string $relation, callable $callback): self {
+        return $this;
+    }
+
+    public function whereKey(int $id): self {
+        return $this;
+    }
+}
+
+function test(Request $request, Builder $builder): void {
+    $builder->when(
+        $request->integer('root_ancestor_id'),
+        fn (Builder $q, int $id) => $q->whereHas('rootAncestor', fn (Builder $q) => $q->whereKey($id)),
+    );
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag int passed to when() with callback param template, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_template_null_default_no_overwrite() {
     // When a template param is resolved from one binding, a later
     // binding with a missing arg and null default should not
