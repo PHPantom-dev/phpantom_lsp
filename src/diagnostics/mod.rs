@@ -502,15 +502,42 @@ fn line_has_ignore_for(content: &str, diag_line: u32, identifier: &str) -> bool 
             if after.starts_with("-line") || after.starts_with("-next-line") {
                 continue;
             }
-            // Parse the comma-separated identifier list.
+            // Parse the identifier list.  Each entry may have a
+            // parenthesized reason whose text can contain commas:
+            //   @phpstan-ignore id1 (reason, with commas), id2 (reason)
+            // A naive `split(',')` would break inside reasons, so we
+            // walk the string and only split on commas at paren depth 0.
             let ids_text = after.trim_start();
-            // Stop at `*/`, ` (reason)`, or end of string.
-            let ids_end = ids_text
-                .find("*/")
-                .or_else(|| ids_text.find(" ("))
-                .unwrap_or(ids_text.len());
-            let ids = &ids_text[..ids_end];
-            if ids.split(',').any(|id| id.trim() == identifier) {
+            let ids_end = ids_text.find("*/").unwrap_or(ids_text.len());
+            let ids_region = &ids_text[..ids_end];
+
+            let mut depth: u32 = 0;
+            let mut start = 0;
+            for (i, ch) in ids_region.char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => depth = depth.saturating_sub(1),
+                    ',' if depth == 0 => {
+                        let entry = ids_region[start..i].trim();
+                        let id = match entry.find(" (") {
+                            Some(pos) => &entry[..pos],
+                            None => entry,
+                        };
+                        if id == identifier {
+                            return true;
+                        }
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            // Last (or only) entry after the final comma.
+            let entry = ids_region[start..].trim();
+            let id = match entry.find(" (") {
+                Some(pos) => &entry[..pos],
+                None => entry,
+            };
+            if id == identifier {
                 return true;
             }
         }
@@ -2509,6 +2536,40 @@ mod tests {
     }
 
     #[test]
+    fn stale_phpstan_ignore_mixed_reason_and_bare() {
+        // First identifier has no reason, second has a reason.
+        let content =
+            "<?php\n$x = foo(); // @phpstan-ignore return.type, argument.type (not a real error)\n";
+        let return_diag = make_phpstan_diag(1, "return.type", "...");
+        let arg_diag = make_phpstan_diag(1, "argument.type", "...");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "bare identifier (no reason) should be stale"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "identifier with reason should be stale"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_reason_then_bare() {
+        // First identifier has a reason, second is bare.
+        let content =
+            "<?php\n$x = foo(); // @phpstan-ignore return.type (some reason), argument.type\n";
+        let return_diag = make_phpstan_diag(1, "return.type", "...");
+        let arg_diag = make_phpstan_diag(1, "argument.type", "...");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "identifier with reason should be stale"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "bare identifier (no reason) after one with reason should be stale"
+        );
+    }
+
+    #[test]
     fn missing_checked_exception_not_stale_via_heuristic() {
         // Previously this was detected as stale because a @throws
         // tag was added.  Now only codeAction/resolve clears it.
@@ -2639,6 +2700,99 @@ mod tests {
         assert!(
             is_stale_phpstan_diagnostic(&arg_diag, content),
             "argument.type should be stale (listed in ignore)"
+        );
+        assert!(
+            !is_stale_phpstan_diagnostic(&other_diag, content),
+            "method.notFound should NOT be stale (not listed)"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_with_reason_in_docblock() {
+        // `/** @phpstan-ignore id (reason) */` — the `*/` comes after
+        // the reason text, so the parser must not treat everything
+        // up to `*/` as the identifier list.
+        let content = "<?php\nclass Foo {\n    /** @phpstan-ignore return.type (not a real error) */\n    public function bar(): void {}\n}\n";
+        let diag = make_phpstan_diag(
+            3,
+            "return.type",
+            "Method App\\Foo::bar() should return string but returns void.",
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&diag, content),
+            "should be stale when @phpstan-ignore in docblock has a (reason)"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_with_per_id_reasons() {
+        // Each identifier has its own `(reason)`:
+        //   @phpstan-ignore return.type (reason1), argument.type (reason2)
+        let content = "<?php\nclass Foo {\n    public function bar(): void {} // @phpstan-ignore return.type (not real), argument.type (also fine)\n}\n";
+        let return_diag = make_phpstan_diag(
+            2,
+            "return.type",
+            "Method App\\Foo::bar() should return string but returns void.",
+        );
+        let arg_diag = make_phpstan_diag(
+            2,
+            "argument.type",
+            "Parameter #1 $x expects string, int given.",
+        );
+        let other_diag = make_phpstan_diag(2, "method.notFound", "Call to undefined method.");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "return.type should be stale (first in list with reason)"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "argument.type should be stale (second in list with reason)"
+        );
+        assert!(
+            !is_stale_phpstan_diagnostic(&other_diag, content),
+            "method.notFound should NOT be stale (not listed)"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_reason_with_commas() {
+        // The reason text contains commas — must not confuse the parser.
+        let content = "<?php\n/** @phpstan-ignore return.type (accepts A, B, and C but PHPDoc is narrower) */\nfunction foo(): void {}\n";
+        let diag = make_phpstan_diag(
+            2,
+            "return.type",
+            "Function foo() should return string but returns void.",
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&diag, content),
+            "should be stale even when reason text contains commas"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_multiple_ids_each_with_comma_reasons() {
+        // Multiple identifiers, each with reason text that contains commas.
+        // This is the trickiest case: the parser must not confuse commas
+        // inside `(reason)` with the comma separating identifiers.
+        let content = "<?php\n// @phpstan-ignore return.type (accepts A, B, C), argument.type (needs X, Y)\nfunction foo(): void {}\n";
+        let return_diag = make_phpstan_diag(
+            1,
+            "return.type",
+            "Function foo() should return string but returns void.",
+        );
+        let arg_diag = make_phpstan_diag(
+            1,
+            "argument.type",
+            "Parameter #1 $x expects string, int given.",
+        );
+        let other_diag = make_phpstan_diag(1, "method.notFound", "Call to undefined method.");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "return.type should be stale (first id, reason has commas)"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "argument.type should be stale (second id, reason has commas)"
         );
         assert!(
             !is_stale_phpstan_diagnostic(&other_diag, content),
