@@ -3297,6 +3297,9 @@ fn normalize_alias(name: &str) -> &str {
 fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
     match supertype {
         PhpType::Literal(other_lit) => lit == other_lit,
+        PhpType::IntRange(min, max) => lit
+            .parse::<i64>()
+            .is_ok_and(|value| int_literal_is_within_range(value, min, max)),
         PhpType::Named(sup) => {
             let sup_l = sup.to_ascii_lowercase();
             // Integer literal → int (and its supertypes).
@@ -3366,6 +3369,19 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
         }
         _ => false,
     }
+}
+
+fn int_literal_is_within_range(value: i64, min: &str, max: &str) -> bool {
+    let min_ok = match min.trim().to_ascii_lowercase().as_str() {
+        "min" => true,
+        min => min.parse::<i64>().is_ok_and(|bound| value >= bound),
+    };
+    let max_ok = match max.trim().to_ascii_lowercase().as_str() {
+        "max" => true,
+        max => max.parse::<i64>().is_ok_and(|bound| value <= bound),
+    };
+
+    min_ok && max_ok
 }
 
 // ---------------------------------------------------------------------------
@@ -6868,6 +6884,22 @@ mod tests {
         #[test]
         fn int_range_is_subtype_of_int() {
             assert!(PhpType::IntRange("0".into(), "100".into()).is_subtype_of(&PhpType::int()));
+        }
+
+        #[test]
+        fn integer_literal_is_subtype_of_int_range() {
+            assert!(
+                PhpType::Literal("10000".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
+            );
+            assert!(
+                PhpType::Literal("1".into())
+                    .is_subtype_of(&PhpType::IntRange("1".into(), "59".into(),))
+            );
+            assert!(
+                !PhpType::Literal("0".into())
+                    .is_subtype_of(&PhpType::IntRange("1".into(), "59".into(),))
+            );
         }
 
         // ── Unrelated types ─────────────────────────────────────────────

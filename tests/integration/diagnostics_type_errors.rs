@@ -123,6 +123,20 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_usleep_with_valid_integer_literal() {
+    let php = r#"<?php
+function test(): void {
+    usleep(10_000);
+}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag integer literal within stub int range, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_string_to_string() {
     let php = r#"<?php
 function takes_string(string $x): void {}
