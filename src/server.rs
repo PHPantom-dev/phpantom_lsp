@@ -238,7 +238,12 @@ impl LanguageServer for Backend {
                     Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                         identifier: Some("phpantom".to_string()),
                         inter_file_dependencies: true,
-                        workspace_diagnostics: true,
+                        // Set to `true` only when the server can report
+                        // diagnostics for files the user has not opened
+                        // (e.g. project-wide PHPStan analysis).  Currently
+                        // the workspace/diagnostic handler just mirrors
+                        // per-file results, so `false` is accurate.
+                        workspace_diagnostics: false,
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
