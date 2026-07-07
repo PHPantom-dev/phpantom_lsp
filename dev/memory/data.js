@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783395280032,
+  "lastUpdate": 1783443950577,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11661,6 +11661,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "14beee7d0f45ef99e25dde9ed363b3a3385f3495",
+          "message": "fix(types): accept integer literals for int range arguments\n\nLiteral integer arguments now satisfy int range parameter types when\ntheir values fall within the declared bounds, including symbolic min\nand max limits.\n\nThis fixes false-positive type_mismatch_argument diagnostics for calls\nlike usleep(10_000) and Laravel-style repeatEvery(1).\n\nCloses #197",
+          "timestamp": "2026-07-07T11:51:35-05:00",
+          "tree_id": "a09bad6201517985e2106e6885531b9c7f519d12",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/14beee7d0f45ef99e25dde9ed363b3a3385f3495"
+        },
+        "date": 1783443949587,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.3,
             "unit": "MiB"
           }
         ]
