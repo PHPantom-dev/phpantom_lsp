@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783443950577,
+  "lastUpdate": 1783457249948,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11695,6 +11695,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "719ffd782bece53e42754736b8816796c9aacf64",
+          "message": "fix(inference): avoid null default fallback for method templates\n\nMethod template inference no longer binds template parameters from\nomitted null defaults except in the narrow cases where defaults are\nmeaningful for template resolution.\n\nThis fixes Laravel Conditionable::when() false positives such as\nwhen(->integer(...), fn (, ) => ...), where the callback\nparameter type could collapse to null instead of the concrete argument\ntype.",
+          "timestamp": "2026-07-07T15:33:08-05:00",
+          "tree_id": "c094782fcbcdc78c9bb97bea2a016f4e3c8a67a4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/719ffd782bece53e42754736b8816796c9aacf64"
+        },
+        "date": 1783457248342,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.4,
             "unit": "MiB"
           }
         ]
