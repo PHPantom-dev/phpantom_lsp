@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783394188861,
+  "lastUpdate": 1783395280032,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11627,6 +11627,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "6ab58cb2c5e6cc358f479c4cec2ccddf80e41f61",
+          "message": "feat(inference): infer array_map callback return type from body expression\n\nWhen the callback passed to `array_map` has no explicit return type\nhint, the LSP now infers the return type by resolving the body\nexpression against the input array's element type.\n\nFor example, `array_map(fn($item) => $item->id, $items)` where\n`$items` is `list<Item>` now correctly produces `list<string>`\n(from `Item::$id`'s type) instead of falling back to `list<Item>`.\n\nImplementation:\n- Extracts the first callback parameter name and maps it to the\n  input array's element type via a synthetic `scope_var_resolver`\n- Loads the `ClassInfo` for the element type so property access\n  resolution can find class members\n- For arrow functions: resolves `arrow.expression` directly\n- For closures: finds the first `return` statement's expression\n\nIncludes 1 new integration test for inferred return types.",
+          "timestamp": "2026-07-06T22:20:15-05:00",
+          "tree_id": "89ef23c3b3b2777cca75839afd1b48f3dd07a1ff",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6ab58cb2c5e6cc358f479c4cec2ccddf80e41f61"
+        },
+        "date": 1783395279124,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.2,
             "unit": "MiB"
           }
         ]
