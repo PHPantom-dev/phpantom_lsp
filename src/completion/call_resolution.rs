@@ -2041,38 +2041,6 @@ impl Backend {
                 None => continue,
             };
 
-            // Get the corresponding argument text.
-            let arg_text = match arg_texts.get(param_idx) {
-                Some(text) => text.trim(),
-                None => {
-                    // No argument was provided at the call site.  Fall
-                    // back to the parameter's default value so that
-                    // template params can be inferred from defaults
-                    // (e.g. `app()` with `$name = Application::class`).
-                    if let Some(param) = method.parameters.get(param_idx)
-                        && let Some(default) = param.default_value.as_deref()
-                        && !subs.contains_key(tpl_name.as_str())
-                    {
-                        if default == "null" {
-                            crate::completion::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                PhpType::null(),
-                            );
-                        } else if let Some(resolved) =
-                            Backend::resolve_arg_text_to_type(default, ctx)
-                        {
-                            crate::completion::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                resolved,
-                            );
-                        }
-                    }
-                    continue;
-                }
-            };
-
             // Classify how the template param appears in the parameter's
             // type hint (direct, array element, generic wrapper, or
             // callable return type).
@@ -2081,6 +2049,34 @@ impl Backend {
                 .get(param_idx)
                 .and_then(|p| p.type_hint.as_ref());
             let binding_mode = classify_template_binding(tpl_name, param_hint);
+
+            // Get the corresponding argument text.
+            let arg_text = match arg_texts.get(param_idx) {
+                Some(text) => text.trim(),
+                None => {
+                    let default_value = method
+                        .parameters
+                        .get(param_idx)
+                        .and_then(|p| p.default_value.as_deref());
+                    match &binding_mode {
+                        TemplateBindingMode::ClassStringInner => match default_value {
+                            Some(d) if !subs.contains_key(tpl_name.as_str()) => d,
+                            None => continue,
+                            _ => continue,
+                        },
+                        TemplateBindingMode::Direct => match default_value {
+                            Some(d)
+                                if !subs.contains_key(tpl_name.as_str())
+                                    && (d == "null" || d.ends_with("::class")) =>
+                            {
+                                d
+                            }
+                            _ => continue,
+                        },
+                        _ => continue,
+                    }
+                }
+            };
 
             // When the template param has a key-of bound (e.g.
             // `@template K as key-of<TData>`) and the argument is a
