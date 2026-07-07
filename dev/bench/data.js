@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783393935326,
+  "lastUpdate": 1783395028732,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -65663,6 +65663,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.07,
             "range": "± 0.025",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "6ab58cb2c5e6cc358f479c4cec2ccddf80e41f61",
+          "message": "feat(inference): infer array_map callback return type from body expression\n\nWhen the callback passed to `array_map` has no explicit return type\nhint, the LSP now infers the return type by resolving the body\nexpression against the input array's element type.\n\nFor example, `array_map(fn($item) => $item->id, $items)` where\n`$items` is `list<Item>` now correctly produces `list<string>`\n(from `Item::$id`'s type) instead of falling back to `list<Item>`.\n\nImplementation:\n- Extracts the first callback parameter name and maps it to the\n  input array's element type via a synthetic `scope_var_resolver`\n- Loads the `ClassInfo` for the element type so property access\n  resolution can find class members\n- For arrow functions: resolves `arrow.expression` directly\n- For closures: finds the first `return` statement's expression\n\nIncludes 1 new integration test for inferred return types.",
+          "timestamp": "2026-07-06T22:20:15-05:00",
+          "tree_id": "89ef23c3b3b2777cca75839afd1b48f3dd07a1ff",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6ab58cb2c5e6cc358f479c4cec2ccddf80e41f61"
+        },
+        "date": 1783395027090,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 5.6,
+            "range": "± 0.128",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.037,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.101,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.149,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.26,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.225,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.926,
+            "range": "± 0.041",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.772,
+            "range": "± 0.035",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.101,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.049,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.041,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.061,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 4.117,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.236,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.247,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.063,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.047,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.119,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.075,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.065,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.176,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.015,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.579,
+            "range": "± 0.103",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.035,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.037,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.035,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 46.085,
+            "range": "± 0.2",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.044,
+            "range": "± 0.016",
             "unit": "ms"
           }
         ]
