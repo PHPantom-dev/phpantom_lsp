@@ -11,6 +11,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::{DocumentLink, Range, Url};
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::util::offset_to_position;
 
 /// A resolved include/require path with its source range in the document.
@@ -33,8 +34,8 @@ impl Backend {
         let file_dir = file_path.as_deref().and_then(|p| p.parent());
 
         let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 
         let mut links: Vec<DocumentLink> = Vec::new();
 
@@ -276,8 +277,8 @@ fn try_evaluate_path_expr(expr: &Expression<'_>, file_dir: &Path) -> Option<Stri
         Expression::Literal(literal::Literal::String(s)) => {
             // Prefer the parsed value, fall back to raw (which includes quotes).
             let value = match s.value {
-                Some(v) => v,
-                None => strip_quotes(s.raw),
+                Some(v) => bytes_to_str(v),
+                None => strip_quotes(bytes_to_str(s.raw)),
             };
             if value.is_empty() {
                 return None;
@@ -325,7 +326,7 @@ fn try_evaluate_dirname_call(call: &call::FunctionCall<'_>, file_dir: &Path) -> 
     // Check that the function name is `dirname`.
     match call.function {
         Expression::Identifier(ident) => {
-            let name = ident.value().trim_start_matches('\\');
+            let name = bytes_to_str(ident.value()).trim_start_matches('\\');
             if !name.eq_ignore_ascii_case("dirname") {
                 return None;
             }

@@ -726,8 +726,8 @@ fn map_detect(content: &str, line: u32, character: u32) -> Option<CallSiteContex
     use mago_database::file::FileId;
 
     let arena = Bump::new();
-    let file_id = FileId::new("test.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    let file_id = FileId::new(b"test.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let sm = crate::symbol_map::extract_symbol_map(program, content);
     let pos = Position { line, character };
     detect_call_site_from_map(&sm, content, pos)

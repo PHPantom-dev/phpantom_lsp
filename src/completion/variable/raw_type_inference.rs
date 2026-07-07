@@ -9,6 +9,7 @@ use mago_syntax::ast::*;
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
+use crate::atom::bytes_to_str;
 use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
@@ -79,13 +80,15 @@ fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> String {
     match key {
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to `raw` trimmed.
-            s.value.map(|v| v.to_string()).unwrap_or_else(|| {
-                crate::util::unquote_php_string(s.raw)
-                    .unwrap_or(s.raw)
-                    .to_string()
-            })
+            s.value
+                .map(|v| bytes_to_str(v).to_string())
+                .unwrap_or_else(|| {
+                    crate::util::unquote_php_string(bytes_to_str(s.raw))
+                        .unwrap_or(bytes_to_str(s.raw))
+                        .to_string()
+                })
         }
-        Expression::Literal(Literal::Integer(i)) => i.raw.to_string(),
+        Expression::Literal(Literal::Integer(i)) => bytes_to_str(i.raw).to_string(),
         _ => PhpType::mixed().to_string(),
     }
 }
@@ -110,7 +113,7 @@ fn infer_element_type<'b>(
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
-                let name = ident.value().to_string();
+                let name = bytes_to_str(ident.value()).to_string();
                 let fqn = crate::util::resolve_name_via_loader(&name, ctx.class_loader);
                 Some(PhpType::Named(fqn))
             }
@@ -123,7 +126,7 @@ fn infer_element_type<'b>(
             super::foreach_resolution::resolve_expression_type(value, ctx)
         }
         Expression::Variable(Variable::Direct(dv)) => {
-            let var_text = dv.name.to_string();
+            let var_text = bytes_to_str(dv.name).to_string();
             let offset = value.span().start.offset as usize;
             // Try iterable docblock first (e.g. `@var list<User> $items`).
             if let Some(t) =

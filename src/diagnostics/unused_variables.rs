@@ -17,7 +17,8 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::diagnostics::undefined_variables::collect_compact_vars;
+use crate::atom::bytes_to_str;
+use crate::diagnostics::undefined_variables::{collect_compact_vars, has_get_defined_vars};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessKind, FrameKind, ScopeMap, collect_function_scope_with_kind,
@@ -95,6 +96,7 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut DiagnosticCtx<'_>) {
             let body_start = func.body.left_brace.start.offset;
             let body_end = func.body.right_brace.end.offset;
             let compact_vars = collect_compact_vars(func.body.statements.as_slice());
+            let has_get_defined = has_get_defined_vars(func.body.statements.as_slice());
             let scope = collect_function_scope_with_resolver(
                 &func.parameter_list,
                 func.body.statements.as_slice(),
@@ -102,7 +104,7 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut DiagnosticCtx<'_>) {
                 body_end,
                 None,
             );
-            check_scope(&scope, ctx, None, &compact_vars);
+            check_scope(&scope, ctx, None, &compact_vars, has_get_defined);
         }
         Statement::Class(class) => {
             collect_from_class_members(class.members.as_slice(), ctx);
@@ -140,6 +142,7 @@ fn collect_from_class_members(members: &[ClassLikeMember<'_>], ctx: &mut Diagnos
             let promoted_params = collect_promoted_params(&method.parameter_list);
 
             let compact_vars = collect_compact_vars(block.statements.as_slice());
+            let has_get_defined = has_get_defined_vars(block.statements.as_slice());
             let scope = collect_function_scope_with_kind(
                 &method.parameter_list,
                 block.statements.as_slice(),
@@ -148,7 +151,13 @@ fn collect_from_class_members(members: &[ClassLikeMember<'_>], ctx: &mut Diagnos
                 FrameKind::Method,
             );
 
-            check_scope(&scope, ctx, Some(&promoted_params), &compact_vars);
+            check_scope(
+                &scope,
+                ctx,
+                Some(&promoted_params),
+                &compact_vars,
+                has_get_defined,
+            );
         }
     }
 }
@@ -160,7 +169,7 @@ fn collect_promoted_params(params: &FunctionLikeParameterList<'_>) -> HashSet<St
     let mut promoted = HashSet::new();
     for param in params.parameters.iter() {
         if param.is_promoted_property() {
-            promoted.insert(param.variable.name.to_string());
+            promoted.insert(bytes_to_str(param.variable.name).to_string());
         }
     }
     promoted
@@ -177,6 +186,7 @@ fn check_scope(
     ctx: &mut DiagnosticCtx<'_>,
     promoted_params: Option<&HashSet<String>>,
     compact_vars: &HashSet<String>,
+    has_get_defined_vars: bool,
 ) {
     if scope.frames.is_empty() {
         return;
@@ -199,6 +209,13 @@ fn check_scope(
     for frame in scope.frames.iter() {
         // Skip top-level frames — global scope has too many implicit defs.
         if frame.kind == FrameKind::TopLevel {
+            continue;
+        }
+
+        // `get_defined_vars()` only consumes variables from the enclosing
+        // function/method scope. Nested closures, arrow functions, and catch
+        // blocks still need their own unused-variable analysis.
+        if has_get_defined_vars && matches!(frame.kind, FrameKind::Function | FrameKind::Method) {
             continue;
         }
 
@@ -606,6 +623,22 @@ function foo() {
     }
 
     #[test]
+    fn no_diagnostic_when_variable_is_used_in_dynamic_property_access() {
+        let diags = collect(
+            r#"<?php
+function foo(object $message, string $type) {
+    $attribute = strtolower($type);
+    return $message->{$attribute};
+}
+"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "dynamic property selector should count as a read"
+        );
+    }
+
+    #[test]
     fn skips_unused_parameter() {
         // Parameters are intentionally not flagged until suppression
         // support is available — callbacks, interface implementations,
@@ -949,8 +982,10 @@ class Foo {
 
     #[test]
     fn skips_non_promoted_constructor_parameter() {
-        // Constructor parameters are skipped until suppression support
-        // is available (D15 depends on D5).
+        // Unused (non-promoted) constructor parameters are intentionally
+        // not flagged: reporting unused parameters is only useful once
+        // users have a way to suppress the warning on parameters they
+        // must keep for interface or signature compatibility.
         let diags = collect(
             r#"<?php
 class Foo {
@@ -1209,6 +1244,71 @@ class Ctrl {
         $series = 'y';
         return view('page', compact('brand', 'series'));
     }
+}
+"#,
+        );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn get_defined_vars_suppresses_all_unused_in_function() {
+        let diags = collect(
+            r#"<?php
+function foo() {
+    $a = 1;
+    $b = 2;
+    $c = 3;
+    return get_defined_vars();
+}
+"#,
+        );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn get_defined_vars_suppresses_all_unused_in_method() {
+        let diags = collect(
+            r#"<?php
+class Ctrl {
+    public function show() {
+        $x = 1;
+        $y = 2;
+        var_dump(get_defined_vars());
+    }
+}
+"#,
+        );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn get_defined_vars_does_not_suppress_nested_closure_unused_variables() {
+        let diags = collect(
+            r#"<?php
+function foo() {
+    $outer = 1;
+    get_defined_vars();
+
+    $fn = function () {
+        $inner = 2;
+    };
+
+    echo $fn;
+}
+"#,
+        );
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("$inner"));
+    }
+
+    #[test]
+    fn get_defined_vars_inside_array_expression_suppresses_outer_unused_variables() {
+        let diags = collect(
+            r#"<?php
+function foo() {
+    $a = 1;
+    $b = 2;
+    return ['vars' => get_defined_vars()];
 }
 "#,
         );

@@ -46,6 +46,34 @@ fn test_nullsafe_property_chain() {
 }
 
 #[test]
+fn test_nullsafe_after_property_chain() {
+    // A property/call chain followed by `?->method()` must keep the full
+    // receiver and preserve the null-safe operator, not collapse to the
+    // bare property name (`b?->c()`).
+    let input = "$a->b?->c()->";
+    let chars: Vec<char> = input.chars().collect();
+    let arrow_pos = input.rfind("->").unwrap();
+    let result = extract_arrow_subject(&chars, arrow_pos);
+    assert_eq!(
+        result, "$a->b?->c()",
+        "Expected full receiver with null-safe operator, got: {result}"
+    );
+}
+
+#[test]
+fn test_nullsafe_after_call_chain() {
+    // The receiver before `?->` may itself be a call expression.
+    let input = "make()?->c()->";
+    let chars: Vec<char> = input.chars().collect();
+    let arrow_pos = input.rfind("->").unwrap();
+    let result = extract_arrow_subject(&chars, arrow_pos);
+    assert_eq!(
+        result, "make()?->c()",
+        "Expected call-expression receiver preserved, got: {result}"
+    );
+}
+
+#[test]
 fn test_regular_chain() {
     let input = "$user->getProfile()->getName()->";
     let chars: Vec<char> = input.chars().collect();
@@ -59,7 +87,7 @@ fn test_regular_chain() {
 
 #[test]
 fn test_triple_method_chain() {
-    // B8: 3-level chained method calls must be fully extracted.
+    // 3-level chained method calls must be fully extracted.
     let input = "$this->products()->filter()->first()->";
     let chars: Vec<char> = input.chars().collect();
     let arrow_pos = input.rfind("->").unwrap();

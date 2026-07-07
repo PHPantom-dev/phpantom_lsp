@@ -23,7 +23,7 @@ use crate::Backend;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, FunctionInfo, MethodInfo, PropertyInfo, Visibility,
 };
-use crate::util::{offset_to_position, short_name};
+use crate::util::{LineIndex, short_name};
 
 impl Backend {
     /// Build the `DocumentSymbol` tree for a single file.
@@ -35,12 +35,17 @@ impl Backend {
         uri: &str,
         content: &str,
     ) -> Option<DocumentSymbolResponse> {
+        // Precompute line starts once. Every symbol converts several byte
+        // offsets to positions, and a file with many declarations would
+        // otherwise rescan from the start for each, making the outline O(n²).
+        let idx = LineIndex::new(content);
+
         let mut symbols: Vec<DocumentSymbol> = Vec::new();
 
         // ── Classes, interfaces, traits, enums ──────────────────────
         if let Some(classes) = self.uri_classes_index.read().get(uri).cloned() {
             for class in &classes {
-                if let Some(sym) = class_to_symbol(class, content) {
+                if let Some(sym) = class_to_symbol(class, &idx) {
                     symbols.push(sym);
                 }
             }
@@ -51,7 +56,7 @@ impl Backend {
             let fmap = self.global_functions.read();
             for (_name, (file_uri, func)) in fmap.iter() {
                 if file_uri == uri
-                    && let Some(sym) = function_to_symbol(func, content)
+                    && let Some(sym) = function_to_symbol(func, &idx)
                 {
                     symbols.push(sym);
                 }
@@ -63,9 +68,8 @@ impl Backend {
             let dmap = self.global_defines.read();
             for (name, info) in dmap.iter() {
                 if info.file_uri == uri && info.name_offset > 0 {
-                    let pos = offset_to_position(content, info.name_offset as usize);
-                    let name_end =
-                        offset_to_position(content, info.name_offset as usize + name.len());
+                    let pos = idx.position(info.name_offset as usize);
+                    let name_end = idx.position(info.name_offset as usize + name.len());
                     let range = Range::new(pos, name_end);
                     symbols.push(DocumentSymbol {
                         name: name.clone(),
@@ -103,7 +107,7 @@ impl Backend {
 /// Convert a `ClassInfo` to a `DocumentSymbol` with nested children
 /// for methods, properties, and constants.
 #[allow(deprecated)]
-fn class_to_symbol(class: &ClassInfo, content: &str) -> Option<DocumentSymbol> {
+fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     // Skip anonymous classes (no meaningful name to display).
     if class.name.is_empty() {
         return None;
@@ -116,20 +120,20 @@ fn class_to_symbol(class: &ClassInfo, content: &str) -> Option<DocumentSymbol> {
         ClassLikeKind::Enum => SymbolKind::ENUM,
     };
 
-    let range_start = offset_to_position(content, class.keyword_offset as usize);
-    let range_end = offset_to_position(content, class.end_offset as usize);
+    let range_start = idx.position(class.keyword_offset as usize);
+    let range_end = idx.position(class.end_offset as usize);
     let full_range = Range::new(range_start, range_end);
 
     // Selection range covers just the class name.
-    let name_start = offset_to_position(content, class.keyword_offset as usize);
+    let name_start = idx.position(class.keyword_offset as usize);
     let selection_range = if class.keyword_offset > 0 {
         // Find the actual name token after the keyword. We use
         // keyword_offset as a reasonable approximation for the start.
         // The name appears shortly after the keyword; use the name
         // length to compute the selection end.
-        let name_offset = find_name_after_keyword(content, class.keyword_offset as usize);
-        let ns = offset_to_position(content, name_offset);
-        let ne = offset_to_position(content, name_offset + class.name.len());
+        let name_offset = find_name_after_keyword(idx.content(), class.keyword_offset as usize);
+        let ns = idx.position(name_offset);
+        let ne = idx.position(name_offset + class.name.len());
         Range::new(ns, ne)
     } else {
         Range::new(name_start, name_start)
@@ -142,8 +146,7 @@ fn class_to_symbol(class: &ClassInfo, content: &str) -> Option<DocumentSymbol> {
         if constant.is_virtual {
             continue;
         }
-        if let Some(sym) = constant_to_symbol(constant, content, class.kind == ClassLikeKind::Enum)
-        {
+        if let Some(sym) = constant_to_symbol(constant, idx, class.kind == ClassLikeKind::Enum) {
             children.push(sym);
         }
     }
@@ -153,7 +156,7 @@ fn class_to_symbol(class: &ClassInfo, content: &str) -> Option<DocumentSymbol> {
         if prop.is_virtual {
             continue;
         }
-        if let Some(sym) = property_to_symbol(prop, content) {
+        if let Some(sym) = property_to_symbol(prop, idx) {
             children.push(sym);
         }
     }
@@ -163,7 +166,7 @@ fn class_to_symbol(class: &ClassInfo, content: &str) -> Option<DocumentSymbol> {
         if method.is_virtual {
             continue;
         }
-        if let Some(sym) = method_to_symbol(method, content) {
+        if let Some(sym) = method_to_symbol(method, idx) {
             children.push(sym);
         }
     }
@@ -200,21 +203,68 @@ fn class_to_symbol(class: &ClassInfo, content: &str) -> Option<DocumentSymbol> {
     })
 }
 
+/// Compute the full declaration range for a callable (method or
+/// function) starting at `name_offset`.
+///
+/// Finds the parameter list, then the body `{…}` (returning the offset
+/// just past the matching `}`) or the `;` of an abstract/interface
+/// declaration. Falls back to the name-only end when the structure can
+/// not be located.
+fn callable_declaration_end(content: &str, name_offset: usize, name_len: usize) -> usize {
+    let fallback = name_offset + name_len;
+    let Some(rel_paren) = content[name_offset..].find('(') else {
+        return fallback;
+    };
+    let paren_open = name_offset + rel_paren;
+    let Some(paren_close) = crate::util::find_matching_forward(content, paren_open, b'(', b')')
+    else {
+        return fallback;
+    };
+    // After the parameter list, the declaration ends at the body's closing
+    // brace or at the `;` of an abstract/interface method.
+    for (i, ch) in content[paren_close + 1..].char_indices() {
+        match ch {
+            '{' => {
+                let brace_open = paren_close + 1 + i;
+                return crate::util::find_matching_forward(content, brace_open, b'{', b'}')
+                    .map(|c| c + 1)
+                    .unwrap_or(fallback);
+            }
+            ';' => return paren_close + 1 + i + 1,
+            _ => {}
+        }
+    }
+    fallback
+}
+
+/// Compute the full declaration range for a property or constant, which
+/// ends at its terminating `;`.
+fn statement_declaration_end(content: &str, name_offset: usize, name_len: usize) -> usize {
+    let fallback = name_offset + name_len;
+    crate::util::find_semicolon_balanced(&content[name_offset..])
+        .map(|p| name_offset + p + 1)
+        .unwrap_or(fallback)
+}
+
 /// Convert a `MethodInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn method_to_symbol(method: &MethodInfo, content: &str) -> Option<DocumentSymbol> {
+fn method_to_symbol(method: &MethodInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     if method.name_offset == 0 {
         return None;
     }
 
-    let pos = offset_to_position(content, method.name_offset as usize);
-    let name_end = offset_to_position(content, method.name_offset as usize + method.name.len());
+    let pos = idx.position(method.name_offset as usize);
+    let name_end = idx.position(method.name_offset as usize + method.name.len());
     let selection_range = Range::new(pos, name_end);
 
-    // For the full range, use the name offset as the start.
-    // We don't have the method's end offset readily available, so we
-    // use the selection range as a reasonable approximation.
-    let range = selection_range;
+    // The full range must enclose the whole declaration (signature and
+    // body), with the selection range (the name) nested inside it.
+    let decl_end = callable_declaration_end(
+        idx.content(),
+        method.name_offset as usize,
+        method.name.len(),
+    );
+    let range = Range::new(pos, idx.position(decl_end));
 
     let detail = build_method_detail(method);
     let tags = if method.deprecation_message.is_some() {
@@ -243,17 +293,19 @@ fn method_to_symbol(method: &MethodInfo, content: &str) -> Option<DocumentSymbol
 
 /// Convert a `PropertyInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn property_to_symbol(prop: &PropertyInfo, content: &str) -> Option<DocumentSymbol> {
+fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     if prop.name_offset == 0 {
         return None;
     }
 
     // The name_offset points to the `$` of the property name.
     let dollar_name_len = prop.name.len() + 1; // `$` + name
-    let pos = offset_to_position(content, prop.name_offset as usize);
-    let name_end = offset_to_position(content, prop.name_offset as usize + dollar_name_len);
+    let pos = idx.position(prop.name_offset as usize);
+    let name_end = idx.position(prop.name_offset as usize + dollar_name_len);
     let selection_range = Range::new(pos, name_end);
-    let range = selection_range;
+    let decl_end =
+        statement_declaration_end(idx.content(), prop.name_offset as usize, dollar_name_len);
+    let range = Range::new(pos, idx.position(decl_end));
 
     let detail = prop.type_hint_str();
     let tags = if prop.deprecation_message.is_some() {
@@ -278,17 +330,22 @@ fn property_to_symbol(prop: &PropertyInfo, content: &str) -> Option<DocumentSymb
 #[allow(deprecated)]
 fn constant_to_symbol(
     constant: &ConstantInfo,
-    content: &str,
+    idx: &LineIndex<'_>,
     is_enum: bool,
 ) -> Option<DocumentSymbol> {
     if constant.name_offset == 0 {
         return None;
     }
 
-    let pos = offset_to_position(content, constant.name_offset as usize);
-    let name_end = offset_to_position(content, constant.name_offset as usize + constant.name.len());
+    let pos = idx.position(constant.name_offset as usize);
+    let name_end = idx.position(constant.name_offset as usize + constant.name.len());
     let selection_range = Range::new(pos, name_end);
-    let range = selection_range;
+    let decl_end = statement_declaration_end(
+        idx.content(),
+        constant.name_offset as usize,
+        constant.name.len(),
+    );
+    let range = Range::new(pos, idx.position(decl_end));
 
     let kind = if constant.is_enum_case {
         SymbolKind::ENUM_MEMBER
@@ -326,15 +383,17 @@ fn constant_to_symbol(
 
 /// Convert a `FunctionInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn function_to_symbol(func: &FunctionInfo, content: &str) -> Option<DocumentSymbol> {
+fn function_to_symbol(func: &FunctionInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     if func.name_offset == 0 {
         return None;
     }
 
-    let pos = offset_to_position(content, func.name_offset as usize);
-    let name_end = offset_to_position(content, func.name_offset as usize + func.name.len());
+    let pos = idx.position(func.name_offset as usize);
+    let name_end = idx.position(func.name_offset as usize + func.name.len());
     let selection_range = Range::new(pos, name_end);
-    let range = selection_range;
+    let decl_end =
+        callable_declaration_end(idx.content(), func.name_offset as usize, func.name.len());
+    let range = Range::new(pos, idx.position(decl_end));
 
     let detail = build_function_detail(func);
     let tags = if func.deprecation_message.is_some() {
@@ -602,6 +661,7 @@ mod tests {
             start_offset: 0,
             end_offset: 0,
             keyword_offset: 0,
+            decl_start_offset: 0,
             parent_class: Some(atom("Bar")),
             interfaces: vec![atom("Baz"), atom("Qux")],
             used_traits: vec![],
@@ -645,6 +705,7 @@ mod tests {
             start_offset: 0,
             end_offset: 0,
             keyword_offset: 0,
+            decl_start_offset: 0,
             parent_class: None,
             interfaces: vec![atom("Bar")],
             used_traits: vec![],

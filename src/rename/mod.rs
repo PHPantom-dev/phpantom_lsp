@@ -37,7 +37,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
-use crate::util::{build_fqn, offset_to_position, ranges_overlap, strip_fqn_prefix};
+use crate::util::{
+    build_fqn, line_start_byte_offset, offset_to_position, ranges_overlap, strip_fqn_prefix,
+};
 
 impl Backend {
     /// Handle `textDocument/prepareRename`.
@@ -128,7 +130,7 @@ impl Backend {
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
         // Find all references (including the declaration).
-        let locations = self.find_references(uri, content, position, true)?;
+        let locations = self.find_references_for_rename(uri, content, position, true)?;
 
         if locations.is_empty() {
             return None;
@@ -138,7 +140,10 @@ impl Backend {
         // special because the `$` prefix is part of the declaration but
         // usage sites via `->` or `?->` don't include it.
         let is_property = self.is_property_rename(&span.kind, uri, &span);
-        let is_variable = matches!(&span.kind, SymbolKind::Variable { .. }) && !is_property;
+        let is_variable = matches!(
+            &span.kind,
+            SymbolKind::Variable { .. } | SymbolKind::CompactVariable { .. }
+        ) && !is_property;
 
         // For class renames, delegate to the specialised handler that
         // understands `use` statements, aliases, and collisions.
@@ -161,12 +166,22 @@ impl Backend {
             };
 
             let edit_text = if is_variable {
-                // Variables: the reference range includes the `$`, so
-                // the new name should also include it.
-                if new_name.starts_with('$') {
-                    new_name.to_string()
-                } else {
-                    format!("${}", new_name)
+                let bare_name = new_name.strip_prefix('$').unwrap_or(new_name);
+                let loc_symbol = loc_content.as_deref().and_then(|c| {
+                    self.lookup_symbol_at_position(&loc_uri_str, c, location.range.start)
+                });
+                match loc_symbol {
+                    Some(crate::symbol_map::SymbolSpan {
+                        kind: SymbolKind::CompactVariable { .. },
+                        ..
+                    }) => bare_name.to_string(),
+                    _ => {
+                        if new_name.starts_with('$') {
+                            new_name.to_string()
+                        } else {
+                            format!("${}", new_name)
+                        }
+                    }
                 }
             } else if is_property {
                 // Properties: the reference may or may not include `$`.
@@ -537,6 +552,7 @@ impl Backend {
                 // Include the `$` prefix in the range — the span already does.
                 Some((format!("${}", name), range))
             }
+            SymbolKind::CompactVariable { name } => Some((name.clone(), range)),
             SymbolKind::ClassReference { name, .. } => Some((name.clone(), range)),
             SymbolKind::ClassDeclaration { name } => Some((name.clone(), range)),
             SymbolKind::MemberAccess { member_name, .. } => Some((member_name.clone(), range)),
@@ -612,6 +628,7 @@ impl Backend {
                 self.lookup_var_def_kind_at(uri, name, span.start)
                     .is_some_and(|k| k == crate::symbol_map::VarDefKind::Property)
             }
+            SymbolKind::CompactVariable { .. } => false,
             _ => false,
         }
     }
@@ -830,7 +847,7 @@ impl Backend {
             };
 
             // Find the byte range of the namespace name within the line.
-            let line_start_byte: usize = content.lines().take(line_idx).map(|l| l.len() + 1).sum();
+            let line_start_byte = line_start_byte_offset(content, line_idx);
             let ns_offset_in_line = line.find(ns_name).unwrap_or(0);
             let ns_start = line_start_byte + ns_offset_in_line;
             let ns_end = ns_start + ns_name.len();
@@ -885,8 +902,7 @@ impl Backend {
                         format!("{}{}", new_prefix, &group_prefix[old_prefix.len()..])
                     };
 
-                    let line_start_byte: usize =
-                        content.lines().take(line_idx).map(|l| l.len() + 1).sum();
+                    let line_start_byte = line_start_byte_offset(content, line_idx);
                     let prefix_offset_in_line = line.find(group_prefix).unwrap_or(0);
                     let prefix_start = line_start_byte + prefix_offset_in_line;
                     let prefix_end = prefix_start + group_prefix.len();
@@ -919,8 +935,7 @@ impl Backend {
                     format!("{}{}", new_prefix, &fqn_part[old_prefix.len()..])
                 };
 
-                let line_start_byte: usize =
-                    content.lines().take(line_idx).map(|l| l.len() + 1).sum();
+                let line_start_byte = line_start_byte_offset(content, line_idx);
                 let fqn_offset_in_line = line.find(fqn_part).unwrap_or(0);
                 let fqn_start = line_start_byte + fqn_offset_in_line;
                 let fqn_end = fqn_start + fqn_part.len();
@@ -1215,7 +1230,7 @@ fn find_use_line_range(content: &str, old_fqn: &str) -> Option<UseLineRange> {
             continue;
         }
 
-        let line_start_byte: usize = content.lines().take(line_idx).map(|l| l.len() + 1).sum();
+        let line_start_byte = line_start_byte_offset(content, line_idx);
         let line_end_byte = line_start_byte + line.len();
 
         let start_pos = offset_to_position(content, line_start_byte);

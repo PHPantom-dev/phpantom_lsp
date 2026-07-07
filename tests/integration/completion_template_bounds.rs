@@ -412,7 +412,7 @@ fn test_extract_bounds_contravariant_with_bound() {
     );
 }
 
-// ─── Trait template bound fallback (B39) ────────────────────────────────────
+// ─── Trait template bound fallback ────────────────────────────────────
 
 /// When a class uses a generic trait without `@use` generics, template
 /// parameters in trait methods should fall back to their declared bound.

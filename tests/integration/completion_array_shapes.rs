@@ -5841,3 +5841,406 @@ async fn test_array_shape_isset_narrowing_optional_key() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Mago issue 570: Compound `isset()` on nested optional shape keys.
+/// After `isset($y['foo'])`, accessing `$y['foo']` should resolve to its shape type.
+#[tokio::test]
+async fn test_array_shape_compound_isset_nested_optional_keys() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///shape_compound_isset.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Inner { public function value(): string { return ''; } }\n",
+        "/** @param array{foo?: array{bar?: Inner}} $y */\n",
+        "function x(array $y): void {\n",
+        "    if (isset($y['foo'])) {\n",
+        "        $y['foo']['bar']->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 26,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for nested shape key access after isset"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"value"),
+                "Should suggest Inner::value() after compound isset on nested shape, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Mago issue 1093: Array shape narrowing via `array_key_exists` check.
+/// After checking `array_key_exists('result', $input)`, accessing `$input['result']` should resolve.
+#[tokio::test]
+async fn test_array_shape_narrowing_via_array_key_exists() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///shape_key_exists.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Result { public function format(): string { return ''; } }\n",
+        "/** @param array{valid: true, result: Result}|array{valid: false, errorCode: string} $input */\n",
+        "function test(array $input): void {\n",
+        "    if (array_key_exists('result', $input)) {\n",
+        "        $input['result']->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 26,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions after array_key_exists narrowing"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"format"),
+                "Should suggest Result::format() after array_key_exists narrowing, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Mago issue 1025: `?->` branch narrowing — after nullsafe access in if condition,
+/// the variable should NOT be narrowed to non-null in the else branch.
+#[tokio::test]
+async fn test_nullsafe_does_not_narrow_in_else() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///nullsafe_no_narrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User { public function isAuthorized(): bool { return true; } public function name(): string { return ''; } }\n",
+        "function test(?User $user): void {\n",
+        "    if ($user?->isAuthorized()) {\n",
+        "        $user->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $user inside if($user?->isAuthorized()) block"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"name"),
+                "Should suggest User::name() inside nullsafe truthy branch, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Tests that `#[ArrayShape]` attributes on stub functions produce
+/// array shape key completions.
+#[tokio::test]
+async fn test_array_shape_attribute_on_function() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_attr.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use JetBrains\\PhpStorm\\ArrayShape;\n",
+        "#[ArrayShape([\"lifetime\" => \"int\", \"path\" => \"string\", \"domain\" => \"string\"])]\n",
+        "function my_get_cookie_params(): array { return []; }\n",
+        "$params = my_get_cookie_params();\n",
+        "$params['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from #[ArrayShape] attribute"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"lifetime"),
+                "Should suggest 'lifetime' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"path"),
+                "Should suggest 'path' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"domain"),
+                "Should suggest 'domain' key, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Tests that `#[ArrayShape]` works on methods too.
+#[tokio::test]
+async fn test_array_shape_attribute_on_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_attr_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use JetBrains\\PhpStorm\\ArrayShape;\n",
+        "class Stats {\n",
+        "    #[ArrayShape([\"runs\" => \"int\", \"collected\" => \"int\"])]\n",
+        "    public function getStatus(): array { return []; }\n",
+        "}\n",
+        "$s = new Stats();\n",
+        "$status = $s->getStatus();\n",
+        "$status['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from #[ArrayShape] on method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"runs"),
+                "Should suggest 'runs' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"collected"),
+                "Should suggest 'collected' key, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Tests that `#[ArrayShape]` works with `array|false` return types.
+#[tokio::test]
+async fn test_array_shape_attribute_union_with_false() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_attr_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use JetBrains\\PhpStorm\\ArrayShape;\n",
+        "#[ArrayShape([\"dev\" => \"int\", \"ino\" => \"int\", \"mode\" => \"int\"])]\n",
+        "function my_stat(string $filename): array|false { return []; }\n",
+        "$info = my_stat('/tmp/foo');\n",
+        "$info['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from #[ArrayShape] with array|false"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"dev"),
+                "Should suggest 'dev' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"ino"),
+                "Should suggest 'ino' key, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"mode"),
+                "Should suggest 'mode' key, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

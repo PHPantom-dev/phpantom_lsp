@@ -63,6 +63,60 @@ async fn test_goto_definition_class_constant_same_file() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_self_const_in_class_level_attribute() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "#[Route(name: self::ROUTE)]\n",
+        "class Ctrl {\n",
+        "    const ROUTE = 'health-check';\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "ROUTE" in `self::ROUTE` inside the class-level attribute.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 1,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve self::ROUTE inside a class-level attribute"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 3,
+                "const ROUTE is declared on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_goto_definition_class_constant_via_classname() {
     let backend = create_test_backend();
 
@@ -196,6 +250,66 @@ async fn test_goto_definition_class_constant_cross_file() {
                 path
             );
             assert_eq!(location.range.start.line, 4, "const PENDING is on line 4");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+// ─── Member Definition: Array callables ─────────────────────────────────────
+
+#[tokio::test]
+async fn test_goto_definition_array_callable_controller_action() {
+    // The Laravel route shape: `[Controller::class, 'method']`.  Clicking the
+    // method string should jump to the controller method (issue #176).
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class IndexPageController {\n",
+        "    public function indexPage() {}\n",
+        "}\n",
+        "\n",
+        "Route::get('/', [IndexPageController::class, 'indexPage']);\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Click on "indexPage" inside the callable array on line 5.
+    let char = text.lines().nth(5).unwrap().find("indexPage").unwrap() as u32;
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: char + 1,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve [IndexPageController::class, 'indexPage'] to the method"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "indexPage() is declared on line 2"
+            );
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
     }

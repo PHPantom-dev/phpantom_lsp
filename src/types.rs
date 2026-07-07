@@ -1006,12 +1006,18 @@ pub struct CompletionTarget {
 /// Shared between signature help (`resolve_callable`) and named-argument
 /// completion (`resolve_named_arg_params`).  Each caller projects the
 /// fields it needs from the result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ResolvedCallableTarget {
     /// The parameters of the callable.
     pub parameters: Vec<ParameterInfo>,
     /// Optional return type.
     pub return_type: Option<PhpType>,
+    /// Whether the callable accepts any number of arguments without error,
+    /// regardless of `parameters`. Set for a class with no explicit
+    /// constructor: PHP silently ignores arguments to `new Foo(...)`, so
+    /// the argument-count diagnostic must not flag extra arguments, while
+    /// signature help still shows the (empty) signature.
+    pub accepts_any_args: bool,
 }
 /// Stores extracted information about a standalone PHP function.
 ///
@@ -1443,7 +1449,8 @@ pub struct ClassInfo {
     /// The outer [`SharedVec`] makes cloning the entire `ClassInfo`
     /// O(1) (Arc refcount bump on the Vec itself).
     pub methods: SharedVec<Arc<MethodInfo>>,
-    /// O(1) index from method name → position in `methods`.
+    /// O(1) index from lowercased method name → position in `methods`
+    /// (PHP method names are case-insensitive).
     ///
     /// Rebuilt by [`rebuild_method_index`] after bulk mutations
     /// (inheritance merge, parsing). The `get_method*` and `has_method`
@@ -1470,6 +1477,18 @@ pub struct ClassInfo {
     /// `Position`.  A value of `0` means "not available" (e.g. for
     /// synthetic classes or anonymous classes) — callers return `None`.
     pub keyword_offset: u32,
+    /// Byte offset where the class declaration starts, including any
+    /// leading attribute lists.
+    ///
+    /// For `#[Route(...)] class Foo {}` this points at the `#[`, whereas
+    /// `keyword_offset` points at `class`. When the class has no
+    /// attributes this equals `keyword_offset`. A value of `0` means
+    /// "not available" (synthetic classes).
+    ///
+    /// Used to associate `self`/`static`/`parent` references that appear
+    /// inside class-level attributes (which sit *before* the keyword and
+    /// the body braces) with their enclosing class.
+    pub decl_start_offset: u32,
     /// The parent class name from the `extends` clause, if any.
     /// This is the raw name as written in source (e.g. "BaseClass", "Foo\\Bar").
     pub parent_class: Option<Atom>,
@@ -1666,6 +1685,9 @@ impl ClassInfo {
     /// parsing, virtual member injection). Individual `push` calls in
     /// test code can skip this — the lookup helpers fall back to linear
     /// scan when the index is empty or stale.
+    ///
+    /// Keys are lowercased because PHP method names are
+    /// case-insensitive; `methods` keeps the declared spelling.
     pub fn rebuild_method_index(&mut self) {
         self.method_index.clear();
         self.method_index.reserve(self.methods.len());
@@ -1673,7 +1695,9 @@ impl ClassInfo {
             // First-writer-wins: matches the semantics of
             // `.iter().find(|m| m.name == name)` which returns the
             // first match when duplicate names exist.
-            self.method_index.entry(method.name).or_insert(i as u32);
+            self.method_index
+                .entry(crate::atom::ascii_lowercase_atom(&method.name))
+                .or_insert(i as u32);
         }
         self.indexed_method_count = self.methods.len() as u32;
     }
@@ -1685,14 +1709,15 @@ impl ClassInfo {
         !self.method_index.is_empty() && self.methods.len() as u32 == self.indexed_method_count
     }
 
-    /// Look up a method by exact name (case-sensitive).
+    /// Look up a method by name, ignoring ASCII case (PHP method names
+    /// are case-insensitive).
     ///
     /// Uses the `method_index` for O(1) lookup when available,
     /// falling back to linear scan otherwise.
     #[inline]
     pub fn get_method(&self, name: &str) -> Option<&MethodInfo> {
         if self.method_index_valid() {
-            let atom = crate::atom::atom(name);
+            let atom = crate::atom::ascii_lowercase_atom(name);
             return self
                 .method_index
                 .get(&atom)
@@ -1701,34 +1726,32 @@ impl ClassInfo {
         }
         self.methods
             .iter()
-            .find(|m| m.name == name)
-            .map(|arc| arc.as_ref())
-    }
-
-    /// Look up a method by name, ignoring ASCII case.
-    ///
-    /// Used for PHP magic methods like `__construct` where the casing
-    /// in source may vary. Always uses linear scan since the index is
-    /// keyed by exact name.
-    #[inline]
-    pub fn get_method_ci(&self, name: &str) -> Option<&MethodInfo> {
-        self.methods
-            .iter()
             .find(|m| m.name.eq_ignore_ascii_case(name))
             .map(|arc| arc.as_ref())
     }
 
-    /// Check whether a method with the given exact name exists.
+    /// Alias of [`get_method`](Self::get_method), kept for call sites
+    /// written when the primary lookup was still case-sensitive.
+    #[inline]
+    pub fn get_method_ci(&self, name: &str) -> Option<&MethodInfo> {
+        self.get_method(name)
+    }
+
+    /// Check whether a method with the given name exists (ignoring
+    /// ASCII case, per PHP semantics).
     #[inline]
     pub fn has_method(&self, name: &str) -> bool {
         if self.method_index_valid() {
-            let atom = crate::atom::atom(name);
+            let atom = crate::atom::ascii_lowercase_atom(name);
             return self.method_index.contains_key(&atom);
         }
-        self.methods.iter().any(|m| m.name == name)
+        self.methods
+            .iter()
+            .any(|m| m.name.eq_ignore_ascii_case(name))
     }
 
-    /// Look up a method by exact name and return a clone of the `Arc`.
+    /// Look up a method by name (ignoring ASCII case) and return a
+    /// clone of the `Arc`.
     ///
     /// Useful when the caller needs to hold onto the method beyond the
     /// borrow of `self`, or when it will be inserted into another
@@ -1736,14 +1759,17 @@ impl ClassInfo {
     #[inline]
     pub fn get_method_arc(&self, name: &str) -> Option<Arc<MethodInfo>> {
         if self.method_index_valid() {
-            let atom = crate::atom::atom(name);
+            let atom = crate::atom::ascii_lowercase_atom(name);
             return self
                 .method_index
                 .get(&atom)
                 .and_then(|&idx| self.methods.get(idx as usize))
                 .map(Arc::clone);
         }
-        self.methods.iter().find(|m| m.name == name).map(Arc::clone)
+        self.methods
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(name))
+            .map(Arc::clone)
     }
 
     /// Compare two `ClassInfo` values by signature-relevant fields only.
@@ -2548,7 +2574,7 @@ mod tests {
         b.description = Some("Different description".to_string());
         assert!(
             !a.signature_eq(&b),
-            "Description changes must break signature_eq (B12)"
+            "Description changes must break signature_eq"
         );
     }
 
@@ -2560,7 +2586,7 @@ mod tests {
         b.return_description = None;
         assert!(
             !a.signature_eq(&b),
-            "Return description changes must break signature_eq (B12)"
+            "Return description changes must break signature_eq"
         );
     }
 
@@ -2569,10 +2595,7 @@ mod tests {
         let mut a = method("foo");
         a.links = vec!["https://example.com".to_string()];
         let b = method("foo");
-        assert!(
-            !a.signature_eq(&b),
-            "Link changes must break signature_eq (B12)"
-        );
+        assert!(!a.signature_eq(&b), "Link changes must break signature_eq");
     }
 
     #[test]
@@ -2662,7 +2685,7 @@ mod tests {
         let b = prop("name", "string");
         assert!(
             !a.signature_eq(&b),
-            "Property description changes must break signature_eq (B12)"
+            "Property description changes must break signature_eq"
         );
     }
 
@@ -3148,7 +3171,7 @@ mod tests {
     }
 
     /// Changing descriptions or links MUST trigger eviction so that
-    /// hover shows updated content after cross-file edits (B12).
+    /// hover shows updated content after cross-file edits.
     #[test]
     fn class_signature_eq_description_change_triggers_eviction() {
         let mut m_a = method("doWork");
@@ -3173,7 +3196,7 @@ mod tests {
         );
     }
 
-    /// Changing a property description MUST trigger eviction (B12).
+    /// Changing a property description MUST trigger eviction.
     #[test]
     fn class_signature_eq_property_description_change_triggers_eviction() {
         let mut p_a = prop("name", "string");

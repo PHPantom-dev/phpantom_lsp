@@ -39,8 +39,8 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
 
 fn scan_route_file(content: &str, target: &str, uri: &Url) -> Vec<Location> {
     let arena = Bump::new();
-    let file_id = FileId::new("input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut results = Vec::new();
 
     for stmt in program.statements.iter() {
@@ -89,7 +89,7 @@ fn scan_expr<'a>(
             };
             let method = ident.value.to_ascii_lowercase();
 
-            if method == "group" {
+            if method == b"group" {
                 let chain_prefix = chain_name_prefix(mc.object, content);
                 let new_prefix = format!("{prefix}{chain_prefix}");
                 for arg in mc.argument_list.arguments.iter() {
@@ -101,7 +101,7 @@ fn scan_expr<'a>(
                         uri,
                     ));
                 }
-            } else if method == "name" {
+            } else if method == b"name" {
                 if let Some(first_arg) = mc.argument_list.arguments.iter().next()
                     && let Some((name_val, start, _)) =
                         extract_string_literal(first_arg.value(), content)
@@ -129,7 +129,7 @@ fn scan_expr<'a>(
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
                 return Vec::new();
             };
-            if !ident.value.eq_ignore_ascii_case("group") {
+            if !ident.value.eq_ignore_ascii_case(b"group") {
                 return Vec::new();
             }
             let mut results = Vec::new();

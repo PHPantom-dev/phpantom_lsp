@@ -30,6 +30,7 @@ use mago_span::HasSpan;
 use mago_syntax::ast::sequence::TokenSeparatedSequence;
 use mago_syntax::ast::*;
 
+use crate::atom::bytes_to_str;
 use crate::completion::resolver::ResolutionCtx;
 use crate::php_type::PhpType;
 use crate::virtual_members::laravel::{
@@ -325,7 +326,7 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
     match call {
         Call::Function(fc) => {
             let func_name = match fc.function {
-                Expression::Identifier(ident) => Some(ident.value().to_string()),
+                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                 _ => None,
             };
             let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
@@ -352,7 +353,7 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
                 return Some(r);
             }
             if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let method_name = ident.value.to_string();
+                let method_name = bytes_to_str(ident.value).to_string();
                 let obj_span = mc.object.span();
                 let result =
                     walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
@@ -383,7 +384,7 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
                 return Some(r);
             }
             if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let method_name = ident.value.to_string();
+                let method_name = bytes_to_str(ident.value).to_string();
                 let obj_span = mc.object.span();
                 let result =
                     walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
@@ -414,7 +415,7 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
                 return Some(r);
             }
             if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
-                let method_name = ident.value.to_string();
+                let method_name = bytes_to_str(ident.value).to_string();
                 let result =
                     walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
                         closure_this_from_static_receiver(sc.class, &method_name, arg_idx, ctx)
@@ -546,7 +547,7 @@ fn closure_this_from_static_receiver(
         Expression::Self_(_) | Expression::Static(_) => {
             ctx.current_class.map(|cc| cc.name.to_string())
         }
-        Expression::Identifier(ident) => Some(ident.value().to_string()),
+        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
         Expression::Parent(_) => ctx
             .current_class
             .and_then(|cc| cc.parent_class.map(|a| a.to_string())),

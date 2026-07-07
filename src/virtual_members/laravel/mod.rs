@@ -219,12 +219,12 @@ use accessors::{
 };
 pub(crate) use where_property::where_property_method_to_column;
 
+pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
-    RelationshipKind, build_property_type, classify_relationship_typed, count_property_name,
-    extract_related_type_typed,
+    RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
 };
 
 pub use scopes::build_scope_methods_for_builder;

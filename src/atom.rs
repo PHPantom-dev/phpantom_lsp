@@ -36,6 +36,43 @@ pub type AtomMap<V> = HashMap<Atom, V, BuildHasherDefault<IdentityHasher>>;
 /// A high-performance `HashSet` using `Atom` as the key.
 pub type AtomSet = HashSet<Atom, BuildHasherDefault<IdentityHasher>>;
 
+/// Convert a byte slice to a string slice.
+///
+/// PHP source is always valid UTF-8 (mago guarantees this after lexing),
+/// so this is a safe unchecked conversion on the hot path.
+#[inline]
+pub fn bytes_to_str(bytes: &[u8]) -> &str {
+    // SAFETY: mago lexer only produces valid UTF-8 identifier bytes
+    unsafe { std::str::from_utf8_unchecked(bytes) }
+}
+
+/// Intern a byte slice as an [`Atom`], treating it as UTF-8.
+#[inline]
+pub fn atom_bytes(bytes: &[u8]) -> Atom {
+    atom(bytes_to_str(bytes))
+}
+
+/// Intern a byte slice as a lowercase [`Atom`].
+#[inline]
+pub fn ascii_lowercase_atom_bytes(bytes: &[u8]) -> Atom {
+    ascii_lowercase_atom(bytes_to_str(bytes))
+}
+
+/// Get the last segment of a namespace-separated byte slice.
+///
+/// WORKAROUND(mago 1.29): `Identifier::last_segment()` uses `position`
+/// (first match) instead of `rposition` (last match), returning incorrect
+/// results for qualified/fully-qualified names. Remove this helper and
+/// switch back to `.last_segment()` once mago fixes the bug.
+/// See: https://github.com/carthage-software/mago/issues/XXXX
+#[inline]
+pub fn last_segment(bytes: &[u8]) -> &[u8] {
+    match bytes.iter().rposition(|b| *b == b'\\') {
+        Some(pos) => &bytes[pos + 1..],
+        None => bytes,
+    }
+}
+
 /// Intern a string, returning an [`Atom`].
 ///
 /// If the string has been seen before, returns the existing interned

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(test)]
 use bumpalo::Bump;
 use mago_docblock::document::TagKind;
 use mago_span::HasSpan;
@@ -24,6 +25,7 @@ use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::code_actions::phpstan::fix_return_type::enrichment_return_type;
 use crate::completion::phpdoc::generation::{enrichment_plain, enrichment_plain_typed};
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
@@ -141,20 +143,21 @@ impl Backend {
 
         let cursor_offset = crate::util::position_to_offset(content, params.range.start);
 
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
-
-        let ctx = find_cursor_context(&program.statements, cursor_offset);
-        let trivia = program.trivia.as_slice();
-
-        let info = match find_function_with_docblock_from_context(
-            &ctx,
-            &program.statements,
-            trivia,
-            content,
-            cursor_offset,
-        ) {
+        // Resolve the function/method (and its docblock) under the cursor.
+        // The returned info is owned, so the borrowed AST does not escape.
+        let info =
+            crate::parser::with_parsed_program(content, "update_docblock", |program, content| {
+                let ctx = find_cursor_context(&program.statements, cursor_offset);
+                let trivia = program.trivia.as_slice();
+                find_function_with_docblock_from_context(
+                    &ctx,
+                    &program.statements,
+                    trivia,
+                    content,
+                    cursor_offset,
+                )
+            });
+        let info = match info {
             Some(info) => info,
             None => return,
         };
@@ -411,7 +414,7 @@ fn build_info_for_function_like<'a>(
         .parameters
         .iter()
         .map(|p| {
-            let name = p.variable.name.to_string();
+            let name = bytes_to_str(p.variable.name).to_string();
             let type_hint = p.hint.as_ref().map(|h| extract_hint_type(h));
             let is_variadic = p.ellipsis.is_some();
             SigParam {
@@ -1367,8 +1370,8 @@ mod tests {
     /// Helper: parse PHP and check if an update is needed at the given offset.
     fn find_info(php: &str, offset: u32) -> Option<FunctionWithDocblock> {
         let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php);
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let ctx = find_cursor_context(&program.statements, offset);
         find_function_with_docblock_from_context(
             &ctx,

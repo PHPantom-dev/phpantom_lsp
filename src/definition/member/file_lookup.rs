@@ -211,9 +211,11 @@ impl Backend {
                         || trimmed.starts_with("@property-write")
                         || trimmed.starts_with("@property")
                     {
+                        // `col` is a byte offset; LSP positions are UTF-16
+                        // columns, so convert the position after the `$`.
                         return Some(Position {
                             line: line_idx as u32,
-                            character: (col + 1) as u32,
+                            character: crate::util::byte_offset_to_utf16_col(line, col + 1),
                         });
                     }
                 }

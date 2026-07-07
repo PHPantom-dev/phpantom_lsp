@@ -12,6 +12,7 @@
 //! to the parameter.  This is a single-file edit — call sites are
 //! unaffected because constructor promotion is transparent to callers.
 
+#[cfg(test)]
 use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::class_like::member::ClassLikeMember;
@@ -23,6 +24,7 @@ use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::util::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
@@ -68,13 +70,16 @@ impl Backend {
 
         let cursor_offset = crate::util::position_to_offset(content, params.range.start);
 
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let candidate = crate::parser::with_parsed_program(
+            content,
+            "promote_constructor_param",
+            |program, content| {
+                let ctx = find_cursor_context(&program.statements, cursor_offset);
+                find_promotion_candidate(&ctx, content, cursor_offset)
+            },
+        );
 
-        let ctx = find_cursor_context(&program.statements, cursor_offset);
-
-        let candidate = match find_promotion_candidate(&ctx, content, cursor_offset) {
+        let candidate = match candidate {
             Some(c) => c,
             None => return,
         };
@@ -159,7 +164,7 @@ fn find_promotion_candidate(
     };
 
     // Must be __construct.
-    if method.name.value != "__construct" {
+    if method.name.value != b"__construct" {
         return None;
     }
 
@@ -185,12 +190,20 @@ fn find_promotion_candidate(
         return None;
     }
 
-    let param_name = param.variable.name;
+    let param_name = bytes_to_str(param.variable.name);
     // Strip the leading `$` for property matching.
     let bare_name = param_name.strip_prefix('$').unwrap_or(param_name);
 
     // Find the matching property declaration in the class body.
     let (property, plain_prop) = find_matching_property(all_members, bare_name)?;
+
+    // Only promote a property declared on its own. A multi-variable
+    // declaration (`private int $a, $b;`) is a single statement whose span
+    // covers every variable, so deleting it would silently drop the
+    // siblings. Decline the action rather than corrupt the declaration.
+    if plain_prop.items.len() != 1 {
+        return None;
+    }
 
     // Property must not be static.
     if is_static(plain_prop.modifiers.iter()) {
@@ -278,7 +291,7 @@ fn find_matching_property<'a>(
             && let Property::Plain(plain) = property
         {
             for item in plain.items.iter() {
-                let var_name = item.variable().name;
+                let var_name = bytes_to_str(item.variable().name);
                 let item_bare = var_name.strip_prefix('$').unwrap_or(var_name);
                 if item_bare == bare_name {
                     return Some((property, plain));
@@ -454,8 +467,8 @@ mod tests {
     /// Helper: parse PHP and find a promotion candidate at the given byte offset.
     fn find_candidate(php: &str, offset: u32) -> Option<PromotionCandidate> {
         let arena = Box::leak(Box::new(Bump::new()));
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(arena, file_id, php);
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
         let ctx = find_cursor_context(&program.statements, offset);
         find_promotion_candidate(&ctx, php, offset)
     }
@@ -728,6 +741,51 @@ class Foo {
         assert!(
             c.is_none(),
             "should not offer when param is used elsewhere in the body"
+        );
+    }
+
+    #[test]
+    fn rejects_multi_variable_declaration() {
+        // Promoting `$name` from a shared declaration would delete `$other`
+        // too, so the action must decline rather than drop a property.
+        let php = "\
+<?php
+class Foo {
+    private int $name, $other;
+
+    public function __construct(int $name) {
+        $this->name = $name;
+    }
+}
+";
+        let pos = php.find("int $name)").unwrap() as u32;
+        let c = find_candidate(php, pos);
+        assert!(
+            c.is_none(),
+            "should not offer for multi-variable property declarations"
+        );
+    }
+
+    #[test]
+    fn rejects_multi_variable_declaration_second_item() {
+        // The rejection must hold regardless of which variable in the
+        // shared declaration is being promoted: promoting `$other` here
+        // would otherwise delete `$name` too.
+        let php = "\
+<?php
+class Foo {
+    private int $name, $other;
+
+    public function __construct(int $other) {
+        $this->other = $other;
+    }
+}
+";
+        let pos = php.find("int $other)").unwrap() as u32;
+        let c = find_candidate(php, pos);
+        assert!(
+            c.is_none(),
+            "should not offer when promoting a later variable in a shared declaration"
         );
     }
 

@@ -164,10 +164,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 .map(|p| p.is_variadic)
                 .unwrap_or(false);
 
-            // Split the textual arguments by comma (at depth 0) and pick
-            // the one at `param_idx`.
+            // Split the textual arguments by comma (at depth 0), then bind
+            // them to parameters by PHP's rules so a named argument resolves
+            // to the parameter it targets rather than its ordinal slot.
             let args = split_text_args(text_args);
-            let arg_text = args.get(param_idx).map(|s| s.trim());
+            let bound_text = crate::call_args::bind_text_args_to_params(params, &args);
+            let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
+            let arg_text = arg_text_owned.as_deref();
 
             if matches!(condition.as_ref(), PhpType::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
@@ -378,7 +381,16 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     tpl,
                 )
             } else if condition.as_ref().is_null() {
-                if arg_text.is_none() || arg_text == Some("") || arg_text == Some("null") {
+                // The null (`then`) branch is taken when the argument is
+                // absent (the parameter falls back to its null default) or
+                // when `null` is passed explicitly. This mirrors the AST
+                // path's rule so the same call resolves identically through
+                // the inline-text and AST resolution paths.
+                let arg_is_null = arg_text.is_none_or(|t| {
+                    let t = t.trim();
+                    t.is_empty() || t.eq_ignore_ascii_case("null")
+                });
+                if arg_is_null {
                     // No argument provided or explicitly null → null branch
                     resolve_conditional_with_text_args_and_defaults(
                         then_type,
@@ -715,25 +727,15 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
             // Find which parameter index corresponds to param
             let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
 
-            // Extract param_name without $ prefix for named argument matching
-            let param_name_without_dollar = param.strip_prefix('$').unwrap_or(param);
-
-            // Get the actual argument expression (if provided)
-            let arg_expr: Option<&Expression<'b>> = argument_list
-                .arguments
-                .iter()
-                .nth(param_idx)
-                .and_then(|arg| match arg {
-                    Argument::Positional(pos) => Some(pos.value),
-                    Argument::Named(named) => {
-                        // Also match named arguments by param name
-                        if named.name.value == param_name_without_dollar {
-                            Some(named.value)
-                        } else {
-                            None
-                        }
-                    }
-                });
+            // Bind arguments to parameters following PHP's rules (positional
+            // fill in order, named fill by name) so a named argument in an
+            // earlier slot does not shadow the parameter the conditional
+            // refers to.
+            let arg_expr: Option<&Expression<'b>> =
+                crate::call_args::bind_args_to_params(params, argument_list)
+                    .get(param_idx)
+                    .copied()
+                    .flatten();
 
             if matches!(condition.as_ref(), PhpType::ClassString(_)) {
                 // Extract the bound from `class-string<Bound>` and determine
@@ -802,7 +804,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 if let Some(Expression::Variable(Variable::Direct(dv))) = arg_expr
                     && let Some(resolver) = var_resolver
                 {
-                    let names = resolver(dv.name);
+                    let names = resolver(crate::atom::bytes_to_str(dv.name));
                     if !names.is_empty() {
                         let names: Vec<String> = names
                             .into_iter()
@@ -833,8 +835,15 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     tpl,
                 )
             } else if condition.as_ref().is_null() {
-                if arg_expr.is_none() {
-                    // No argument provided → param uses default (null)
+                // The null (`then`) branch is taken when the argument is
+                // absent (the parameter falls back to its null default) or
+                // when `null` is passed explicitly.
+                let arg_is_null = match arg_expr {
+                    None => true,
+                    Some(expr) => matches!(expr, Expression::Literal(Literal::Null(_))),
+                };
+                if arg_is_null {
+                    // No argument provided or explicitly null → null branch
                     resolve_conditional_with_args_and_defaults(
                         then_type,
                         params,
@@ -845,7 +854,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 } else {
-                    // Argument was provided → not null
+                    // Argument was provided and not null → else branch
                     resolve_conditional_with_args_and_defaults(
                         else_type,
                         params,
@@ -866,11 +875,16 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     Some(Expression::Literal(Literal::String(lit_str))) => {
                         // `value` is the unquoted content; fall back
                         // to stripping quotes from `raw`.
-                        let inner = lit_str.value.map(|v| v.to_string()).unwrap_or_else(|| {
-                            crate::util::unquote_php_string(lit_str.raw)
-                                .unwrap_or(lit_str.raw)
+                        let inner = lit_str
+                            .value
+                            .map(|v| crate::atom::bytes_to_str(v).to_string())
+                            .unwrap_or_else(|| {
+                                crate::util::unquote_php_string(crate::atom::bytes_to_str(
+                                    lit_str.raw,
+                                ))
+                                .unwrap_or(crate::atom::bytes_to_str(lit_str.raw))
                                 .to_string()
-                        });
+                            });
                         inner == *expected
                     }
                     _ => false,
@@ -1126,11 +1140,13 @@ fn try_resolve_with_template_default(
 pub(crate) fn extract_class_string_from_expr(expr: &Expression<'_>) -> Option<String> {
     if let Expression::Access(Access::ClassConstant(cca)) = expr
         && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
-        && ident.value == "class"
+        && ident.value == b"class"
     {
         // Extract the class name from the LHS
         return match cca.class {
-            Expression::Identifier(class_ident) => Some(class_ident.value().to_string()),
+            Expression::Identifier(class_ident) => {
+                Some(crate::atom::bytes_to_str(class_ident.value()).to_string())
+            }
             Expression::Self_(_) => Some("self".to_string()),
             Expression::Static(_) => Some("static".to_string()),
             Expression::Parent(_) => Some("parent".to_string()),

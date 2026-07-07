@@ -1,0 +1,24 @@
+// test: conditional `is null` return type resolves the else-branch when a non-null argument is passed
+// feature: completion
+// expect: send(
+---
+<?php
+
+class ResponseFactory
+{
+    public function json(): string {}
+}
+
+class HttpResponse
+{
+    public function send(): void {}
+}
+
+/**
+ * @param string|array|null $content
+ * @return ($content is null ? ResponseFactory : HttpResponse)
+ */
+function response($content = null) {}
+
+$r = response('body');
+$r-><>

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
+use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
 use crate::types::ClassInfo;
 use crate::util::{resolve_class_keyword, short_name};
@@ -166,7 +167,9 @@ fn walk_class_string_assignments<'b>(
                 // and the iterated expression is an array of ::class literals.
                 let value_expr = foreach.target.value();
                 let value_name = match value_expr {
-                    Expression::Variable(Variable::Direct(dv)) => Some(dv.name.to_string()),
+                    Expression::Variable(Variable::Direct(dv)) => {
+                        Some(bytes_to_str(dv.name).to_string())
+                    }
                     _ => None,
                 };
                 if let Some(name) = value_name
@@ -222,7 +225,7 @@ fn check_class_string_assignment(
         return;
     }
     let lhs_name = match assignment.lhs {
-        Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
         _ => return,
     };
     if lhs_name != ctx.var_name {

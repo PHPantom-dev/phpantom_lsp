@@ -22,6 +22,8 @@ use mago_database::file::FileId;
 use mago_span::{Position, Span};
 use mago_type_syntax::ast;
 
+use crate::atom::bytes_to_str;
+
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -304,7 +306,7 @@ impl PhpType {
         );
 
         let arena = Bump::new();
-        let effective = arena.alloc_str(effective);
+        let effective = arena.alloc_slice_copy(effective.as_bytes());
         match mago_type_syntax::parse_str(&arena, span, effective) {
             Ok(ty) => convert(&ty),
             Err(_) => PhpType::Raw(input.to_owned()),
@@ -735,8 +737,11 @@ impl PhpType {
             PhpType::Nullable(inner) => inner.is_string_subtype(),
             PhpType::Generic(name, _) => matches!(
                 name.to_ascii_lowercase().as_str(),
-                "class-string" | "interface-string"
+                "class-string" | "interface-string" | "model-property"
             ),
+            PhpType::Union(members) => {
+                !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
+            }
             _ => false,
         }
     }
@@ -765,17 +770,26 @@ impl PhpType {
                 !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit())
             }
             PhpType::Nullable(inner) => inner.is_int_subtype(),
+            PhpType::Union(members) => {
+                !members.is_empty() && members.iter().all(|m| m.is_int_subtype())
+            }
             _ => false,
         }
     }
 
-    /// Whether this type is `float` or `double` (case-insensitive).
+    /// Whether this type is `float`, `double`, a float literal, or a
+    /// union of float subtypes (case-insensitive).
     ///
-    /// This is currently identical to [`is_float`], but exists for
-    /// symmetry with [`is_string_subtype`] and [`is_int_subtype`] and
-    /// may be extended with float refinement types in the future.
+    /// Extends [`is_float`] with literal and union handling for
+    /// symmetry with [`is_string_subtype`] and [`is_int_subtype`].
     pub fn is_float_subtype(&self) -> bool {
-        self.is_float()
+        match self {
+            PhpType::Literal(s) => s.parse::<f64>().is_ok(),
+            PhpType::Union(members) => {
+                !members.is_empty() && members.iter().all(|m| m.is_float_subtype())
+            }
+            _ => self.is_float(),
+        }
     }
 
     /// Whether this type is `object` (case-insensitive).
@@ -1436,6 +1450,10 @@ impl PhpType {
         match self {
             PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => Some(entries),
             PhpType::Nullable(inner) => inner.shape_entries(),
+            PhpType::Union(members) => {
+                // Find the first array/object shape member in the union.
+                members.iter().find_map(|m| m.shape_entries())
+            }
             _ => None,
         }
     }
@@ -3455,8 +3473,11 @@ pub(crate) fn replace_star_wildcards(s: &str) -> std::borrow::Cow<'_, str> {
             result.push_str("mixed");
             i += 1;
         } else {
-            result.push(bytes[i] as char);
-            i += 1;
+            // Copy the whole UTF-8 character, not a single byte, so
+            // multibyte characters in the type string are not mangled.
+            let ch = s[i..].chars().next().unwrap();
+            result.push(ch);
+            i += ch.len_utf8();
         }
     }
 
@@ -3542,8 +3563,11 @@ fn strip_variance_annotations_from_type(s: &str) -> std::borrow::Cow<'_, str> {
         {
             i += "contravariant ".len();
         } else {
-            cleaned.push(bytes[i] as char);
-            i += 1;
+            // Copy the whole UTF-8 character so multibyte characters in the
+            // type string survive intact.
+            let ch = s[i..].chars().next().unwrap();
+            cleaned.push(ch);
+            i += ch.len_utf8();
         }
     }
 
@@ -3668,6 +3692,7 @@ pub(crate) fn is_builtin_non_class_type(name: &str) -> bool {
             | "literal-string"
             | "class-string"
             | "interface-string"
+            | "model-property"
             | "array-key"
             | "list"
             | "non-empty-list"
@@ -3727,6 +3752,7 @@ fn is_scalar_name(name: &str) -> bool {
             | "interface-string"
             | "trait-string"
             | "enum-string"
+            | "model-property"
             | "numeric-string"
             | "non-empty-string"
             | "non-empty-lowercase-string"
@@ -3906,7 +3932,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
 
         // -- Named / Reference types ------------------------------------------
         ast::Type::Reference(r) => {
-            let name = r.identifier.value.to_string();
+            let name = bytes_to_str(r.identifier.value).to_string();
             match &r.parameters {
                 Some(params) => {
                     let args: Vec<PhpType> =
@@ -3919,22 +3945,22 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
 
         // -- Array-like types with optional generic parameters ----------------
         ast::Type::Array(a) => {
-            convert_keyword_with_optional_generics(a.keyword.value, &a.parameters)
+            convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
         ast::Type::NonEmptyArray(a) => {
-            convert_keyword_with_optional_generics(a.keyword.value, &a.parameters)
+            convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
         ast::Type::AssociativeArray(a) => {
-            convert_keyword_with_optional_generics(a.keyword.value, &a.parameters)
+            convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
         ast::Type::List(l) => {
-            convert_keyword_with_optional_generics(l.keyword.value, &l.parameters)
+            convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
         }
         ast::Type::NonEmptyList(l) => {
-            convert_keyword_with_optional_generics(l.keyword.value, &l.parameters)
+            convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
         }
         ast::Type::Iterable(i) => {
-            convert_keyword_with_optional_generics(i.keyword.value, &i.parameters)
+            convert_keyword_with_optional_generics(bytes_to_str(i.keyword.value), &i.parameters)
         }
 
         // -- Slice: T[] -------------------------------------------------------
@@ -3990,7 +4016,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
 
         // -- Callable types ---------------------------------------------------
         ast::Type::Callable(c) => {
-            let kind = c.keyword.value.to_string();
+            let kind = bytes_to_str(c.keyword.value).to_string();
             match &c.specification {
                 Some(spec) => {
                     let params: Vec<CallableParam> = spec
@@ -4061,12 +4087,12 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- Variable (e.g. $this in conditional types) -----------------------
-        ast::Type::Variable(v) => PhpType::Named(v.value.to_string()),
+        ast::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
 
         // -- Literal types ----------------------------------------------------
-        ast::Type::LiteralInt(l) => PhpType::Literal(l.raw.to_string()),
-        ast::Type::LiteralFloat(l) => PhpType::Literal(l.raw.to_string()),
-        ast::Type::LiteralString(l) => PhpType::Literal(l.raw.to_string()),
+        ast::Type::LiteralInt(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
+        ast::Type::LiteralFloat(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
+        ast::Type::LiteralString(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
         ast::Type::Negated(n) => PhpType::Literal(format!("-{}", n.number)),
@@ -4107,7 +4133,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         | ast::Type::UnspecifiedLiteralString(k)
         | ast::Type::UnspecifiedLiteralFloat(k)
         | ast::Type::NonEmptyUnspecifiedLiteralString(k) => {
-            PhpType::Named(normalize_keyword_casing(k.value))
+            PhpType::Named(normalize_keyword_casing(bytes_to_str(k.value)))
         }
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------
@@ -4203,7 +4229,9 @@ fn evaluate_value_of(resolved: &PhpType) -> PhpType {
     match resolved {
         PhpType::ArrayShape(entries) => {
             let mut values: Vec<PhpType> = entries.iter().map(|e| e.value_type.clone()).collect();
-            values.dedup();
+            // Deduplicate the whole value set (not just adjacent duplicates),
+            // so `array{a: int, b: string, c: int}` yields `int|string`.
+            dedup_types(&mut values);
             match values.len() {
                 0 => PhpType::Named("never".to_string()),
                 1 => values.into_iter().next().unwrap(),
@@ -4509,7 +4537,7 @@ mod tests {
             Position::new(input.len() as u32),
         );
         let arena = Bump::new();
-        let input_arena = arena.alloc_str(input);
+        let input_arena = arena.alloc_slice_copy(input.as_bytes());
         let mago_canonical = match mago_type_syntax::parse_str(&arena, span, input_arena) {
             Ok(ty) => ty.to_string(),
             Err(_) => {
@@ -4874,6 +4902,22 @@ mod tests {
     }
 
     #[test]
+    fn replace_star_wildcards_preserves_multibyte() {
+        // A multibyte character alongside a generic wildcard must survive
+        // the rewrite intact (not be mangled byte-by-byte).
+        use super::replace_star_wildcards;
+        let result = replace_star_wildcards("Map<Café, *>");
+        assert_eq!(result.as_ref(), "Map<Café, mixed>");
+    }
+
+    #[test]
+    fn strip_variance_annotations_preserves_multibyte() {
+        use super::strip_variance_annotations_from_type;
+        let result = strip_variance_annotations_from_type("Map<café, covariant Naïve>");
+        assert_eq!(result.as_ref(), "Map<café, Naïve>");
+    }
+
+    #[test]
     fn replace_star_wildcards_no_star() {
         use super::replace_star_wildcards;
         let result = replace_star_wildcards("Collection<int, User>");
@@ -5224,6 +5268,28 @@ mod tests {
                 assert_eq!(*inner, PhpType::Named("T".to_owned()));
             }
             other => panic!("Expected ValueOf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn value_of_shape_dedups_non_adjacent_values() {
+        // `value-of<array{a: int, b: string, c: int}>` must collapse the
+        // two non-adjacent `int` values into a single union member.
+        let ty = PhpType::parse("value-of<array{a: int, b: string, c: int}>");
+        // `substitute` short-circuits on an empty map, so pass an unrelated
+        // binding to force the `value-of` evaluation path to run.
+        let subs =
+            std::collections::HashMap::from([("T".to_string(), PhpType::Named("int".to_string()))]);
+        let evaluated = ty.substitute(&subs);
+        match &evaluated {
+            PhpType::Union(members) => {
+                assert_eq!(
+                    members.len(),
+                    2,
+                    "expected int|string (deduped), got {evaluated:?}"
+                );
+            }
+            other => panic!("Expected a 2-member union, got {other:?}"),
         }
     }
 

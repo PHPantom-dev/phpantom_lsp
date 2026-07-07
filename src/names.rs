@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+use crate::atom::bytes_to_str;
+
 /// Per-file name resolution data (owned, lifetime-free).
 ///
 /// Each entry maps a byte offset in the source file to the fully-qualified
@@ -27,7 +29,7 @@ impl OwnedResolvedNames {
     pub fn from_resolved(resolved: &mago_names::ResolvedNames<'_>) -> Self {
         let mut names = HashMap::with_capacity(resolved.len());
         for (start, _end, fqn, imported) in resolved.iter() {
-            names.insert(start, (fqn.to_owned(), imported));
+            names.insert(start, (bytes_to_str(fqn).to_owned(), imported));
         }
         Self { names }
     }

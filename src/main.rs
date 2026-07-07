@@ -4,6 +4,7 @@ use clap::Parser;
 use clap::builder::Styles;
 use clap::builder::styling::AnsiColor;
 use phpantom_lsp::Backend;
+use phpantom_lsp::LSP_CONCURRENCY;
 use phpantom_lsp::config;
 use tokio::net::TcpListener;
 use tower_lsp::{LspService, Server};
@@ -117,6 +118,24 @@ enum Command {
 
     /// Create a default .phpantom.toml configuration file in the current directory.
     Init,
+
+    /// Check for updates or upgrade to the latest version.
+    ///
+    /// Downloads the latest release from GitHub and replaces the current
+    /// binary.  Use --check to see if an update is available without
+    /// installing it.
+    Update {
+        /// Check for updates but do not install them.
+        ///
+        /// Exits with code 0 if already up-to-date, or code 1 if an
+        /// update is available.
+        #[arg(long, short)]
+        check: bool,
+
+        /// Skip the confirmation prompt before replacing the binary.
+        #[arg(long)]
+        no_confirm: bool,
+    },
 }
 
 /// Minimum severity level for the analyze command.
@@ -185,6 +204,28 @@ async fn main() {
                 }
                 Err(e) => {
                     eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Command::Update { check, no_confirm }) => {
+            use phpantom_lsp::self_update::{self, UpdateStatus};
+            match self_update::run(check, no_confirm) {
+                Ok(UpdateStatus::UpToDate(v)) => {
+                    eprintln!("Already up-to-date ({v})");
+                }
+                Ok(UpdateStatus::UpdateAvailable(_)) => {
+                    // Exit with code 1 to signal "update available" so
+                    // scripts can branch on `update --check`.
+                    std::process::exit(1);
+                }
+                Ok(UpdateStatus::Updated(_)) => {}
+                Err(self_update::UpdateError::Cancelled) => {
+                    eprintln!("Update cancelled.");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
             }
@@ -282,7 +323,10 @@ async fn main() {
 
                 let (read, write) = tokio::io::split(stream);
                 let (service, socket) = LspService::build(Backend::new).finish();
-                Server::new(read, write, socket).serve(service).await;
+                Server::new(read, write, socket)
+                    .concurrency_level(LSP_CONCURRENCY)
+                    .serve(service)
+                    .await;
                 // The serve loop exited (client disconnected or an
                 // internal error occurred).  Exit the process so the
                 // editor can restart us instead of leaving a zombie
@@ -295,7 +339,10 @@ async fn main() {
                 let stdout = tokio::io::stdout();
 
                 let (service, socket) = LspService::build(Backend::new).finish();
-                Server::new(stdin, stdout, socket).serve(service).await;
+                Server::new(stdin, stdout, socket)
+                    .concurrency_level(LSP_CONCURRENCY)
+                    .serve(service)
+                    .await;
                 // Same as above: the serve loop exited.  Without this
                 // explicit exit, the process hangs because the tokio
                 // blocking stdin reader thread keeps the runtime alive

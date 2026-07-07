@@ -405,25 +405,24 @@ impl Backend {
                     None => continue,
                 };
 
-                let (kind, tags, container_name) =
-                    if let Some(class_info) = fqn_idx.get(fqn.as_str()) {
-                        let k = match class_info.kind {
-                            ClassLikeKind::Class => SymbolKind::CLASS,
-                            ClassLikeKind::Interface => SymbolKind::INTERFACE,
-                            ClassLikeKind::Trait => SymbolKind::CLASS,
-                            ClassLikeKind::Enum => SymbolKind::ENUM,
-                        };
-                        let t = class_info
-                            .deprecation_message
-                            .as_ref()
-                            .map(|_| vec![SymbolTag::DEPRECATED]);
-                        (k, t, class_info.file_namespace.map(|a| a.to_string()))
-                    } else {
-                        (SymbolKind::CLASS, None, namespace_from_fqn(fqn))
+                let (kind, tags, container_name) = if let Some(class_info) = fqn_idx.get(fqn) {
+                    let k = match class_info.kind {
+                        ClassLikeKind::Class => SymbolKind::CLASS,
+                        ClassLikeKind::Interface => SymbolKind::INTERFACE,
+                        ClassLikeKind::Trait => SymbolKind::CLASS,
+                        ClassLikeKind::Enum => SymbolKind::ENUM,
                     };
+                    let t = class_info
+                        .deprecation_message
+                        .as_ref()
+                        .map(|_| vec![SymbolTag::DEPRECATED]);
+                    (k, t, class_info.file_namespace.map(|a| a.to_string()))
+                } else {
+                    (SymbolKind::CLASS, None, namespace_from_fqn(fqn))
+                };
 
                 // Try to compute a precise position from file content.
-                let pos = if let Some(class_info) = fqn_idx.get(fqn.as_str()) {
+                let pos = if let Some(class_info) = fqn_idx.get(fqn) {
                     if class_info.keyword_offset > 0 {
                         if let Some(content) = self.get_file_content_arc(file_uri) {
                             offset_to_position(&content, class_info.keyword_offset as usize)
@@ -437,11 +436,11 @@ impl Backend {
                     Position::new(0, 0)
                 };
 
-                seen_fqns.insert(fqn.clone());
+                seen_fqns.insert(fqn.to_owned());
 
                 ranked.push(RankedSymbol {
                     symbol: SymbolInformation {
-                        name: fqn.clone(),
+                        name: fqn.to_owned(),
                         kind,
                         tags,
                         deprecated: None,
@@ -480,11 +479,11 @@ impl Backend {
                     Err(_) => continue,
                 };
 
-                seen_fqns.insert(fqn.clone());
+                seen_fqns.insert(fqn.to_owned());
 
                 ranked.push(RankedSymbol {
                     symbol: SymbolInformation {
-                        name: fqn.clone(),
+                        name: fqn.to_owned(),
                         kind: SymbolKind::CLASS,
                         tags: None,
                         deprecated: None,

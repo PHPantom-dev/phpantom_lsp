@@ -634,7 +634,7 @@ fn collect_mixin_members(
         ensure_mixin_cache_fresh();
         let resolved_mixin = if let Some(c) = cache {
             let cached = {
-                let map = c.lock();
+                let map = c.read();
                 map.get(&(Atom::from(&resolved_mixin_name), Vec::new()))
                     .map(Arc::clone)
             };

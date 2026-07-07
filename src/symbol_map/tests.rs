@@ -132,8 +132,8 @@ fn empty_name_is_not_navigable() {
 
 fn parse_and_extract(php: &str) -> SymbolMap {
     let arena = bumpalo::Bump::new();
-    let file_id = mago_database::file::FileId::new("test.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, php);
+    let file_id = mago_database::file::FileId::new(b"test.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
     extract_symbol_map(program, php)
 }
 
@@ -693,6 +693,54 @@ fn docblock_nullable_type() {
     assert!(hit.is_some(), "Should find Foo in nullable return type");
     if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
         assert_eq!(name, "Foo");
+    }
+}
+
+#[test]
+fn docblock_phpstan_require_extends_produces_class_reference() {
+    let php = concat!(
+        "<?php\n",
+        "use Illuminate\\Http\\Resources\\Json\\JsonResource;\n",
+        "/** @phpstan-require-extends JsonResource */\n",
+        "trait GathersAuthorizations {}\n"
+    );
+    let map = parse_and_extract(php);
+    let docblock_start = php.find("/**").unwrap();
+    let name_in_doc = php[docblock_start..].find("JsonResource").unwrap() + docblock_start;
+
+    let hit = map.lookup(name_in_doc as u32);
+    assert!(
+        hit.is_some(),
+        "Should find JsonResource in require-extends docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "JsonResource");
+    } else {
+        panic!("Expected ClassReference for JsonResource");
+    }
+}
+
+#[test]
+fn docblock_phpstan_require_implements_produces_class_reference() {
+    let php = concat!(
+        "<?php\n",
+        "use Countable;\n",
+        "/** @phpstan-require-implements Countable */\n",
+        "trait GathersAuthorizations {}\n"
+    );
+    let map = parse_and_extract(php);
+    let docblock_start = php.find("/**").unwrap();
+    let name_in_doc = php[docblock_start..].find("Countable").unwrap() + docblock_start;
+
+    let hit = map.lookup(name_in_doc as u32);
+    assert!(
+        hit.is_some(),
+        "Should find Countable in require-implements docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "Countable");
+    } else {
+        panic!("Expected ClassReference for Countable");
     }
 }
 
@@ -3368,6 +3416,75 @@ fn see_tag_multiple_on_same_docblock() {
 }
 
 #[test]
+fn see_tag_qualified_member_spans_aligned() {
+    // A qualified-but-not-FQN reference (`App\Foo::bar()`) gets a synthetic
+    // leading `\` for FQN handling. The emitted spans must still align with
+    // the original source bytes, not be shifted by the synthetic prefix.
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @see App\\Foo::bar()\n",
+        " */\n",
+        "class Baz {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    // Class portion: span must start at `App` and end right after `App\Foo`.
+    let class_offset = php.find("App\\Foo").unwrap() as u32;
+    let hit = map
+        .lookup(class_offset)
+        .expect("Should find App\\Foo class");
+    assert_eq!(hit.start, class_offset, "class span start aligned");
+    assert_eq!(
+        hit.end,
+        class_offset + "App\\Foo".len() as u32,
+        "class span end must not overshoot by the synthetic prefix"
+    );
+
+    // Member portion: lookup at the exact `bar` offset must succeed (a
+    // one-byte shift would make this miss).
+    let member_offset = php.find("bar").unwrap() as u32;
+    let hit = map.lookup(member_offset).expect("Should find bar member");
+    assert_eq!(hit.start, member_offset, "member span start aligned");
+    assert_eq!(
+        hit.end,
+        member_offset + "bar".len() as u32,
+        "member span end aligned"
+    );
+    if let SymbolKind::MemberAccess {
+        ref member_name, ..
+    } = hit.kind
+    {
+        assert_eq!(member_name, "bar");
+    } else {
+        panic!("Expected MemberAccess for bar");
+    }
+}
+
+#[test]
+fn see_tag_qualified_class_span_aligned() {
+    // A bare qualified class reference (no `::`) also gets the synthetic
+    // prefix; its span must not overshoot.
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @see App\\Models\\User\n",
+        " */\n",
+        "class Baz {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let offset = php.find("App\\Models\\User").unwrap() as u32;
+    let hit = map.lookup(offset).expect("Should find App\\Models\\User");
+    assert_eq!(hit.start, offset, "class span start aligned");
+    assert_eq!(
+        hit.end,
+        offset + "App\\Models\\User".len() as u32,
+        "class span end must not overshoot by the synthetic prefix"
+    );
+}
+
+#[test]
 fn see_tag_on_method_docblock() {
     let php = concat!(
         "<?php\n",
@@ -3674,4 +3791,78 @@ fn docblock_star_wildcard_in_generic_produces_correct_spans() {
             );
         }
     }
+}
+
+// ── array-callable spans ────────────────────────────────────────────
+
+#[test]
+fn array_callable_class_const_emits_member_access() {
+    // `[Controller::class, 'method']` — the Laravel route/controller-action
+    // shape. Cursor on the method string should resolve as a member access.
+    let php = "<?php\nRoute::get('/', [IndexPageController::class, 'indexPage']);\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("indexPage']").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method string");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static,
+            is_method_call,
+            ..
+        } => {
+            assert_eq!(subject_text, "IndexPageController");
+            assert_eq!(member_name, "indexPage");
+            assert!(*is_static);
+            assert!(*is_method_call);
+        }
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}
+
+#[test]
+fn array_callable_variable_emits_instance_member_access() {
+    // `[$this, 'method']` and `[$obj, 'method']` — instance-style callables.
+    let php = "<?php\n$cb = [$this, 'handle'];\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("handle']").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method string");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static,
+            ..
+        } => {
+            assert_eq!(subject_text, "$this");
+            assert_eq!(member_name, "handle");
+            assert!(!*is_static);
+        }
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}
+
+#[test]
+fn plain_two_string_array_is_not_a_callable() {
+    // `['foo', 'bar']` — a plain data array, not a callable. No span should
+    // be emitted over the second string.
+    let php = "<?php\n$x = ['foo', 'bar'];\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("bar']").unwrap() as u32;
+    assert!(
+        map.lookup(offset).is_none(),
+        "plain string array must not emit a member-access span"
+    );
+}
+
+#[test]
+fn array_callable_ignores_non_identifier_method_string() {
+    // `[$this, 'not a method']` — the second string is not an identifier.
+    let php = "<?php\n$x = [$this, 'not a method'];\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("not a method").unwrap() as u32;
+    assert!(
+        map.lookup(offset).is_none(),
+        "non-identifier string must not emit a member-access span"
+    );
 }

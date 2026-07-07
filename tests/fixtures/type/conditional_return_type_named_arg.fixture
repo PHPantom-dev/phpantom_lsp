@@ -1,0 +1,31 @@
+// test: conditional return type resolves when the subject is passed as an out-of-order named argument
+// feature: completion
+// expect: fooMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+/** @api */
+interface TreeMapper
+{
+    /**
+     * @template T of object
+     *
+     * @param string|class-string<T> $signature
+     * @param mixed $source
+     * @return (
+     *     $signature is class-string<T>
+     *         ? T
+     *         : mixed
+     * )
+     */
+    public function map(string $signature, $source);
+}
+
+function test(TreeMapper $mapper): void {
+    $result = $mapper->map(source: 'bar', signature: Foo::class);
+    $result-><>
+}

@@ -1189,6 +1189,12 @@ class InvokeReturnTypeDemo
         $formatter = new ScaffoldingFormatter();
         $formatter()->write();                    // __invoke() returns Pen
 
+        // Try: type `$formatter->` — implemented magic methods such as
+        // __invoke() and __toString() are offered for explicit calls and
+        // go-to-definition, sorted below the regular methods so they never
+        // appear at the top of the list.
+        $formatter->__invoke()->write();          // explicit __invoke() call
+
         // Chaining through __invoke() return type
         $factory = new ScaffoldingPenFactory();
         $factory()->rename('Fine')->write();      // __invoke() → Pen → rename() → Pen
@@ -3540,10 +3546,84 @@ function globalKeywordDemo(): void {
     $globalPen->write();                  // Pen — resolved from top-level scope via `global`
 }
 
+// ── Method-Tag Template ─────────────────────────────────────────────────────
+
+class MethodTagTemplateDemo
+{
+    public function demo(): void
+    {
+        // @method tags with <T of Bound> template params resolve at call sites.
+        $registry = new ScaffoldingMethodTagTemplate();
+
+        // TVal inferred from argument type
+        $pen = new Pen('demo');
+        $result = $registry->get($pen);
+        $result->write();                 // TVal = Pen
+
+        // Inline chain
+        $registry->get(new Pencil())->sketch(); // TVal = Pencil
+    }
+}
+
+/**
+ * Convert to arrow function — place cursor on a single-expression closure
+ * and trigger code actions to see "Convert to arrow function".
+ */
+class ConvertToArrowFunctionDemo
+{
+    public function demo(): void
+    {
+        // Try: place cursor on `function` and use code action
+        $double = function(int $x): int { return $x * 2; };
+
+        // Static closure with use clause (by-value)
+        $base = 10;
+        $add = static function(int $x) use ($base) { return $x + $base; };
+
+        // Passes as callback — trigger inside the closure
+        $result = array_map(function(string $s) { return strtoupper($s); }, ['a', 'b']);
+    }
+}
+
+class ConvertToClosureDemo
+{
+    public function demo(): void
+    {
+        // Try: place cursor on `fn` and use code action "Convert to closure"
+        $double = fn(int $x): int => $x * 2;
+
+        // Arrow with captured outer variable — converted closure gets use()
+        $base = 10;
+        $add = fn(int $x) => $x + $base;
+
+        // Static arrow function
+        $staticFn = static fn(string $s): string => strtoupper($s);
+
+        // Arrow as callback — trigger inside the arrow function
+        $result = array_map(fn(string $s) => strtoupper($s), ['a', 'b']);
+
+        // Multiple captured variables
+        $prefix = 'hello';
+        $suffix = 'world';
+        $greet = fn(string $sep) => $prefix . $sep . $suffix;
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
-// ── Template-param @mixin scaffolding ───────────────────────────────────────
+// ── Method-Tag Template scaffolding ────────────────────────────────────────────
+
+/**
+ * @method TVal get<TVal of mixed>(TVal $default)
+ */
+class ScaffoldingMethodTagTemplate
+{
+    /** @return mixed */
+    public function __call(string $name, array $args): mixed { return $args[0] ?? null; }
+}
+
+// ── Template-param @mixin scaffolding ─────────────────────────────────────────
 interface ScaffoldingAstNodeInterface {
     public function getStartColumn(): int;
     public function getEndColumn(): int;

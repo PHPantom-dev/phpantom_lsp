@@ -491,6 +491,39 @@ class Consumer {}
     }
 }
 
+#[test]
+fn unused_import_range_lands_on_correct_prefix_sharing_line() {
+    // `Vendor\Foo` (unused) shares a prefix with `Vendor\FooBar` (used) and
+    // appears on a later line. The squiggle must land on the `Vendor\Foo`
+    // line, not the earlier `Vendor\FooBar` line that contains it as a
+    // substring.
+    let backend = create_test_backend();
+    let uri = "file:///test_unused_prefix.php";
+    let text = r#"<?php
+namespace App;
+
+use Vendor\FooBar;
+use Vendor\Foo;
+
+class Consumer {
+    public function m(): FooBar {}
+}
+"#;
+
+    let diags = unused_import_diagnostics(&backend, uri, text);
+    let foo_diag = diags
+        .iter()
+        .filter(|d| has_unnecessary_tag(d))
+        .find(|d| d.message.contains("Vendor\\Foo") && !d.message.contains("FooBar"))
+        .expect("expected unused import diagnostic for Vendor\\Foo");
+
+    assert_eq!(
+        foo_diag.range.start.line, 4,
+        "Unused import squiggle should be on the `use Vendor\\Foo;` line (4), got line {}",
+        foo_diag.range.start.line
+    );
+}
+
 // ─── Used import produces no diagnostic ─────────────────────────────────────
 
 #[test]
@@ -609,6 +642,52 @@ class Consumer implements SomeInterface {}
     assert!(
         unnecessary.is_empty(),
         "Import used in implements should not be flagged, got: {:?}",
+        unnecessary
+    );
+}
+
+#[test]
+fn used_import_in_phpstan_require_extends_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_used_phpstan_require_extends.php";
+    let text = r#"<?php
+namespace App;
+
+use Illuminate\Http\Resources\Json\JsonResource;
+
+/** @phpstan-require-extends JsonResource */
+trait GathersAuthorizations {}
+"#;
+
+    let diags = unused_import_diagnostics(&backend, uri, text);
+    let unnecessary: Vec<_> = diags.iter().filter(|d| has_unnecessary_tag(d)).collect();
+
+    assert!(
+        unnecessary.is_empty(),
+        "Import used in @phpstan-require-extends should not be flagged, got: {:?}",
+        unnecessary
+    );
+}
+
+#[test]
+fn used_import_in_phpstan_require_implements_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_used_phpstan_require_implements.php";
+    let text = r#"<?php
+namespace App;
+
+use Countable;
+
+/** @phpstan-require-implements Countable */
+trait GathersAuthorizations {}
+"#;
+
+    let diags = unused_import_diagnostics(&backend, uri, text);
+    let unnecessary: Vec<_> = diags.iter().filter(|d| has_unnecessary_tag(d)).collect();
+
+    assert!(
+        unnecessary.is_empty(),
+        "Import used in @phpstan-require-implements should not be flagged, got: {:?}",
         unnecessary
     );
 }

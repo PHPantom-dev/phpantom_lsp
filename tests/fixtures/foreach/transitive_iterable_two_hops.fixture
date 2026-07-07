@@ -1,0 +1,27 @@
+// test: foreach element type resolves through an interface that reaches a known iterable two hops away via interface-extends
+// feature: completion
+// expect: itemMethod(
+---
+<?php
+interface DeepIterable extends IteratorAggregate {}
+interface MidIterable extends DeepIterable {}
+/** @template T */
+interface MyCollection extends MidIterable {
+    /** @return T */
+    public function first();
+}
+class Item {
+    public function itemMethod(): void {}
+}
+/** @implements MyCollection<Item> */
+class ItemCollection implements MyCollection {
+    public function first() {}
+    public function getIterator(): Iterator {}
+}
+class Test {
+    public function items(): ItemCollection {}
+}
+$t = new Test();
+foreach ($t->items() as $x) {
+    $x-><>
+}

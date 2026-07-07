@@ -230,6 +230,11 @@ impl Backend {
     ) -> Vec<AbsoluteToken> {
         let mut tokens = Vec::with_capacity(symbol_map.spans.len());
 
+        // Precompute line starts once: converting each span's byte offset to a
+        // line/column independently would rescan the file from the start every
+        // time, which is O(n²) on large files (the demo file alone takes ~17s).
+        let line_index = crate::util::LineIndex::new(content);
+
         for span in &symbol_map.spans {
             let length = span.end.saturating_sub(span.start);
             if length == 0 {
@@ -301,7 +306,7 @@ impl Backend {
                     (tt, mods)
                 }
 
-                SymbolKind::Variable { name } => {
+                SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                     // Check if this variable is a parameter.
                     let (tt, mut mods) =
                         self.classify_variable(name, span.start, symbol_map, uri, ctx);
@@ -361,9 +366,14 @@ impl Backend {
                 SymbolKind::LaravelStringKey { .. } => continue,
             };
 
-            if let Some(abs) =
-                offset_to_absolute(content, span.start, length, token_type, modifiers)
-            {
+            if let Some(abs) = offset_to_absolute(
+                content,
+                &line_index,
+                span.start,
+                length,
+                token_type,
+                modifiers,
+            ) {
                 tokens.push(abs);
             }
         }
@@ -807,6 +817,7 @@ fn utf16_col_at(chars: &[char], pos: usize) -> u32 {
 /// Returns `None` if the offset is beyond the content length.
 fn offset_to_absolute(
     content: &str,
+    line_index: &crate::util::LineIndex,
     start_offset: u32,
     byte_length: u32,
     token_type: u32,
@@ -819,7 +830,7 @@ fn offset_to_absolute(
     if utf16_len == 0 {
         return None;
     }
-    let pos = crate::util::offset_to_position(content, start);
+    let pos = line_index.position(start);
     Some(AbsoluteToken {
         line: pos.line,
         start_char: pos.character,

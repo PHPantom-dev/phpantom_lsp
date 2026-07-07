@@ -83,9 +83,16 @@ fn find_enclosing_class_fqn(
     let cls = local_classes
         .iter()
         .find(|c| {
-            !c.name.starts_with("__anonymous@")
-                && offset >= c.start_offset
-                && offset <= c.end_offset
+            // Use the declaration start (which includes leading
+            // attributes) so a `self::` reference inside a class-level
+            // attribute, which sits before the body braces, still maps
+            // to the class it decorates.
+            let start = if c.decl_start_offset != 0 {
+                c.decl_start_offset
+            } else {
+                c.start_offset
+            };
+            !c.name.starts_with("__anonymous@") && offset >= start && offset <= c.end_offset
         })
         .or_else(|| {
             local_classes

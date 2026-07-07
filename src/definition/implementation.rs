@@ -677,7 +677,7 @@ impl Backend {
         let index_entries: Vec<(String, String)> = {
             let idx = self.fqn_uri_index.read();
             idx.iter()
-                .map(|(fqn, uri)| (fqn.clone(), uri.clone()))
+                .map(|(fqn, uri)| (fqn.to_owned(), uri.clone()))
                 .collect()
         };
 
@@ -760,7 +760,7 @@ impl Backend {
         // Parsing is lazy and cached in uri_classes_index, so subsequent lookups
         // hit Phase 1.
         let stub_idx = self.stub_index.read();
-        for (&stub_name, &stub_source) in &*stub_idx {
+        for (stub_name, &stub_source) in stub_idx.iter() {
             if seen_fqns.contains(stub_name) {
                 continue;
             }
@@ -1102,8 +1102,8 @@ impl Backend {
         // Look for an entry whose short name matches.
         for fqn in idx.keys() {
             let short = short_name(fqn);
-            if short == target_short {
-                return Some(fqn.clone());
+            if short.eq_ignore_ascii_case(target_short) {
+                return Some(fqn.to_owned());
             }
         }
         None

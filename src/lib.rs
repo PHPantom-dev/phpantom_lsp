@@ -86,7 +86,9 @@ use std::sync::atomic::AtomicU64;
 
 use parking_lot::{Mutex, RwLock};
 use tower_lsp::Client;
-use tower_lsp::lsp_types::CompletionItem;
+use tower_lsp::lsp_types::{CompletionItem, FileChangeType};
+
+use ci_map::{CiMap, CiSet};
 
 /// A single parse error entry: `(message, start_byte_offset, end_byte_offset)`.
 ///
@@ -96,9 +98,26 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
+/// Maximum number of LSP requests the tower-lsp transport processes
+/// concurrently.
+///
+/// tower-lsp defaults to 4, which is far too low for real editors: they fire a
+/// large request barrage on every keystroke (completion, a resolve per visible
+/// item, diagnostics, code lens, semantic tokens, …). With a limit of 4, that
+/// barrage fills tower-lsp's internal task queue, which blocks the message-read
+/// loop so it can no longer even receive `$/cancelRequest` — the server stops
+/// responding to everything until the backlog drains. Raising the limit lets
+/// the barrage (and the cancellations that supersede stale requests) flow, so
+/// cheap requests stay instant while typing. Heavy handlers run on the blocking
+/// thread pool, so real CPU parallelism is bounded there; this only governs how
+/// many requests may be in flight.
+pub const LSP_CONCURRENCY: usize = 128;
+
 pub mod analyse;
 pub mod atom;
 pub mod blade;
+pub(crate) mod call_args;
+pub mod ci_map;
 pub mod classmap_scanner;
 mod code_actions;
 mod code_lens;
@@ -130,6 +149,7 @@ mod rename;
 mod resolution;
 pub(crate) mod scope_collector;
 mod selection_range;
+pub mod self_update;
 mod semantic_tokens;
 mod server;
 mod signature_help;
@@ -183,7 +203,6 @@ pub use virtual_members::resolve_class_fully;
 ///   `collect_deprecated_diagnostics`, `collect_unused_import_diagnostics`,
 ///   `collect_unknown_class_diagnostics`,
 ///   `collect_unknown_member_diagnostics` (includes unresolved-member-access logic)
-/// - `highlight` — `handle_document_highlight` (same-file symbol occurrence highlighting)
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -220,6 +239,9 @@ pub struct Backend {
     /// handler also verifies that the captured text is still current before
     /// updating shared maps.
     pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Coalescing state for expensive whole-file requests. See
+    /// [`WholeFileCoalesce`] for why this exists.
+    pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,
     pub(crate) client: Option<Client>,
     /// Whether to update ASTs synchronously.  Used for testing.
     pub(crate) sync_ast_updates: bool,
@@ -252,7 +274,9 @@ pub struct Backend {
     /// Populated from files listed in Composer's `autoload_files.php` at init
     /// time, and also from any opened/changed files that contain standalone
     /// function declarations.
-    pub(crate) global_functions: Arc<RwLock<HashMap<String, (String, FunctionInfo)>>>,
+    /// Function names are case-insensitive in PHP, so the map folds
+    /// keys to lowercase while preserving the declared spelling.
+    pub(crate) global_functions: Arc<RwLock<CiMap<(String, FunctionInfo)>>>,
     /// Global constants defined via `define('NAME', value)` calls or
     /// top-level `const NAME = value;` statements.
     ///
@@ -274,7 +298,7 @@ pub struct Backend {
     /// defines them so that [`find_or_load_function`] can lazily call
     /// `update_ast` on first access instead of eagerly parsing every
     /// file at startup.
-    pub(crate) autoload_function_index: Arc<RwLock<HashMap<String, PathBuf>>>,
+    pub(crate) autoload_function_index: Arc<RwLock<CiMap<PathBuf>>>,
     /// Autoload constant index: constant name → file path on disk.
     ///
     /// Populated alongside `autoload_function_index` by the
@@ -314,7 +338,7 @@ pub struct Backend {
     /// - The workspace full-scan for non-Composer projects.
     /// - Entries from Composer's `autoload_classmap.php` (merged during
     ///   server initialization).
-    pub(crate) fqn_uri_index: Arc<RwLock<HashMap<String, String>>>,
+    pub(crate) fqn_uri_index: Arc<RwLock<CiMap<String>>>,
     /// Secondary index mapping fully-qualified class names directly to
     /// their parsed `ClassInfo`.
     ///
@@ -322,7 +346,7 @@ pub struct Backend {
     /// O(1) hash lookup instead of scanning all files in `uri_classes_index`.
     /// Maintained alongside `fqn_uri_index` in `update_ast_inner` and
     /// `parse_and_cache_content_versioned`.
-    pub(crate) fqn_class_index: Arc<RwLock<HashMap<String, Arc<ClassInfo>>>>,
+    pub(crate) fqn_class_index: Arc<RwLock<CiMap<Arc<ClassInfo>>>>,
     /// Negative-result cache for [`find_or_load_class`].
     ///
     /// Stores fully-qualified class names that have been looked up and
@@ -335,7 +359,7 @@ pub struct Backend {
     /// `update_ast_inner` and `parse_and_cache_content_versioned`) so
     /// that a class which becomes available after lazy loading is not
     /// permanently suppressed.
-    pub(crate) class_not_found_cache: Arc<RwLock<HashSet<String>>>,
+    pub(crate) class_not_found_cache: Arc<RwLock<CiSet>>,
     /// Parsed phar archives keyed by the phar file's absolute path.
     ///
     /// Populated during Composer autoload scanning when a bootstrap file
@@ -370,7 +394,7 @@ pub struct Backend {
     /// Consulted by `find_or_load_class` as a final fallback after the
     /// `uri_classes_index` and PSR-4 resolution.  Stub files are parsed lazily on
     /// first access and cached in `uri_classes_index` under `phpantom-stub://` URIs.
-    pub(crate) stub_index: RwLock<HashMap<&'static str, &'static str>>,
+    pub(crate) stub_index: RwLock<CiMap<&'static str>>,
     /// Cache of fully-resolved classes (inheritance + virtual members).
     ///
     /// Keyed by fully-qualified class name.  Populated lazily by
@@ -410,7 +434,7 @@ pub struct Backend {
     /// Filtered at startup via [`set_php_version`](Self::set_php_version) to
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted to resolve return types of built-in function calls.
-    pub(crate) stub_function_index: RwLock<HashMap<&'static str, &'static str>>,
+    pub(crate) stub_function_index: RwLock<CiMap<&'static str>>,
     /// Embedded PHP stubs for built-in constants (e.g. `PHP_EOL`,
     /// `SORT_ASC`, …).  Maps constant name → raw PHP source code.
     ///
@@ -474,7 +498,10 @@ pub struct Backend {
     ///
     /// Wrapped in `Arc` so the diagnostic worker task (spawned during
     /// `initialized`) shares the same slot as the main `Backend`.
-    pub(crate) diag_pending_uris: Arc<Mutex<Vec<String>>>,
+    ///
+    /// A `HashSet` deduplicates queued URIs in O(1); the worker drains
+    /// the whole set on each wake, so insertion order does not matter.
+    pub(crate) diag_pending_uris: Arc<Mutex<HashSet<String>>>,
     /// Last-published slow diagnostics (unknown classes, unknown members, etc.)
     /// per file URI.  Used by the two-phase diagnostic publisher: the fast
     /// phase merges fresh fast diagnostics with the previous slow diagnostics
@@ -642,6 +669,70 @@ pub struct Backend {
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
 }
 
+/// Request-coalescing state for expensive whole-file requests (semantic
+/// tokens, code lens, document symbols, folding, links).
+///
+/// Editors re-issue these on every keystroke and cancel the superseded ones,
+/// but a `spawn_blocking` computation cannot be aborted once it starts, so a
+/// fast typist piles up many full-file scans (hundreds of ms each) that all
+/// run to completion and saturate every CPU core, starving the cheap
+/// interactive requests (completion, hover) until the user gives up waiting.
+///
+/// This coalesces by `(kind, uri)`: a global sequence stamps each request,
+/// a per-key async lock serialises computation so at most one runs per kind
+/// per file, and any request that finds itself no longer the latest when it
+/// acquires the lock short-circuits to the previous result instead of redoing
+/// the scan. A burst of N requests therefore performs at most two scans (the
+/// one already running plus the newest) rather than N.
+#[derive(Default)]
+pub(crate) struct WholeFileCoalesce {
+    /// Monotonic request counter shared across all keys.
+    seq: AtomicU64,
+    /// Latest request sequence seen per `"{kind}\0{uri}"` key.
+    latest: Mutex<HashMap<String, u64>>,
+    /// Per-key serialisation lock (async, held across the blocking compute).
+    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Last successfully computed result per key, returned to superseded
+    /// requests so the editor never briefly sees an empty result.
+    last: Mutex<HashMap<String, Arc<dyn std::any::Any + Send + Sync>>>,
+}
+
+impl WholeFileCoalesce {
+    /// Get (or create) the per-key async serialisation lock. Held across the
+    /// blocking compute so at most one computation per key runs at a time.
+    pub(crate) fn key_lock(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.locks.lock();
+        Arc::clone(
+            locks
+                .entry(key.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    }
+
+    /// Stamp a request with the next sequence number and record it as the
+    /// latest for `key`. Returns the stamped sequence.
+    pub(crate) fn stamp(&self, key: &str) -> u64 {
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.latest.lock().insert(key.to_string(), seq);
+        seq
+    }
+
+    /// Whether `seq` is still the latest request stamped for `key`.
+    pub(crate) fn is_latest(&self, key: &str, seq: u64) -> bool {
+        self.latest.lock().get(key).copied() == Some(seq)
+    }
+
+    /// Read the cached last result for `key`, if any.
+    pub(crate) fn last_result(&self, key: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.last.lock().get(key).cloned()
+    }
+
+    /// Store the last computed result for `key`.
+    pub(crate) fn store_result(&self, key: &str, value: Arc<dyn std::any::Any + Send + Sync>) {
+        self.last.lock().insert(key.to_string(), value);
+    }
+}
+
 impl Backend {
     /// Shared defaults for all Backend constructors.
     ///
@@ -662,6 +753,7 @@ impl Backend {
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
+            whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
@@ -670,19 +762,19 @@ impl Backend {
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
-            global_functions: Arc::new(RwLock::new(HashMap::new())),
+            global_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
-            autoload_function_index: Arc::new(RwLock::new(HashMap::new())),
+            autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
-            fqn_uri_index: Arc::new(RwLock::new(HashMap::new())),
-            fqn_class_index: Arc::new(RwLock::new(HashMap::new())),
-            class_not_found_cache: Arc::new(RwLock::new(HashSet::new())),
+            fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
+            fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
+            class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(Mutex::new(HashSet::new())),
-            stub_index: RwLock::new(stubs::build_stub_class_index()),
-            stub_function_index: RwLock::new(stubs::build_stub_function_index()),
+            stub_index: RwLock::new(CiMap::from(stubs::build_stub_class_index())),
+            stub_function_index: RwLock::new(CiMap::from(stubs::build_stub_function_index())),
             stub_constant_index: RwLock::new(stubs::build_stub_constant_index()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -691,7 +783,7 @@ impl Backend {
             php_version: Mutex::new(types::PhpVersion::default()),
             diag_version: Arc::new(AtomicU64::new(0)),
             diag_notify: Arc::new(tokio::sync::Notify::new()),
-            diag_pending_uris: Arc::new(Mutex::new(Vec::new())),
+            diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
             diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
             phpstan_notify: Arc::new(tokio::sync::Notify::new()),
@@ -743,6 +835,7 @@ impl Backend {
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
+            whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
@@ -751,19 +844,19 @@ impl Backend {
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
-            global_functions: Arc::new(RwLock::new(HashMap::new())),
+            global_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
-            autoload_function_index: Arc::new(RwLock::new(HashMap::new())),
+            autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
-            fqn_uri_index: Arc::new(RwLock::new(HashMap::new())),
-            fqn_class_index: Arc::new(RwLock::new(HashMap::new())),
-            class_not_found_cache: Arc::new(RwLock::new(HashSet::new())),
+            fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
+            fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
+            class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(Mutex::new(HashSet::new())),
-            stub_index: RwLock::new(HashMap::new()),
-            stub_function_index: RwLock::new(HashMap::new()),
+            stub_index: RwLock::new(CiMap::new()),
+            stub_function_index: RwLock::new(CiMap::new()),
             stub_constant_index: RwLock::new(HashMap::new()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -772,7 +865,7 @@ impl Backend {
             php_version: Mutex::new(types::PhpVersion::default()),
             diag_version: Arc::new(AtomicU64::new(0)),
             diag_notify: Arc::new(tokio::sync::Notify::new()),
-            diag_pending_uris: Arc::new(Mutex::new(Vec::new())),
+            diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
             diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
             phpstan_notify: Arc::new(tokio::sync::Notify::new()),
@@ -857,7 +950,7 @@ impl Backend {
     pub fn new_test_with_stubs(stub_index: HashMap<&'static str, &'static str>) -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
-            stub_index: RwLock::new(stub_index),
+            stub_index: RwLock::new(CiMap::from(stub_index)),
             ..Self::test_defaults()
         };
         backend.set_php_version(backend.php_version());
@@ -876,8 +969,8 @@ impl Backend {
     ) -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
-            stub_index: RwLock::new(stub_index),
-            stub_function_index: RwLock::new(stub_function_index),
+            stub_index: RwLock::new(CiMap::from(stub_index)),
+            stub_function_index: RwLock::new(CiMap::from(stub_function_index)),
             stub_constant_index: RwLock::new(stub_constant_index),
             ..Self::test_defaults()
         };
@@ -909,7 +1002,7 @@ impl Backend {
 
     /// Borrow the global functions mutex (used by integration tests to
     /// inject user-defined functions or inspect the cache).
-    pub fn global_functions(&self) -> &Arc<RwLock<HashMap<String, (String, FunctionInfo)>>> {
+    pub fn global_functions(&self) -> &Arc<RwLock<CiMap<(String, FunctionInfo)>>> {
         &self.global_functions
     }
 
@@ -921,13 +1014,13 @@ impl Backend {
 
     /// Borrow the class index mutex (used by integration tests to
     /// populate discovered class entries).
-    pub fn fqn_uri_index(&self) -> &Arc<RwLock<HashMap<String, String>>> {
+    pub fn fqn_uri_index(&self) -> &Arc<RwLock<CiMap<String>>> {
         &self.fqn_uri_index
     }
 
     /// Borrow the FQN → ClassInfo index mutex (used by integration tests
     /// to populate class metadata for context-aware completion filtering).
-    pub fn fqn_class_index(&self) -> &Arc<RwLock<HashMap<String, Arc<ClassInfo>>>> {
+    pub fn fqn_class_index(&self) -> &Arc<RwLock<CiMap<Arc<ClassInfo>>>> {
         &self.fqn_class_index
     }
 
@@ -935,6 +1028,12 @@ impl Backend {
     /// configure autoload mappings).
     pub fn psr4_mappings(&self) -> &Arc<RwLock<Vec<composer::Psr4Mapping>>> {
         &self.psr4_mappings
+    }
+
+    /// Borrow the set of parsed file URIs (used by integration tests to
+    /// mark a workspace file as already loaded, mirroring a lazy parse).
+    pub fn parsed_uris(&self) -> &Arc<RwLock<HashSet<String>>> {
+        &self.parsed_uris
     }
 
     /// Read the stub constant index (used by integration tests to
@@ -955,7 +1054,7 @@ impl Backend {
 
     /// Borrow the autoload function index (used by integration tests to
     /// populate discovered function entries for non-Composer projects).
-    pub fn autoload_function_index(&self) -> &Arc<RwLock<HashMap<String, PathBuf>>> {
+    pub fn autoload_function_index(&self) -> &Arc<RwLock<CiMap<PathBuf>>> {
         &self.autoload_function_index
     }
 
@@ -1085,6 +1184,127 @@ impl Backend {
         gti.retain(|_, v| !v.is_empty());
     }
 
+    /// Re-scan a batch of files from disk, refreshing their discovery-level
+    /// index entries (FQN→URI, autoload functions/constants, globals).
+    ///
+    /// Used when files are created, changed, or deleted outside the editor
+    /// (a git checkout, a `composer install`, an editor session resuming
+    /// after idle).  Every index that references a changed file is purged
+    /// first, or stale symbols linger: completion keeps suggesting a class
+    /// whose file was removed, go-to-definition jumps into a deleted file,
+    /// and so on.  Purging only some indexes (e.g. `fqn_uri_index` but not
+    /// `method_store`) leaves the symptom alive in whichever feature reads
+    /// the index that was missed.
+    ///
+    /// The purge of each discovery index is done once for the whole batch
+    /// rather than once per file.  Each of those maps must be scanned in
+    /// full to drop a file's entries, so handling a flood of watched-file
+    /// events one at a time would be O(files × index size); a branch switch
+    /// can emit thousands of events at once.  Batching makes the purge
+    /// O(index size) regardless of how many files changed.
+    ///
+    /// A given FQN→URI entry may have been stored under either of two URI
+    /// conventions depending on how it was created (the classmap scan
+    /// stores [`crate::util::path_to_uri`] of the discovered path, while
+    /// `update_ast` stores the editor's URI string), so values are matched
+    /// against both spellings.  The full
+    /// [`ClassInfo`](crate::types::ClassInfo) is re-parsed lazily on next
+    /// access; this only restores the lightweight discovery indexes.
+    ///
+    /// `changes` is `(editor URI string, file path, change type)`.
+    pub(crate) fn reindex_files_batch(&self, changes: &[(String, PathBuf, FileChangeType)]) {
+        if changes.is_empty() {
+            return;
+        }
+
+        // Index values are stored under either the editor URI or the
+        // canonical `file://` URI, so match both variants.
+        let mut uri_set: HashSet<String> = HashSet::new();
+        let mut path_set: HashSet<PathBuf> = HashSet::new();
+        for (uri_str, path, _) in changes {
+            uri_set.insert(uri_str.clone());
+            uri_set.insert(crate::util::path_to_uri(path));
+            path_set.insert(path.clone());
+        }
+
+        // FQN → URI: drop every entry sourced from a changed file in one
+        // pass, collecting the dropped FQNs so the dependent caches can be
+        // evicted without re-scanning.
+        let mut dropped_fqns: Vec<String> = Vec::new();
+        {
+            let mut idx = self.fqn_uri_index.write();
+            idx.retain(|fqn, v| {
+                if uri_set.contains(v.as_str()) {
+                    dropped_fqns.push(fqn.to_owned());
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        {
+            let mut fci = self.fqn_class_index.write();
+            for fqn in &dropped_fqns {
+                fci.remove(fqn);
+            }
+        }
+        self.evict_methods_for_fqns(&dropped_fqns);
+        self.evict_gti_for_fqns(&dropped_fqns);
+
+        self.autoload_function_index
+            .write()
+            .retain(|_, v| !path_set.contains(v));
+        self.autoload_constant_index
+            .write()
+            .retain(|_, v| !path_set.contains(v));
+        self.global_functions
+            .write()
+            .retain(|_, (u, _)| !uri_set.contains(u.as_str()));
+        self.global_defines
+            .write()
+            .retain(|_, d| !uri_set.contains(d.file_uri.as_str()));
+
+        // Per-URI keyed removals are cheap (no full scan).
+        for (uri_str, _, _) in changes {
+            self.clear_file_maps(uri_str);
+            self.uri_classes_index.write().remove(uri_str);
+            self.parsed_uris.write().remove(uri_str);
+        }
+
+        // Re-add current symbols for created/changed files.  Deleted files
+        // keep their entries purged.
+        for (uri_str, path, change_type) in changes {
+            if !matches!(
+                *change_type,
+                FileChangeType::CREATED | FileChangeType::CHANGED
+            ) {
+                continue;
+            }
+
+            let classes = crate::classmap_scanner::scan_file(path);
+            {
+                let mut idx = self.fqn_uri_index.write();
+                for fqn in classes {
+                    idx.insert(fqn, uri_str.clone());
+                }
+            }
+
+            let scan = crate::classmap_scanner::scan_file_full(path);
+            {
+                let mut fi = self.autoload_function_index.write();
+                for fqn in scan.functions {
+                    fi.or_insert_with(fqn, || path.clone());
+                }
+            }
+            {
+                let mut ci = self.autoload_constant_index.write();
+                for name in scan.constants {
+                    ci.entry(name).or_insert_with(|| path.clone());
+                }
+            }
+        }
+    }
+
     /// Create a shallow clone of this `Backend` that shares every
     /// `Arc`-wrapped field with the original.
     ///
@@ -1110,6 +1330,7 @@ impl Backend {
             symbol_maps: Arc::clone(&self.symbol_maps),
             parse_errors: Arc::clone(&self.parse_errors),
             did_change_parse_locks: Arc::clone(&self.did_change_parse_locks),
+            whole_file_coalesce: Arc::clone(&self.whole_file_coalesce),
             // RwLock fields are shared by Arc::clone — the diagnostic
             // worker reads them concurrently with the main Backend.
             client: self.client.clone(),

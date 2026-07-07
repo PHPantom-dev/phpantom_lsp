@@ -6,6 +6,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::util::{offset_to_position, push_unique_location};
 
@@ -58,8 +59,8 @@ pub(crate) fn collect_laravel_config_declarations(
     prefix: &str,
 ) -> Vec<ConfigKeyMatch> {
     let arena = Bump::new();
-    let file_id = FileId::new("input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();
 
     let mut returned_var_name: Option<String> = None;
@@ -70,7 +71,7 @@ pub(crate) fn collect_laravel_config_declarations(
             if let Some(val) = ret.value {
                 match val {
                     Expression::Variable(Variable::Direct(dv)) => {
-                        returned_var_name = Some(dv.name.to_string());
+                        returned_var_name = Some(bytes_to_str(dv.name).to_string());
                     }
                     _ => {
                         return_expr = Some(val);
@@ -88,7 +89,7 @@ pub(crate) fn collect_laravel_config_declarations(
             if let Statement::Expression(expr_stmt) = stmt
                 && let Expression::Assignment(assign) = expr_stmt.expression
                 && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-                && dv.name == var_name
+                && dv.name == var_name.as_bytes()
             {
                 collect_expr_declarations(assign.rhs, content, prefix, &[], &mut out);
             }
@@ -119,7 +120,7 @@ fn collect_expr_declarations(
         }
         Expression::Call(Call::Function(fc)) => {
             if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case("array_merge")
+                && ident.value().eq_ignore_ascii_case(b"array_merge")
             {
                 for arg in fc.argument_list.arguments.iter() {
                     let arg_expr = match arg {

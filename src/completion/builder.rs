@@ -215,10 +215,25 @@ const MAGIC_METHODS: &[&str] = &[
     "__debugInfo",
 ];
 
-/// Check whether a method name is a PHP magic method that should be
-/// excluded from completion results.
+/// Check whether a method name is a PHP magic method.
+///
+/// Magic methods that are actually implemented on a class are offered in
+/// completion, but sorted below the regular methods so they never appear at
+/// the top of the list (see [`magic_sort_tier`]).
 fn is_magic_method(name: &str) -> bool {
     MAGIC_METHODS.iter().any(|&m| m.eq_ignore_ascii_case(name))
+}
+
+/// Sub-tier within the method group used for ordering.
+///
+/// PHP magic methods all start with `__`, and `_` sorts before letters in
+/// ASCII, so a naive alphabetical sort would push `__invoke`, `__toString`,
+/// etc. to the very top of the method list. This tier sorts them after the
+/// regular methods instead, keeping the common members at the top.
+fn magic_sort_tier(item: &CompletionItem) -> u8 {
+    let is_magic = item.kind == Some(CompletionItemKind::METHOD)
+        && item.filter_text.as_deref().is_some_and(is_magic_method);
+    if is_magic { 1 } else { 0 }
 }
 
 /// Format a parameter list into a display string.
@@ -268,7 +283,8 @@ pub(crate) fn build_method_label(method: &MethodInfo) -> String {
 /// Build completion items for a resolved class, filtered by access kind
 /// and visibility scope.
 ///
-/// - `Arrow` access: returns only non-static methods and properties.
+/// - `Arrow` access: returns both instance and static methods, but only
+///   non-static properties.
 /// - `DoubleColon` access: returns only static methods, static properties, and constants.
 /// - `ParentDoubleColon` access: returns both static and non-static methods,
 ///   static properties, and constants — but excludes private members.
@@ -301,14 +317,21 @@ pub(crate) fn build_completion_items(
 
     // Methods — filtered by static / instance, excluding magic methods
     for method in &target_class.methods {
-        // `__construct` is meaningful to call explicitly via `::` when
+        // `__construct` is only meaningful to call explicitly via `::` when
         // inside the same class or a subclass (e.g.
-        // `parent::__construct(...)`, `self::__construct()`).
-        // Outside of that relationship, magic methods are suppressed.
+        // `parent::__construct(...)`, `self::__construct()`). Outside of that
+        // relationship it is suppressed entirely.
+        //
+        // Other magic methods that are actually implemented on the class
+        // (`__invoke`, `__toString`, `__call`, …) are offered too, so explicit
+        // calls like `$x->__invoke()` autocomplete and support go-to-definition.
+        // They fall through to the normal static/instance and visibility
+        // filters below. The completion handler only surfaces them when the
+        // user is explicitly typing a `_`-prefixed member name, so they do not
+        // clutter the default member list.
         let is_constructor = method.name.eq_ignore_ascii_case("__construct");
-        if is_magic_method(&method.name) {
-            let allow = is_constructor
-                && is_self_or_ancestor
+        if is_constructor {
+            let allow = is_self_or_ancestor
                 && matches!(
                     access_kind,
                     AccessKind::DoubleColon | AccessKind::ParentDoubleColon
@@ -330,7 +353,9 @@ pub(crate) fn build_completion_items(
         }
 
         let include = match access_kind {
-            AccessKind::Arrow => !method.is_static,
+            // PHP allows calling static methods through an instance, so
+            // surface them in `->` completion as well.
+            AccessKind::Arrow => true,
             // External `ClassName::` shows only static methods, but
             // `__construct` is an exception — it's an instance method
             // that is routinely called via `ClassName::__construct()`
@@ -496,18 +521,21 @@ pub(crate) fn build_completion_items(
         });
     }
 
-    // Sort by member kind (constants → properties → methods) then
-    // alphabetically within each kind group.
+    // Sort by member kind (constants → properties → methods), then with
+    // regular methods before magic methods, then alphabetically within each
+    // group.
     items.sort_by(|a, b| {
         let ka = kind_sort_tier(a.kind);
         let kb = kind_sort_tier(b.kind);
-        ka.cmp(&kb).then_with(|| {
-            a.filter_text
-                .as_deref()
-                .unwrap_or(&a.label)
-                .to_lowercase()
-                .cmp(&b.filter_text.as_deref().unwrap_or(&b.label).to_lowercase())
-        })
+        ka.cmp(&kb)
+            .then_with(|| magic_sort_tier(a).cmp(&magic_sort_tier(b)))
+            .then_with(|| {
+                a.filter_text
+                    .as_deref()
+                    .unwrap_or(&a.label)
+                    .to_lowercase()
+                    .cmp(&b.filter_text.as_deref().unwrap_or(&b.label).to_lowercase())
+            })
     });
 
     for (i, item) in items.iter_mut().enumerate() {
@@ -785,9 +813,10 @@ pub(crate) fn merge_union_completion_items(
         return items;
     }
 
-    let sort_key = |item: &CompletionItem| -> (u8, String) {
+    let sort_key = |item: &CompletionItem| -> (u8, u8, String) {
         (
             kind_sort_tier(item.kind),
+            magic_sort_tier(item),
             item.filter_text
                 .as_deref()
                 .unwrap_or(&item.label)

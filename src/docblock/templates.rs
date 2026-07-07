@@ -277,7 +277,7 @@ pub fn extract_generics_tag(docblock: &str, tag: &str) -> Vec<(String, Vec<PhpTy
 
 /// Recursively walk a [`PhpType`] tree and collect `(template_name, param_name)` pairs
 /// for every template parameter reference found anywhere in the type.
-fn collect_template_bindings(
+pub(crate) fn collect_template_bindings(
     ty: &PhpType,
     template_params: &[String],
     param_name: &str,

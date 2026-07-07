@@ -275,6 +275,24 @@ function test(): void {
         );
     }
 
+    /// PHP function names are case-insensitive (B25): `STRLEN()` calls
+    /// the built-in `strlen` and must not be flagged.
+    #[test]
+    fn no_diagnostic_for_differently_cased_builtin_function() {
+        let php = r#"<?php
+function test(): void {
+    $len = STRLEN("hello");
+    $arr = Array_Map(fn($x) => $x, [1,2,3]);
+}
+"#;
+        let diags = collect_with_stubs(php);
+        assert!(
+            diags.is_empty(),
+            "No diagnostics expected for differently-cased built-ins, got: {:?}",
+            diags,
+        );
+    }
+
     #[test]
     fn no_diagnostic_for_language_constructs() {
         let php = r#"<?php

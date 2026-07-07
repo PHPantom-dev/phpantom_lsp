@@ -109,28 +109,50 @@ fn is_transitive_iterable(
     iface: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    // Check direct interfaces.
+    let mut visited = std::collections::HashSet::new();
+    is_transitive_iterable_inner(iface, class_loader, &mut visited)
+}
+
+fn is_transitive_iterable_inner(
+    iface: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visited: &mut std::collections::HashSet<String>,
+) -> bool {
+    // Recurse through a parent name, guarding against cyclic hierarchies.
+    let recurse = |name: &str, visited: &mut std::collections::HashSet<String>| -> bool {
+        if !visited.insert(name.to_string()) {
+            return false;
+        }
+        class_loader(name)
+            .is_some_and(|parent| is_transitive_iterable_inner(&parent, class_loader, visited))
+    };
+
+    // Check direct interfaces, then recurse into any that are not
+    // themselves a known iterable so a two-hop ancestor is still found.
     for parent in &iface.interfaces {
-        let s = short_name(parent);
-        if ITERABLE_IFACE_NAMES.contains(&s) {
+        if ITERABLE_IFACE_NAMES.contains(&short_name(parent)) {
+            return true;
+        }
+        if recurse(parent, visited) {
             return true;
         }
     }
     // Check extends_generics for the interface-extends-interface pattern.
     for (name, _) in &iface.extends_generics {
-        let s = short_name(name);
-        if ITERABLE_IFACE_NAMES.contains(&s) {
+        if ITERABLE_IFACE_NAMES.contains(&short_name(name)) {
+            return true;
+        }
+        if recurse(name, visited) {
             return true;
         }
     }
     // Check parent class (interfaces use `parent_class` for extends).
     if let Some(ref parent_name) = iface.parent_class {
-        let s = short_name(parent_name);
-        if ITERABLE_IFACE_NAMES.contains(&s) {
+        if ITERABLE_IFACE_NAMES.contains(&short_name(parent_name)) {
             return true;
         }
-        if let Some(parent) = class_loader(parent_name) {
-            return is_transitive_iterable(&parent, class_loader);
+        if recurse(parent_name, visited) {
+            return true;
         }
     }
     false

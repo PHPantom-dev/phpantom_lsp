@@ -458,6 +458,35 @@ function test(): void {
     assert!(diags.is_empty(), "Got: {:?}", diags);
 }
 
+#[test]
+fn var_annotation_does_not_leak_into_other_function() {
+    // A `/** @var ... $name */` in one function must not suppress an
+    // undefined `$name` in a different function in the same file.
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function annotated(): void {
+    /** @var string $name */
+    echo $name;
+}
+
+function other(): void {
+    echo $name;
+}
+"#,
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("$name")),
+        "Expected undefined $name in other(), got: {:?}",
+        diags
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "Only other()'s $name should be flagged, got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Closures
 // ═══════════════════════════════════════════════════════════════════════════

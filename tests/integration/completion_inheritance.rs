@@ -980,7 +980,7 @@ async fn test_completion_variable_of_child_type_includes_inherited() {
 }
 
 #[tokio::test]
-async fn test_completion_magic_methods_not_inherited() {
+async fn test_completion_magic_methods_sorted_after_regular() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///magic_inherit.php").unwrap();
@@ -1032,19 +1032,32 @@ async fn test_completion_magic_methods_not_inherited() {
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
-            // Magic methods are filtered out by build_completion_items (existing behavior)
+            // `__construct` is never offered via `->` (arrow) access.
             assert!(
                 !method_names.contains(&"__construct"),
-                "Magic methods should be filtered"
+                "__construct should not appear via -> access"
             );
+            // Other implemented magic methods are offered, but sorted after
+            // the regular methods so they never appear at the top.
             assert!(
-                !method_names.contains(&"__toString"),
-                "Magic methods should be filtered"
+                method_names.contains(&"__toString"),
+                "Implemented __toString should be offered, got: {method_names:?}"
             );
-            // Non-magic inherited method should appear
             assert!(
                 method_names.contains(&"realMethod"),
                 "Should include inherited 'realMethod'"
+            );
+            let regular_idx = items
+                .iter()
+                .position(|i| i.filter_text.as_deref() == Some("realMethod"))
+                .unwrap();
+            let magic_idx = items
+                .iter()
+                .position(|i| i.filter_text.as_deref() == Some("__toString"))
+                .unwrap();
+            assert!(
+                items[regular_idx].sort_text < items[magic_idx].sort_text,
+                "Regular method should sort before the magic method"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

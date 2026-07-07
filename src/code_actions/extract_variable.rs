@@ -122,10 +122,9 @@ fn is_valid_expression(selected_text: &str) -> bool {
     // Parse `<?php $__x = <body>;` — if the parser produces errors,
     // the selection is not a valid expression.
     let wrapper = format!("<?php $__x = {};", body);
-    let arena = bumpalo::Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_check.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, &wrapper);
-    program.errors.is_empty()
+    with_parsed_program(&wrapper, "extract_variable_check", |program, _| {
+        program.errors.is_empty()
+    })
 }
 
 /// Check whether `text` contains a semicolon outside of string literals.

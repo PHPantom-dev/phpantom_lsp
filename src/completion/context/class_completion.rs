@@ -1593,7 +1593,12 @@ impl Backend {
         // calling classify/is_likely_namespace_not_class (which
         // re-acquire the same lock — parking_lot RwLock is not
         // reentrant).
-        let fqn_keys: Vec<String> = self.fqn_uri_index.read().keys().cloned().collect();
+        let fqn_keys: Vec<String> = self
+            .fqn_uri_index
+            .read()
+            .keys()
+            .map(str::to_owned)
+            .collect();
         for fqn in &fqn_keys {
             let sn = short_name(fqn);
             if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix, expanded_prefix_lower) {
@@ -1644,7 +1649,7 @@ impl Backend {
 
         // ── Pass 2: stub_index (built-in PHP classes) ───────────────
         // Collect keys first to avoid deadlock (same reason as pass 1).
-        let stub_keys: Vec<&'static str> = self.stub_index.read().keys().copied().collect();
+        let stub_keys: Vec<String> = self.stub_index.read().keys().map(str::to_owned).collect();
         for fqn in &stub_keys {
             let sn = short_name(fqn);
             if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix, expanded_prefix_lower) {

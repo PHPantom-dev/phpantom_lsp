@@ -568,7 +568,7 @@ fn shorten_php_type_direct(
 }
 
 /// Shorten a single named type string.
-fn shorten_single_type(
+pub(super) fn shorten_single_type(
     type_str: &str,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,

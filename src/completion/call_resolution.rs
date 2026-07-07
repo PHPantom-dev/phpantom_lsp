@@ -476,6 +476,7 @@ impl Backend {
                 let target = ResolvedCallableTarget {
                     parameters: result_method.parameters.clone(),
                     return_type: result_method.return_type.clone(),
+                    ..Default::default()
                 };
 
                 // Store positive result in the callable target cache.
@@ -499,6 +500,7 @@ impl Backend {
                 let target = ResolvedCallableTarget {
                     parameters: m.parameters.clone(),
                     return_type: m.return_type.clone(),
+                    ..Default::default()
                 };
 
                 // Store __call fallback in the callable target cache.
@@ -591,6 +593,7 @@ impl Backend {
         Some(ResolvedCallableTarget {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
+            ..Default::default()
         })
     }
 
@@ -599,6 +602,7 @@ impl Backend {
         ResolvedCallableTarget {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
+            ..Default::default()
         }
     }
 
@@ -640,6 +644,7 @@ impl Backend {
                 return ResolvedCallableTarget {
                     parameters,
                     return_type: func.return_type.clone(),
+                    ..Default::default()
                 };
             }
         }
@@ -674,10 +679,15 @@ impl Backend {
         let merged = crate::virtual_members::resolve_class_fully_cached(&ci, class_loader, cache);
         let ctor = match merged.get_method("__construct") {
             Some(c) => c.clone(),
+            // A class with no constructor (and none inherited) accepts any
+            // arguments without error: PHP silently ignores them. Mark the
+            // target so the argument-count diagnostic skips it, while
+            // signature help still shows the empty `()` signature.
             None => {
                 return Some(ResolvedCallableTarget {
                     parameters: vec![],
                     return_type: None,
+                    accepts_any_args: true,
                 });
             }
         };
@@ -695,6 +705,7 @@ impl Backend {
                 return Some(ResolvedCallableTarget {
                     parameters: result_ctor.parameters.clone(),
                     return_type: result_ctor.return_type.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -702,6 +713,7 @@ impl Backend {
         Some(ResolvedCallableTarget {
             parameters: ctor.parameters.clone(),
             return_type: ctor.return_type.clone(),
+            ..Default::default()
         })
     }
 

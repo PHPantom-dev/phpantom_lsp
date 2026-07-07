@@ -25,6 +25,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{AccessKind, ScopeMap};
@@ -90,7 +91,7 @@ fn find_assignment_in_statement(
                     _ => return None,
                 };
 
-                let var_name = var.name.to_string();
+                let var_name = bytes_to_str(var.name).to_string();
                 // Skip `$this`.
                 if var_name == "$this" {
                     return None;

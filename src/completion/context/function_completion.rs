@@ -195,12 +195,12 @@ impl Backend {
                 // Deduplicate on the map key (FQN for namespaced
                 // functions, bare name for global ones).  User-defined
                 // functions run first, so they shadow same-named stubs.
-                if !seen.insert(key.clone()) {
+                if !seen.insert(key.to_owned()) {
                     continue;
                 }
 
                 let is_namespaced = info.namespace.is_some();
-                let fqn = key.clone();
+                let fqn = key.to_owned();
                 let is_deprecated = info.deprecation_message.is_some();
 
                 let return_type = info
@@ -288,19 +288,15 @@ impl Backend {
                 if !fqn.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }
-                if !seen.insert(fqn.clone()) {
+                if !seen.insert(fqn.to_owned()) {
                     continue;
                 }
 
                 let is_namespaced = fqn.contains('\\');
-                let sn = if is_namespaced {
-                    short_name(fqn)
-                } else {
-                    fqn.as_str()
-                };
+                let sn = if is_namespaced { short_name(fqn) } else { fqn };
 
                 if for_use_import {
-                    items.push(build_use_import_item(fqn.clone(), fqn, "4", false, uri));
+                    items.push(build_use_import_item(fqn.to_owned(), fqn, "4", false, uri));
                 } else {
                     let has_conflict = is_namespaced
                         && use_block
@@ -327,7 +323,7 @@ impl Backend {
                             insert_text,
                             filter_text,
                             format!("4_{}", sn.to_lowercase()),
-                            fqn.clone(),
+                            fqn.to_owned(),
                             uri.to_string(),
                         )
                         .snippet()
@@ -340,7 +336,7 @@ impl Backend {
 
         // ── 3. Built-in PHP functions from stubs ────────────────────
         let stub_fn_idx = self.stub_function_index.read();
-        for &name in stub_fn_idx.keys() {
+        for name in stub_fn_idx.keys() {
             if !name.to_lowercase().contains(&prefix_lower) {
                 continue;
             }

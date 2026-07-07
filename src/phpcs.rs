@@ -41,7 +41,7 @@
 //! code action can offer `phpcbf` auto-fix.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
@@ -160,9 +160,6 @@ pub(crate) fn run_phpcs(
         .arg("--no-colors")
         .arg("-q")
         .arg(format!("--stdin-path={}", file_path.display()))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .current_dir(workspace_root);
 
     if let Some(ref standard) = config.standard {
@@ -172,19 +169,11 @@ pub(crate) fn run_phpcs(
     // The `-` argument tells PHPCS to read from stdin.
     cmd.arg("-");
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn PHPCS: {}", e))?;
-
-    // Write the buffer content to PHPCS's stdin, then close it.
-    if let Some(mut stdin) = child.stdin.take() {
-        // Use a separate scope so stdin is dropped (closed) before we wait.
-        std::io::Write::write_all(&mut stdin, content.as_bytes())
-            .map_err(|e| format!("Failed to write to PHPCS stdin: {}", e))?;
-    }
-
-    // Wait for the process with timeout.
-    let result = wait_with_timeout(&mut child, timeout, cancelled);
+    // The buffer content is fed to PHPCS's stdin by the shared helper,
+    // which drains stdout/stderr concurrently so a large JSON report
+    // cannot deadlock against a full pipe buffer.
+    let result =
+        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPCS", Some(content));
 
     match result {
         Ok(output) => {
@@ -358,79 +347,6 @@ fn paths_match(a: &str, b: &str) -> bool {
     // Check suffix match (one is a suffix of the other), requiring a
     // path separator boundary so that e.g. "AFoo.php" does not match "Foo.php".
     a_norm.ends_with(&format!("/{}", b_norm)) || b_norm.ends_with(&format!("/{}", a_norm))
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-/// Result of running an external command.
-struct CommandOutput {
-    /// Exit code (or -1 if the process was killed / no code available).
-    code: i32,
-    /// Captured stdout content.
-    stdout: String,
-    /// Captured stderr content.
-    stderr: String,
-}
-
-/// Wait for a spawned child process with a timeout.
-///
-/// Polls `try_wait` in a loop, checking the timeout and cancellation
-/// flag between iterations.  On timeout or cancellation, the child is
-/// killed and an error is returned.
-fn wait_with_timeout(
-    child: &mut std::process::Child,
-    timeout: Duration,
-    cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<CommandOutput, String> {
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = child
-                    .stdout
-                    .take()
-                    .and_then(|mut s| {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut s, &mut buf).ok()?;
-                        Some(buf)
-                    })
-                    .unwrap_or_default();
-
-                let stderr = child
-                    .stderr
-                    .take()
-                    .and_then(|mut s| {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut s, &mut buf).ok()?;
-                        Some(buf)
-                    })
-                    .unwrap_or_default();
-
-                return Ok(CommandOutput {
-                    code: status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                });
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("PHPCS timed out after {}ms", timeout.as_millis()));
-                }
-                if cancelled.load(std::sync::atomic::Ordering::Acquire) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("PHPCS cancelled (server shutting down)".to_string());
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                let _ = child.kill();
-                return Err(format!("Error waiting for PHPCS: {}", e));
-            }
-        }
-    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────

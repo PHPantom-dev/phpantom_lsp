@@ -213,8 +213,8 @@ mod tests {
         // assertions.  This is fine in tests — the memory is reclaimed
         // when the process exits.
         let arena = Box::leak(Box::new(Bump::new()));
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(arena, file_id, php);
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
         find_cursor_context(&program.statements, offset)
     }
 
@@ -263,7 +263,7 @@ mod tests {
             CursorContext::InClassLike {
                 member: MemberContext::Method(method, false),
                 ..
-            } => assert_eq!(method.name.value, "bar"),
+            } => assert_eq!(method.name.value, b"bar"),
             _ => panic!("should find method on signature"),
         }
     }
@@ -277,7 +277,7 @@ mod tests {
             CursorContext::InClassLike {
                 member: MemberContext::Method(method, true),
                 ..
-            } => assert_eq!(method.name.value, "bar"),
+            } => assert_eq!(method.name.value, b"bar"),
             _ => panic!("should find method with in_body=true"),
         }
     }

@@ -57,6 +57,7 @@ use tempfile::NamedTempFile;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
+use crate::atom::bytes_to_str;
 use crate::config::FormattingConfig;
 
 /// Default formatting timeout in milliseconds.
@@ -218,12 +219,12 @@ fn format_with_mago(
 
     let formatted = formatter
         .format_code(
-            Cow::Borrowed("phpantom-fmt"),
-            Cow::Owned(content.to_string()),
+            Cow::Borrowed(b"phpantom-fmt"),
+            Cow::Owned(content.as_bytes().to_vec()),
         )
         .map_err(|e| format!("Built-in formatter failed to parse PHP: {}", e))?;
 
-    Ok(formatted.to_string())
+    Ok(bytes_to_str(formatted).to_string())
 }
 
 /// Convert a project [`PhpVersion`](crate::types::PhpVersion) into the

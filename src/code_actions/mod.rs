@@ -73,10 +73,14 @@
 //! diagnostic from the cache and pushes updated diagnostics.
 
 mod change_visibility;
+mod convert_switch_to_match;
+mod convert_to_arrow_function;
+mod convert_to_closure;
 mod convert_to_instance_variable;
 pub(crate) mod cursor_context;
 mod extract_constant;
 mod extract_function;
+mod extract_interface;
 mod extract_variable;
 mod generate_constructor;
 mod generate_getter_setter;
@@ -172,6 +176,12 @@ impl Backend {
     ) -> Vec<CodeActionOrCommand> {
         let mut actions = Vec::new();
 
+        // Parse the file once and share the result across every collector
+        // below.  Each collector resolves cursor context by walking the
+        // AST via `with_parsed_program(content, …)`; without this guard
+        // they would each re-parse the same file from scratch.
+        let _parse_guard = crate::parser::with_parse_cache(content);
+
         // ── Import class ────────────────────────────────────────────────
         self.collect_import_class_actions(uri, content, params, &mut actions);
 
@@ -232,6 +242,16 @@ impl Backend {
         // ── Simplify with null coalescing / null-safe operator ──────────
         self.collect_simplify_null_actions(uri, content, params, &mut actions);
 
+        // ── Convert to arrow function / closure ─────────────────────────
+        self.collect_convert_to_arrow_function_actions(uri, content, params, &mut actions);
+        self.collect_convert_to_closure_actions(uri, content, params, &mut actions);
+
+        // ── Convert switch to match expression ──────────────────────────
+        self.collect_convert_switch_to_match_actions(uri, content, params, &mut actions);
+
+        // ── Extract interface ────────────────────────────────────────────
+        self.collect_extract_interface_actions(uri, content, params, &mut actions);
+
         actions
     }
 
@@ -260,6 +280,12 @@ impl Backend {
             Some(c) => c,
             None => return (action, None),
         };
+
+        // Parse the file once and share it across the resolve handler below.
+        // Resolving an extract action, for example, walks the AST several
+        // times (scope map, return analysis, parameter order, return type);
+        // without this guard each walk would re-parse the same file.
+        let _parse_guard = crate::parser::with_parse_cache(&content);
 
         let result = match data.action_kind.as_str() {
             // ── PHPStan quickfixes ──────────────────────────────────
@@ -326,6 +352,7 @@ impl Backend {
             // ── Import all missing classes ───────────────────────────────
             "source.importAllClasses" => self.resolve_import_all_classes(&data, &content),
             "refactor.extractFunction" => self.resolve_extract_function(&data, &content),
+            "refactor.extractInterface" => self.resolve_extract_interface(&data, &content),
             "refactor.inlineVariable" => self.resolve_inline_variable(&data, &content),
             "refactor.extractInstanceVariable" => {
                 self.resolve_convert_to_instance_variable(&data, &content)

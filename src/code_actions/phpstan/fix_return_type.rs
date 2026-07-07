@@ -45,7 +45,9 @@ use crate::completion::variable::resolution::resolve_variable_types;
 use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FunctionLoader, ResolvedType};
-use crate::util::{find_brace_match_line, find_semicolon_balanced, ranges_overlap};
+use crate::util::{
+    find_brace_match_line, find_semicolon_balanced, line_start_byte_offset, ranges_overlap,
+};
 
 // ── Return type inference result ────────────────────────────────────────────
 
@@ -528,7 +530,7 @@ pub(crate) fn infer_return_type(
 
             // Fall back to the variable/expression resolver.
             // Compute byte offset of the expression for resolution.
-            let line_start: usize = content.lines().take(line_idx).map(|l| l.len() + 1).sum();
+            let line_start = line_start_byte_offset(content, line_idx);
             let expr_offset_in_line = line.find("return ").unwrap_or(0) + "return ".len();
             let expr_offset = (line_start + expr_offset_in_line) as u32;
 

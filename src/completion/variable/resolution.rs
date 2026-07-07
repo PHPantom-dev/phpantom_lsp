@@ -13,7 +13,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
-use crate::atom::atom;
+use crate::atom::{atom, bytes_to_str, last_segment};
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{PhpType, ShapeEntry, is_keyword_type};
@@ -412,7 +412,7 @@ fn check_param_list(
     }
 
     for param in param_list.parameters.iter() {
-        let pname = param.variable.name.to_string();
+        let pname = bytes_to_str(param.variable.name);
         if pname != var_name {
             continue;
         }
@@ -425,7 +425,7 @@ fn check_param_list(
                 .or_else(|| {
                     // Try extracting from docblock text directly.
                     find_method_docblock_text(content, method_start_offset)
-                        .and_then(|doc| docblock::extract_param_raw_type(&doc, &pname))
+                        .and_then(|doc| docblock::extract_param_raw_type(&doc, pname))
                 });
 
         let effective =
@@ -468,7 +468,7 @@ fn find_catch_var_type_at_cursor(
             Statement::Try(try_stmt) => {
                 for catch in try_stmt.catch_clauses.iter() {
                     if let Some(ref var) = catch.variable
-                        && var.name == var_name
+                        && bytes_to_str(var.name) == var_name
                     {
                         let var_start = var.span.start.offset;
                         let var_end = var.span.end.offset;
@@ -1090,7 +1090,7 @@ fn resolve_variable_in_members<'b>(
                     let has_scope_attr = method.attribute_lists.iter().any(|al| {
                         al.attributes
                             .iter()
-                            .any(|a| a.name.last_segment() == "Scope")
+                            .any(|a| last_segment(a.name.value()) == b"Scope")
                     });
 
                     // Extract the enclosing method's @return type for
@@ -1116,7 +1116,7 @@ fn resolve_variable_in_members<'b>(
                         enclosing_return_type: enclosing_ret,
                         top_level_scope: ctx.top_level_scope.clone(),
                     };
-                    let method_name_str = method.name.value.to_string();
+                    let method_name_str = bytes_to_str(method.name.value).to_string();
                     let is_static = method.modifiers.contains_static();
                     return super::forward_walk::resolve_in_method_body(
                         ctx.var_name,
@@ -1162,13 +1162,13 @@ fn resolve_abstract_method_param(
     let has_scope_attr = method.attribute_lists.iter().any(|al| {
         al.attributes
             .iter()
-            .any(|a| a.name.last_segment() == "Scope")
+            .any(|a| last_segment(a.name.value()) == b"Scope")
     });
 
-    let method_name_str = method.name.value.to_string();
+    let method_name_str = bytes_to_str(method.name.value).to_string();
 
     for param in method.parameter_list.parameters.iter() {
-        let pname = param.variable.name.to_string();
+        let pname = bytes_to_str(param.variable.name);
         if pname != ctx.var_name {
             continue;
         }
@@ -1189,7 +1189,7 @@ fn resolve_abstract_method_param(
         };
 
         return super::forward_walk::resolve_param_type(
-            &pname,
+            pname,
             native_type.as_ref(),
             is_variadic,
             method.span().start.offset,
@@ -1356,7 +1356,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
         // `new ClassName(…)` → the class name.
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
-                let name = ident.value().to_string();
+                let name = bytes_to_str(ident.value()).to_string();
                 let fqn = crate::util::resolve_name_via_loader(&name, ctx.class_loader);
                 Some(PhpType::Named(fqn))
             }
@@ -1368,7 +1368,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
         Expression::Call(call) => match call {
             Call::Function(func_call) => {
                 let func_name = match func_call.function {
-                    Expression::Identifier(ident) => Some(ident.value().to_string()),
+                    Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                     _ => None,
                 };
                 func_name.and_then(|name| {
@@ -1379,10 +1379,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
             }
             Call::Method(method_call) => {
                 if let Expression::Variable(Variable::Direct(dv)) = method_call.object
-                    && dv.name == "$this"
+                    && dv.name == b"$this"
                     && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
                 {
-                    let method_name = ident.value.to_string();
+                    let method_name = bytes_to_str(ident.value).to_string();
                     ctx.all_classes
                         .iter()
                         .find(|c| c.name == ctx.current_class.name)
@@ -1399,13 +1399,13 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     Expression::Self_(_) | Expression::Static(_) => {
                         Some(ctx.current_class.name.to_string())
                     }
-                    Expression::Identifier(ident) => Some(ident.value().to_string()),
+                    Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                     _ => None,
                 };
                 if let Some(cls_name) = class_name
                     && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
                 {
-                    let method_name = ident.value.to_string();
+                    let method_name = bytes_to_str(ident.value).to_string();
                     let owner = ctx
                         .all_classes
                         .iter()
@@ -1455,7 +1455,7 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
                 // We collected keys innermost-first; reverse so the
                 // outermost key (closest to the variable) comes first.
                 keys.reverse();
-                return Some((dv.name.to_string(), keys));
+                return Some((bytes_to_str(dv.name).to_string(), keys));
             }
             _ => return None,
         }
@@ -1502,11 +1502,14 @@ pub(super) fn merge_nested_shape_keys(
 /// entries.
 pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<String> {
     if let Expression::Literal(Literal::String(s)) = index {
-        let key = s.value.map(|v| v.to_string()).unwrap_or_else(|| {
-            crate::util::unquote_php_string(s.raw)
-                .unwrap_or(s.raw)
-                .to_string()
-        });
+        let key = s
+            .value
+            .map(|v| bytes_to_str(v).to_string())
+            .unwrap_or_else(|| {
+                crate::util::unquote_php_string(bytes_to_str(s.raw))
+                    .unwrap_or(bytes_to_str(s.raw))
+                    .to_string()
+            });
         // Skip numeric-only keys — they are positional, not shape entries.
         if key.chars().all(|c| c.is_ascii_digit()) {
             return None;
@@ -1762,7 +1765,7 @@ pub(in crate::completion) fn resolve_arg_raw_type<'b>(
 ) -> Option<PhpType> {
     // Direct variable — scan for @var / @param annotation.
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-        let var_text = dv.name.to_string();
+        let var_text = bytes_to_str(dv.name).to_string();
         let offset = arg_expr.span().start.offset as usize;
         let from_docblock =
             docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
@@ -1831,7 +1834,7 @@ pub(super) fn try_apply_pass_by_reference_type(
     let (argument_list, parameters) = match expr {
         Expression::Call(Call::Function(func_call)) => {
             let func_name = match func_call.function {
-                Expression::Identifier(ident) => ident.value().to_string(),
+                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 _ => return,
             };
             let fl = match ctx.function_loader() {
@@ -1871,15 +1874,20 @@ pub(super) fn try_apply_pass_by_reference_type(
         _ => return,
     };
 
-    for (i, arg) in argument_list.arguments.iter().enumerate() {
-        let arg_expr = match arg {
-            Argument::Positional(pos) => pos.value,
-            Argument::Named(named) => named.value,
+    // Bind arguments to parameters following PHP's rules so that named
+    // arguments consult the parameter they actually target, not the one at
+    // their ordinal position in the call.
+    let bound = crate::call_args::bind_args_to_params(&parameters, argument_list);
+
+    for (param, arg_expr) in parameters.iter().zip(bound.iter()) {
+        let arg_expr = match arg_expr {
+            Some(expr) => *expr,
+            None => continue,
         };
 
         // Check if this argument is our target variable.
         let is_our_var = match arg_expr {
-            Expression::Variable(Variable::Direct(dv)) => dv.name == ctx.var_name,
+            Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name) == ctx.var_name,
             _ => false,
         };
         if !is_our_var {
@@ -1888,8 +1896,7 @@ pub(super) fn try_apply_pass_by_reference_type(
 
         // Check if the corresponding parameter is pass-by-reference
         // with a type hint.
-        if let Some(param) = parameters.get(i)
-            && param.is_reference
+        if param.is_reference
             && let Some(type_hint) = &param.type_hint
         {
             let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -1922,13 +1929,13 @@ fn try_resolve_method_params(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<(Vec<ParameterInfo>,)> {
     let method_name = match method {
-        ClassLikeMemberSelector::Identifier(ident) => ident.value,
+        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => return None,
     };
 
     // Only handle `$this->method()` — we know the current class.
     match object {
-        Expression::Variable(Variable::Direct(dv)) if dv.name == "$this" => {}
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {}
         _ => return None,
     }
 
@@ -1942,14 +1949,14 @@ fn try_resolve_static_method_params<'a>(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<(Vec<ParameterInfo>, &'a ArgumentList<'a>)> {
     let method_name = match &static_call.method {
-        ClassLikeMemberSelector::Identifier(ident) => ident.value,
+        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => return None,
     };
 
     let class_name = match static_call.class {
         Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
         Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        Expression::Identifier(ident) => ident.value().to_string(),
+        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
         _ => return None,
     };
 
@@ -1964,7 +1971,7 @@ fn try_resolve_constructor_params<'a>(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<(Vec<ParameterInfo>, &'a ArgumentList<'a>)> {
     let class_name = match inst.class {
-        Expression::Identifier(ident) => ident.value().to_string(),
+        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
         Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
         Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
         _ => return None,

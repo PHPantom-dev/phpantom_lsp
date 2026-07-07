@@ -4,6 +4,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::util::strip_fqn_prefix;
 
 use super::helpers::{extract_string_literal, walk_all_php_expressions};
@@ -57,7 +58,7 @@ fn try_env_call<'c>(expr: &Expression<'_>, content: &'c str) -> Option<(&'c str,
     let Expression::Identifier(ident) = fc.function else {
         return None;
     };
-    if !strip_fqn_prefix(ident.value()).eq_ignore_ascii_case("env") {
+    if !strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("env") {
         return None;
     }
     let first_arg = fc.argument_list.arguments.iter().next()?.value();

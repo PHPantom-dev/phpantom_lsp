@@ -520,3 +520,84 @@ fn find_symbols_global_namespace_block() {
         result.constants
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Eager autoload-file preloading
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn preload_autoload_files_resolves_function_exists_guarded_helper() {
+    let backend = create_test_backend();
+
+    // A helper guarded by `function_exists` lives at brace depth > 0, so
+    // the byte-level scanner never records it in the autoload function
+    // index.  Eager preloading runs a full parse, which finds it.
+    let dir = tempfile::tempdir().unwrap();
+    let helper_path = dir.path().join("helpers.php");
+    std::fs::write(
+        &helper_path,
+        r#"<?php
+if (! function_exists('guardedHelper')) {
+    function guardedHelper(): string {
+        return 'ok';
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    // The function is unknown before preloading (the byte scan missed it
+    // and nothing has been parsed).
+    assert!(
+        backend.find_or_load_function(&["guardedHelper"]).is_none(),
+        "guarded helper should not be resolvable before preloading"
+    );
+
+    backend.preload_autoload_files(&[helper_path]);
+
+    let info = backend.find_or_load_function(&["guardedHelper"]);
+    assert!(
+        info.is_some(),
+        "guarded helper should resolve after eager preloading"
+    );
+    assert_eq!(
+        info.unwrap().return_type_str().as_deref(),
+        Some("string"),
+        "preloaded helper should carry its full signature"
+    );
+    assert!(
+        backend
+            .global_functions()
+            .read()
+            .contains_key("guardedHelper"),
+        "preloaded helper should be cached in global_functions"
+    );
+}
+
+#[test]
+fn preload_autoload_files_skips_already_parsed() {
+    let backend = create_test_backend();
+
+    // Parse a file up front with one signature.
+    let dir = tempfile::tempdir().unwrap();
+    let helper_path = dir.path().join("helpers.php");
+    let uri = format!("file://{}", helper_path.display());
+    backend.update_ast(&uri, "<?php\nfunction stableFunc(): string { return ''; }");
+
+    // The on-disk content differs (a stale copy).  Preloading must not
+    // re-parse it, so the already-parsed signature is preserved.
+    std::fs::write(
+        &helper_path,
+        "<?php\nfunction stableFunc(): int { return 0; }",
+    )
+    .unwrap();
+
+    backend.preload_autoload_files(&[helper_path]);
+
+    let info = backend.find_or_load_function(&["stableFunc"]);
+    assert_eq!(
+        info.and_then(|i| i.return_type_str().map(|s| s.to_string())),
+        Some("string".to_string()),
+        "already-parsed file must not be re-parsed by preloading"
+    );
+}

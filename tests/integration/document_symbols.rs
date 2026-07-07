@@ -546,3 +546,69 @@ class VeryLongClassName {
         "selection range should be on one line"
     );
 }
+
+#[allow(deprecated)]
+#[test]
+fn method_full_range_spans_body() {
+    let php = r#"<?php
+class Foo {
+    public function build(): void {
+        $x = 1;
+        echo $x;
+    }
+}
+"#;
+    let resp = get_symbols(php).expect("should have symbols");
+    let symbols = unwrap_nested(resp);
+    let class_sym = &symbols[0];
+    let method = class_sym
+        .children
+        .as_ref()
+        .and_then(|c| c.iter().find(|s| s.name == "build"))
+        .expect("should find build method");
+
+    // The full range must enclose the whole method (signature + body),
+    // spanning multiple lines, while the selection range stays on the
+    // single name line and is nested inside the full range.
+    assert!(
+        method.range.end.line > method.range.start.line,
+        "method full range should span multiple lines, got {:?}",
+        method.range
+    );
+    assert_eq!(
+        method.selection_range.start.line, method.selection_range.end.line,
+        "method selection range should be on one line"
+    );
+    assert!(
+        method.range.start.line <= method.selection_range.start.line
+            && method.range.end.line >= method.selection_range.end.line,
+        "selection range must be nested inside the full range"
+    );
+}
+
+#[allow(deprecated)]
+#[test]
+fn property_full_range_reaches_semicolon() {
+    let php = r#"<?php
+class Foo {
+    public string $name = 'default';
+}
+"#;
+    let resp = get_symbols(php).expect("should have symbols");
+    let symbols = unwrap_nested(resp);
+    let class_sym = &symbols[0];
+    let prop = class_sym
+        .children
+        .as_ref()
+        .and_then(|c| c.iter().find(|s| s.name == "$name"))
+        .expect("should find $name property");
+
+    // The full range should extend past the name to cover the `= 'default';`
+    // initializer, while the selection range covers just `$name`.
+    assert!(
+        prop.range.end.character > prop.selection_range.end.character,
+        "property full range should extend past the name, got range {:?} selection {:?}",
+        prop.range,
+        prop.selection_range
+    );
+}

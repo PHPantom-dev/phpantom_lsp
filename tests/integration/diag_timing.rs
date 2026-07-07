@@ -648,6 +648,93 @@ function describe(Base $item): string {
     );
 }
 
+/// Verify that `assert($data instanceof stdClass)` narrowing survives
+/// through multiple intervening `if` blocks with early returns.
+///
+/// Regression test for Luxplus Shared `RefundCallback`: after the assert
+/// on line 33, several `if (!$refund)` / `if (!$payment) { return; }`
+/// blocks follow.  The forward walker must preserve the `stdClass`
+/// narrowing across all of them so that `$data->status` on a later line
+/// does not produce an `unresolved_member_access` diagnostic.
+#[test]
+fn assert_instanceof_survives_intervening_if_blocks() {
+    let php = r#"<?php
+use stdClass;
+use Vendor\Convert;
+use Vendor\RefundService;
+use Vendor\PaymentService;
+use Vendor\PaymentGateway;
+use Vendor\MobilepayRefundCallbackException;
+
+class RefundCallback {
+    protected string $data;
+
+    public function handle(): void {
+        $data = json_decode($this->data, false, 512, JSON_THROW_ON_ERROR);
+        assert($data instanceof stdClass);
+
+        $paymentId = Convert::toString($data->payment_id);
+        $amount = Convert::toDecimal($data->amount);
+        $gatewayRefundId = Convert::toString($data->refund_id);
+        $statusText = Convert::toString($data->status_text ?? '');
+        $externalId = Convert::toString($data->external_id ?? null);
+
+        $refund = null;
+        $refundService = app()->make(RefundService::class);
+        if ($externalId) {
+            $refund = $refundService->getRefundById(Convert::toInt($externalId));
+        }
+
+        if (!$refund) {
+            $payment = app()->make(PaymentService::class)->getPaymentByGatewayAndGatewayPaymentId(PaymentGateway::MOBILEPAY, $paymentId);
+            if (!$payment) {
+                return;
+            }
+            $refund = $refundService->getOrCreateMissing($payment, $gatewayRefundId, $amount);
+        }
+
+        if (!is_string($data->status)) {
+            throw new MobilepayRefundCallbackException('Unknown status: ' . gettype($data->status));
+        }
+
+        switch ($data->status) {
+            case 'Issued':
+                $refundService->setCompleted($refund);
+                break;
+            case 'Declined':
+                $refundService->setFailed($refund, $statusText);
+                break;
+            default:
+                throw new MobilepayRefundCallbackException('Unknown status: ' . $data->status);
+        }
+    }
+}
+"#;
+
+    let uri = "file:///test/refund.php";
+    let backend = create_test_backend_with_full_stubs();
+    backend.update_ast(uri, php);
+
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+
+    let relevant: Vec<_> = out
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
+            )
+        })
+        .collect();
+
+    assert!(
+        relevant.is_empty(),
+        "Expected no unresolved_member_access after assert instanceof with intervening ifs, got {}: {:?}",
+        relevant.len(),
+        relevant.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 /// Verify that `match(true)` with comma-separated conditions (multiple
 /// instanceof checks on the same arm) narrow correctly.
 ///

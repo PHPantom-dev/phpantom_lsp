@@ -238,6 +238,87 @@ async fn test_generic_extends_two_params_resolves() {
     }
 }
 
+/// A single generic argument against a two-parameter class with a
+/// key-like leading bound binds to the trailing (value) parameter.
+/// `@extends Collection<Language>` against `Collection<TKey of array-key,
+/// TValue>` must yield `TValue => Language`, not `TKey => Language`.
+#[tokio::test]
+async fn test_generic_extends_short_args_right_align() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generics_right_align.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey of array-key\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue */\n",
+        "    public function first() {}\n",
+        "}\n",
+        "\n",
+        "class Language {\n",
+        "    public int $priority;\n",
+        "    public function getCode(): string {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @extends Collection<Language>\n",
+        " */\n",
+        "class LanguageCollection extends Collection {\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $col = new LanguageCollection();\n",
+        "    $col->first()->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 23,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getCode"),
+                "Single arg should bind to TValue (Language) and show 'getCode', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// Test that @template-covariant is also parsed correctly.
 #[tokio::test]
 async fn test_generic_template_covariant() {
@@ -8589,7 +8670,7 @@ async fn test_implements_generic_interface_completion() {
 }
 
 /// Class-level template parameters must survive through a chained method call
-/// that returns `self<T>` (B8).  When `products()` returns `Collection<Product>`
+/// that returns `self<T>`.  When `products()` returns `Collection<Product>`
 /// and `filter()` returns `self<TItem>`, completing after `->` should show
 /// Collection's methods (proving the type is still Collection<Product>).
 #[tokio::test]
@@ -8678,7 +8759,7 @@ async fn test_class_template_params_preserved_through_chained_calls() {
     }
 }
 
-/// B8: After calling a method that returns `self<TItem>` on a Collection<Product>,
+/// After calling a method that returns `self<TItem>` on a Collection<Product>,
 /// further chaining `->first()->` should resolve TItem to Product and show
 /// Product's methods.  Uses a variable assignment to keep the chain to 2 levels
 /// at the completion point.
@@ -9293,6 +9374,85 @@ async fn test_key_of_and_value_of_type_operators() {
             assert!(
                 method_names.contains(&"getName"),
                 "value-of<TData> should evaluate to string|User after @extends substitution, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test that @template on @method tags resolves at call sites.
+/// `@method TVal doThing<TVal of mixed>(TVal $param)` should infer TVal from the argument.
+#[tokio::test]
+async fn test_method_tag_template_resolves_at_call_site() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///method_tag_template.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @method TVal get<TVal of mixed>(TVal $default)\n",
+        " */\n",
+        "class Config {\n",
+        "    public function __call(string $name, array $args): mixed { return null; }\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $config = new Config();\n",
+        "    $user = new User();\n",
+        "    $result = $config->get($user);\n",
+        "    $result->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$result->` on line 17
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 17,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve TVal to User and show User's 'getName' method, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should resolve TVal to User and show User's 'getEmail' method, got: {:?}",
                 method_names
             );
         }

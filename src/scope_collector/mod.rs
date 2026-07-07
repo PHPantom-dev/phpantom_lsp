@@ -40,6 +40,8 @@ mod tests;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
+use crate::atom::bytes_to_str;
+
 // ─── By-reference parameter resolution ──────────────────────────────────────
 
 /// Describes a call expression so the by-ref resolver can look up
@@ -346,16 +348,28 @@ impl ScopeMap {
                     result.return_values.push(var_name.clone());
                 }
             } else if has_write_inside && has_read_after {
-                // Written inside, read after → return value.
-                // Only treat as parameter if there's a write before (the
-                // initial value matters) or if it's read inside but its
-                // first write is *before* the range (meaning the read
-                // consumes an external value).  When the first write is
-                // inside the range the internal reads consume local
-                // assignments, so no parameter is needed.
-                let first_write_inside =
-                    first_write.is_some_and(|w| w.offset >= start && w.offset < end);
-                let needs_param = has_write_before || (has_read_inside && !first_write_inside);
+                // Written inside, read after → return value.  It is ALSO a
+                // parameter whenever the extracted code reads the variable's
+                // *incoming* value.  That happens when it was written before
+                // the range, or when a read inside the range occurs before
+                // the first pure write inside it (a read that consumes the
+                // value passed in).  A `+=`-style read-write also reads the
+                // incoming value, so a read-write that precedes any pure
+                // write counts too.
+                let first_pure_write_inside = frame_accesses
+                    .iter()
+                    .filter(|a| {
+                        a.offset >= start && a.offset < end && matches!(a.kind, AccessKind::Write)
+                    })
+                    .map(|a| a.offset)
+                    .min();
+                let reads_incoming_value = frame_accesses.iter().any(|a| {
+                    a.offset >= start
+                        && a.offset < end
+                        && matches!(a.kind, AccessKind::Read | AccessKind::ReadWrite)
+                        && first_pure_write_inside.is_none_or(|w| a.offset < w)
+                });
+                let needs_param = has_write_before || reads_incoming_value;
                 if needs_param && !result.parameters.contains(var_name) {
                     result.parameters.push(var_name.clone());
                 }
@@ -650,7 +664,7 @@ pub(crate) fn collect_parameters(
     collector_has_reference: &mut bool,
 ) {
     for param in params.parameters.iter() {
-        let name = param.variable.name.to_string();
+        let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
         collector_accesses.push(VarAccess {
             name,
@@ -736,7 +750,7 @@ pub(crate) fn collect_function_scope_with_kind_and_resolver<'a>(
     let param_names: Vec<String> = params
         .parameters
         .iter()
-        .map(|p| p.variable.name.to_string())
+        .map(|p| bytes_to_str(p.variable.name).to_string())
         .collect();
 
     collector.push_frame(Frame {
@@ -904,7 +918,7 @@ fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>) {
                 let catch_start = catch.block.left_brace.start.offset;
                 let catch_end = catch.block.right_brace.end.offset;
                 let catch_params = if let Some(ref var) = catch.variable {
-                    vec![var.name.to_string()]
+                    vec![bytes_to_str(var.name).to_string()]
                 } else {
                     Vec::new()
                 };
@@ -916,7 +930,7 @@ fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>) {
                     parameters: catch_params,
                 });
                 if let Some(ref var) = catch.variable {
-                    let name = var.name.to_string();
+                    let name = bytes_to_str(var.name).to_string();
                     collector.push_access(name, var.span().start.offset, AccessKind::Write);
                 }
                 for s in catch.block.statements.iter() {
@@ -944,7 +958,7 @@ fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>) {
         Statement::Global(global) => {
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
-                    let name = dv.name.to_string();
+                    let name = bytes_to_str(dv.name).to_string();
                     collector.push_access(name, dv.span().start.offset, AccessKind::Write);
                 }
             }
@@ -952,7 +966,7 @@ fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>) {
         Statement::Static(static_stmt) => {
             for item in static_stmt.items.iter() {
                 let dv = item.variable();
-                let name = dv.name.to_string();
+                let name = bytes_to_str(dv.name).to_string();
                 collector.push_access(name, dv.span().start.offset, AccessKind::Write);
                 // Note: we don't walk the default value expression of
                 // static items — it's evaluated once at first call and
@@ -1032,10 +1046,25 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
         Expression::Access(access) => match access {
             Access::Property(pa) => {
                 walk_expression(pa.object, collector);
-                // property selector is not a variable read
+                match &pa.property {
+                    ClassLikeMemberSelector::Identifier(_)
+                    | ClassLikeMemberSelector::Missing(_) => {}
+                    ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                    ClassLikeMemberSelector::Expression(selector) => {
+                        walk_expression(selector.expression, collector)
+                    }
+                }
             }
             Access::NullSafeProperty(pa) => {
                 walk_expression(pa.object, collector);
+                match &pa.property {
+                    ClassLikeMemberSelector::Identifier(_)
+                    | ClassLikeMemberSelector::Missing(_) => {}
+                    ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                    ClassLikeMemberSelector::Expression(selector) => {
+                        walk_expression(selector.expression, collector)
+                    }
+                }
             }
             Access::StaticProperty(spa) => {
                 walk_expression(spa.class, collector);
@@ -1090,7 +1119,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
         Expression::UnaryPostfix(unary) => {
             // `$x++` and `$x--` are read-write.
             if let Expression::Variable(Variable::Direct(dv)) = unary.operand {
-                let name = dv.name.to_string();
+                let name = bytes_to_str(dv.name).to_string();
                 collector.push_access(name, dv.span().start.offset, AccessKind::ReadWrite);
             } else {
                 walk_expression(unary.operand, collector);
@@ -1275,7 +1304,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
 fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>) {
     match expr {
         Expression::Variable(Variable::Direct(dv)) => {
-            let name = dv.name.to_string();
+            let name = bytes_to_str(dv.name).to_string();
             collector.push_access(name, dv.span().start.offset, AccessKind::Write);
         }
         Expression::Variable(Variable::Indirect(iv)) => {
@@ -1321,7 +1350,7 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
         Expression::ArrayAccess(access) => {
             // `$arr[0] = …` — the array itself is being read-written.
             if let Expression::Variable(Variable::Direct(dv)) = access.array {
-                let name = dv.name.to_string();
+                let name = bytes_to_str(dv.name).to_string();
                 collector.push_access(name, dv.span().start.offset, AccessKind::ReadWrite);
             } else {
                 walk_expression_as_write(access.array, collector);
@@ -1331,7 +1360,7 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
         Expression::ArrayAppend(append) => {
             // `$arr[] = …` — the array itself is being read-written.
             if let Expression::Variable(Variable::Direct(dv)) = append.array {
-                let name = dv.name.to_string();
+                let name = bytes_to_str(dv.name).to_string();
                 collector.push_access(name, dv.span().start.offset, AccessKind::ReadWrite);
             } else {
                 walk_expression_as_write(append.array, collector);
@@ -1340,9 +1369,23 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
         Expression::Access(Access::Property(pa)) => {
             // `$obj->prop = …` — $obj is read, prop is written.
             walk_expression(pa.object, collector);
+            match &pa.property {
+                ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
+                ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                ClassLikeMemberSelector::Expression(selector) => {
+                    walk_expression(selector.expression, collector)
+                }
+            }
         }
         Expression::Access(Access::NullSafeProperty(pa)) => {
             walk_expression(pa.object, collector);
+            match &pa.property {
+                ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
+                ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+                ClassLikeMemberSelector::Expression(selector) => {
+                    walk_expression(selector.expression, collector)
+                }
+            }
         }
         Expression::Access(Access::StaticProperty(spa)) => {
             walk_expression(spa.class, collector);
@@ -1371,7 +1414,7 @@ fn walk_expression_as_readwrite(expr: &Expression<'_>, collector: &mut Collector
             walk_expression_as_readwrite(up.operand, collector);
         }
         Expression::Variable(Variable::Direct(dv)) => {
-            let name = dv.name.to_string();
+            let name = bytes_to_str(dv.name).to_string();
             collector.push_access(name, dv.span().start.offset, AccessKind::ReadWrite);
         }
         _ => {
@@ -1385,7 +1428,7 @@ fn walk_expression_as_readwrite(expr: &Expression<'_>, collector: &mut Collector
 fn walk_variable_read(var: &Variable<'_>, collector: &mut Collector<'_>) {
     match var {
         Variable::Direct(dv) => {
-            let name = dv.name.to_string();
+            let name = bytes_to_str(dv.name).to_string();
             let offset = dv.span().start.offset;
             if name == "$this" {
                 collector.has_this_or_self = true;
@@ -1409,7 +1452,7 @@ fn walk_assignment(assignment: &Assignment<'_>, collector: &mut Collector<'_>) {
     if is_compound {
         // Compound assignment: LHS is both read and written.
         if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
-            let name = dv.name.to_string();
+            let name = bytes_to_str(dv.name).to_string();
             collector.push_access(name, dv.span().start.offset, AccessKind::ReadWrite);
         } else {
             walk_expression(assignment.lhs, collector);
@@ -1500,7 +1543,7 @@ fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Co
     // Try to extract a bare function name.
     let func_name = match func_call.function {
         Expression::Identifier(ident) => {
-            let raw = ident.value();
+            let raw = bytes_to_str(ident.value());
             // Strip leading backslash for FQN calls like \preg_match
             raw.strip_prefix('\\').unwrap_or(raw)
         }
@@ -1571,14 +1614,14 @@ fn walk_method_call_arguments_inner(
     // Only handle `$this->method()` — for arbitrary receivers we cannot
     // resolve the class type in the scope collector.
     let is_this =
-        matches!(object, Expression::Variable(Variable::Direct(dv)) if dv.name == "$this");
+        matches!(object, Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this");
     if !is_this {
         walk_arguments(argument_list, collector);
         return;
     }
 
     let method_name = match method {
-        ClassLikeMemberSelector::Identifier(ident) => ident.value,
+        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => {
             walk_arguments(argument_list, collector);
             return;
@@ -1620,7 +1663,7 @@ fn walk_static_method_call_arguments(
 ) {
     // Extract the class name from the AST.
     let class_name = match static_call.class {
-        Expression::Identifier(ident) => ident.value(),
+        Expression::Identifier(ident) => bytes_to_str(ident.value()),
         Expression::Self_(_) => "self",
         Expression::Static(_) => "static",
         Expression::Parent(_) => "parent",
@@ -1631,7 +1674,7 @@ fn walk_static_method_call_arguments(
     };
 
     let method_name = match &static_call.method {
-        ClassLikeMemberSelector::Identifier(ident) => ident.value,
+        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         // Variable method name (`Cls::$method()`) — can't resolve statically.
         _ => {
             walk_arguments(&static_call.argument_list, collector);
@@ -1667,7 +1710,7 @@ fn walk_constructor_arguments(
 ) {
     // Extract the class name from the AST.
     let class_name = match inst.class {
-        Expression::Identifier(ident) => ident.value(),
+        Expression::Identifier(ident) => bytes_to_str(ident.value()),
         Expression::Self_(_) => "self",
         Expression::Static(_) => "static",
         Expression::Parent(_) => "parent",
@@ -1724,7 +1767,7 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
     let mut captures = Vec::new();
     if let Some(ref use_clause) = closure.use_clause {
         for var in use_clause.variables.iter() {
-            let name = var.variable.name.to_string();
+            let name = bytes_to_str(var.variable.name).to_string();
             let is_ref = var.ampersand.is_some();
             captures.push((name.clone(), is_ref));
 
@@ -1738,7 +1781,7 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
         .parameter_list
         .parameters
         .iter()
-        .map(|p| p.variable.name.to_string())
+        .map(|p| bytes_to_str(p.variable.name).to_string())
         .collect();
 
     collector.push_frame(Frame {
@@ -1751,7 +1794,7 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
 
     // Record parameters as writes in the closure frame.
     for param in closure.parameter_list.parameters.iter() {
-        let name = param.variable.name.to_string();
+        let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
         collector.push_access(name, offset, AccessKind::Write);
         if param.ampersand.is_some() {
@@ -1783,7 +1826,7 @@ fn walk_arrow_function(arrow: &ArrowFunction<'_>, collector: &mut Collector<'_>)
         .parameter_list
         .parameters
         .iter()
-        .map(|p| p.variable.name.to_string())
+        .map(|p| bytes_to_str(p.variable.name).to_string())
         .collect();
 
     collector.push_frame(Frame {
@@ -1796,7 +1839,7 @@ fn walk_arrow_function(arrow: &ArrowFunction<'_>, collector: &mut Collector<'_>)
 
     // Record parameters as writes.
     for param in arrow.parameter_list.parameters.iter() {
-        let name = param.variable.name.to_string();
+        let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
         collector.push_access(name, offset, AccessKind::Write);
         if param.ampersand.is_some() {

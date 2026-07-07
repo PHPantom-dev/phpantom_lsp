@@ -6,10 +6,11 @@
 /// symbol_maps) in a single pass.  It also contains the name resolution
 /// helpers (`resolve_parent_class_names`, `resolve_name`) used to convert
 /// short class names to fully-qualified names.
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::atom::{Atom, atom};
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::symbol_map::extract_symbol_map;
 use crate::types::TypeAliasDef;
@@ -24,6 +25,35 @@ use crate::Backend;
 use crate::types::ClassInfo;
 
 use super::DocblockCtx;
+
+/// Run `f` with a parsing arena, reusing a thread-local `Bump` across
+/// calls instead of allocating a fresh one each time.
+///
+/// `update_ast_inner` is invoked on every keystroke (each `didChange`),
+/// so a fresh `Bump::new()` per call returns its backing pages to the OS
+/// via `munmap` on drop and re-acquires them via `mmap` on the next
+/// parse. Reusing one arena and `reset()`ing it (an O(1) bump-pointer
+/// rewind that keeps the pages allocated) eliminates those syscalls
+/// during active editing.
+///
+/// Resolution can trigger a nested parse on the same thread (e.g.
+/// `find_or_load_function` calls `update_ast` while the outer parse is
+/// still using the arena). Such re-entrant calls fall back to a throwaway
+/// `Bump` so the shared arena is never aliased — the borrow held for the
+/// duration of `f` makes `try_borrow_mut` fail for the nested call.
+fn with_reusable_arena<R>(f: impl FnOnce(&Bump) -> R) -> R {
+    thread_local! {
+        static ARENA: RefCell<Bump> = RefCell::new(Bump::with_capacity(512 * 1024));
+    }
+
+    ARENA.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut arena) => {
+            arena.reset();
+            f(&arena)
+        }
+        Err(_) => f(&Bump::new()),
+    })
+}
 
 impl Backend {
     /// Update the uri_classes_index, use_map, and namespace_map for a given file URI
@@ -86,550 +116,587 @@ impl Backend {
     ///
     /// Returns `true` when at least one class signature changed.
     fn update_ast_inner(&self, uri: &str, content: &str) -> bool {
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = parse_file_content(&arena, file_id, content);
+        with_reusable_arena(|arena| {
+            let file_id = mago_database::file::FileId::new(b"input.php");
+            let program = parse_file_content(arena, file_id, content.as_bytes());
 
-        // Run mago-names resolver while the arena is still alive.
-        // This produces a `ResolvedNames` that maps every identifier's
-        // byte offset to its fully-qualified name.  We immediately copy
-        // the data into an owned `OwnedResolvedNames` so it survives
-        // the arena drop.
-        let name_resolver = mago_names::resolver::NameResolver::new(&arena);
-        let mago_resolved = name_resolver.resolve(program);
-        let owned_resolved = crate::names::OwnedResolvedNames::from_resolved(&mago_resolved);
+            // Run mago-names resolver while the arena is still alive.
+            // This produces a `ResolvedNames` that maps every identifier's
+            // byte offset to its fully-qualified name.  We immediately copy
+            // the data into an owned `OwnedResolvedNames` so it survives
+            // the arena drop.
+            let name_resolver = mago_names::resolver::NameResolver::new(arena);
+            let mago_resolved = name_resolver.resolve(program);
+            let owned_resolved = crate::names::OwnedResolvedNames::from_resolved(&mago_resolved);
 
-        // Cache parse errors for the syntax-error diagnostic collector.
-        // Extract (message, start_byte, end_byte) tuples from the
-        // arena-allocated errors before the arena is dropped.
-        {
-            use mago_span::HasSpan;
+            // Cache parse errors for the syntax-error diagnostic collector.
+            // Extract (message, start_byte, end_byte) tuples from the
+            // arena-allocated errors before the arena is dropped.
+            {
+                use mago_span::HasSpan;
 
-            let errors: Vec<(String, u32, u32)> = program
-                .errors
-                .iter()
-                .map(|e| {
-                    let span = e.span();
-                    (
-                        super::error_format::format_parse_error(e),
-                        span.start.offset,
-                        span.end.offset,
-                    )
-                })
-                .collect();
-            self.parse_errors.write().insert(uri.to_string(), errors);
-        }
-
-        let doc_ctx = DocblockCtx {
-            trivias: program.trivia.as_slice(),
-            content,
-            php_version: Some(self.php_version()),
-            use_map: HashMap::new(),
-            namespace: None,
-        };
-
-        // Extract all three in a single parse pass.
-        //
-        // `classes_with_ns` tracks each extracted class together with the
-        // namespace block it was declared in.  This is critical for files
-        // that contain multiple `namespace { }` blocks (e.g. example.php
-        // places demo classes in `Demo` and Illuminate stubs in their own
-        // namespace blocks).  The per-class namespace is used later when
-        // building the `fqn_uri_index` and when resolving parent/trait names.
-        let mut classes_with_ns: Vec<(ClassInfo, Option<String>)> = Vec::new();
-        let mut use_map = HashMap::new();
-        let mut namespace: Option<String> = None;
-        let mut namespace_spans: Vec<crate::types::NamespaceSpan> = Vec::new();
-
-        for statement in program.statements.iter() {
-            match statement {
-                Statement::Use(use_stmt) => {
-                    Self::extract_use_items(&use_stmt.items, &mut use_map);
-                }
-                Statement::Namespace(ns) => {
-                    // Determine the namespace for this block.
-                    let block_ns: Option<String> = ns
-                        .name
-                        .as_ref()
-                        .map(|ident| ident.value().to_string())
-                        .filter(|n| !n.is_empty());
-
-                    // Record the byte span of this namespace block.
-                    let ns_span = ns.span();
-                    namespace_spans.push(crate::types::NamespaceSpan {
-                        namespace: block_ns.clone(),
-                        start: ns_span.start.offset,
-                        end: ns_span.end.offset,
-                    });
-
-                    // The file-level namespace is the FIRST non-empty one.
-                    if namespace.is_none() {
-                        namespace = block_ns.clone();
-                    }
-
-                    // Collect classes from this namespace block, tagging
-                    // each with the block's namespace.
-                    let mut block_classes = Vec::new();
-                    // Recurse into namespace body for classes and use statements
-                    for inner in ns.statements().iter() {
-                        match inner {
-                            Statement::Use(use_stmt) => {
-                                Self::extract_use_items(&use_stmt.items, &mut use_map);
-                            }
-                            Statement::Class(_)
-                            | Statement::Interface(_)
-                            | Statement::Trait(_)
-                            | Statement::Enum(_) => {
-                                Self::extract_classes_from_statements(
-                                    std::iter::once(inner),
-                                    &mut block_classes,
-                                    Some(&doc_ctx),
-                                );
-                            }
-                            Statement::Namespace(inner_ns) => {
-                                // Nested namespaces (rare but valid)
-                                Self::extract_use_statements_from_statements(
-                                    inner_ns.statements().iter(),
-                                    &mut use_map,
-                                );
-                                Self::extract_classes_from_statements(
-                                    inner_ns.statements().iter(),
-                                    &mut block_classes,
-                                    Some(&doc_ctx),
-                                );
-                            }
-                            _ => {
-                                // Walk other statements (expression statements,
-                                // control flow, etc.) for anonymous classes.
-                                Self::find_anonymous_classes_in_statement(
-                                    inner,
-                                    &mut block_classes,
-                                    Some(&doc_ctx),
-                                );
-                            }
-                        }
-                    }
-
-                    // Tag each class with the namespace of this block.
-                    for cls in block_classes {
-                        classes_with_ns.push((cls, block_ns.clone()));
-                    }
-                }
-                Statement::Class(_)
-                | Statement::Interface(_)
-                | Statement::Trait(_)
-                | Statement::Enum(_) => {
-                    let mut top_classes = Vec::new();
-                    Self::extract_classes_from_statements(
-                        std::iter::once(statement),
-                        &mut top_classes,
-                        Some(&doc_ctx),
-                    );
-                    for cls in top_classes {
-                        classes_with_ns.push((cls, None));
-                    }
-                }
-                _ => {
-                    // Walk other top-level statements (expression statements,
-                    // function declarations, control flow, etc.) for anonymous
-                    // classes.
-                    let mut anon_classes = Vec::new();
-                    Self::find_anonymous_classes_in_statement(
-                        statement,
-                        &mut anon_classes,
-                        Some(&doc_ctx),
-                    );
-                    for cls in anon_classes {
-                        classes_with_ns.push((cls, None));
-                    }
-                }
-            }
-        }
-
-        // Extract standalone functions (including those inside if-guards
-        // like `if (! function_exists('...'))`) using the shared helper
-        // which recurses into if/block statements.
-        let mut functions = Vec::new();
-        // Update doc_ctx with the file's use-map and namespace so that
-        // parameter default values (e.g. `Application::class`) can be
-        // resolved to FQNs during extraction.
-        let func_doc_ctx = DocblockCtx {
-            trivias: doc_ctx.trivias,
-            content: doc_ctx.content,
-            php_version: doc_ctx.php_version,
-            use_map: use_map.clone(),
-            namespace: namespace.clone(),
-        };
-        Self::extract_functions_from_statements(
-            program.statements.iter(),
-            &mut functions,
-            &namespace,
-            Some(&func_doc_ctx),
-        );
-        if !functions.is_empty() {
-            // Resolve class-like names in function return types and
-            // parameter type hints to FQNs so that cross-file consumers
-            // can resolve them without the declaring file's use map.
-            // This mirrors the resolution done for class method return
-            // types and parameter hints in `resolve_parent_class_names`.
-            for func in &mut functions {
-                let skip_names: Vec<String> =
-                    func.template_params.iter().map(|a| a.to_string()).collect();
-                // Use the function's own namespace (not the file-level one)
-                // so that multi-namespace files resolve return types
-                // against the correct namespace block.
-                let func_ns = func.namespace.clone().or_else(|| namespace.clone());
-                let resolver = Self::build_type_resolver(&use_map, &func_ns, &skip_names);
-
-                if let Some(ref ret) = func.return_type {
-                    let resolved = ret.resolve_names(&resolver);
-                    if resolved != *ret {
-                        func.return_type = Some(resolved);
-                    }
-                }
-                if let Some(ref ret) = func.native_return_type {
-                    let resolved = ret.resolve_names(&resolver);
-                    if resolved != *ret {
-                        func.native_return_type = Some(resolved);
-                    }
-                }
-                if let Some(ref cond) = func.conditional_return {
-                    let resolved = cond.resolve_names(&resolver);
-                    if resolved != *cond {
-                        func.conditional_return = Some(resolved);
-                    }
-                }
-                for param in &mut func.parameters {
-                    if let Some(ref hint) = param.type_hint {
-                        let resolved = hint.resolve_names(&resolver);
-                        if resolved != *hint {
-                            param.type_hint = Some(resolved);
-                        }
-                    }
-                }
-                // Resolve exception class names in @throws tags.
-                for throw in &mut func.throws {
-                    let resolved = throw.resolve_names(&resolver);
-                    if resolved != *throw {
-                        *throw = resolved;
-                    }
-                }
+                let errors: Vec<(String, u32, u32)> = program
+                    .errors
+                    .iter()
+                    .map(|e| {
+                        let span = e.span();
+                        (
+                            super::error_format::format_parse_error(e),
+                            span.start.offset,
+                            span.end.offset,
+                        )
+                    })
+                    .collect();
+                self.parse_errors.write().insert(uri.to_string(), errors);
             }
 
-            let mut fmap = self.global_functions.write();
-            for func_info in functions {
-                let fqn = if let Some(ref ns) = func_info.namespace {
-                    format!("{}\\{}", ns, &func_info.name)
-                } else {
-                    func_info.name.to_string()
-                };
+            let doc_ctx = DocblockCtx {
+                trivias: program.trivia.as_slice(),
+                content,
+                php_version: Some(self.php_version()),
+                use_map: HashMap::new(),
+                namespace: None,
+            };
 
-                // Skip polyfill functions when a native stub exists.
-                // Libraries like Laravel wrap helpers such as
-                // `str_contains` in `if (! function_exists('…'))` guards
-                // and mark them `@deprecated`.  On the configured PHP
-                // version the native function exists, so the guard is
-                // never entered and the polyfill is dead code.  Letting
-                // the stub win ensures the correct signature, return
-                // type, and deprecation status are used everywhere
-                // (hover, completion, diagnostics).
-                if func_info.is_polyfill
-                    && self.stub_function_index.read().contains_key(fqn.as_str())
-                {
-                    continue;
-                }
-
-                // Insert under the FQN only.  For namespaced functions
-                // the FQN is `Namespace\name`; for global functions it
-                // is just the bare name.  `resolve_function_name` already
-                // builds namespace-qualified candidates, so a short-name
-                // fallback entry is unnecessary and would cause collisions
-                // when two namespaces define the same short name.
-                fmap.insert(fqn, (uri.to_string(), func_info));
-            }
-        }
-
-        // Extract define() constants from the already-parsed AST and
-        // store them in the global_defines map so they appear in
-        // completions.  This reuses the parse pass above rather than
-        // doing a separate regex scan over the raw content.
-        let mut define_entries = Vec::new();
-        Self::extract_defines_from_statements(
-            program.statements.iter(),
-            &mut define_entries,
-            content,
-        );
-        if !define_entries.is_empty() {
-            let mut dmap = self.global_defines.write();
-            for (name, offset, value) in define_entries {
-                dmap.entry(name)
-                    .or_insert_with(|| crate::types::DefineInfo {
-                        file_uri: uri.to_string(),
-                        name_offset: offset,
-                        value,
-                    });
-            }
-        }
-
-        // Post-process: resolve parent_class short names to fully-qualified
-        // names using the file's use_map and each class's own namespace so
-        // that cross-file inheritance resolution can find parent classes via
-        // PSR-4.
-        //
-        // For files with multiple namespace blocks, each class's names are
-        // resolved against its own namespace rather than the file-level
-        // default.  This is done by grouping classes by namespace and
-        // calling resolve_parent_class_names once per group.
-        {
-            // Gather distinct namespaces used in this file.
-            let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
-            for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
-                ns_groups.entry(ns.clone()).or_default().push(i);
-            }
-
-            // When all classes share the same namespace, take the fast
-            // path (single call, no extra allocation).
-            if ns_groups.len() <= 1 {
-                let mut classes: Vec<ClassInfo> =
-                    classes_with_ns.iter().map(|(c, _)| c.clone()).collect();
-                Self::resolve_parent_class_names(&mut classes, &use_map, &namespace);
-                // Write back
-                for (i, cls) in classes.into_iter().enumerate() {
-                    classes_with_ns[i].0 = cls;
-                }
-            } else {
-                // Multi-namespace file: resolve each group with its own
-                // namespace context.
-                for (group_ns, indices) in &ns_groups {
-                    let mut group: Vec<ClassInfo> = indices
-                        .iter()
-                        .map(|&i| classes_with_ns[i].0.clone())
-                        .collect();
-                    Self::resolve_parent_class_names(&mut group, &use_map, group_ns);
-                    for (j, &idx) in indices.iter().enumerate() {
-                        classes_with_ns[idx].0 = group[j].clone();
-                    }
-                }
-            }
-        }
-
-        // Separate the classes from their namespace tags for storage,
-        // stamping each ClassInfo with its namespace so that
-        // `find_class_in_uri_classes_index` can distinguish classes with the same
-        // short name in different namespace blocks.
-        let classes: Vec<ClassInfo> = classes_with_ns
-            .iter()
-            .map(|(c, ns)| {
-                let mut cls = c.clone();
-                cls.file_namespace = ns.as_deref().map(atom);
-                cls
-            })
-            .collect();
-
-        let uri_string = uri.to_string();
-
-        // Collect old ClassInfo values (not just FQNs) before the uri_classes_index
-        // entry is overwritten.  These are compared against the new classes
-        // using `signature_eq` to decide whether each FQN's cache entry
-        // actually needs eviction (signature-level cache invalidation).
-        let old_classes_snapshot: Vec<crate::types::ClassInfo> = self
-            .uri_classes_index
-            .read()
-            .get(&uri_string)
-            .map(|v| {
-                v.iter()
-                    .map(|c| crate::types::ClassInfo::clone(c))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let old_fqns: Vec<String> = old_classes_snapshot
-            .iter()
-            .filter(|c| !c.name.starts_with("__anonymous@"))
-            .map(|c| match &c.file_namespace {
-                Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                _ => c.name.to_string(),
-            })
-            .collect();
-
-        // Populate the fqn_uri_index with FQN → URI mappings for every class
-        // found in this file.  This enables reliable lookup of classes that
-        // don't follow PSR-4 conventions (e.g. classes defined in Composer
-        // autoload_files.php entries).
-        //
-        // Uses the per-class namespace (not the file-level namespace) so
-        // that files with multiple namespace blocks produce correct FQNs.
-        {
-            let mut idx = self.fqn_uri_index.write();
-            let mut fqn_idx = self.fqn_class_index.write();
-            // Remove stale entries from previous parses of this file.
-            // When a file's namespace changes (e.g. while the user is
-            // typing a namespace declaration), old FQNs linger under
-            // the previous namespace and pollute completions.
+            // Extract all three in a single parse pass.
             //
-            // Use targeted removes via old_fqns instead of a full
-            // retain() scan — O(old_classes) ~ O(1) vs O(fqn_uri_index).
-            for old_fqn in &old_fqns {
-                idx.remove(old_fqn);
-                fqn_idx.remove(old_fqn);
-            }
+            // `classes_with_ns` tracks each extracted class together with the
+            // namespace block it was declared in.  This is critical for files
+            // that contain multiple `namespace { }` blocks (e.g. example.php
+            // places demo classes in `Demo` and Illuminate stubs in their own
+            // namespace blocks).  The per-class namespace is used later when
+            // building the `fqn_uri_index` and when resolving parent/trait names.
+            let mut classes_with_ns: Vec<(ClassInfo, Option<String>)> = Vec::new();
+            let mut use_map = HashMap::new();
+            let mut namespace: Option<String> = None;
+            let mut namespace_spans: Vec<crate::types::NamespaceSpan> = Vec::new();
 
-            for (i, (class, class_ns)) in classes_with_ns.iter().enumerate() {
-                // Anonymous classes (named `__anonymous@<offset>`) are
-                // internal bookkeeping — they should never appear in
-                // cross-file lookups or completion results.
-                if class.name.starts_with("__anonymous@") {
-                    continue;
+            for statement in program.statements.iter() {
+                match statement {
+                    Statement::Use(use_stmt) => {
+                        Self::extract_use_items(&use_stmt.items, &mut use_map);
+                    }
+                    Statement::Namespace(ns) => {
+                        // Determine the namespace for this block.
+                        let block_ns: Option<String> = ns
+                            .name
+                            .as_ref()
+                            .map(|ident| bytes_to_str(ident.value()).to_string())
+                            .filter(|n| !n.is_empty());
+
+                        // Record the byte span of this namespace block.
+                        let ns_span = ns.span();
+                        namespace_spans.push(crate::types::NamespaceSpan {
+                            namespace: block_ns.clone(),
+                            start: ns_span.start.offset,
+                            end: ns_span.end.offset,
+                        });
+
+                        // The file-level namespace is the FIRST non-empty one.
+                        if namespace.is_none() {
+                            namespace = block_ns.clone();
+                        }
+
+                        // Collect classes from this namespace block, tagging
+                        // each with the block's namespace.
+                        let mut block_classes = Vec::new();
+                        // Recurse into namespace body for classes and use statements
+                        for inner in ns.statements().iter() {
+                            match inner {
+                                Statement::Use(use_stmt) => {
+                                    Self::extract_use_items(&use_stmt.items, &mut use_map);
+                                }
+                                Statement::Class(_)
+                                | Statement::Interface(_)
+                                | Statement::Trait(_)
+                                | Statement::Enum(_)
+                                // Class-likes declared inside conditional /
+                                // control-flow blocks (e.g. Doctrine's
+                                // `ServiceEntityRepository` version guard) —
+                                // the extractor descends into the bodies.
+                                | Statement::If(_)
+                                | Statement::Block(_)
+                                | Statement::Try(_)
+                                | Statement::Switch(_)
+                                | Statement::While(_)
+                                | Statement::DoWhile(_)
+                                | Statement::For(_)
+                                | Statement::Foreach(_) => {
+                                    Self::extract_classes_from_statements(
+                                        std::iter::once(inner),
+                                        &mut block_classes,
+                                        Some(&doc_ctx),
+                                    );
+                                }
+                                Statement::Namespace(inner_ns) => {
+                                    // Nested namespaces (rare but valid)
+                                    Self::extract_use_statements_from_statements(
+                                        inner_ns.statements().iter(),
+                                        &mut use_map,
+                                    );
+                                    Self::extract_classes_from_statements(
+                                        inner_ns.statements().iter(),
+                                        &mut block_classes,
+                                        Some(&doc_ctx),
+                                    );
+                                }
+                                _ => {
+                                    // Walk other statements (expression statements,
+                                    // control flow, etc.) for anonymous classes.
+                                    Self::find_anonymous_classes_in_statement(
+                                        inner,
+                                        &mut block_classes,
+                                        Some(&doc_ctx),
+                                    );
+                                }
+                            }
+                        }
+
+                        // Tag each class with the namespace of this block.
+                        for cls in block_classes {
+                            classes_with_ns.push((cls, block_ns.clone()));
+                        }
+                    }
+                    Statement::Class(_)
+                    | Statement::Interface(_)
+                    | Statement::Trait(_)
+                    | Statement::Enum(_)
+                    // Class-likes declared inside top-level conditional /
+                    // control-flow blocks — the extractor descends into the
+                    // bodies (and still collects anonymous classes within).
+                    | Statement::If(_)
+                    | Statement::Block(_)
+                    | Statement::Try(_)
+                    | Statement::Switch(_)
+                    | Statement::While(_)
+                    | Statement::DoWhile(_)
+                    | Statement::For(_)
+                    | Statement::Foreach(_) => {
+                        let mut top_classes = Vec::new();
+                        Self::extract_classes_from_statements(
+                            std::iter::once(statement),
+                            &mut top_classes,
+                            Some(&doc_ctx),
+                        );
+                        for cls in top_classes {
+                            classes_with_ns.push((cls, None));
+                        }
+                    }
+                    _ => {
+                        // Walk other top-level statements (expression statements,
+                        // function declarations, etc.) for anonymous classes.
+                        let mut anon_classes = Vec::new();
+                        Self::find_anonymous_classes_in_statement(
+                            statement,
+                            &mut anon_classes,
+                            Some(&doc_ctx),
+                        );
+                        for cls in anon_classes {
+                            classes_with_ns.push((cls, None));
+                        }
+                    }
                 }
-                let fqn = if let Some(ns) = class_ns {
-                    format!("{}\\{}", ns, &class.name)
-                } else {
-                    class.name.to_string()
-                };
-                idx.insert(fqn.clone(), uri_string.clone());
-                // The `classes` vec already has `file_namespace` set,
-                // so use it for the fqn_index entry.
-                fqn_idx.insert(fqn, Arc::new(classes[i].clone()));
             }
-        }
 
-        // Remove newly-discovered FQNs from the negative-result cache
-        // so classes that just became available are not suppressed.
-        {
-            let nf_cache = self.class_not_found_cache.read();
-            if !nf_cache.is_empty() {
-                drop(nf_cache);
-                let mut nf_cache = self.class_not_found_cache.write();
-                for (class, class_ns) in &classes_with_ns {
-                    if class.name.starts_with("__anonymous@") {
+            // A class-like declared in two branches of a conditional yields
+            // one entry per branch; keep the first so resolution is
+            // deterministic (see `dedup_class_likes_first_wins`).
+            Self::dedup_class_likes_first_wins(&mut classes_with_ns);
+
+            // Extract standalone functions (including those inside if-guards
+            // like `if (! function_exists('...'))`) using the shared helper
+            // which recurses into if/block statements.
+            let mut functions = Vec::new();
+            // Update doc_ctx with the file's use-map and namespace so that
+            // parameter default values (e.g. `Application::class`) can be
+            // resolved to FQNs during extraction.
+            let func_doc_ctx = DocblockCtx {
+                trivias: doc_ctx.trivias,
+                content: doc_ctx.content,
+                php_version: doc_ctx.php_version,
+                use_map: use_map.clone(),
+                namespace: namespace.clone(),
+            };
+            Self::extract_functions_from_statements(
+                program.statements.iter(),
+                &mut functions,
+                &namespace,
+                Some(&func_doc_ctx),
+            );
+            if !functions.is_empty() {
+                // Resolve class-like names in function return types and
+                // parameter type hints to FQNs so that cross-file consumers
+                // can resolve them without the declaring file's use map.
+                // This mirrors the resolution done for class method return
+                // types and parameter hints in `resolve_parent_class_names`.
+                for func in &mut functions {
+                    let skip_names: Vec<String> =
+                        func.template_params.iter().map(|a| a.to_string()).collect();
+                    // Use the function's own namespace (not the file-level one)
+                    // so that multi-namespace files resolve return types
+                    // against the correct namespace block.
+                    let func_ns = func.namespace.clone().or_else(|| namespace.clone());
+                    let resolver = Self::build_type_resolver(&use_map, &func_ns, &skip_names);
+
+                    if let Some(ref ret) = func.return_type {
+                        let resolved = ret.resolve_names(&resolver);
+                        if resolved != *ret {
+                            func.return_type = Some(resolved);
+                        }
+                    }
+                    if let Some(ref ret) = func.native_return_type {
+                        let resolved = ret.resolve_names(&resolver);
+                        if resolved != *ret {
+                            func.native_return_type = Some(resolved);
+                        }
+                    }
+                    if let Some(ref cond) = func.conditional_return {
+                        let resolved = cond.resolve_names(&resolver);
+                        if resolved != *cond {
+                            func.conditional_return = Some(resolved);
+                        }
+                    }
+                    for param in &mut func.parameters {
+                        if let Some(ref hint) = param.type_hint {
+                            let resolved = hint.resolve_names(&resolver);
+                            if resolved != *hint {
+                                param.type_hint = Some(resolved);
+                            }
+                        }
+                    }
+                    // Resolve exception class names in @throws tags.
+                    for throw in &mut func.throws {
+                        let resolved = throw.resolve_names(&resolver);
+                        if resolved != *throw {
+                            *throw = resolved;
+                        }
+                    }
+                }
+
+                let mut fmap = self.global_functions.write();
+                for func_info in functions {
+                    let fqn = if let Some(ref ns) = func_info.namespace {
+                        format!("{}\\{}", ns, &func_info.name)
+                    } else {
+                        func_info.name.to_string()
+                    };
+
+                    // Skip polyfill functions when a native stub exists.
+                    // Libraries like Laravel wrap helpers such as
+                    // `str_contains` in `if (! function_exists('…'))` guards
+                    // and mark them `@deprecated`.  On the configured PHP
+                    // version the native function exists, so the guard is
+                    // never entered and the polyfill is dead code.  Letting
+                    // the stub win ensures the correct signature, return
+                    // type, and deprecation status are used everywhere
+                    // (hover, completion, diagnostics).
+                    if func_info.is_polyfill
+                        && self.stub_function_index.read().contains_key(fqn.as_str())
+                    {
                         continue;
                     }
-                    let fqn = match class_ns {
-                        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, class.name),
-                        _ => class.name.to_string(),
-                    };
-                    nf_cache.remove(&fqn);
+
+                    // Insert under the FQN only.  For namespaced functions
+                    // the FQN is `Namespace\name`; for global functions it
+                    // is just the bare name.  `resolve_function_name` already
+                    // builds namespace-qualified candidates, so a short-name
+                    // fallback entry is unnecessary and would cause collisions
+                    // when two namespaces define the same short name.
+                    fmap.insert(fqn, (uri.to_string(), func_info));
                 }
             }
-        }
 
-        // Build the precomputed symbol map while the AST is still alive.
-        // This must happen before the `Program` (and its arena) are dropped.
-        let symbol_map = std::sync::Arc::new(extract_symbol_map(program, content));
+            // Extract define() constants from the already-parsed AST and
+            // store them in the global_defines map so they appear in
+            // completions.  This reuses the parse pass above rather than
+            // doing a separate regex scan over the raw content.
+            let mut define_entries = Vec::new();
+            Self::extract_defines_from_statements(
+                program.statements.iter(),
+                &mut define_entries,
+                content,
+            );
+            if !define_entries.is_empty() {
+                let mut dmap = self.global_defines.write();
+                for (name, offset, value) in define_entries {
+                    dmap.entry(name)
+                        .or_insert_with(|| crate::types::DefineInfo {
+                            file_uri: uri.to_string(),
+                            name_offset: offset,
+                            value,
+                        });
+                }
+            }
 
-        self.uri_classes_index.write().insert(
-            uri_string.clone(),
-            classes.into_iter().map(Arc::new).collect(),
-        );
-        self.parsed_uris.write().insert(uri_string.clone());
+            // Post-process: resolve parent_class short names to fully-qualified
+            // names using the file's use_map and each class's own namespace so
+            // that cross-file inheritance resolution can find parent classes via
+            // PSR-4.
+            //
+            // For files with multiple namespace blocks, each class's names are
+            // resolved against its own namespace rather than the file-level
+            // default.  This is done by grouping classes by namespace and
+            // calling resolve_parent_class_names once per group.
+            {
+                // Gather distinct namespaces used in this file.
+                let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
+                for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
+                    ns_groups.entry(ns.clone()).or_default().push(i);
+                }
 
-        // Populate the global method store for O(1) method lookup.
-        self.evict_methods_for_fqns(&old_fqns);
-        self.evict_gti_for_fqns(&old_fqns);
-        if let Some(arc_classes) = self.uri_classes_index.read().get(&uri_string) {
-            self.populate_method_store(arc_classes);
-            self.populate_gti_index(arc_classes);
-        }
+                // When all classes share the same namespace, take the fast
+                // path (single call, no extra allocation).
+                if ns_groups.len() <= 1 {
+                    let mut classes: Vec<ClassInfo> =
+                        classes_with_ns.iter().map(|(c, _)| c.clone()).collect();
+                    Self::resolve_parent_class_names(&mut classes, &use_map, &namespace);
+                    // Write back
+                    for (i, cls) in classes.into_iter().enumerate() {
+                        classes_with_ns[i].0 = cls;
+                    }
+                } else {
+                    // Multi-namespace file: resolve each group with its own
+                    // namespace context.
+                    for (group_ns, indices) in &ns_groups {
+                        let mut group: Vec<ClassInfo> = indices
+                            .iter()
+                            .map(|&i| classes_with_ns[i].0.clone())
+                            .collect();
+                        Self::resolve_parent_class_names(&mut group, &use_map, group_ns);
+                        for (j, &idx) in indices.iter().enumerate() {
+                            classes_with_ns[idx].0 = group[j].clone();
+                        }
+                    }
+                }
+            }
 
-        self.symbol_maps
-            .write()
-            .insert(uri_string.clone(), symbol_map);
-        self.file_imports
-            .write()
-            .insert(uri_string.clone(), use_map);
-        self.resolved_names
-            .write()
-            .insert(uri_string.clone(), Arc::new(owned_resolved));
-        // For files without any explicit namespace blocks, synthesize a
-        // single span covering the entire file with the detected namespace
-        // (which will be None for files without namespace declarations).
-        if namespace_spans.is_empty() {
-            namespace_spans.push(crate::types::NamespaceSpan {
-                namespace: namespace.clone(),
-                start: 0,
-                end: content.len() as u32,
-            });
-        }
-        self.file_namespaces
-            .write()
-            .insert(uri_string, namespace_spans);
-
-        // Selectively invalidate the resolved-class cache with
-        // signature-level granularity.
-        //
-        // Instead of evicting every FQN defined in this file on every
-        // keystroke, compare the old and new ClassInfo values using
-        // `signature_eq`.  When the signature has not changed (the
-        // overwhelmingly common case during normal editing inside a
-        // method body), the cache entry is kept warm.
-        //
-        // FQNs that only appear in the old set (renamed/removed classes)
-        // or only in the new set (newly added classes) are always evicted.
-        // FQNs present in both sets are evicted only when their signature
-        // differs.
-        //
-        // `evict_fqn` transitively evicts dependents (classes that
-        // extend/use/implement/mixin the changed class) so that
-        // cached child classes don't serve stale inherited members.
-        //
-        // **First-parse fast path**: when `old_fqns` is empty the file
-        // has never been parsed by `update_ast` before.  There are no
-        // stale cache entries to evict — any existing cache entries for
-        // these FQNs were populated by legitimate resolution paths
-        // (classmap / PSR-4 / stubs) reading the same on-disk content.
-        // Skipping eviction here eliminates the O(N²) cost of calling
-        // `evict_fqn` (which does a full cache scan + transitive
-        // dependent cascade) for every class during bulk operations
-        // like `analyse`.
-        let mut any_signature_changed = false;
-        let mut evicted_fqns: Vec<String> = Vec::new();
-
-        if !old_fqns.is_empty() {
-            let mut cache = self.resolved_class_cache.lock();
-            // Collect new FQNs from the classes we just parsed.
-            let new_fqns: Vec<String> = classes_with_ns
+            // Separate the classes from their namespace tags for storage,
+            // stamping each ClassInfo with its namespace so that
+            // `find_class_in_uri_classes_index` can distinguish classes with the same
+            // short name in different namespace blocks.
+            let classes: Vec<ClassInfo> = classes_with_ns
                 .iter()
-                .filter(|(c, _)| !c.name.starts_with("__anonymous@"))
-                .map(|(c, ns)| match ns {
+                .map(|(c, ns)| {
+                    let mut cls = c.clone();
+                    cls.file_namespace = ns.as_deref().map(atom);
+                    cls
+                })
+                .collect();
+
+            let uri_string = uri.to_string();
+
+            // Collect old ClassInfo values (not just FQNs) before the uri_classes_index
+            // entry is overwritten.  These are compared against the new classes
+            // using `signature_eq` to decide whether each FQN's cache entry
+            // actually needs eviction (signature-level cache invalidation).
+            let old_classes_snapshot: Vec<crate::types::ClassInfo> = self
+                .uri_classes_index
+                .read()
+                .get(&uri_string)
+                .map(|v| {
+                    v.iter()
+                        .map(|c| crate::types::ClassInfo::clone(c))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let old_fqns: Vec<String> = old_classes_snapshot
+                .iter()
+                .filter(|c| !c.name.starts_with("__anonymous@"))
+                .map(|c| match &c.file_namespace {
                     Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
                     _ => c.name.to_string(),
                 })
                 .collect();
 
-            // Evict old FQNs that no longer exist (renames / removals),
-            // or whose signature changed.
-            for (i, fqn) in old_fqns.iter().enumerate() {
-                let old_cls = &old_classes_snapshot[old_classes_snapshot
+            // Populate the fqn_uri_index with FQN → URI mappings for every class
+            // found in this file.  This enables reliable lookup of classes that
+            // don't follow PSR-4 conventions (e.g. classes defined in Composer
+            // autoload_files.php entries).
+            //
+            // Uses the per-class namespace (not the file-level namespace) so
+            // that files with multiple namespace blocks produce correct FQNs.
+            {
+                let mut idx = self.fqn_uri_index.write();
+                let mut fqn_idx = self.fqn_class_index.write();
+                // Remove stale entries from previous parses of this file.
+                // When a file's namespace changes (e.g. while the user is
+                // typing a namespace declaration), old FQNs linger under
+                // the previous namespace and pollute completions.
+                //
+                // Use targeted removes via old_fqns instead of a full
+                // retain() scan — O(old_classes) ~ O(1) vs O(fqn_uri_index).
+                for old_fqn in &old_fqns {
+                    idx.remove(old_fqn);
+                    fqn_idx.remove(old_fqn);
+                }
+
+                for (i, (class, class_ns)) in classes_with_ns.iter().enumerate() {
+                    // Anonymous classes (named `__anonymous@<offset>`) are
+                    // internal bookkeeping — they should never appear in
+                    // cross-file lookups or completion results.
+                    if class.name.starts_with("__anonymous@") {
+                        continue;
+                    }
+                    let fqn = if let Some(ns) = class_ns {
+                        format!("{}\\{}", ns, &class.name)
+                    } else {
+                        class.name.to_string()
+                    };
+                    idx.insert(fqn.clone(), uri_string.clone());
+                    // The `classes` vec already has `file_namespace` set,
+                    // so use it for the fqn_index entry.
+                    fqn_idx.insert(fqn, Arc::new(classes[i].clone()));
+                }
+            }
+
+            // Remove newly-discovered FQNs from the negative-result cache
+            // so classes that just became available are not suppressed.
+            {
+                let nf_cache = self.class_not_found_cache.read();
+                if !nf_cache.is_empty() {
+                    drop(nf_cache);
+                    let mut nf_cache = self.class_not_found_cache.write();
+                    for (class, class_ns) in &classes_with_ns {
+                        if class.name.starts_with("__anonymous@") {
+                            continue;
+                        }
+                        let fqn = match class_ns {
+                            Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, class.name),
+                            _ => class.name.to_string(),
+                        };
+                        nf_cache.remove(&fqn);
+                    }
+                }
+            }
+
+            // Build the precomputed symbol map while the AST is still alive.
+            // This must happen before the `Program` (and its arena) are dropped.
+            let symbol_map = std::sync::Arc::new(extract_symbol_map(program, content));
+
+            self.uri_classes_index.write().insert(
+                uri_string.clone(),
+                classes.into_iter().map(Arc::new).collect(),
+            );
+            self.parsed_uris.write().insert(uri_string.clone());
+
+            // Populate the global method store for O(1) method lookup.
+            self.evict_methods_for_fqns(&old_fqns);
+            self.evict_gti_for_fqns(&old_fqns);
+            if let Some(arc_classes) = self.uri_classes_index.read().get(&uri_string) {
+                self.populate_method_store(arc_classes);
+                self.populate_gti_index(arc_classes);
+            }
+
+            self.symbol_maps
+                .write()
+                .insert(uri_string.clone(), symbol_map);
+            self.file_imports
+                .write()
+                .insert(uri_string.clone(), use_map);
+            self.resolved_names
+                .write()
+                .insert(uri_string.clone(), Arc::new(owned_resolved));
+            // For files without any explicit namespace blocks, synthesize a
+            // single span covering the entire file with the detected namespace
+            // (which will be None for files without namespace declarations).
+            if namespace_spans.is_empty() {
+                namespace_spans.push(crate::types::NamespaceSpan {
+                    namespace: namespace.clone(),
+                    start: 0,
+                    end: content.len() as u32,
+                });
+            }
+            self.file_namespaces
+                .write()
+                .insert(uri_string, namespace_spans);
+
+            // Selectively invalidate the resolved-class cache with
+            // signature-level granularity.
+            //
+            // Instead of evicting every FQN defined in this file on every
+            // keystroke, compare the old and new ClassInfo values using
+            // `signature_eq`.  When the signature has not changed (the
+            // overwhelmingly common case during normal editing inside a
+            // method body), the cache entry is kept warm.
+            //
+            // FQNs that only appear in the old set (renamed/removed classes)
+            // or only in the new set (newly added classes) are always evicted.
+            // FQNs present in both sets are evicted only when their signature
+            // differs.
+            //
+            // `evict_fqn` transitively evicts dependents (classes that
+            // extend/use/implement/mixin the changed class) so that
+            // cached child classes don't serve stale inherited members.
+            //
+            // **First-parse fast path**: when `old_fqns` is empty the file
+            // has never been parsed by `update_ast` before.  There are no
+            // stale cache entries to evict — any existing cache entries for
+            // these FQNs were populated by legitimate resolution paths
+            // (classmap / PSR-4 / stubs) reading the same on-disk content.
+            // Skipping eviction here eliminates the O(N²) cost of calling
+            // `evict_fqn` (which does a full cache scan + transitive
+            // dependent cascade) for every class during bulk operations
+            // like `analyse`.
+            let mut any_signature_changed = false;
+            let mut evicted_fqns: Vec<String> = Vec::new();
+
+            if !old_fqns.is_empty() {
+                let mut cache = self.resolved_class_cache.write();
+                // Collect new FQNs from the classes we just parsed.
+                let new_fqns: Vec<String> = classes_with_ns
                     .iter()
-                    .position(|c| {
+                    .filter(|(c, _)| !c.name.starts_with("__anonymous@"))
+                    .map(|(c, ns)| match ns {
+                        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
+                        _ => c.name.to_string(),
+                    })
+                    .collect();
+
+                // Evict old FQNs that no longer exist (renames / removals),
+                // or whose signature changed.
+                for (i, fqn) in old_fqns.iter().enumerate() {
+                    let old_cls = &old_classes_snapshot[old_classes_snapshot
+                        .iter()
+                        .position(|c| {
+                            !c.name.starts_with("__anonymous@") && {
+                                let f = match &c.file_namespace {
+                                    Some(ns) if !ns.is_empty() => {
+                                        format!("{}\\{}", ns, c.name)
+                                    }
+                                    _ => c.name.to_string(),
+                                };
+                                f == *fqn
+                            }
+                        })
+                        .unwrap_or(i)];
+
+                    // Find the matching new class by FQN.
+                    let new_cls = classes_with_ns.iter().find(|(c, ns)| {
                         !c.name.starts_with("__anonymous@") && {
-                            let f = match &c.file_namespace {
-                                Some(ns) if !ns.is_empty() => {
-                                    format!("{}\\{}", ns, c.name)
-                                }
+                            let f = match ns {
+                                Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
                                 _ => c.name.to_string(),
                             };
                             f == *fqn
                         }
-                    })
-                    .unwrap_or(i)];
+                    });
 
-                // Find the matching new class by FQN.
-                let new_cls = classes_with_ns.iter().find(|(c, ns)| {
-                    !c.name.starts_with("__anonymous@") && {
-                        let f = match ns {
-                            Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                            _ => c.name.to_string(),
-                        };
-                        f == *fqn
+                    match new_cls {
+                        Some((new, _)) if old_cls.signature_eq(new) => {
+                            // Signature unchanged — keep the cache entry warm.
+                        }
+                        _ => {
+                            // Signature changed or class was removed — evict.
+                            let evicted = crate::virtual_members::evict_fqn(&mut cache, fqn);
+                            evicted_fqns.extend(evicted);
+                            any_signature_changed = true;
+                        }
                     }
-                });
+                }
 
-                match new_cls {
-                    Some((new, _)) if old_cls.signature_eq(new) => {
-                        // Signature unchanged — keep the cache entry warm.
-                    }
-                    _ => {
-                        // Signature changed or class was removed — evict.
+                // Evict new FQNs that did not exist before (new classes).
+                for fqn in &new_fqns {
+                    if !old_fqns.contains(fqn) {
                         let evicted = crate::virtual_members::evict_fqn(&mut cache, fqn);
                         evicted_fqns.extend(evicted);
                         any_signature_changed = true;
@@ -637,48 +704,39 @@ impl Backend {
                 }
             }
 
-            // Evict new FQNs that did not exist before (new classes).
-            for fqn in &new_fqns {
-                if !old_fqns.contains(fqn) {
-                    let evicted = crate::virtual_members::evict_fqn(&mut cache, fqn);
-                    evicted_fqns.extend(evicted);
-                    any_signature_changed = true;
-                }
+            // Dedup evicted FQNs before repopulation.
+            evicted_fqns.sort();
+            evicted_fqns.dedup();
+
+            // ── ER4: Eagerly re-populate evicted classes ─────────────────
+            if !evicted_fqns.is_empty() {
+                // Toposort just the evicted subset using their current
+                // (just-parsed) ClassInfo from uri_classes_index.
+                let sorted = {
+                    let uri_classes = self.uri_classes_index.read();
+                    let iter = uri_classes
+                        .values()
+                        .flat_map(|classes| classes.iter())
+                        .filter(|c| evicted_fqns.contains(&c.fqn().to_string()))
+                        .map(|c| (c.fqn().to_string(), c.as_ref()));
+                    crate::toposort::toposort_classes(iter)
+                };
+
+                let class_loader =
+                    |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+                crate::virtual_members::populate_from_sorted(
+                    &sorted,
+                    &self.resolved_class_cache,
+                    &class_loader,
+                );
             }
-        }
 
-        // Dedup evicted FQNs before repopulation.
-        evicted_fqns.sort();
-        evicted_fqns.dedup();
+            if any_signature_changed {
+                self.member_completion_cache.lock().clear();
+            }
 
-        // ── ER4: Eagerly re-populate evicted classes ─────────────────
-        if !evicted_fqns.is_empty() {
-            // Toposort just the evicted subset using their current
-            // (just-parsed) ClassInfo from uri_classes_index.
-            let sorted = {
-                let uri_classes = self.uri_classes_index.read();
-                let iter = uri_classes
-                    .values()
-                    .flat_map(|classes| classes.iter())
-                    .filter(|c| evicted_fqns.contains(&c.fqn().to_string()))
-                    .map(|c| (c.fqn().to_string(), c.as_ref()));
-                crate::toposort::toposort_classes(iter)
-            };
-
-            let class_loader =
-                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-            crate::virtual_members::populate_from_sorted(
-                &sorted,
-                &self.resolved_class_cache,
-                &class_loader,
-            );
-        }
-
-        if any_signature_changed {
-            self.member_completion_cache.lock().clear();
-        }
-
-        any_signature_changed
+            any_signature_changed
+        })
     }
 
     /// Resolve `parent_class` short names in a list of `ClassInfo` to

@@ -10,14 +10,16 @@
 //! setups).  This is the single most impactful diagnostic for catching
 //! typos in variable names.
 //!
-//! ## Implementation (Phase 1 — conservative)
+//! ## Implementation
 //!
-//! The implementation is deliberately simple: any assignment anywhere
-//! in the function counts as a definition, regardless of control flow.
-//! This avoids false positives from branch-dependent definitions at the
-//! cost of missing some genuinely undefined variables that are only
-//! assigned in one branch.  This matches the approach taken by
-//! Intelephense.
+//! A variable read is flagged only when no write of the same name exists
+//! at a **lower byte offset** in the same frame.  Writes inside any
+//! control-flow branch (if/else, switch, try/catch) still count, so the
+//! analysis is conservative about branches but strict about source order:
+//! it catches the common "used before assigned" typo while avoiding false
+//! positives from branch-dependent definitions.  `/** @var Type $var */`
+//! annotations are treated as a write at the annotation's position and are
+//! scoped to the frame they appear in.
 //!
 //! ## Suppression / false-positive avoidance
 //!
@@ -248,15 +250,15 @@ fn collect_from_statement(
             );
         }
         Statement::Class(class) => {
-            let class_name = class.name.value.to_string();
+            let class_name = crate::atom::bytes_to_str(class.name.value).to_string();
             collect_from_class_members(class.members.as_slice(), ctx, resolver, Some(&class_name));
         }
         Statement::Trait(tr) => {
-            let trait_name = tr.name.value.to_string();
+            let trait_name = crate::atom::bytes_to_str(tr.name.value).to_string();
             collect_from_class_members(tr.members.as_slice(), ctx, resolver, Some(&trait_name));
         }
         Statement::Enum(en) => {
-            let enum_name = en.name.value.to_string();
+            let enum_name = crate::atom::bytes_to_str(en.name.value).to_string();
             collect_from_class_members(en.members.as_slice(), ctx, resolver, Some(&enum_name));
         }
         Statement::Interface(_) => {
@@ -339,7 +341,9 @@ fn check_scope(
     let compact_vars = collect_compact_vars(statements);
 
     // Collect variable names annotated with `/** @var Type $var */`
-    // inline docblocks.
+    // inline docblocks, each with the byte offset of its `$` sigil so it
+    // can be treated as a scoped, source-ordered write rather than a
+    // file-wide "always defined" name.
     let var_annotated = collect_var_annotations(ctx.content);
 
     // Collect byte offsets suppressed by the `@` error control
@@ -367,9 +371,6 @@ fn check_scope(
     for cv in &compact_vars {
         always_defined.insert(cv.as_str());
     }
-    for av in &var_annotated {
-        always_defined.insert(av.as_str());
-    }
 
     // Pre-compute the "own writes" for each frame: writes that are
     // directly inside the frame (not inside a nested sub-frame).
@@ -392,6 +393,16 @@ fn check_scope(
                     && !is_in_nested_frame(access.offset, frame, &scope.frames)
                 {
                     writes.push((access.name.as_str(), access.offset));
+                }
+            }
+            // `/** @var Type $var */` annotations act as a write at the
+            // annotation's offset, but only within the frame they appear in.
+            for (name, offset) in &var_annotated {
+                if *offset >= frame.start
+                    && *offset <= frame.end
+                    && !is_in_nested_frame(*offset, frame, &scope.frames)
+                {
+                    writes.push((name.as_str(), *offset));
                 }
             }
             writes
@@ -936,7 +947,7 @@ fn expr_has_extract(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::Call(Call::Function(fc)) => {
             if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case("extract")
+                && ident.value().eq_ignore_ascii_case(b"extract")
             {
                 return true;
             }
@@ -1134,7 +1145,7 @@ fn collect_compact_from_expr(expr: &Expression<'_>, vars: &mut HashSet<String>) 
     match expr {
         Expression::Call(Call::Function(fc)) => {
             if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case("compact")
+                && ident.value().eq_ignore_ascii_case(b"compact")
             {
                 // Each string argument is a variable name (without $).
                 for arg in fc.argument_list.arguments.iter() {
@@ -1143,9 +1154,9 @@ fn collect_compact_from_expr(expr: &Expression<'_>, vars: &mut HashSet<String>) 
                         // (without quotes); fall back to `raw` and
                         // strip quotes manually if `value` is `None`.
                         let name: &str = if let Some(v) = s.value {
-                            v
+                            crate::atom::bytes_to_str(v)
                         } else {
-                            let raw = s.raw;
+                            let raw = crate::atom::bytes_to_str(s.raw);
                             raw.strip_prefix('\'')
                                 .or_else(|| raw.strip_prefix('"'))
                                 .and_then(|inner| {
@@ -1203,23 +1214,344 @@ fn collect_compact_from_expr(expr: &Expression<'_>, vars: &mut HashSet<String>) 
     }
 }
 
+// ─── get_defined_vars() detection ───────────────────────────────────────────
+
+/// Returns true if the statements contain a call to `get_defined_vars()`.
+/// When present in a scope, all variables defined in that scope are
+/// considered used (e.g. for debug dumps), so unused-variable diagnostics
+/// should be suppressed for them.
+pub(crate) fn has_get_defined_vars(statements: &[Statement<'_>]) -> bool {
+    for stmt in statements {
+        if stmt_has_get_defined_vars(stmt) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmt_has_get_defined_vars(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::Expression(es) => expr_has_get_defined_vars(es.expression),
+        Statement::Return(ret) => ret.value.is_some_and(|v| expr_has_get_defined_vars(v)),
+        Statement::Echo(echo) => echo.values.iter().any(|v| expr_has_get_defined_vars(v)),
+        Statement::If(if_stmt) => {
+            if expr_has_get_defined_vars(if_stmt.condition) {
+                return true;
+            }
+            match &if_stmt.body {
+                IfBody::Statement(body) => {
+                    if stmt_has_get_defined_vars(body.statement) {
+                        return true;
+                    }
+                    for clause in body.else_if_clauses.iter() {
+                        if expr_has_get_defined_vars(clause.condition)
+                            || stmt_has_get_defined_vars(clause.statement)
+                        {
+                            return true;
+                        }
+                    }
+                    if let Some(ref el) = body.else_clause
+                        && stmt_has_get_defined_vars(el.statement)
+                    {
+                        return true;
+                    }
+                }
+                IfBody::ColonDelimited(body) => {
+                    for s in body.statements.iter() {
+                        if stmt_has_get_defined_vars(s) {
+                            return true;
+                        }
+                    }
+                    for clause in body.else_if_clauses.iter() {
+                        if expr_has_get_defined_vars(clause.condition) {
+                            return true;
+                        }
+                        for s in clause.statements.iter() {
+                            if stmt_has_get_defined_vars(s) {
+                                return true;
+                            }
+                        }
+                    }
+                    if let Some(ref el) = body.else_clause {
+                        for s in el.statements.iter() {
+                            if stmt_has_get_defined_vars(s) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        }
+        Statement::Foreach(foreach) => {
+            expr_has_get_defined_vars(foreach.expression)
+                || match &foreach.body {
+                    ForeachBody::Statement(s) => stmt_has_get_defined_vars(s),
+                    ForeachBody::ColonDelimited(b) => {
+                        b.statements.iter().any(|s| stmt_has_get_defined_vars(s))
+                    }
+                }
+        }
+        Statement::While(w) => {
+            expr_has_get_defined_vars(w.condition)
+                || match &w.body {
+                    WhileBody::Statement(s) => stmt_has_get_defined_vars(s),
+                    WhileBody::ColonDelimited(b) => {
+                        b.statements.iter().any(|s| stmt_has_get_defined_vars(s))
+                    }
+                }
+        }
+        Statement::DoWhile(dw) => {
+            stmt_has_get_defined_vars(dw.statement) || expr_has_get_defined_vars(dw.condition)
+        }
+        Statement::For(for_stmt) => {
+            for_stmt
+                .initializations
+                .iter()
+                .any(|e| expr_has_get_defined_vars(e))
+                || for_stmt
+                    .conditions
+                    .iter()
+                    .any(|e| expr_has_get_defined_vars(e))
+                || for_stmt
+                    .increments
+                    .iter()
+                    .any(|e| expr_has_get_defined_vars(e))
+                || match &for_stmt.body {
+                    ForBody::Statement(s) => stmt_has_get_defined_vars(s),
+                    ForBody::ColonDelimited(b) => {
+                        b.statements.iter().any(|s| stmt_has_get_defined_vars(s))
+                    }
+                }
+        }
+        Statement::Switch(sw) => {
+            expr_has_get_defined_vars(sw.expression)
+                || sw.body.cases().iter().any(|c| match c {
+                    SwitchCase::Expression(sc) => {
+                        expr_has_get_defined_vars(sc.expression)
+                            || sc.statements.iter().any(|s| stmt_has_get_defined_vars(s))
+                    }
+                    SwitchCase::Default(dc) => {
+                        dc.statements.iter().any(|s| stmt_has_get_defined_vars(s))
+                    }
+                })
+        }
+        Statement::Try(try_stmt) => {
+            try_stmt
+                .block
+                .statements
+                .iter()
+                .any(|s| stmt_has_get_defined_vars(s))
+                || try_stmt.catch_clauses.iter().any(|c| {
+                    c.block
+                        .statements
+                        .iter()
+                        .any(|s| stmt_has_get_defined_vars(s))
+                })
+                || try_stmt.finally_clause.as_ref().is_some_and(|f| {
+                    f.block
+                        .statements
+                        .iter()
+                        .any(|s| stmt_has_get_defined_vars(s))
+                })
+        }
+        Statement::Block(block) => block
+            .statements
+            .iter()
+            .any(|s| stmt_has_get_defined_vars(s)),
+        _ => false,
+    }
+}
+
+fn expr_has_get_defined_vars(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Call(Call::Function(fc)) => {
+            if let Expression::Identifier(ident) = fc.function
+                && ident.value().eq_ignore_ascii_case(b"get_defined_vars")
+            {
+                return true;
+            }
+            expr_has_get_defined_vars(fc.function)
+                // Recurse into arguments for nested calls.
+                || fc
+                    .argument_list
+                    .arguments
+                    .iter()
+                    .any(|a| expr_has_get_defined_vars(a.value()))
+        }
+        Expression::Call(Call::Method(mc)) => {
+            expr_has_get_defined_vars(mc.object)
+                || mc
+                    .argument_list
+                    .arguments
+                    .iter()
+                    .any(|a| expr_has_get_defined_vars(a.value()))
+        }
+        Expression::Call(Call::NullSafeMethod(mc)) => {
+            expr_has_get_defined_vars(mc.object)
+                || mc
+                    .argument_list
+                    .arguments
+                    .iter()
+                    .any(|a| expr_has_get_defined_vars(a.value()))
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            expr_has_get_defined_vars(sc.class)
+                || sc
+                    .argument_list
+                    .arguments
+                    .iter()
+                    .any(|a| expr_has_get_defined_vars(a.value()))
+        }
+        Expression::Access(access) => match access {
+            Access::Property(pa) => expr_has_get_defined_vars(pa.object),
+            Access::NullSafeProperty(pa) => expr_has_get_defined_vars(pa.object),
+            Access::StaticProperty(spa) => expr_has_get_defined_vars(spa.class),
+            Access::ClassConstant(cca) => expr_has_get_defined_vars(cca.class),
+        },
+        Expression::ArrayAccess(aa) => {
+            expr_has_get_defined_vars(aa.array) || expr_has_get_defined_vars(aa.index)
+        }
+        Expression::ArrayAppend(append) => expr_has_get_defined_vars(append.array),
+        Expression::Array(arr) => arr
+            .elements
+            .iter()
+            .any(|e| array_elem_has_get_defined_vars(e)),
+        Expression::LegacyArray(arr) => arr
+            .elements
+            .iter()
+            .any(|e| array_elem_has_get_defined_vars(e)),
+        Expression::List(list) => list
+            .elements
+            .iter()
+            .any(|e| array_elem_has_get_defined_vars(e)),
+        Expression::Assignment(a) => {
+            expr_has_get_defined_vars(a.lhs) || expr_has_get_defined_vars(a.rhs)
+        }
+        Expression::Binary(b) => {
+            expr_has_get_defined_vars(b.lhs) || expr_has_get_defined_vars(b.rhs)
+        }
+        Expression::UnaryPrefix(u) => expr_has_get_defined_vars(u.operand),
+        Expression::UnaryPostfix(u) => expr_has_get_defined_vars(u.operand),
+        Expression::Parenthesized(p) => expr_has_get_defined_vars(p.expression),
+        Expression::Conditional(c) => {
+            expr_has_get_defined_vars(c.condition)
+                || c.then.is_some_and(|t| expr_has_get_defined_vars(t))
+                || expr_has_get_defined_vars(c.r#else)
+        }
+        Expression::Instantiation(inst) => {
+            expr_has_get_defined_vars(inst.class)
+                || inst.argument_list.as_ref().is_some_and(|al| {
+                    al.arguments
+                        .iter()
+                        .any(|a| expr_has_get_defined_vars(a.value()))
+                })
+        }
+        Expression::Throw(t) => expr_has_get_defined_vars(t.exception),
+        Expression::Clone(c) => expr_has_get_defined_vars(c.object),
+        Expression::Yield(yield_expr) => match yield_expr {
+            Yield::Value(yv) => yv.value.is_some_and(expr_has_get_defined_vars),
+            Yield::Pair(yp) => {
+                expr_has_get_defined_vars(yp.key) || expr_has_get_defined_vars(yp.value)
+            }
+            Yield::From(yf) => expr_has_get_defined_vars(yf.iterator),
+        },
+        Expression::Match(m) => {
+            expr_has_get_defined_vars(m.expression)
+                || m.arms.iter().any(|arm| match arm {
+                    MatchArm::Expression(ea) => {
+                        ea.conditions.iter().any(|c| expr_has_get_defined_vars(c))
+                            || expr_has_get_defined_vars(ea.expression)
+                    }
+                    MatchArm::Default(da) => expr_has_get_defined_vars(da.expression),
+                })
+        }
+        Expression::Construct(construct) => match construct {
+            Construct::Isset(isset) => isset.values.iter().any(|v| expr_has_get_defined_vars(v)),
+            Construct::Empty(empty) => expr_has_get_defined_vars(empty.value),
+            Construct::Eval(eval) => expr_has_get_defined_vars(eval.value),
+            Construct::Include(inc) => expr_has_get_defined_vars(inc.value),
+            Construct::IncludeOnce(inc) => expr_has_get_defined_vars(inc.value),
+            Construct::Require(req) => expr_has_get_defined_vars(req.value),
+            Construct::RequireOnce(req) => expr_has_get_defined_vars(req.value),
+            Construct::Print(print) => expr_has_get_defined_vars(print.value),
+            Construct::Exit(exit) => exit.arguments.as_ref().is_some_and(|args| {
+                args.arguments
+                    .iter()
+                    .any(|a| expr_has_get_defined_vars(a.value()))
+            }),
+            Construct::Die(die) => die.arguments.as_ref().is_some_and(|args| {
+                args.arguments
+                    .iter()
+                    .any(|a| expr_has_get_defined_vars(a.value()))
+            }),
+        },
+        Expression::CompositeString(composite) => composite.parts().iter().any(|part| match part {
+            StringPart::Expression(inner_expr) => expr_has_get_defined_vars(inner_expr),
+            StringPart::BracedExpression(braced) => expr_has_get_defined_vars(braced.expression),
+            StringPart::Literal(_) => false,
+        }),
+        Expression::Pipe(pipe) => {
+            expr_has_get_defined_vars(pipe.input) || expr_has_get_defined_vars(pipe.callable)
+        }
+        Expression::PartialApplication(partial) => match partial {
+            PartialApplication::Function(func_pa) => expr_has_get_defined_vars(func_pa.function),
+            PartialApplication::Method(method_pa) => expr_has_get_defined_vars(method_pa.object),
+            PartialApplication::StaticMethod(static_pa) => {
+                expr_has_get_defined_vars(static_pa.class)
+            }
+        },
+        Expression::AnonymousClass(anon) => anon.argument_list.as_ref().is_some_and(|args| {
+            args.arguments
+                .iter()
+                .any(|a| expr_has_get_defined_vars(a.value()))
+        }),
+        // Don't recurse into closures/arrow functions.
+        Expression::Closure(_) | Expression::ArrowFunction(_) => false,
+        _ => false,
+    }
+}
+
+fn array_elem_has_get_defined_vars(elem: &ArrayElement<'_>) -> bool {
+    match elem {
+        ArrayElement::KeyValue(kv) => {
+            expr_has_get_defined_vars(kv.key) || expr_has_get_defined_vars(kv.value)
+        }
+        ArrayElement::Value(v) => expr_has_get_defined_vars(v.value),
+        ArrayElement::Variadic(s) => expr_has_get_defined_vars(s.value),
+        ArrayElement::Missing(_) => false,
+    }
+}
+
 // ─── @var annotation collection ─────────────────────────────────────────────
 
 /// Scan the source text for `/** @var Type $varName */` inline
-/// docblocks and return the set of variable names they declare.
-fn collect_var_annotations(content: &str) -> HashSet<String> {
-    let mut vars = HashSet::new();
+/// docblocks and return each declared variable name paired with the byte
+/// offset of its `$` sigil.
+///
+/// The offset lets callers treat the annotation as a write at that
+/// position so it (a) only defines the variable within the scope it
+/// appears in, and (b) follows the same "prior write in source order"
+/// rule as ordinary assignments.
+fn collect_var_annotations(content: &str) -> Vec<(String, u32)> {
+    let mut vars = Vec::new();
     // Look for patterns like: @var SomeType $varName
     // The regex-like scan: find `@var ` followed by a type, then `$name`.
+    let mut line_start = 0usize;
     for line in content.lines() {
-        let trimmed = line.trim();
-        // Must be inside a doc comment context.
-        if !trimmed.contains("@var") {
+        // `lines()` strips the line terminator; track the running byte
+        // offset so we can report absolute positions.
+        let this_line_start = line_start;
+        line_start += line.len() + 1; // +1 for the stripped '\n'
+
+        if !line.contains("@var") {
             continue;
         }
         // Find `@var` and extract the variable name after the type.
-        if let Some(var_pos) = trimmed.find("@var") {
-            let after_var = &trimmed[var_pos + 4..];
+        if let Some(var_pos) = line.find("@var") {
+            let after_var_off = var_pos + 4;
+            let after_var = &line[after_var_off..];
+            let ws = after_var.len() - after_var.trim_start().len();
             let after_var = after_var.trim_start();
             // Skip the type (everything before the $).
             if let Some(dollar_pos) = after_var.find('$') {
@@ -1235,7 +1567,8 @@ fn collect_var_annotations(content: &str) -> HashSet<String> {
                 // Trim trailing `*/` if present.
                 let var_name = var_name.trim_end_matches("*/").trim();
                 if var_name.len() > 1 {
-                    vars.insert(var_name.to_string());
+                    let dollar_offset = this_line_start + after_var_off + ws + dollar_pos;
+                    vars.push((var_name.to_string(), dollar_offset as u32));
                 }
             }
         }

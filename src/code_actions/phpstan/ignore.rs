@@ -266,8 +266,11 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
             };
         }
 
-        // Insert the new identifier after the existing ones.
-        let insert_col = (ids_start + ids_offset + ids_end) as u32;
+        // Insert the new identifier after the existing ones. The accumulated
+        // offset is in bytes; LSP positions are UTF-16 code units, so convert
+        // before emitting the edit.
+        let insert_byte = ids_start + ids_offset + ids_end;
+        let insert_col = crate::util::byte_offset_to_utf16_col(line_text, insert_byte);
 
         // Check if we need a comma separator.
         let separator = if existing_ids.is_empty() { "" } else { ", " };
@@ -293,7 +296,9 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
 /// Build a `TextEdit` that appends `// @phpstan-ignore <id>` at the end
 /// of a line.
 fn build_eol_comment(_content: &str, line: u32, line_text: &str, identifier: &str) -> TextEdit {
-    let end_col = line_text.len() as u32;
+    // LSP positions are UTF-16 code units, not bytes: convert the end-of-line
+    // byte offset so the comment lands correctly on multibyte lines.
+    let end_col = crate::util::byte_offset_to_utf16_col(line_text, line_text.len());
     TextEdit {
         range: Range {
             start: Position {
@@ -629,6 +634,37 @@ mod tests {
         assert_eq!(edit.new_text, " // @phpstan-ignore variable.undefined");
         assert_eq!(edit.range.start.line, 1);
         assert_eq!(edit.range.start.character, 7); // end of "$x = 1;"
+    }
+
+    #[test]
+    fn eol_comment_column_is_utf16_on_multibyte_line() {
+        // "café" is 5 bytes but 4 UTF-16 code units; the comment must be
+        // inserted at the UTF-16 column, not the byte length.
+        let line_text = "$x = \"café\";";
+        let content = format!("<?php\n{line_text}\n");
+        let edit = build_add_ignore_edit(&content, 1, line_text, "variable.undefined");
+        assert_eq!(edit.new_text, " // @phpstan-ignore variable.undefined");
+        // 13 bytes ("é" is two) but 12 UTF-16 code units.
+        assert_eq!(edit.range.start.character, 12);
+    }
+
+    #[test]
+    fn appends_after_multibyte_in_existing_ignore() {
+        // The receiver expression contains a multibyte character before the
+        // existing ignore comment; the append position must be a UTF-16
+        // column, not a byte offset.
+        let line_text = "echo \"é\"; // @phpstan-ignore variable.undefined";
+        let content = format!("<?php\n{line_text}\n");
+        let edit = build_add_ignore_edit(&content, 1, line_text, "argument.type");
+        assert_eq!(edit.new_text, ", argument.type");
+        let insert_char = edit.range.start.character as usize;
+        // The byte offset of the end of the id list would be one greater than
+        // the UTF-16 column because "é" is two bytes.
+        let byte_end = line_text.len();
+        assert!(
+            insert_char < byte_end,
+            "UTF-16 column {insert_char} should be less than byte length {byte_end}",
+        );
     }
 
     #[test]

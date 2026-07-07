@@ -20,7 +20,6 @@
 
 use std::collections::HashMap;
 
-use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::class_like::property::Property;
 use mago_syntax::ast::modifier::Modifier;
@@ -31,6 +30,7 @@ use super::cursor_context::{
 };
 use super::detect_indent_from_members;
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::util::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
@@ -51,8 +51,8 @@ fn existing_hook_names<'a>(property: &Property<'a>) -> (bool, bool) {
             let mut has_set = false;
             for hook in hooked.hook_list.hooks.iter() {
                 match hook.name.value {
-                    "get" => has_get = true,
-                    "set" => has_set = true,
+                    b"get" => has_get = true,
+                    b"set" => has_set = true,
                     _ => {}
                 }
             }
@@ -211,97 +211,129 @@ impl Backend {
 
         let cursor_offset = crate::util::position_to_offset(content, params.range.start);
 
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        // Resolve the cursor context and extract the (owned) data needed to
+        // build the hook edits.  The borrowed AST does not escape the
+        // closure, so we capture whether the property is already hooked
+        // (`is_hooked`) and recompute the source slice from offsets below.
+        let Some((
+            can_get,
+            can_set,
+            prop_info,
+            indent,
+            prop_start,
+            prop_end,
+            is_interface,
+            is_hooked,
+        )) = crate::parser::with_parsed_program(
+            content,
+            "generate_property_hooks",
+            |program, content| {
+                let ctx = find_cursor_context(&program.statements, cursor_offset);
 
-        let ctx = find_cursor_context(&program.statements, cursor_offset);
+                let (property, all_members, class_kind, class_readonly) = match &ctx {
+                    CursorContext::InClassLike {
+                        kind,
+                        class_readonly,
+                        member: MemberContext::Property(prop),
+                        all_members,
+                    } => (*prop, *all_members, *kind, *class_readonly),
+                    _ => return None,
+                };
 
-        let (property, all_members, class_kind, class_readonly) = match &ctx {
-            CursorContext::InClassLike {
-                kind,
-                class_readonly,
-                member: MemberContext::Property(prop),
-                all_members,
-            } => (*prop, *all_members, *kind, *class_readonly),
-            _ => return,
-        };
-
-        // Enums cannot have properties (only backed enum cases), and
-        // PHP 8.4 does not support hooks on enum properties anyway.
-        if class_kind == ClassLikeContextKind::Enum {
-            return;
-        }
-
-        let is_interface = class_kind == ClassLikeContextKind::Interface;
-
-        // Check for static — hooks are not supported on static properties.
-        let is_static = match property {
-            Property::Plain(plain) => has_static(plain.modifiers.iter()),
-            Property::Hooked(hooked) => has_static(hooked.modifiers.iter()),
-        };
-        if is_static {
-            return;
-        }
-
-        let prop_readonly = match property {
-            Property::Plain(plain) => has_readonly(plain.modifiers.iter()),
-            Property::Hooked(hooked) => has_readonly(hooked.modifiers.iter()),
-        };
-        let is_readonly = prop_readonly || class_readonly;
-
-        // PHP 8.4 does not allow hooks on readonly properties at all.
-        // A `readonly class` makes every property readonly implicitly.
-        if is_readonly {
-            return;
-        }
-
-        // Get the property name.
-        let prop_name = match property {
-            Property::Plain(plain) => {
-                // For multi-variable declarations like `public int $a, $b;`,
-                // use the first variable name. Multi-variable declarations
-                // can't have hooks anyway.
-                if let Some(first_item) = plain.items.first() {
-                    let var = first_item.variable();
-                    var.name.strip_prefix('$').unwrap_or(var.name).to_string()
-                } else {
-                    return;
+                // Enums cannot have properties (only backed enum cases), and
+                // PHP 8.4 does not support hooks on enum properties anyway.
+                if class_kind == ClassLikeContextKind::Enum {
+                    return None;
                 }
-            }
-            Property::Hooked(hooked) => {
-                let var = hooked.item.variable();
-                var.name.strip_prefix('$').unwrap_or(var.name).to_string()
-            }
+
+                let is_interface = class_kind == ClassLikeContextKind::Interface;
+
+                // Hooks are not supported on static properties.
+                let is_static = match property {
+                    Property::Plain(plain) => has_static(plain.modifiers.iter()),
+                    Property::Hooked(hooked) => has_static(hooked.modifiers.iter()),
+                };
+                if is_static {
+                    return None;
+                }
+
+                let prop_readonly = match property {
+                    Property::Plain(plain) => has_readonly(plain.modifiers.iter()),
+                    Property::Hooked(hooked) => has_readonly(hooked.modifiers.iter()),
+                };
+                // PHP 8.4 does not allow hooks on readonly properties at all.
+                // A `readonly class` makes every property readonly implicitly.
+                if prop_readonly || class_readonly {
+                    return None;
+                }
+
+                // Get the property name.
+                let prop_name = match property {
+                    Property::Plain(plain) => {
+                        // For multi-variable declarations like
+                        // `public int $a, $b;`, use the first variable name.
+                        // Multi-variable declarations can't have hooks anyway.
+                        if let Some(first_item) = plain.items.first() {
+                            let var = first_item.variable();
+                            bytes_to_str(var.name)
+                                .strip_prefix('$')
+                                .unwrap_or(bytes_to_str(var.name))
+                                .to_string()
+                        } else {
+                            return None;
+                        }
+                    }
+                    Property::Hooked(hooked) => {
+                        let var = hooked.item.variable();
+                        bytes_to_str(var.name)
+                            .strip_prefix('$')
+                            .unwrap_or(bytes_to_str(var.name))
+                            .to_string()
+                    }
+                };
+
+                // For plain properties with multiple variables, hooks cannot
+                // be generated (PHP does not support hooks on multi-variable
+                // declarations).
+                if let Property::Plain(plain) = property
+                    && plain.items.len() > 1
+                {
+                    return None;
+                }
+
+                // Check which hooks already exist.
+                let (has_get, has_set) = existing_hook_names(property);
+                let can_get = !has_get;
+                let can_set = !has_set;
+                if !can_get && !can_set {
+                    return None;
+                }
+
+                let prop_info = HookableProperty { name: prop_name };
+                let indent = detect_indent_from_members(all_members, content);
+
+                // The property's full span so we can replace it.
+                let prop_span = property.span();
+                let prop_start = prop_span.start.offset as usize;
+                let prop_end = prop_span.end.offset as usize;
+
+                let is_hooked = matches!(property, Property::Hooked(_));
+
+                Some((
+                    can_get,
+                    can_set,
+                    prop_info,
+                    indent,
+                    prop_start,
+                    prop_end,
+                    is_interface,
+                    is_hooked,
+                ))
+            },
+        )
+        else {
+            return;
         };
-
-        // For plain properties with multiple variables, hooks cannot be
-        // generated (PHP does not support hooks on multi-variable
-        // declarations).
-        if let Property::Plain(plain) = property
-            && plain.items.len() > 1
-        {
-            return;
-        }
-
-        // Check which hooks already exist.
-        let (has_get, has_set) = existing_hook_names(property);
-
-        let can_get = !has_get;
-        let can_set = !has_set;
-
-        if !can_get && !can_set {
-            return;
-        }
-
-        let prop_info = HookableProperty { name: prop_name };
-
-        let indent = detect_indent_from_members(all_members, content);
-
-        // Get the property's full span so we can replace it.
-        let prop_span = property.span();
-        let prop_start = prop_span.start.offset as usize;
-        let prop_end = prop_span.end.offset as usize;
 
         let original_text = &content[prop_start..prop_end];
 
@@ -312,10 +344,8 @@ impl Backend {
             end: end_pos,
         };
 
-        let existing_hooks_text = match property {
-            Property::Hooked(_) => Some(original_text),
-            Property::Plain(_) => None,
-        };
+        // Hooked properties carry their existing hooks forward.
+        let existing_hooks_text = if is_hooked { Some(original_text) } else { None };
 
         // ── Generate get hook ───────────────────────────────────────────
         if can_get {

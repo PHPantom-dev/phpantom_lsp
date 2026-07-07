@@ -869,16 +869,11 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
             continue;
         }
 
-        // ── Skip: block comment (memchr to '*') ─────────────────────
+        // ── Skip: block comment (memmem to "*/") ────────────────────
         if in_block_comment {
-            if let Some(pos) = memchr(b'*', &content[i..]) {
-                i += pos;
-                if i + 1 < len && content[i + 1] == b'/' {
-                    in_block_comment = false;
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+            if let Some(pos) = memmem::find(&content[i..], b"*/") {
+                i += pos + 2;
+                in_block_comment = false;
             } else {
                 break; // unclosed block comment
             }
@@ -1286,16 +1281,11 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
             continue;
         }
 
-        // ── Skip: block comment (memchr to '*') ─────────────────────
+        // ── Skip: block comment (memmem to "*/") ────────────────────
         if in_block_comment {
-            if let Some(pos) = memchr(b'*', &content[i..]) {
-                i += pos;
-                if i + 1 < len && content[i + 1] == b'/' {
-                    in_block_comment = false;
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+            if let Some(pos) = memmem::find(&content[i..], b"*/") {
+                i += pos + 2;
+                in_block_comment = false;
             } else {
                 break;
             }

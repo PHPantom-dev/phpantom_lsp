@@ -113,7 +113,7 @@ const ELOQUENT_RELATIONS_NS: &str = "Illuminate\\Database\\Eloquent\\Relations\\
 
 /// The category of a relationship return type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RelationshipKind {
+pub(crate) enum RelationshipKind {
     /// HasOne, MorphOne, BelongsTo — singular nullable model.
     Singular,
     /// HasMany, MorphMany, BelongsToMany, HasManyThrough, MorphToMany — Collection.
@@ -138,7 +138,7 @@ pub(super) enum RelationshipKind {
 /// Unqualified names (no `\`) are matched by short name only, which
 /// is the common case for body-inferred types and docblock annotations
 /// that use `use` imports.
-pub(super) fn classify_relationship_typed(return_type: &PhpType) -> Option<RelationshipKind> {
+pub(crate) fn classify_relationship_typed(return_type: &PhpType) -> Option<RelationshipKind> {
     let base = return_type.base_name()?;
     let sname = short_name(base);
 

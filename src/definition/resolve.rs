@@ -169,7 +169,7 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<Vec<Location>> {
         match kind {
-            SymbolKind::Variable { name } => {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Try the precomputed var_defs map first.
                 // This avoids re-parsing the file at request time.
 
@@ -191,10 +191,14 @@ impl Backend {
                         let parsed_uri = Url::parse(uri).ok()?;
                         let start =
                             crate::util::offset_to_position(content, cursor_offset as usize);
-                        let end = crate::util::offset_to_position(
-                            content,
-                            cursor_offset as usize + 1 + name.len(),
-                        );
+                        let end_offset = match kind {
+                            SymbolKind::Variable { .. } => cursor_offset as usize + 1 + name.len(),
+                            SymbolKind::CompactVariable { .. } => {
+                                cursor_offset as usize + name.len()
+                            }
+                            _ => unreachable!(),
+                        };
+                        let end = crate::util::offset_to_position(content, end_offset);
                         return Some(vec![Location {
                             uri: parsed_uri,
                             range: Range { start, end },
@@ -824,7 +828,7 @@ impl Backend {
         {
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
-                if let Some(file_uri) = self.fqn_uri_index.read().get(*candidate).cloned()
+                if let Some(file_uri) = self.fqn_uri_index.read().get(candidate).cloned()
                     && let Some(file_path) = Url::parse(&file_uri)
                         .ok()
                         .and_then(|u| u.to_file_path().ok())

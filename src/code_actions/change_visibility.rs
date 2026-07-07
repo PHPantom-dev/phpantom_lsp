@@ -27,6 +27,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(test)]
 use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::class_like::property::Property;
@@ -35,6 +36,7 @@ use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::types::{ClassInfo, Visibility};
 use crate::util::offset_to_position;
@@ -99,19 +101,21 @@ impl Backend {
     ) {
         let cursor_offset = crate::util::position_to_offset(content, params.range.start);
 
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
-
-        let ctx = find_cursor_context(&program.statements, cursor_offset);
-
-        let hit = match find_visibility_from_context(&ctx, cursor_offset) {
-            Some(h) => h,
-            None => return,
+        // Resolve the cursor context once and extract the owned data the
+        // rest of this function needs (the AST does not escape the closure).
+        let Some((hit, member_kind, member_lines)) =
+            crate::parser::with_parsed_program(content, "change_visibility", |program, content| {
+                let ctx = find_cursor_context(&program.statements, cursor_offset);
+                let hit = find_visibility_from_context(&ctx, cursor_offset)?;
+                // Member kind for parent lookup and the member's line range
+                // (used below to find an overlapping PHPStan diagnostic).
+                let member_kind = extract_member_kind(&ctx);
+                let member_lines = member_line_range(&ctx, content);
+                Some((hit, member_kind, member_lines))
+            })
+        else {
+            return;
         };
-
-        // ── Determine member kind for parent lookup ─────────────────
-        let member_kind = extract_member_kind(&ctx);
 
         // ── Parent-aware filtering ──────────────────────────────────
         // Find the minimum visibility required by the parent hierarchy.
@@ -142,7 +146,6 @@ impl Backend {
         // The diagnostic may land on an attribute line (e.g. #[Override])
         // rather than the method signature line, so search the full
         // line range of the member declaration.
-        let member_lines = member_line_range(&ctx, content);
         let phpstan_diag = self.find_visibility_diagnostic(uri, member_lines);
 
         // Parse the PHPStan message to determine which visibilities are
@@ -454,18 +457,26 @@ fn is_valid_visibility(s: &str) -> bool {
 fn extract_member_kind(ctx: &CursorContext<'_>) -> Option<MemberKind> {
     match ctx {
         CursorContext::InClassLike { member, .. } => match member {
-            MemberContext::Method(method, _) => {
-                Some(MemberKind::Method(method.name.value.to_string()))
-            }
+            MemberContext::Method(method, _) => Some(MemberKind::Method(
+                bytes_to_str(method.name.value).to_string(),
+            )),
             MemberContext::Property(property) => {
                 let name = match property {
                     Property::Plain(plain) => plain.items.first().map(|item| {
                         let var = item.variable();
-                        var.name.strip_prefix('$').unwrap_or(var.name).to_string()
+                        bytes_to_str(var.name)
+                            .strip_prefix('$')
+                            .unwrap_or(bytes_to_str(var.name))
+                            .to_string()
                     }),
                     Property::Hooked(hooked) => {
                         let var = hooked.item.variable();
-                        Some(var.name.strip_prefix('$').unwrap_or(var.name).to_string())
+                        Some(
+                            bytes_to_str(var.name)
+                                .strip_prefix('$')
+                                .unwrap_or(bytes_to_str(var.name))
+                                .to_string(),
+                        )
                     }
                 };
                 name.map(MemberKind::Property)
@@ -473,7 +484,7 @@ fn extract_member_kind(ctx: &CursorContext<'_>) -> Option<MemberKind> {
             MemberContext::Constant(constant) => constant
                 .items
                 .first()
-                .map(|item| MemberKind::Constant(item.name.value.to_string())),
+                .map(|item| MemberKind::Constant(bytes_to_str(item.name.value).to_string())),
             _ => None,
         },
         _ => None,
@@ -543,7 +554,7 @@ fn find_promoted_param_visibility(
     use mago_span::HasSpan;
 
     // Only check constructors — only they can have promoted properties.
-    if method.name.value != "__construct" {
+    if method.name.value != b"__construct" {
         return None;
     }
 
@@ -592,8 +603,8 @@ mod tests {
     /// Helper: parse PHP and find visibility at a given byte offset.
     fn find_vis(php: &str, offset: u32) -> Option<VisibilityHit> {
         let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php);
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let ctx = find_cursor_context(&program.statements, offset);
         find_visibility_from_context(&ctx, offset)
     }

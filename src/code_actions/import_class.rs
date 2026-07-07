@@ -345,7 +345,7 @@ impl Backend {
             let idx = self.fqn_uri_index.read();
             for fqn in idx.keys() {
                 if short_name(fqn).to_lowercase() == name_lower {
-                    candidates.push(fqn.clone());
+                    candidates.push(fqn.to_owned());
                 }
             }
         }
@@ -359,7 +359,7 @@ impl Backend {
                         .iter()
                         .any(|c: &String| c.eq_ignore_ascii_case(fqn))
                 {
-                    candidates.push(fqn.clone());
+                    candidates.push(fqn.to_owned());
                 }
             }
         }
@@ -389,7 +389,7 @@ impl Backend {
         // Stubs are global-namespace classes, so the FQN is the short name.
         // Only add if the file has a namespace (otherwise no import needed).
         let stub_idx = self.stub_index.read();
-        for &stub_name in stub_idx.keys() {
+        for stub_name in stub_idx.keys() {
             if short_name(stub_name).to_lowercase() == name_lower
                 && !candidates
                     .iter()
@@ -857,7 +857,12 @@ fn compute_use_line_ranges(content: &str) -> Vec<(u32, u32)> {
     let mut offset: u32 = 0;
     let mut brace_depth: u32 = 0;
 
-    for line in content.lines() {
+    // Iterate with `split_inclusive` so the terminator stays attached to
+    // each chunk. Advancing `offset` by the full chunk length keeps the
+    // byte ranges correct on CRLF files (where `str::lines()` would strip
+    // the `\r` and drift the offset by one byte per line).
+    for chunk in content.split_inclusive('\n') {
+        let line = chunk.trim_end_matches('\n').trim_end_matches('\r');
         let trimmed = line.trim();
         let line_start = offset;
         let line_end = offset + line.len() as u32;
@@ -879,8 +884,7 @@ fn compute_use_line_ranges(content: &str) -> Vec<(u32, u32)> {
             ranges.push((line_start, line_end));
         }
 
-        // +1 for the newline character
-        offset = line_end + 1;
+        offset += chunk.len() as u32;
     }
 
     ranges
@@ -898,6 +902,29 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    // ── compute_use_line_ranges ─────────────────────────────────────────
+
+    #[test]
+    fn use_line_ranges_lf() {
+        let content = "<?php\nuse App\\Foo;\nnew Foo();\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        // The `use App\Foo;` line starts right after "<?php\n" (6 bytes).
+        assert_eq!(&content[start as usize..end as usize], "use App\\Foo;");
+    }
+
+    #[test]
+    fn use_line_ranges_crlf() {
+        let content = "<?php\r\nuse App\\Foo;\r\nnew Foo();\r\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        // The slice must still land exactly on the use statement even
+        // though each preceding line carries a two-byte `\r\n` terminator.
+        assert_eq!(&content[start as usize..end as usize], "use App\\Foo;");
+    }
 
     // ── find_all_unresolved_class_names ─────────────────────────────────
 

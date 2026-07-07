@@ -4,6 +4,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 
 /// Resolve `__('file.key')` / `trans('file.key')` / `Lang::get('file.key')` to the
 /// matching keys inside all matching `lang/{locale}/file.php` translation files.
@@ -55,8 +56,8 @@ struct TransKeyMatch {
 
 fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMatch> {
     let arena = Bump::new();
-    let file_id = FileId::new("input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();
 
     let mut returned_var_name: Option<String> = None;
@@ -67,7 +68,7 @@ fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMat
             if let Some(val) = ret.value {
                 match val {
                     Expression::Variable(Variable::Direct(dv)) => {
-                        returned_var_name = Some(dv.name.to_string());
+                        returned_var_name = Some(bytes_to_str(dv.name).to_string());
                     }
                     _ => {
                         return_expr = Some(val);
@@ -85,7 +86,7 @@ fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMat
             if let Statement::Expression(expr_stmt) = stmt
                 && let Expression::Assignment(assign) = expr_stmt.expression
                 && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-                && dv.name == var_name
+                && dv.name == var_name.as_bytes()
             {
                 collect_expr(assign.rhs, content, file_stem, &[], &mut out);
             }
@@ -114,7 +115,7 @@ fn collect_expr<'a>(
         }
         Expression::Call(Call::Function(fc)) => {
             if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case("array_merge")
+                && ident.value().eq_ignore_ascii_case(b"array_merge")
             {
                 for arg in fc.argument_list.arguments.iter() {
                     let arg_expr = match arg {

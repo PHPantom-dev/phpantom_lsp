@@ -163,10 +163,11 @@ async fn test_completion_arrow_shows_only_non_static() {
                 method_names.contains(&"helper"),
                 "Arrow should include non-static method 'helper'"
             );
-            // Should NOT include static method `create`
+            // PHP allows calling static methods through an instance,
+            // so `->` access should include static methods too.
             assert!(
-                !method_names.contains(&"create"),
-                "Arrow should exclude static method 'create'"
+                method_names.contains(&"create"),
+                "Arrow should include static method 'create' (PHP allows static calls via instance)"
             );
 
             // Should include non-static property `count`
@@ -350,10 +351,11 @@ async fn test_completion_arrow_with_partial_typed_identifier() {
                 "Should include instanceMethod"
             );
             assert!(method_names.contains(&"test"), "Should include test");
-            // Should NOT include static method even with partial typing
+            // PHP allows calling static methods through an instance,
+            // so `->` access should include static methods too.
             assert!(
-                !method_names.contains(&"staticMethod"),
-                "Should exclude staticMethod when using ->"
+                method_names.contains(&"staticMethod"),
+                "Should include staticMethod when using -> (PHP allows static calls via instance)"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

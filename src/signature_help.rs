@@ -482,7 +482,7 @@ fn find_fcc_target_in_expr(
 
         // Check the LHS is the variable we're looking for.
         if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
-            if dv.name != var_name {
+            if dv.name != var_name.as_bytes() {
                 return None;
             }
 
@@ -680,32 +680,14 @@ impl Backend {
     /// This is the same patching strategy used by named-argument
     /// completion (see `handler::patch_content_at_cursor`).
     fn patch_content_for_signature(content: &str, position: Position) -> String {
-        let line_idx = position.line as usize;
-        let col = position.character as usize;
+        // Convert the LSP position (UTF-16 column) to an absolute byte
+        // offset, preserving the original line terminators (including
+        // CRLF), then splice `);` in at that point.
+        let byte_offset = crate::util::position_to_byte_offset(content, position);
         let mut result = String::with_capacity(content.len() + 2);
-
-        for (i, line) in content.lines().enumerate() {
-            if i == line_idx {
-                let byte_col = line
-                    .char_indices()
-                    .nth(col)
-                    .map(|(idx, _)| idx)
-                    .unwrap_or(line.len());
-                result.push_str(&line[..byte_col]);
-                result.push_str(");");
-                result.push_str(&line[byte_col..]);
-            } else {
-                result.push_str(line);
-            }
-            result.push('\n');
-        }
-
-        // Remove the trailing newline we may have added if the original
-        // content did not end with one.
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
-        }
-
+        result.push_str(&content[..byte_offset]);
+        result.push_str(");");
+        result.push_str(&content[byte_offset..]);
         result
     }
 }

@@ -532,6 +532,20 @@ function test() {
     assert_eq!(count_kind(&scope_map, "$config", AccessKind::Read), 1);
 }
 
+#[test]
+fn dynamic_property_selector_reads_variable() {
+    let php = r#"<?php
+function test(object $message, string $type) {
+    $attribute = strtolower($type);
+    return $message->{$attribute};
+}
+"#;
+    let scope_map = collect_from_function(php);
+
+    assert_eq!(count_kind(&scope_map, "$attribute", AccessKind::Write), 1);
+    assert_eq!(count_kind(&scope_map, "$attribute", AccessKind::Read), 1);
+}
+
 // ─── Unset ──────────────────────────────────────────────────────────────────
 
 #[test]
@@ -1296,6 +1310,43 @@ function test($items) {
     assert!(
         !classification.parameters.contains(&"$count".to_string()),
         "$count must NOT be a parameter (first write is inside range): {:?}",
+        classification
+    );
+}
+
+#[test]
+fn classify_range_read_before_inner_write_is_param_and_return() {
+    // $subcategories is read at the start of the range (`if (!$subcategories)`)
+    // before its first write inside the range, so the range consumes the
+    // incoming value → it must be a parameter.  It is also written inside
+    // and read after → it is also a return value.
+    let php = r#"<?php
+function test($subcategories) {
+    if (!$subcategories) {
+        $subcategories = array_merge($subcategories, [1]);
+    }
+    return $subcategories;
+}
+"#;
+    let scope_map = collect_from_function(php);
+
+    let range_start = php.find("if (!$subcategories)").unwrap() as u32;
+    let range_end = php.find("return $subcategories;").unwrap() as u32;
+
+    let classification = scope_map.classify_range(range_start, range_end);
+
+    assert!(
+        classification
+            .parameters
+            .contains(&"$subcategories".to_string()),
+        "$subcategories must be a parameter (read before its inner write): {:?}",
+        classification
+    );
+    assert!(
+        classification
+            .return_values
+            .contains(&"$subcategories".to_string()),
+        "$subcategories must also be a return value (written inside, read after): {:?}",
         classification
     );
 }

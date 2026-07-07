@@ -12943,3 +12943,97 @@ class Order extends Model {
         methods
     );
 }
+
+// ─── Eloquent relation string completion ────────────────────────────────────
+
+#[tokio::test]
+async fn test_eloquent_relation_string_completion_with() {
+    let post_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class Post extends Model {
+    /** @return HasMany<\\App\\Models\\Comment, $this> */
+    public function comments(): HasMany { return $this->hasMany(Comment::class); }
+}
+";
+    let comment_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Comment extends Model {}
+";
+    let test_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class UserTest {
+    public function test() {
+        Post::with('
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Post.php", post_php),
+        ("src/Models/Comment.php", comment_php),
+        ("src/Models/UserTest.php", test_php),
+    ]);
+
+    // Cursor is inside the string after the opening quote: Post::with('
+    // Line 5 = "        Post::with('", character = 20 (after the ')
+    let items = complete_at(&backend, &dir, "src/Models/UserTest.php", test_php, 5, 20).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        labels.contains(&"comments"),
+        "Should offer 'comments' relation in with() string, got: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn test_eloquent_column_string_completion_where() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+/**
+ * @property string $email
+ * @property string $name
+ */
+class User extends Model {
+    protected $casts = ['status' => 'string'];
+    protected $fillable = ['email', 'name', 'status'];
+}
+";
+    let test_php = "\
+<?php
+namespace App\\Models;
+class ColumnTest {
+    public function test() {
+        User::where('
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", user_php),
+        ("src/Models/ColumnTest.php", test_php),
+    ]);
+
+    // Cursor inside the string: User::where('
+    // Line 4 = "        User::where('", character = 21
+    let items = complete_at(&backend, &dir, "src/Models/ColumnTest.php", test_php, 4, 21).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        labels.contains(&"email"),
+        "Should offer 'email' column in where() string, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"status"),
+        "Should offer 'status' column from $casts in where() string, got: {:?}",
+        labels
+    );
+}

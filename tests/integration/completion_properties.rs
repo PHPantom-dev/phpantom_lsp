@@ -500,6 +500,72 @@ async fn test_completion_private_method_hidden_outside_class() {
     }
 }
 
+#[tokio::test]
+async fn test_completion_instance_access_includes_public_static_methods() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_instance_static_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service {\n",
+        "    public static function make(): self { return new self(); }\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "$svc = new Service();\n",
+        "$svc->\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 6,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"run"),
+                "Should include instance method 'run', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"make"),
+                "Should include static method 'make' on instance access, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// `$this->` inside the same class should show private and protected members.
 #[tokio::test]
 async fn test_completion_private_and_protected_visible_inside_own_class() {

@@ -1,0 +1,24 @@
+// test: conditional `is null` return type resolves the then-branch when null is passed explicitly
+// feature: completion
+// expect: json(
+---
+<?php
+
+class ResponseFactory
+{
+    public function json(): string {}
+}
+
+class HttpResponse
+{
+    public function send(): void {}
+}
+
+/**
+ * @param string|array|null $content
+ * @return ($content is null ? ResponseFactory : HttpResponse)
+ */
+function response($content = null) {}
+
+$r = response(null);
+$r-><>

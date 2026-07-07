@@ -9,7 +9,6 @@
 //! to the selected range.  Type annotations are inferred via the hover
 //! variable-type resolution pipeline.
 
-use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 use std::collections::HashMap;
@@ -17,6 +16,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::completion::phpdoc::generation::enrichment_plain;
@@ -36,36 +36,34 @@ use crate::util::{find_class_at_offset, offset_to_position, position_to_byte_off
 /// If any statement is only partially selected, the selection is
 /// invalid for extraction.
 fn selection_covers_complete_statements(content: &str, start: usize, end: usize) -> bool {
-    let arena = Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_fn_validate");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
-
-    // Find the enclosing function/method body statements.
-    let body_stmts = find_enclosing_body_statements(&program.statements, start as u32);
-    if body_stmts.is_empty() {
-        return false;
-    }
-
-    let mut found_any = false;
-    for stmt in &body_stmts {
-        let span = stmt.span();
-        let stmt_start = span.start.offset as usize;
-        let stmt_end = span.end.offset as usize;
-
-        // Statement fully outside the selection — fine, skip it.
-        if stmt_end <= start || stmt_start >= end {
-            continue;
-        }
-
-        // Statement overlaps the selection — it must be fully contained.
-        if stmt_start < start || stmt_end > end {
+    crate::parser::with_parsed_program(content, "extract_function", |program, _| {
+        // Find the enclosing function/method body statements.
+        let body_stmts = find_enclosing_body_statements(&program.statements, start as u32);
+        if body_stmts.is_empty() {
             return false;
         }
 
-        found_any = true;
-    }
+        let mut found_any = false;
+        for stmt in &body_stmts {
+            let span = stmt.span();
+            let stmt_start = span.start.offset as usize;
+            let stmt_end = span.end.offset as usize;
 
-    found_any
+            // Statement fully outside the selection — fine, skip it.
+            if stmt_end <= start || stmt_start >= end {
+                continue;
+            }
+
+            // Statement overlaps the selection — it must be fully contained.
+            if stmt_start < start || stmt_end > end {
+                return false;
+            }
+
+            found_any = true;
+        }
+
+        found_any
+    })
 }
 
 /// Collect references to top-level statements in the enclosing
@@ -153,88 +151,88 @@ struct EnclosingContext {
 
 /// Determine the extraction target and insertion point by walking the AST.
 fn find_enclosing_context(content: &str, offset: u32, uses_this: bool) -> Option<EnclosingContext> {
-    let arena = Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_fn_ctx");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    crate::parser::with_parsed_program(content, "extract_function", |program, content| {
+        let ctx = find_cursor_context(&program.statements, offset);
 
-    let ctx = find_cursor_context(&program.statements, offset);
+        match ctx {
+            CursorContext::InClassLike {
+                member,
+                all_members,
+                ..
+            } => {
+                if let MemberContext::Method(method, true) = member {
+                    let is_static = method.modifiers.iter().any(|m| m.is_static());
+                    let enclosing_name = bytes_to_str(method.name.value).to_string();
 
-    match ctx {
-        CursorContext::InClassLike {
-            member,
-            all_members,
-            ..
-        } => {
-            if let MemberContext::Method(method, true) = member {
-                let is_static = method.modifiers.iter().any(|m| m.is_static());
-                let enclosing_name = method.name.value.to_string();
+                    // Collect sibling method names for scoped deduplication.
+                    let sibling_method_names: Vec<String> = all_members
+                        .iter()
+                        .filter_map(|m| {
+                            if let ClassLikeMember::Method(m) = m {
+                                Some(bytes_to_str(m.name.value).to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                // Collect sibling method names for scoped deduplication.
-                let sibling_method_names: Vec<String> = all_members
-                    .iter()
-                    .filter_map(|m| {
-                        if let ClassLikeMember::Method(m) = m {
-                            Some(m.name.value.to_string())
-                        } else {
-                            None
+                    // For method extraction, insert before the closing `}` of
+                    // the class.  Find the class closing brace by walking up
+                    // from the method.
+                    let class_end = find_class_end_offset(&program.statements, offset);
+
+                    if let MethodBody::Concrete(block) = &method.body {
+                        let body_start = block.left_brace.start.offset as usize;
+
+                        if uses_this && is_static {
+                            // $this in a static method — can't extract as method.
+                            // Fall back to extracting as a function.
+                            let func_end = block.right_brace.end.offset as usize;
+                            return Some(EnclosingContext {
+                                target: ExtractionTarget::Function,
+                                insert_offset: find_after_class_end(&program.statements, offset)
+                                    .unwrap_or(func_end),
+                                body_start,
+                                is_static,
+                                enclosing_name,
+                                sibling_method_names: Vec::new(),
+                            });
                         }
-                    })
-                    .collect();
 
-                // For method extraction, insert before the closing `}` of the class.
-                // Find the class closing brace by walking up from the method.
-                let class_end = find_class_end_offset(&program.statements, offset);
-
-                if let MethodBody::Concrete(block) = &method.body {
-                    let body_start = block.left_brace.start.offset as usize;
-
-                    if uses_this && is_static {
-                        // $this in a static method — can't extract as method.
-                        // Fall back to extracting as a function.
-                        let func_end = block.right_brace.end.offset as usize;
                         return Some(EnclosingContext {
-                            target: ExtractionTarget::Function,
-                            insert_offset: find_after_class_end(&program.statements, offset)
-                                .unwrap_or(func_end),
+                            target: ExtractionTarget::Method,
+                            insert_offset: class_end
+                                .unwrap_or(block.right_brace.end.offset as usize),
                             body_start,
                             is_static,
                             enclosing_name,
-                            sibling_method_names: Vec::new(),
+                            sibling_method_names,
                         });
                     }
-
-                    return Some(EnclosingContext {
-                        target: ExtractionTarget::Method,
-                        insert_offset: class_end.unwrap_or(block.right_brace.end.offset as usize),
-                        body_start,
-                        is_static,
-                        enclosing_name,
-                        sibling_method_names,
-                    });
                 }
+                None
             }
-            None
-        }
-        CursorContext::InFunction(func, true) => {
-            let body_start = func.body.left_brace.start.offset as usize;
-            let func_end = func.body.right_brace.end.offset as usize;
-            let enclosing_name = func.name.value.to_string();
+            CursorContext::InFunction(func, true) => {
+                let body_start = func.body.left_brace.start.offset as usize;
+                let func_end = func.body.right_brace.end.offset as usize;
+                let enclosing_name = bytes_to_str(func.name.value).to_string();
 
-            // For function extraction, insert after the enclosing function.
-            // Find the end of the line containing the closing `}`.
-            let insert_offset = find_line_end(content, func_end);
+                // For function extraction, insert after the enclosing function.
+                // Find the end of the line containing the closing `}`.
+                let insert_offset = find_line_end(content, func_end);
 
-            Some(EnclosingContext {
-                target: ExtractionTarget::Function,
-                insert_offset,
-                body_start,
-                is_static: false,
-                enclosing_name,
-                sibling_method_names: Vec::new(),
-            })
+                Some(EnclosingContext {
+                    target: ExtractionTarget::Function,
+                    insert_offset,
+                    body_start,
+                    is_static: false,
+                    enclosing_name,
+                    sibling_method_names: Vec::new(),
+                })
+            }
+            _ => None,
         }
-        _ => None,
-    }
+    })
 }
 
 /// Find the byte offset of the closing `}` of the class containing `offset`.
@@ -307,14 +305,13 @@ fn find_after_class_end(statements: &Sequence<'_, Statement<'_>>, offset: u32) -
 
 /// Build a `ScopeMap` for the enclosing function/method at `offset`.
 fn build_scope_map(content: &str, offset: u32) -> ScopeMap {
-    let arena = Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_fn_scope");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
-    crate::scope_collector::build_scope_map_for_offset(
-        program.statements.as_slice(),
-        offset,
-        content.len() as u32,
-    )
+    crate::parser::with_parsed_program(content, "extract_function", |program, content| {
+        crate::scope_collector::build_scope_map_for_offset(
+            program.statements.as_slice(),
+            offset,
+            content.len() as u32,
+        )
+    })
 }
 
 // ─── Type resolution ────────────────────────────────────────────────────────
@@ -1536,49 +1533,52 @@ fn analyse_returns(
     end: usize,
     return_value_count: usize,
 ) -> ReturnStrategy {
-    let arena = Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_fn_ret");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    crate::parser::with_parsed_program(content, "extract_function", |program, content| {
+        let body_stmts = find_enclosing_body_statements(&program.statements, start as u32);
 
-    let body_stmts = find_enclosing_body_statements(&program.statements, start as u32);
+        // Collect the statements that fall inside the selection.
+        let selected: Vec<&Statement<'_>> = body_stmts
+            .iter()
+            .filter(|stmt| {
+                let span = stmt.span();
+                let s = span.start.offset as usize;
+                let e = span.end.offset as usize;
+                s >= start && e <= end
+            })
+            .copied()
+            .collect();
 
-    // Collect the statements that fall inside the selection.
-    let selected: Vec<&Statement<'_>> = body_stmts
-        .iter()
-        .filter(|stmt| {
-            let span = stmt.span();
-            let s = span.start.offset as usize;
-            let e = span.end.offset as usize;
-            s >= start && e <= end
-        })
-        .copied()
-        .collect();
+        if selected.is_empty() {
+            return Some(ReturnStrategy::None);
+        }
 
-    if selected.is_empty() {
-        return ReturnStrategy::None;
-    }
+        // Check whether the last selected statement is a `return`.
+        let has_trailing_return = matches!(selected.last(), Some(Statement::Return(_)));
 
-    // Check whether the last selected statement is a `return`.
-    let has_trailing_return = matches!(selected.last(), Some(Statement::Return(_)));
+        // Check whether any statement in the selection contains a return
+        // (at any nesting level).
+        let any_return = selected.iter().any(|s| selection_stmt_contains_return(s));
 
-    // Check whether any statement in the selection contains a return
-    // (at any nesting level).
-    let any_return = selected.iter().any(|s| selection_stmt_contains_return(s));
+        if !any_return {
+            return Some(ReturnStrategy::None);
+        }
 
-    if !any_return {
-        return ReturnStrategy::None;
-    }
+        // When the selection ends with `return`, the call site is
+        // `return extracted(…)`, so every return path inside the
+        // extracted function propagates correctly.
+        if has_trailing_return {
+            return Some(ReturnStrategy::TrailingReturn);
+        }
 
-    // When the selection ends with `return`, the call site is
-    // `return extracted(…)`, so every return path inside the
-    // extracted function propagates correctly.
-    if has_trailing_return {
-        return ReturnStrategy::TrailingReturn;
-    }
-
-    // The selection contains returns but does NOT end with one.
-    // Try to find a guard-clause strategy.
-    classify_guard_returns(content, &selected, return_value_count)
+        // The selection contains returns but does NOT end with one.
+        // Try to find a guard-clause strategy.
+        Some(classify_guard_returns(
+            content,
+            &selected,
+            return_value_count,
+        ))
+    })
+    .unwrap_or(ReturnStrategy::None)
 }
 
 /// Check whether a statement is or contains a `return` at any depth.
@@ -1841,6 +1841,35 @@ fn collect_returns_from_stmt<'a>(
     }
 }
 
+/// Whether a guard's return value is safe to reproduce verbatim at the
+/// call site.
+///
+/// `UniformGuards` re-emits the return expression at the call site
+/// (`if (!extracted(…)) return <value>;`).  That is only correct when the
+/// value is a side-effect-free literal or constant: it must not reference
+/// a variable (which could be local to the selection and out of scope at
+/// the call site) and must not be a call (which would run twice).  String
+/// literals are allowed even though they may contain `(`.
+fn is_reproducible_guard_value(value: &str) -> bool {
+    let v = value.trim();
+    if v.is_empty() {
+        return false;
+    }
+    // Any variable reference is risky — it may be selection-local.
+    if v.contains('$') {
+        return false;
+    }
+    // Quoted string literals are fine (their contents are inert).
+    let single = v.len() >= 2 && v.starts_with('\'') && v.ends_with('\'');
+    let double = v.len() >= 2 && v.starts_with('"') && v.ends_with('"');
+    if single || double {
+        return true;
+    }
+    // Numbers and constants (e.g. `42`, `Status::Bad`, `self::FOO`) are
+    // fine; a `(` indicates a call, which may have side effects.
+    !v.contains('(')
+}
+
 /// Classify the return strategy for a selection that contains return
 /// statements but does NOT end with one.
 ///
@@ -1907,23 +1936,29 @@ fn classify_guard_returns(
     let all_same = values.windows(2).all(|w| w[0].trim() == w[1].trim());
     if all_same {
         let value = values[0].trim().to_string();
-        // If the uniform value is `true` or `false`, we can use the
-        // inverse as the sentinel — the cleanest possible output.
         let lower = value.to_lowercase();
-        if lower == "false" || lower == "true" {
+        // `true`/`false`/`null` are always safe to reproduce at the call
+        // site: the extracted function returns bool and the call site
+        // does `if (!extracted(…)) return <value>;`.
+        if lower == "false" || lower == "true" || lower == "null" {
             return ReturnStrategy::UniformGuards(value);
         }
-        // If the uniform value is `null`, we can't use null as sentinel,
-        // but we can still use bool: the extracted function returns bool,
-        // and the call site does `if (!extracted()) return null;`.
-        if lower == "null" {
+        // Other uniform values can only be reproduced at the call site
+        // when they are side-effect-free literals or constants.  A value
+        // that references a variable or a call (e.g. `redirect($url)`)
+        // may depend on variables that are local to the selection and
+        // therefore out of scope at the call site, or it may have side
+        // effects that must not run twice.  Such a value is kept inside
+        // the extracted function via the null sentinel below.
+        if is_reproducible_guard_value(&value) {
             return ReturnStrategy::UniformGuards(value);
         }
-        // For other uniform values, if it's not null, bool flag works.
-        return ReturnStrategy::UniformGuards(value);
+        // Fall through to the null-sentinel strategy.
     }
 
-    // Case 3: Different values, none are null — use null sentinel.
+    // Case 3: Different (or non-reproducible) values, none are null —
+    // use null sentinel so the return expressions stay inside the
+    // extracted function and propagate through `$result`.
     if !any_returns_null {
         return ReturnStrategy::SentinelNull;
     }
@@ -1940,32 +1975,30 @@ fn classify_guard_returns(
 /// declaration order.  Used to sort extracted-function parameters so
 /// they mirror the original signature.
 fn resolve_enclosing_param_order(content: &str, offset: u32) -> Vec<String> {
-    let arena = Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_fn_pord");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    crate::parser::with_parsed_program(content, "extract_function", |program, _| {
+        let ctx = find_cursor_context(&program.statements, offset);
 
-    let ctx = find_cursor_context(&program.statements, offset);
-
-    let param_list = match ctx {
-        CursorContext::InClassLike { member, .. } => {
-            if let MemberContext::Method(method, true) = member {
-                Some(&method.parameter_list)
-            } else {
-                None
+        let param_list = match ctx {
+            CursorContext::InClassLike { member, .. } => {
+                if let MemberContext::Method(method, true) = member {
+                    Some(&method.parameter_list)
+                } else {
+                    None
+                }
             }
-        }
-        CursorContext::InFunction(func, true) => Some(&func.parameter_list),
-        _ => None,
-    };
+            CursorContext::InFunction(func, true) => Some(&func.parameter_list),
+            _ => None,
+        };
 
-    match param_list {
-        Some(pl) => pl
-            .parameters
-            .iter()
-            .map(|p| p.variable.name.to_string())
-            .collect(),
-        None => Vec::new(),
-    }
+        match param_list {
+            Some(pl) => pl
+                .parameters
+                .iter()
+                .map(|p| bytes_to_str(p.variable.name).to_string())
+                .collect(),
+            None => Vec::new(),
+        }
+    })
 }
 
 /// Sort extracted-function parameters so that variables matching the
@@ -1995,30 +2028,31 @@ fn sort_params_by_enclosing_order(
 }
 
 fn resolve_enclosing_return_type(content: &str, offset: u32) -> PhpType {
-    let arena = Bump::new();
-    let file_id = mago_database::file::FileId::new("extract_fn_rtype");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    crate::parser::with_parsed_program(content, "extract_function", |program, _| {
+        let ctx = find_cursor_context(&program.statements, offset);
 
-    let ctx = find_cursor_context(&program.statements, offset);
-
-    match ctx {
-        CursorContext::InClassLike { member, .. } => {
-            if let MemberContext::Method(method, true) = member {
-                return method
-                    .return_type_hint
-                    .as_ref()
-                    .map(|h| crate::parser::extract_hint_type(&h.hint))
-                    .unwrap_or_else(PhpType::untyped);
+        let ty = match ctx {
+            CursorContext::InClassLike { member, .. } => {
+                if let MemberContext::Method(method, true) = member {
+                    method
+                        .return_type_hint
+                        .as_ref()
+                        .map(|h| crate::parser::extract_hint_type(&h.hint))
+                        .unwrap_or_else(PhpType::untyped)
+                } else {
+                    PhpType::untyped()
+                }
             }
-            PhpType::untyped()
-        }
-        CursorContext::InFunction(func, true) => func
-            .return_type_hint
-            .as_ref()
-            .map(|h| crate::parser::extract_hint_type(&h.hint))
-            .unwrap_or_else(PhpType::untyped),
-        _ => PhpType::untyped(),
-    }
+            CursorContext::InFunction(func, true) => func
+                .return_type_hint
+                .as_ref()
+                .map(|h| crate::parser::extract_hint_type(&h.hint))
+                .unwrap_or_else(PhpType::untyped),
+            _ => PhpType::untyped(),
+        };
+        Some(ty)
+    })
+    .unwrap_or_else(PhpType::untyped)
 }
 
 // ─── Main code action collector ─────────────────────────────────────────────
@@ -2667,6 +2701,47 @@ mod tests {
         let end = php.find("echo 'ok';").unwrap() + "echo 'ok';".len();
         let strategy = analyse_returns(php, start, end, 0);
         assert_eq!(strategy, ReturnStrategy::SentinelNull);
+    }
+
+    #[test]
+    fn uniform_literal_guard_value_uses_uniform_guards() {
+        // A uniform literal return value (`42`) is safe to reproduce at
+        // the call site → UniformGuards.
+        let php = "<?php\nfunction foo($x, $y) {\n    if (!$x) return 42;\n    if (!$y) return 42;\n    echo 'ok';\n}\n";
+        let start = php.find("if (!$x)").unwrap();
+        let end = php.find("echo 'ok';").unwrap() + "echo 'ok';".len();
+        let strategy = analyse_returns(php, start, end, 0);
+        assert_eq!(strategy, ReturnStrategy::UniformGuards("42".to_string()));
+    }
+
+    #[test]
+    fn uniform_non_literal_guard_value_uses_sentinel() {
+        // A uniform return value that references a variable or a call
+        // cannot be reproduced at the call site (the variable may be
+        // selection-local).  It must use the null sentinel so the
+        // expression stays inside the extracted function.
+        let php = "<?php\nfunction foo($x) {\n    $u = lookup($x);\n    if ($u) {\n        return build($u);\n    }\n    echo 'ok';\n}\n";
+        let start = php.find("$u = lookup").unwrap();
+        let end = php.find("echo 'ok';").unwrap() + "echo 'ok';".len();
+        let strategy = analyse_returns(php, start, end, 0);
+        assert_eq!(strategy, ReturnStrategy::SentinelNull);
+    }
+
+    #[test]
+    fn reproducible_guard_value_classification() {
+        assert!(is_reproducible_guard_value("42"));
+        assert!(is_reproducible_guard_value("-1"));
+        assert!(is_reproducible_guard_value("3.14"));
+        assert!(is_reproducible_guard_value("'overflow'"));
+        assert!(is_reproducible_guard_value("\"text\""));
+        assert!(is_reproducible_guard_value("Status::Bad"));
+        assert!(is_reproducible_guard_value("self::FOO"));
+        // Variables and calls are not reproducible at the call site.
+        assert!(!is_reproducible_guard_value("$url"));
+        assert!(!is_reproducible_guard_value("redirect($url, 301)"));
+        assert!(!is_reproducible_guard_value("compute()"));
+        assert!(!is_reproducible_guard_value("$this->value"));
+        assert!(!is_reproducible_guard_value(""));
     }
 
     #[test]

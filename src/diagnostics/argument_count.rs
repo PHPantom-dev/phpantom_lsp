@@ -53,8 +53,10 @@ pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
 /// phpstorm-stubs with proper version filtering applied.
 /// Regenerate with `php scripts/check_overloads.php`.
 fn overload_min_args(name: &str) -> Option<u32> {
-    // Compare lowercase to match PHP's case-insensitive function names.
-    match name.to_ascii_lowercase().as_str() {
+    // Strip a leading namespace separator so `\mt_rand()` in namespaced code
+    // matches the same overload entry as `mt_rand()`. Compare lowercase to
+    // match PHP's case-insensitive function names.
+    match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
         "apc_add" => Some(1),
         "apc_store" => Some(1),
         "apcu_add" => Some(1),
@@ -274,6 +276,13 @@ impl Backend {
                 None => continue,
             };
 
+            // A callable that accepts any number of arguments (e.g. a class
+            // with no explicit constructor, which PHP lets you call with
+            // extra arguments) is never an argument-count error.
+            if resolved.accepts_any_args {
+                continue;
+            }
+
             let params = &resolved.parameters;
             let actual_args = call_site.arg_count;
 
@@ -285,6 +294,7 @@ impl Backend {
             // required count, use that instead.  The call expression
             // for standalone function calls is just the function name
             // (e.g. "array_keys"), so we can look it up directly.
+            let overload_applied = overload_min_args(expr).is_some_and(|m| m < required_count);
             if let Some(overload_min) = overload_min_args(expr)
                 && overload_min < required_count
             {
@@ -300,7 +310,39 @@ impl Backend {
             };
 
             // ── Too few arguments ───────────────────────────────────
-            if actual_args < required_count {
+            // When the call uses named arguments, a raw count comparison is
+            // wrong: a named argument can fill a later parameter while an
+            // earlier required one is left unsupplied (and vice versa).
+            // Resolve named arguments to their parameters by name and report
+            // the specific required parameters that no argument provides.
+            // Overloaded built-ins are excluded because their stubs may
+            // over-declare required parameters; the count path already
+            // accounts for the overload minimum.
+            let named_too_few = if !call_site.named_arg_indices.is_empty() && !overload_applied {
+                let positional_count =
+                    actual_args.saturating_sub(call_site.named_arg_indices.len() as u32);
+                let missing = crate::call_args::missing_required_params(
+                    params,
+                    positional_count,
+                    &call_site.named_arg_names,
+                );
+                if missing.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "Missing required argument{}: {}",
+                        if missing.len() == 1 { "" } else { "s" },
+                        missing.join(", "),
+                    ))
+                }
+            } else {
+                None
+            };
+
+            let positional_too_few =
+                call_site.named_arg_indices.is_empty() && actual_args < required_count;
+
+            if named_too_few.is_some() || positional_too_few {
                 let range = match self.offset_range_to_lsp_range(
                     uri,
                     content,
@@ -311,7 +353,9 @@ impl Backend {
                     None => continue,
                 };
 
-                let message = if has_variadic {
+                let message = if let Some(named_message) = named_too_few {
+                    named_message
+                } else if has_variadic {
                     format!(
                         "Expected at least {} argument{}, got {}",
                         required_count,
@@ -643,6 +687,41 @@ function test(): void {
         assert!(
             diags.iter().any(|d| d.message.contains("got 3")),
             "Expected too-many-args diagnostic, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_extra_args_to_constructorless_class() {
+        // PHP silently ignores arguments passed to a class with no
+        // constructor, so even with the extra-arguments check enabled the
+        // call must not be flagged.
+        let php = r#"<?php
+class Plain {}
+function test(): void {
+    new Plain("x");
+}
+"#;
+        let diags = collect_extra(php);
+        assert!(
+            diags.is_empty(),
+            "Constructor-less class should accept any args, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn leading_backslash_builtin_honours_overload_minimum() {
+        // `\mt_rand()` in namespaced code must hit the same overload entry
+        // as `mt_rand()` (min 0 args), not the stub's full required count.
+        let php = r#"<?php
+namespace App;
+function test(): void {
+    \mt_rand();
+}
+"#;
+        let diags = collect_with_stubs_extra(php);
+        assert!(
+            diags.is_empty(),
+            "Leading-backslash builtin should respect overload minimum, got: {diags:?}",
         );
     }
 
@@ -1245,6 +1324,76 @@ class Demo {
         assert!(
             diags.iter().any(|d| d.message.contains("got 0")),
             "Scope method topping() needs 1 arg after $query stripping, got: {diags:?}",
+        );
+    }
+
+    // ── Named arguments ─────────────────────────────────────────────
+
+    #[test]
+    fn flags_missing_required_when_named_arg_fills_optional() {
+        // $a is required; filling only the optional $c by name leaves $a
+        // unsupplied, which PHP rejects with ArgumentCountError.
+        let php = r#"<?php
+function f(int $a, int $b = 0, int $c = 0): void {}
+function test(): void {
+    f(c: 3);
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(
+                |d| d.message.contains("Missing required argument") && d.message.contains("$a")
+            ),
+            "Expected missing-required-argument diagnostic for $a, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_when_required_filled_by_name() {
+        // The single required parameter is supplied by name, so no error
+        // even though it is not in the first positional slot.
+        let php = r#"<?php
+function f(int $a, int $b = 0): void {}
+function test(): void {
+    f(a: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "No diagnostics expected, got: {diags:?}",);
+    }
+
+    #[test]
+    fn no_diagnostic_when_required_split_positional_and_named() {
+        // First required parameter positional, second required parameter by
+        // name (in any order) — both supplied, so no error.
+        let php = r#"<?php
+function f(int $a, int $b, int $c = 0): void {}
+function test(): void {
+    f(1, b: 2);
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "No diagnostics expected, got: {diags:?}",);
+    }
+
+    #[test]
+    fn reports_multiple_missing_required_named() {
+        // Two required parameters left unsupplied while only an optional is
+        // filled by name.
+        let php = r#"<?php
+function f(int $a, int $b, int $c = 0): void {}
+function test(): void {
+    f(c: 9);
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Missing required arguments")
+                    && d.message.contains("$a")
+                    && d.message.contains("$b")),
+            "Expected both $a and $b reported missing, got: {diags:?}",
         );
     }
 }

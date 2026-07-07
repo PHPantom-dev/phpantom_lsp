@@ -40,6 +40,7 @@ pub fn make_class(name: &str) -> ClassInfo {
         start_offset: 0,
         end_offset: 0,
         keyword_offset: 0,
+        decl_start_offset: 0,
         parent_class: None,
         interfaces: Vec::new(),
         used_traits: Vec::new(),

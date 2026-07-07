@@ -51,31 +51,6 @@ threshold (e.g. 8 files).
 
 ---
 
-## P4. `memmem` for block comment terminator search
-
-**Impact: Low-Medium · Effort: Low**
-
-The current block comment skip in `find_classes` and `find_symbols`
-uses `memchr(b'*', ...)` and then checks the next byte for `/`.
-This is effective but can false-match on `*` characters inside
-docblock annotations (e.g. `@param`, `@return`, starred lines).
-Each false match falls through to a single-byte advance, which is
-correct but suboptimal for large docblocks.
-
-### Fix
-
-Replace `memchr(b'*', ...)` with `memmem::find(content[i..], b"*/")`.
-This searches for the two-byte sequence `*/` directly, skipping all
-intermediate `*` characters in a single SIMD pass. The `memmem`
-searcher is already imported and used for keyword pre-screening.
-
-For typical PHP files this is a marginal improvement. For files with
-very large docblocks (e.g. generated API documentation classes with
-hundreds of `@method` tags), it avoids O(n) false `*` matches inside
-the comment body.
-
----
-
 ## P5. `memmap2` for file reads during scanning
 
 **Impact: Low-Medium · Effort: Low**
@@ -110,83 +85,6 @@ covers most PHP files). The benefit is more pronounced on macOS
 where `read` involves an extra kernel-to-userspace copy. If
 profiling shows that file I/O is no longer the bottleneck after
 parallelisation, this item can be dropped.
-
----
-
-## P6. O(n²) transitive eviction in `evict_fqn`
-
-**Impact: Low-Medium · Effort: Low**
-
-The `evict_fqn` function in `virtual_members/mod.rs` runs a
-fixed-point loop that scans the entire resolved-class cache on each
-iteration to find transitive dependents. In a large project with a
-deep class hierarchy (common in Laravel codebases with hundreds of
-Eloquent models), editing a base class can trigger a cascade of
-evictions where each round does a full cache scan.
-
-The `depends_on_any` helper also matches against both the FQN and
-the short name of the evicted class, which increases the chance of
-false-positive transitive evictions (e.g. two unrelated classes that
-share a short name like `Builder`).
-
-### Fix
-
-Build a reverse-dependency index (`HashMap<String, Vec<String>>`)
-that maps each FQN to the set of cached FQNs that directly depend
-on it. Maintain this index alongside cache insertions and removals.
-On eviction, walk the reverse index instead of scanning the entire
-cache, turning the O(n²) loop into O(dependents).
-
-If the reverse index is too much bookkeeping, a simpler first step
-is to collect all dependents in a single pass (instead of the
-current iterative fixed-point loop) by doing a breadth-first walk
-of the dependency graph within the cache.
-
----
-
-## P7. `diag_pending_uris` uses `Vec::contains` for deduplication
-
-**Impact: Low · Effort: Low**
-
-`schedule_diagnostics` and `schedule_diagnostics_for_open_files`
-deduplicate pending URIs with `Vec::contains`, which is O(n) per
-insertion. When a class signature changes, every open file is
-queued, and each insertion scans the entire pending list.
-
-For typical usage (< 50 open files) this is imperceptible. It
-becomes measurable only with hundreds of open tabs and rapid
-cross-file edits.
-
-### Fix
-
-Replace `Vec<String>` with `IndexSet<String>` (from `indexmap`) or
-`HashSet<String>` + a separate `Vec<String>` for ordering. The
-worker drains the collection on each wake, so insertion order is
-not important and a plain `HashSet` suffices.
-
----
-
-## P8. `find_class_in_uri_classes_index` linear fallback scan
-
-**Impact: Low · Effort: Low**
-
-The fast O(1) `fqn_index` lookup in `find_class_in_uri_classes_index` covers
-the common case. The slow fallback iterates every file in `uri_classes_index`
-linearly. The comment says this covers "race conditions during
-initial indexing" and anonymous classes.
-
-During initial indexing with many files open, the fallback could
-cause micro-stutters if the `fqn_index` has not been populated yet
-for a requested class. In steady state the fallback is rarely hit.
-
-### Fix
-
-Audit the code paths that can reach the fallback to determine
-whether they are still reachable after the `fqn_index` was added.
-If they are not, replace the fallback with a `None` return and a
-debug log. If they are, consider populating `fqn_index` earlier in
-the pipeline (e.g. during the byte-level scan phase) to close the
-window.
 
 ---
 
@@ -240,26 +138,6 @@ Either introduce a separate base-resolution cache (keyed by FQN),
 or restructure so `build_scope_methods_for_builder` accepts the
 already-resolved model class from the caller (which may already
 have it from the resolved-class cache).
-
----
-
-## P12. `find_or_load_function` Phase 1.75 serial bottleneck
-
-**Impact: Low · Effort: Low**
-
-For the first unknown function that misses both `global_functions`
-and `autoload_function_index`, Phase 1.75 iterates all known
-autoload file paths and calls `update_ast` on each unparsed one
-until the function is found. With ~50 autoload files this is a
-one-time cost per thread, but it blocks the thread while it
-happens.
-
-### Fix
-
-Pre-load all autoload files during initialisation (in the
-`initialized` handler, after the byte-level scan). This moves the
-cost to startup, where it can run in parallel with other init work,
-and eliminates the blocking fallback during interactive use.
 
 ---
 
@@ -627,61 +505,6 @@ like:
 
 ---
 
-## P19. Arena reuse on the parse hot path
-
-**Impact: Medium · Effort: Low**
-
-`update_ast_inner` creates a fresh `Bump::new()` on every call —
-every keystroke allocates new backing pages from the OS and every drop
-returns them via `mmap`/`munmap` syscalls. There are 12+ additional
-`Bump::new()` sites across code action helpers (`extract_function.rs`,
-`extract_constant.rs`, `change_visibility.rs`, `generate_constructor.rs`,
-`extract_variable.rs`, etc.). No call site reuses an arena.
-
-php-lsp's `ParserContext::reparse()` calls `arena.reset()` — an O(1)
-operation that keeps backing memory allocated and just resets the bump
-pointer. After the arena grows to fit the largest file, subsequent
-re-parses are allocation-free from the system allocator's perspective.
-
-### Fix
-
-Add a `thread_local!` arena that is reset (not dropped) after each
-use:
-
-```rust
-thread_local! {
-    static ARENA: RefCell<Bump> = RefCell::new(Bump::with_capacity(512 * 1024));
-}
-
-fn with_arena<R>(f: impl FnOnce(&Bump) -> R) -> R {
-    ARENA.with(|cell| {
-        let result = f(&cell.borrow());
-        cell.borrow_mut().reset(); // O(1) — keeps pages allocated
-        result
-    })
-}
-```
-
-`update_ast_inner` is the hot path — called on every keystroke. A
-512 KB arena that resets instead of reallocating avoids thousands of
-`mmap`/`munmap` syscalls per minute during active editing.
-
-### Safety
-
-The arena's lifetime must not escape the closure. Currently
-`update_ast_inner` extracts owned `ClassInfo` and `SymbolMap` from
-the AST before the arena is dropped, so this works. The code action
-helpers also extract owned data before returning.
-
-### When to implement
-
-Independent of all other items. Pure performance win with no
-behavioural change. Can land any time.
-
----
-
----
-
 ## P20. Content-hash gated resolution cache persistence
 
 **Impact: Medium · Effort: Medium**
@@ -778,6 +601,111 @@ diagnostic layer.
 - Psalm: `FileDiffer` and `FileStatementsDiffer` in
   `references/psalm/src/Psalm/Internal/Diff/`
 - Psalm: `Analyzer::shiftFileOffsets()` for the offset-shifting logic
+
+---
+
+## P22. Signature change re-queues slow diagnostics for every open file
+
+**Impact: Medium-High · Effort: Medium**
+
+When `update_ast` detects that a class signature changed,
+`schedule_diagnostics_for_open_files` (`src/diagnostics/mod.rs:935`,
+called from `src/server.rs:589` and `:626`) queues **all** open
+files (minus the edited one) for a full slow-diagnostic pass —
+unknown classes, unknown members, argument checks. The per-file
+cost of that pass is the most expensive thing the server does (see
+the Appendix: tens of seconds on pathological files, hundreds of
+ms on ordinary ones).
+
+A user with 20 tabs open who adds a method to a class therefore
+pays 20 full-file analysis passes per signature-changing edit
+burst. Debouncing coalesces keystrokes, but the work is still
+O(open files) regardless of whether those files reference the
+edited class at all. During the burst the diagnostic worker
+saturates blocking threads that completion/hover also need.
+
+### Fix
+
+Queue only files that can observe the change. The resolved-class
+cache already maintains a dependency index for transitive
+eviction (`evict_fqn`), and ER4 tracks which members changed.
+Build a reverse map (FQN → open files that reference it) — either
+from each file's `resolved_names` (which byte-offset FQN lookups
+already exist for) or by recording, during each diagnostic pass,
+which FQNs the pass touched. On signature change, queue only the
+dependent files. Falls back to all-open-files when the dependency
+data is missing (e.g. right after startup).
+
+Synergy: P21 (offset-shifting) reduces the cost of re-diagnosing
+the *edited* file; this item reduces the *count* of other files
+re-diagnosed. Together they make the slow pass proportional to
+the blast radius of an edit.
+
+---
+
+## P23. `workspace/symbol` allocates a lowercase copy of every symbol name per request
+
+**Impact: Low-Medium · Effort: Low**
+
+`match_tier` (`src/workspace_symbols.rs:64-72`) calls
+`name.to_lowercase()` on every candidate symbol, and each symbol
+is tested against up to two or three name forms (FQN, short name,
+display name — call sites at lines 144, 232, 318, 401, 471). A
+`workspace/symbol` request walks every class, method, property,
+constant, and function in `uri_classes_index` and
+`global_functions`, so each keystroke in the editor's symbol
+picker performs O(total symbols × name length) heap allocations
+just for case folding, then throws them away.
+
+### Fix
+
+Match case-insensitively without allocating: a byte-wise
+`eq_ignore_ascii_case`-style prefix/substring scan (PHP
+identifiers are ASCII; a non-ASCII fallback can keep the old
+path), or store a pre-lowercased name alongside each symbol if
+the tiering logic needs real substring search. Note B25
+(case-insensitive index keys) will make lowercased names
+available on the index side anyway — implementing that first
+makes this nearly free.
+
+Related: X4 (full background indexing) plans a dedicated
+workspace-symbol index; this fix is independent and worth taking
+early since it is a few lines.
+
+---
+
+## P24. Per-file maps that survive `did_close` grow for the whole session
+
+**Impact: Low · Effort: Low**
+
+Two session-lifetime leaks found while auditing map hygiene:
+
+1. **`parse_errors` is never pruned.** `clear_file_maps`
+   (`src/util.rs:1757-1772`) removes `uri_classes_index`,
+   `symbol_maps`, `file_imports`, `resolved_names`, and
+   `file_namespaces`, but not `parse_errors`, and no other path
+   removes entries either (`did_close` and `reindex_files_batch`
+   both delegate to `clear_file_maps`). Every file ever opened
+   (or deleted from disk) keeps its last parse-error vector in
+   memory until restart.
+
+2. **`member_completion_cache` has no size bound.** It is cleared
+   wholesale on signature-changing edits
+   (`src/parser/ast_update.rs:735`) and on watched-file changes,
+   but during read-heavy browsing (no edits) it accumulates one
+   `Vec<CompletionItem>` per distinct completion target — for
+   Eloquent models those vectors contain hundreds of fully-built
+   items each.
+
+### Fix
+
+Add `self.parse_errors.write().remove(uri)` to `clear_file_maps`.
+For the completion cache, a simple cap (e.g. clear when the map
+exceeds N entries) is enough — the cache exists to serve
+keystroke bursts on one target, so losing cold entries is free.
+While in there, audit the `diag_last_*` / `diag_result_ids` /
+external-tool diagnostic caches for the same keep-after-close
+pattern (they hold per-file diagnostic vectors).
 
 ---
 

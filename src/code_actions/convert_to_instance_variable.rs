@@ -25,6 +25,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::code_actions::{CodeActionData, detect_indent_from_members, make_code_action_data};
 use crate::parser::with_parsed_program;
@@ -50,7 +51,7 @@ fn property_exists<'a>(all_members: &Sequence<'a, ClassLikeMember<'a>>, bare_nam
                 if let Property::Plain(plain) = property {
                     for item in plain.items.iter() {
                         let var = item.variable();
-                        let name = var.name;
+                        let name = bytes_to_str(var.name);
                         let bare = name.strip_prefix('$').unwrap_or(name);
                         if bare == bare_name {
                             return true;
@@ -59,17 +60,17 @@ fn property_exists<'a>(all_members: &Sequence<'a, ClassLikeMember<'a>>, bare_nam
                 }
                 if let Property::Hooked(hooked) = property {
                     let var = hooked.item.variable();
-                    let name = var.name;
+                    let name = bytes_to_str(var.name);
                     let bare = name.strip_prefix('$').unwrap_or(name);
                     if bare == bare_name {
                         return true;
                     }
                 }
             }
-            ClassLikeMember::Method(method) if method.name.value == "__construct" => {
+            ClassLikeMember::Method(method) if method.name.value == b"__construct" => {
                 for param in method.parameter_list.parameters.iter() {
                     if param.is_promoted_property() {
-                        let name = param.variable.name.to_string();
+                        let name = bytes_to_str(param.variable.name).to_string();
                         let bare = name.strip_prefix('$').unwrap_or(&name);
                         if bare == bare_name {
                             return true;
@@ -206,7 +207,7 @@ fn find_assignment_in_stmt(stmt: &Statement<'_>, cursor: u32) -> Option<(String,
                     Expression::Variable(Variable::Direct(dv)) => dv,
                     _ => return None,
                 };
-                let var_name = var.name.to_string();
+                let var_name = bytes_to_str(var.name).to_string();
                 if var_name == "$this" {
                     return None;
                 }

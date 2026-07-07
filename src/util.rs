@@ -343,6 +343,93 @@ pub(crate) fn offset_to_position(content: &str, offset: usize) -> Position {
     }
 }
 
+/// Precomputed line-start byte offsets for fast repeated offset→[`Position`]
+/// lookups within a single piece of content.
+///
+/// [`offset_to_position`] rescans `content` from the start on every call, so
+/// it is O(offset). Converting many offsets in a loop (e.g. one per semantic
+/// token, of which a large file has thousands) is therefore O(n²) in the file
+/// size. `LineIndex` builds the line table once and answers each query with a
+/// binary search for the line plus a short within-line UTF-16 scan, turning the
+/// loop into O(n log n).
+pub(crate) struct LineIndex<'a> {
+    content: &'a str,
+    /// Byte offset of the first character of each line. Always starts with `0`.
+    line_starts: Vec<usize>,
+}
+
+impl<'a> LineIndex<'a> {
+    /// Build the line table for `content` in a single pass.
+    pub(crate) fn new(content: &'a str) -> Self {
+        let mut line_starts = Vec::with_capacity(content.len() / 24 + 1);
+        line_starts.push(0usize);
+        for (i, b) in content.bytes().enumerate() {
+            if b == b'\n' {
+                line_starts.push(i + 1);
+            }
+        }
+        Self {
+            content,
+            line_starts,
+        }
+    }
+
+    /// The content this index was built from, for callers that also need to
+    /// scan the raw source (e.g. to locate a declaration's end).
+    pub(crate) fn content(&self) -> &'a str {
+        self.content
+    }
+
+    /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
+    /// column). Offsets past the end of the content clamp to the content
+    /// length, matching [`offset_to_position`].
+    pub(crate) fn position(&self, offset: usize) -> Position {
+        let offset = offset.min(self.content.len());
+        // Greatest line start that is <= offset. `line_starts[0] == 0`, so the
+        // `Err(0)` case (offset before the first line start) cannot happen.
+        let line = match self.line_starts.binary_search(&offset) {
+            Ok(idx) => idx,
+            Err(idx) => idx - 1,
+        };
+        let line_start = self.line_starts[line];
+        let character = self.content[line_start..offset]
+            .chars()
+            .map(|c| c.len_utf16() as u32)
+            .sum();
+        Position {
+            line: line as u32,
+            character,
+        }
+    }
+}
+
+/// Return the byte offset of the start of the line at `line_idx`
+/// (0-based) within `content`.
+///
+/// Unlike the common `content.lines().take(n).map(|l| l.len() + 1).sum()`
+/// idiom, this counts the real line terminator. `str::lines()` strips the
+/// `\r` of a `\r\n` (CRLF) pair, so the sum-of-`len + 1` approach
+/// undercounts every preceding line by one byte on CRLF files and drifts
+/// the computed offset. Counting newline bytes directly stays correct for
+/// both LF and CRLF (the `\n` is the final byte of a CRLF pair either way).
+///
+/// If `line_idx` exceeds the number of lines, `content.len()` is returned.
+pub(crate) fn line_start_byte_offset(content: &str, line_idx: usize) -> usize {
+    if line_idx == 0 {
+        return 0;
+    }
+    let mut seen = 0usize;
+    for (i, b) in content.bytes().enumerate() {
+        if b == b'\n' {
+            seen += 1;
+            if seen == line_idx {
+                return i + 1;
+            }
+        }
+    }
+    content.len()
+}
+
 /// Convert an LSP `Position` (line, character) to a byte offset in
 /// `content`.
 ///
@@ -769,12 +856,26 @@ pub fn position_to_char_offset(chars: &[char], position: Position) -> Option<usi
 /// nested inside a named class's method), the smallest (most specific)
 /// class is returned.  This ensures that `$this` inside an anonymous
 /// class body resolves to the anonymous class, not the outer class.
+///
+/// The span runs from the declaration start (`decl_start_offset`, which
+/// includes any leading attribute lists) to the closing brace, so a
+/// `self::` reference inside a class-level attribute — which sits before
+/// the body braces — still resolves to the class it decorates.
 pub(crate) fn find_class_at_offset(classes: &[Arc<ClassInfo>], offset: u32) -> Option<&ClassInfo> {
     classes
         .iter()
         .map(|c| c.as_ref())
-        .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
-        .min_by_key(|c| c.end_offset - c.start_offset)
+        .map(|c| {
+            let start = if c.decl_start_offset != 0 {
+                c.decl_start_offset
+            } else {
+                c.start_offset
+            };
+            (c, start)
+        })
+        .filter(|(c, start)| offset >= *start && offset <= c.end_offset)
+        .min_by_key(|(c, start)| c.end_offset.saturating_sub(*start))
+        .map(|(c, _)| c)
 }
 
 /// Find a class in a slice by name, preferring namespace-aware matching
@@ -1443,50 +1544,9 @@ impl Backend {
             return Some(Arc::clone(cls));
         }
 
-        // ── Slow fallback: linear scan of uri_classes_index ──
-        // Covers edge cases where the fqn_index has not been populated
-        // yet (e.g. anonymous classes, or race conditions during initial
-        // indexing).
-        let last_segment = short_name(class_name);
-        let expected_ns: Option<&str> = if class_name.contains('\\') {
-            Some(&class_name[..class_name.len() - last_segment.len() - 1])
-        } else {
-            None
-        };
-
-        let map = self.uri_classes_index.read();
-
-        for (_uri, classes) in map.iter() {
-            // Iterate ALL classes with the matching short name, not just
-            // the first.  A multi-namespace file can contain two classes
-            // with the same short name in different namespace blocks
-            // (e.g. `Illuminate\Database\Eloquent\Builder` and
-            // `Illuminate\Database\Query\Builder`).
-            for cls in classes.iter().filter(|c| c.name == last_segment) {
-                let class_ns = cls.file_namespace.as_deref();
-                if let Some(exp_ns) = expected_ns {
-                    // Use the per-class namespace (set during parsing)
-                    // rather than the file-level namespace.  This
-                    // correctly handles files with multiple namespace
-                    // blocks where different classes live under different
-                    // namespaces.
-                    if class_ns != Some(exp_ns) {
-                        continue;
-                    }
-                } else {
-                    // Bare-name lookup (no namespace in the query).
-                    // Only match classes that are themselves in the
-                    // global namespace.  Without this check, looking
-                    // up bare `"Carbon"` would incorrectly match
-                    // `Carbon\Carbon` (or any other namespaced class
-                    // whose short name happens to be `Carbon`).
-                    if class_ns.is_some() {
-                        continue;
-                    }
-                }
-                return Some(Arc::clone(cls));
-            }
-        }
+        // The fqn_class_index is always populated before (or at the
+        // same time as) uri_classes_index, so if the O(1) lookup above
+        // missed, a linear scan would not find it either.
         None
     }
 
@@ -2111,9 +2171,183 @@ pub fn push_unique_location(
     }
 }
 
+/// Result of running an external command via [`run_command_with_timeout`].
+#[derive(Debug)]
+pub struct CommandOutput {
+    /// Exit code (or -1 if the process was killed / no code available).
+    pub code: i32,
+    /// Captured stdout content.
+    pub stdout: String,
+    /// Captured stderr content.
+    pub stderr: String,
+}
+
+/// Spawn a command, feed it optional stdin, wait for it with a timeout,
+/// and return its exit code plus captured stdout/stderr.
+///
+/// stdout and stderr are drained on dedicated reader threads that run
+/// **while** the child is alive. This is essential: a child that writes
+/// more than the OS pipe buffer (~64 KB — easily exceeded by the JSON
+/// output of PHPStan/PHPCS/Mago on a real project) blocks on the write
+/// until the pipe is drained. If we only read after the process exits,
+/// the child can never exit and the call spins until it times out,
+/// returning an error instead of the diagnostics. Reading concurrently
+/// keeps the pipe from filling.
+///
+/// When `stdin_content` is `Some`, it is written to the child's stdin
+/// and the pipe is then closed (EOF). The write happens after the reader
+/// threads are started so a large stdin payload cannot deadlock against
+/// the child's output. When `stdin_content` is `None`, stdin is set to
+/// null so the child never inherits the server's stdin.
+///
+/// `tool_name` is used only for error messages. On timeout or
+/// cancellation the child is killed and an `Err` is returned.
+pub fn run_command_with_timeout(
+    command: &mut std::process::Command,
+    timeout: std::time::Duration,
+    cancelled: &std::sync::atomic::AtomicBool,
+    tool_name: &str,
+    stdin_content: Option<&str>,
+) -> Result<CommandOutput, String> {
+    use std::io::{Read, Write};
+    use std::process::Stdio;
+    use std::sync::atomic::Ordering;
+
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if stdin_content.is_some() {
+        command.stdin(Stdio::piped());
+    } else {
+        command.stdin(Stdio::null());
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {}: {}", tool_name, e))?;
+
+    // Drain stdout/stderr concurrently so the child can never block
+    // writing to a full pipe while we wait for it to exit.
+    let stdout_reader = child.stdout.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            buf
+        })
+    });
+    let stderr_reader = child.stderr.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            buf
+        })
+    });
+
+    // Feed stdin (if any) and close it so the child sees EOF. A broken
+    // pipe here means the child exited early; the status/output below is
+    // what we care about, so the write error is intentionally ignored.
+    if let Some((content, mut stdin)) = stdin_content.zip(child.stdin.take()) {
+        let _ = stdin.write_all(content.as_bytes());
+    }
+
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{} timed out after {}ms",
+                        tool_name,
+                        timeout.as_millis()
+                    ));
+                }
+                if cancelled.load(Ordering::Acquire) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("{} cancelled (server shutting down)", tool_name));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                return Err(format!("Error waiting for {}: {}", tool_name, e));
+            }
+        }
+    };
+
+    // The child has exited, so its pipe write ends are closed and the
+    // reader threads will reach EOF; join them to collect the output.
+    let stdout = stdout_reader
+        .and_then(|h| h.join().ok())
+        .unwrap_or_default();
+    let stderr = stderr_reader
+        .and_then(|h| h.join().ok())
+        .unwrap_or_default();
+
+    Ok(CommandOutput {
+        code: status.code().unwrap_or(-1),
+        stdout,
+        stderr,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_index_matches_offset_to_position() {
+        // Include multi-byte (é = 2 bytes / 1 UTF-16 unit) and an emoji
+        // (🎉 = 4 bytes / 2 UTF-16 units) to exercise the column math.
+        let content = "<?php\n$x = 'é';\n// 🎉 comment\nfinal;\n";
+        let index = LineIndex::new(content);
+        // Every char boundary must agree with the scanning implementation.
+        for (offset, _) in content
+            .char_indices()
+            .chain(std::iter::once((content.len(), ' ')))
+        {
+            assert_eq!(
+                index.position(offset),
+                offset_to_position(content, offset),
+                "mismatch at offset {offset}"
+            );
+        }
+    }
+
+    #[test]
+    fn line_index_clamps_past_end() {
+        let content = "ab\ncd";
+        let index = LineIndex::new(content);
+        assert_eq!(
+            index.position(999),
+            offset_to_position(content, content.len())
+        );
+    }
+
+    #[test]
+    fn line_start_byte_offset_lf() {
+        let content = "aaa\nbb\nc\n";
+        assert_eq!(line_start_byte_offset(content, 0), 0);
+        assert_eq!(line_start_byte_offset(content, 1), 4); // after "aaa\n"
+        assert_eq!(line_start_byte_offset(content, 2), 7); // after "bb\n"
+        assert_eq!(line_start_byte_offset(content, 3), 9); // after "c\n" (EOF)
+    }
+
+    #[test]
+    fn line_start_byte_offset_crlf() {
+        let content = "aaa\r\nbb\r\nc\r\n";
+        assert_eq!(line_start_byte_offset(content, 0), 0);
+        assert_eq!(line_start_byte_offset(content, 1), 5); // after "aaa\r\n"
+        assert_eq!(line_start_byte_offset(content, 2), 9); // after "bb\r\n"
+        assert_eq!(line_start_byte_offset(content, 3), 12); // after "c\r\n" (EOF)
+    }
+
+    #[test]
+    fn line_start_byte_offset_past_end_returns_len() {
+        let content = "one\ntwo";
+        assert_eq!(line_start_byte_offset(content, 5), content.len());
+    }
 
     #[test]
     fn is_self_or_static_matches_three() {
@@ -2286,5 +2520,94 @@ mod tests {
         let classes = [exc, cls.clone()];
         let loader = loader_from(&classes);
         assert!(is_subtype_of(&cls, "RuntimeException", &loader));
+    }
+
+    // ── run_command_with_timeout ────────────────────────────────────
+
+    /// A child that writes far more than the OS pipe buffer (~64 KB)
+    /// must not deadlock: the reader threads keep the pipe drained while
+    /// the child runs, so it can exit and we collect the full output.
+    #[cfg(unix)]
+    #[test]
+    fn run_command_drains_large_stdout_without_deadlock() {
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+
+        // 200_000 NUL bytes (valid UTF-8), well above the pipe buffer.
+        let mut cmd = Command::new("head");
+        cmd.arg("-c").arg("200000").arg("/dev/zero");
+        let cancelled = AtomicBool::new(false);
+        let out =
+            run_command_with_timeout(&mut cmd, Duration::from_secs(10), &cancelled, "test", None)
+                .expect("command should complete");
+        assert_eq!(out.code, 0);
+        assert_eq!(out.stdout.len(), 200000);
+    }
+
+    /// Feeding large stdin while the child writes large stdout (here
+    /// `cat`, which echoes stdin) exercises both pipes at once. Under the
+    /// old read-after-exit logic this deadlocked.
+    #[cfg(unix)]
+    #[test]
+    fn run_command_echoes_large_stdin() {
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+
+        let payload = "x".repeat(200000);
+        let mut cmd = Command::new("cat");
+        let cancelled = AtomicBool::new(false);
+        let out = run_command_with_timeout(
+            &mut cmd,
+            Duration::from_secs(10),
+            &cancelled,
+            "test",
+            Some(&payload),
+        )
+        .expect("command should complete");
+        assert_eq!(out.code, 0);
+        assert_eq!(out.stdout, payload);
+    }
+
+    /// A long-running child is killed when the timeout elapses, returning
+    /// an error rather than hanging.
+    #[cfg(unix)]
+    #[test]
+    fn run_command_times_out() {
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+
+        let mut cmd = Command::new("sleep");
+        cmd.arg("10");
+        let cancelled = AtomicBool::new(false);
+        let result = run_command_with_timeout(
+            &mut cmd,
+            Duration::from_millis(100),
+            &cancelled,
+            "test",
+            None,
+        );
+        let err = result.expect_err("should time out");
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+    }
+
+    /// A spawn failure surfaces as an error rather than panicking.
+    #[test]
+    fn run_command_reports_spawn_failure() {
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+
+        let mut cmd = Command::new("phpantom-no-such-binary-xyz");
+        let cancelled = AtomicBool::new(false);
+        let result =
+            run_command_with_timeout(&mut cmd, Duration::from_secs(1), &cancelled, "test", None);
+        let err = result.expect_err("spawn should fail");
+        assert!(
+            err.contains("Failed to spawn test"),
+            "unexpected error: {err}"
+        );
     }
 }

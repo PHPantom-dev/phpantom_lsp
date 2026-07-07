@@ -2,7 +2,7 @@
 // feature: completion
 // Array built inside a loop with if/else branching (one branch increments,
 // the other assigns a shape literal) should preserve the shape type through
-// foreach iteration. Reproduces the real-world pattern from B13.
+// foreach iteration. Reproduces a real-world keyed-loop assignment pattern.
 // expect: parentProduct(
 ---
 <?php

@@ -37,7 +37,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
 use tempfile::NamedTempFile;
@@ -180,7 +180,8 @@ pub(crate) fn run_phpstan(
         .arg(file_path)
         .current_dir(workspace_root);
 
-    let result = run_command_with_timeout(&mut cmd, timeout, cancelled);
+    let result =
+        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPStan", None);
 
     // NamedTempFile auto-deletes on drop — but we keep `tmp` alive
     // until after we've consumed the command output.
@@ -421,82 +422,6 @@ fn write_temp_file(_original: &Path, content: &str) -> Result<NamedTempFile, Str
         .map_err(|e| format!("Failed to flush temp file: {}", e))?;
 
     Ok(temp)
-}
-
-/// Result of running an external command.
-struct CommandOutput {
-    /// Exit code (or -1 if the process was killed / no code available).
-    code: i32,
-    /// Captured stdout content.
-    stdout: String,
-    /// Captured stderr content.
-    stderr: String,
-}
-
-/// Spawn a command, wait for it with a timeout, and return the result.
-///
-/// Both stdout and stderr are captured.  PHPStan writes its JSON
-/// output to stdout.
-fn run_command_with_timeout(
-    command: &mut Command,
-    timeout: Duration,
-    cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<CommandOutput, String> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn PHPStan: {}", e))?;
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = child
-                    .stdout
-                    .take()
-                    .and_then(|mut s| {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut s, &mut buf).ok()?;
-                        Some(buf)
-                    })
-                    .unwrap_or_default();
-
-                let stderr = child
-                    .stderr
-                    .take()
-                    .and_then(|mut s| {
-                        let mut buf = String::new();
-                        std::io::Read::read_to_string(&mut s, &mut buf).ok()?;
-                        Some(buf)
-                    })
-                    .unwrap_or_default();
-
-                return Ok(CommandOutput {
-                    code: status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                });
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("PHPStan timed out after {}ms", timeout.as_millis()));
-                }
-                if cancelled.load(std::sync::atomic::Ordering::Acquire) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("PHPStan cancelled (server shutting down)".to_string());
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                let _ = child.kill();
-                return Err(format!("Error waiting for PHPStan: {}", e));
-            }
-        }
-    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────

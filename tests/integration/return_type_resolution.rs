@@ -482,8 +482,7 @@ async fn test_goto_definition_class_from_autoload_files() {
                     };
                     fmap.insert(fqn.clone(), (uri.clone(), func.clone()));
                     if func.namespace.is_some() {
-                        fmap.entry(func.name.to_string())
-                            .or_insert_with(|| (uri.clone(), func.clone()));
+                        fmap.or_insert_with(func.name.to_string(), || (uri.clone(), func.clone()));
                     }
                 }
             }
@@ -954,8 +953,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
                     };
                     fmap.insert(fqn.clone(), (uri.clone(), func.clone()));
                     if func.namespace.is_some() {
-                        fmap.entry(func.name.to_string())
-                            .or_insert_with(|| (uri.clone(), func.clone()));
+                        fmap.or_insert_with(func.name.to_string(), || (uri.clone(), func.clone()));
                     }
                 }
             }
@@ -1308,24 +1306,24 @@ async fn test_goto_definition_function_inside_function_exists_guard() {
     let backend = Backend::new_test_with_workspace(workspace_root.clone(), vec![]);
 
     // Simulate initialized — this triggers the byte-level autoload
-    // file scan.  Functions inside `function_exists()` guards are NOT
-    // discovered by the lightweight scanner (they're at brace depth 1),
-    // but the autoload file paths are remembered so that
-    // `find_or_load_function` can lazily parse them as a last resort.
+    // file scan followed by an eager full parse of every autoload file.
+    // Functions inside `function_exists()` guards live at brace depth 1
+    // and are missed by the lightweight scanner, but the eager parse
+    // picks them up so the first interactive request never has to parse
+    // them on the hot path.
     backend.initialized(InitializedParams {}).await;
 
-    // The guarded functions should NOT be in global_functions yet —
-    // the byte-level scanner intentionally skips them.  They will be
-    // lazily parsed on first access (e.g. goto-definition).
+    // The guarded functions are eagerly parsed into global_functions
+    // during initialization, so the first lookup hits the fast path.
     {
         let fmap = backend.global_functions().read();
         assert!(
-            !fmap.contains_key("session"),
-            "session() should NOT be eagerly parsed into global_functions (guarded function)"
+            fmap.contains_key("session"),
+            "session() should be eagerly parsed into global_functions during init"
         );
         assert!(
-            !fmap.contains_key("app"),
-            "app() should NOT be eagerly parsed into global_functions (guarded function)"
+            fmap.contains_key("app"),
+            "app() should be eagerly parsed into global_functions during init"
         );
     }
 

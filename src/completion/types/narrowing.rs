@@ -26,7 +26,7 @@
 ///     narrows to the corresponding scalar type.
 use std::sync::Arc;
 
-use crate::atom::Atom;
+use crate::atom::{Atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, ResolvedType, TypeAssertion};
 
@@ -90,11 +90,11 @@ pub(crate) fn resolve_class_names_to_union(
 /// Returns `None` for expressions that are not supported as narrowing subjects.
 pub(in crate::completion) fn expr_to_subject_key(expr: &Expression<'_>) -> Option<String> {
     match expr {
-        Expression::Variable(Variable::Direct(dv)) => Some(dv.name.to_string()),
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
         Expression::Access(Access::Property(pa)) => {
             let obj = expr_to_subject_key(pa.object)?;
             if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                Some(format!("{}->{}", obj, ident.value))
+                Some(format!("{}->{}", obj, bytes_to_str(ident.value)))
             } else {
                 None
             }
@@ -102,7 +102,7 @@ pub(in crate::completion) fn expr_to_subject_key(expr: &Expression<'_>) -> Optio
         Expression::Access(Access::NullSafeProperty(pa)) => {
             let obj = expr_to_subject_key(pa.object)?;
             if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                Some(format!("{}->{}", obj, ident.value))
+                Some(format!("{}->{}", obj, bytes_to_str(ident.value)))
             } else {
                 None
             }
@@ -127,11 +127,15 @@ pub(in crate::completion) fn array_access_key_as_string(
     if let Expression::Literal(Literal::String(s)) = aa.index {
         // `value` is the unquoted content; fall back to stripping quotes
         // from `raw`.
-        let key = s.value.map(|v| v.to_string()).unwrap_or_else(|| {
-            crate::util::unquote_php_string(s.raw)
-                .unwrap_or(s.raw)
-                .to_string()
-        });
+        let key = s
+            .value
+            .map(|v| bytes_to_str(v).to_string())
+            .unwrap_or_else(|| {
+                let raw_str = bytes_to_str(s.raw);
+                crate::util::unquote_php_string(raw_str)
+                    .unwrap_or(raw_str)
+                    .to_string()
+            });
         Some(key)
     } else {
         None
@@ -399,7 +403,9 @@ pub(in crate::completion) fn try_extract_instanceof<'b>(
             }
             // RHS is the class name
             match bin.rhs {
-                Expression::Identifier(ident) => Some(PhpType::Named(ident.value().to_string())),
+                Expression::Identifier(ident) => {
+                    Some(PhpType::Named(bytes_to_str(ident.value()).to_string()))
+                }
                 Expression::Self_(_) => Some(PhpType::Named("self".to_string())),
                 Expression::Static(_) => Some(PhpType::Named("static".to_string())),
                 Expression::Parent(_) => Some(PhpType::Named("parent".to_string())),
@@ -496,7 +502,7 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<PhpT
     };
     if let Expression::Call(Call::Function(func_call)) = expr {
         let func_name = match func_call.function {
-            Expression::Identifier(ident) => ident.value(),
+            Expression::Identifier(ident) => bytes_to_str(ident.value()),
             _ => return None,
         };
         if func_name != "is_a" {
@@ -512,7 +518,7 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<PhpT
             Argument::Named(named) => named.value,
         };
         let first_var = match first_expr {
-            Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+            Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
             _ => return None,
         };
         if first_var != var_name {
@@ -586,7 +592,7 @@ fn is_get_class_of_var(expr: &Expression<'_>, var_name: &str) -> bool {
     };
     if let Expression::Call(Call::Function(func_call)) = expr {
         let func_name = match func_call.function {
-            Expression::Identifier(ident) => ident.value(),
+            Expression::Identifier(ident) => bytes_to_str(ident.value()),
             _ => return false,
         };
         if func_name != "get_class" {
@@ -598,7 +604,7 @@ fn is_get_class_of_var(expr: &Expression<'_>, var_name: &str) -> bool {
                 Argument::Named(named) => named.value,
             };
             if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-                return dv.name == var_name;
+                return bytes_to_str(dv.name) == var_name;
             }
         }
     }
@@ -610,12 +616,12 @@ fn is_var_class_constant(expr: &Expression<'_>, var_name: &str) -> bool {
     if let Expression::Access(Access::ClassConstant(cca)) = expr {
         // The class part must be our variable
         if let Expression::Variable(Variable::Direct(dv)) = cca.class {
-            if dv.name != var_name {
+            if bytes_to_str(dv.name) != var_name {
                 return false;
             }
             // The constant selector must be `class`
             if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
-                return ident.value == "class";
+                return ident.value == b"class";
             }
         }
     }
@@ -659,7 +665,7 @@ fn extract_call_assertions<'a>(
     match call {
         Call::Function(func_call) => {
             let func_name = match func_call.function {
-                Expression::Identifier(ident) => ident.value().to_string(),
+                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 _ => return None,
             };
             let func_info = ctx.function_loader()?(&func_name)?;
@@ -680,12 +686,12 @@ fn extract_call_assertions<'a>(
         }
         Call::StaticMethod(static_call) => {
             let class_name = match static_call.class {
-                Expression::Identifier(ident) => ident.value().to_string(),
+                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
                 _ => return None,
             };
             let method_name = match &static_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => ident.value.to_string(),
+                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
                 _ => return None,
             };
             let class_info = (ctx.class_loader)(&class_name)?;
@@ -821,7 +827,7 @@ fn resolve_assertion_template_type(
 
     // Try to resolve a variable argument's class-string type.
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-        let var_name = dv.name.to_string();
+        let var_name = bytes_to_str(dv.name).to_string();
         let targets =
             crate::completion::variable::class_string_resolution::resolve_class_string_targets(
                 &var_name,
@@ -876,7 +882,7 @@ pub(in crate::completion) fn find_assertion_arg_variable(
 
     // The argument must be a simple variable
     match arg_expr {
-        Expression::Variable(Variable::Direct(dv)) => Some(dv.name.to_string()),
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
         _ => None,
     }
 }
@@ -932,7 +938,7 @@ fn try_extract_assert_instanceof<'b>(
     };
     if let Expression::Call(Call::Function(func_call)) = expr {
         let func_name_raw = match func_call.function {
-            Expression::Identifier(ident) => ident.value(),
+            Expression::Identifier(ident) => bytes_to_str(ident.value()),
             _ => return None,
         };
         let func_name = func_name_raw.strip_prefix('\\').unwrap_or(func_name_raw);
@@ -967,7 +973,7 @@ fn try_extract_assert_compound_or_instanceof<'b>(
     };
     if let Expression::Call(Call::Function(func_call)) = expr {
         let func_name_raw = match func_call.function {
-            Expression::Identifier(ident) => ident.value(),
+            Expression::Identifier(ident) => bytes_to_str(ident.value()),
             _ => return None,
         };
         let func_name = func_name_raw.strip_prefix('\\').unwrap_or(func_name_raw);
@@ -1417,7 +1423,7 @@ pub(in crate::completion) fn try_extract_in_array<'b>(
         _ => return None,
     };
     let name = match func_call.function {
-        Expression::Identifier(ident) => ident.value(),
+        Expression::Identifier(ident) => bytes_to_str(ident.value()),
         _ => return None,
     };
     if name != "in_array" {
@@ -1443,7 +1449,7 @@ pub(in crate::completion) fn try_extract_in_array<'b>(
         Argument::Named(named) => named.value,
     };
     let needle_var = match first_expr {
-        Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
         _ => return None,
     };
     if needle_var != var_name {
@@ -1517,7 +1523,7 @@ pub(crate) fn try_extract_type_guard(
         }
         Expression::Call(Call::Function(fc)) => {
             let func_name = match &fc.function {
-                Expression::Identifier(ident) => ident.value(),
+                Expression::Identifier(ident) => bytes_to_str(ident.value()),
                 _ => return None,
             };
             let kind = match func_name {

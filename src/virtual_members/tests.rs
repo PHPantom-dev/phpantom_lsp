@@ -1012,11 +1012,11 @@ fn resolve_class_fully_returns_same_as_base_when_no_providers() {
 
 // ── evict_fqn / depends_on_any tests ────────────────────────────────
 
-/// Helper: create a plain `HashMap` cache for eviction tests.
-/// `evict_fqn` operates on the inner `HashMap`, not the
+/// Helper: create a bare cache store for eviction tests.
+/// `evict_fqn` operates on the inner [`ResolvedCacheInner`], not the
 /// `Arc<Mutex<…>>` wrapper used at runtime.
-fn make_cache() -> HashMap<ResolvedClassCacheKey, Arc<ClassInfo>> {
-    HashMap::new()
+fn make_cache() -> ResolvedCacheInner {
+    ResolvedCacheInner::default()
 }
 
 #[test]
@@ -1044,7 +1044,7 @@ fn resolve_class_fully_with_type_args_caches_specialisation() {
         Some("User".to_string())
     );
 
-    let map = cache.lock();
+    let map = cache.read();
     assert!(
         map.contains_key(&(atom("Collection"), Vec::new())),
         "base resolved class should be cached separately"
@@ -1251,6 +1251,85 @@ fn evict_cast_class_chains_through_model_to_child() {
         cache.is_empty(),
         "cast eviction should chain: cast → model (via casts) → child (via parent)"
     );
+}
+
+#[test]
+fn evict_removes_all_generic_variants_of_fqn() {
+    let mut cache = make_cache();
+
+    let cls = make_class("App\\Support\\Collection");
+    // The same class cached under two distinct generic instantiations.
+    cache.insert(
+        ("App\\Support\\Collection".to_string().into(), Vec::new()),
+        Arc::new(cls.clone()),
+    );
+    cache.insert(
+        (
+            "App\\Support\\Collection".to_string().into(),
+            vec!["App\\Models\\User".to_string()],
+        ),
+        Arc::new(cls),
+    );
+
+    let evicted = evict_fqn(&mut cache, "App\\Support\\Collection");
+    assert!(
+        cache.is_empty(),
+        "every generic-arg variant of the FQN should be evicted"
+    );
+    assert_eq!(evicted, vec!["App\\Support\\Collection".to_string()]);
+}
+
+#[test]
+fn evict_returns_empty_when_nothing_matches() {
+    let mut cache = make_cache();
+
+    let mut child = make_class("User");
+    child.parent_class = Some(atom("App\\Models\\Model"));
+    cache.insert(
+        ("App\\Models\\User".to_string().into(), Vec::new()),
+        Arc::new(child),
+    );
+
+    // An FQN that is neither cached nor depended upon yields no eviction.
+    let evicted = evict_fqn(&mut cache, "App\\Unrelated\\Thing");
+    assert!(evicted.is_empty(), "unmatched FQN should evict nothing");
+    assert_eq!(cache.len(), 1, "unrelated entry should remain cached");
+}
+
+#[test]
+fn reverse_index_is_cleaned_up_after_eviction() {
+    let mut cache = make_cache();
+
+    let parent = make_class("Model");
+    cache.insert(
+        ("App\\Models\\Model".to_string().into(), Vec::new()),
+        Arc::new(parent),
+    );
+
+    let mut child = make_class("User");
+    child.parent_class = Some(atom("App\\Models\\Model"));
+    cache.insert(
+        ("App\\Models\\User".to_string().into(), Vec::new()),
+        Arc::new(child),
+    );
+
+    // Evict the parent; both entries go.
+    evict_fqn(&mut cache, "App\\Models\\Model");
+    assert!(cache.is_empty());
+
+    // A fresh, unrelated class that happens to share the parent's FQN
+    // must not be evicted by a stale reverse-dependency edge.
+    let standalone = make_class("App\\Models\\Model");
+    cache.insert(
+        ("App\\Models\\Model".to_string().into(), Vec::new()),
+        Arc::new(standalone),
+    );
+    let evicted = evict_fqn(&mut cache, "App\\Models\\User");
+    assert!(
+        evicted.is_empty(),
+        "evicting the removed child must not touch the new unrelated entry"
+    );
+    assert_eq!(cache.len(), 1, "the standalone entry should survive");
 }
 
 // ── Interface-extends-interface transitive member merging ────────────

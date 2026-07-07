@@ -123,7 +123,9 @@ impl Backend {
                 .ok()
                 .and_then(|u| u.to_file_path().ok())
             && let Some(classes) = self.parse_and_cache_file(&file_path)
-            && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
+            && let Some(cls) = classes
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(last_segment))
         {
             return Some(Arc::clone(cls));
         }
@@ -141,7 +143,9 @@ impl Backend {
             };
             if let Some(file_path) = file_path
                 && let Some(classes) = self.parse_and_cache_file(&file_path)
-                && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
+                && let Some(cls) = classes
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(last_segment))
             {
                 return Some(Arc::clone(cls));
             }
@@ -167,25 +171,23 @@ impl Backend {
         //
         // Strategy (a) is tried first because it is more specific.
         let stub_idx = self.stub_index.read();
-        if expected_ns.is_some() {
+        let stub_lookup = if expected_ns.is_some() {
             // Namespaced lookup — try the full FQN as a stub key.
-            if let Some(&stub_content) = stub_idx.get(class_name) {
-                let stub_uri = format!("phpantom-stub://{}", class_name);
-                let ver = Some(self.php_version());
-                if let Some(classes) =
-                    self.parse_and_cache_content_versioned(stub_content, &stub_uri, ver)
-                    && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
-                {
-                    return Some(Arc::clone(cls));
-                }
-            }
-        } else if let Some(&stub_content) = stub_idx.get(last_segment) {
+            stub_idx.get_key_value(class_name)
+        } else {
             // Global-namespace lookup — match by short name only.
-            let stub_uri = format!("phpantom-stub://{}", last_segment);
+            stub_idx.get_key_value(last_segment)
+        };
+        if let Some((canonical_name, &stub_content)) = stub_lookup {
+            // Key the stub URI by the stub index's spelling so that
+            // differently-cased lookups share one cache entry.
+            let stub_uri = format!("phpantom-stub://{}", canonical_name);
             let ver = Some(self.php_version());
             if let Some(classes) =
                 self.parse_and_cache_content_versioned(stub_content, &stub_uri, ver)
-                && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
+                && let Some(cls) = classes
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(last_segment))
             {
                 return Some(Arc::clone(cls));
             }
@@ -193,9 +195,7 @@ impl Backend {
 
         // Cache the negative result so subsequent lookups for the same
         // unknown class skip the expensive multi-phase search.
-        self.class_not_found_cache
-            .write()
-            .insert(class_name.to_owned());
+        self.class_not_found_cache.write().insert(class_name);
         None
     }
 
@@ -220,19 +220,21 @@ impl Backend {
 
         // Look up in the in-memory stub index.
         let stub_idx = self.stub_index.read();
-        let stub_content = if class_name.contains('\\') {
+        let stub_lookup = if class_name.contains('\\') {
             // Namespaced lookup (e.g. "BcMath\\Number").
-            stub_idx.get(class_name).copied()
+            stub_idx.get_key_value(class_name)
         } else {
             // Global-namespace lookup (e.g. "PDO").
-            stub_idx.get(last_segment).copied()
+            stub_idx.get_key_value(last_segment)
         };
 
-        if let Some(content) = stub_content {
-            let stub_uri = format!("phpantom-stub://{}", class_name);
+        if let Some((canonical_name, &content)) = stub_lookup {
+            let stub_uri = format!("phpantom-stub://{}", canonical_name);
             let ver = Some(self.php_version());
             if let Some(classes) = self.parse_and_cache_content_versioned(content, &stub_uri, ver)
-                && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
+                && let Some(cls) = classes
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(last_segment))
             {
                 return Some(Arc::clone(cls));
             }
@@ -440,7 +442,7 @@ impl Backend {
         // for lazily-loaded files (vendor, stubs, PSR-4).  These maps
         // are only needed for files open in the editor (populated by
         // update_ast_inner).  Skipping them reduces memory usage across
-        // thousands of vendor files.  See P13.
+        // thousands of vendor files.
 
         // Populate the fqn_index so that `find_class_in_uri_classes_index` can
         // resolve these classes via O(1) hash lookup.  Also populate
@@ -448,15 +450,20 @@ impl Backend {
         // the source file even after the uri_classes_index entry is
         // cleared by didClose.
         {
+            // Build the new entries outside the lock so the FQN-string
+            // formatting and Arc clones don't serialize concurrent readers.
+            // Only the brief insert below holds the `.write()` guards.
+            let new_entries: Vec<(String, Arc<ClassInfo>)> = arc_classes
+                .iter()
+                .filter(|cls| !cls.name.starts_with("__anonymous@"))
+                .map(|cls| (cls.fqn().to_string(), Arc::clone(cls)))
+                .collect();
+
             let mut class_idx = self.fqn_uri_index.write();
             let mut fqn_idx = self.fqn_class_index.write();
-            for cls in &arc_classes {
-                if cls.name.starts_with("__anonymous@") {
-                    continue;
-                }
-                let fqn = cls.fqn().to_string();
-                fqn_idx.insert(fqn.clone(), Arc::clone(cls));
-                class_idx.entry(fqn).or_insert_with(|| uri.to_owned());
+            for (fqn, cls) in new_entries {
+                class_idx.or_insert_with(fqn.as_str(), || uri.to_owned());
+                fqn_idx.insert(fqn, cls);
             }
         }
 
@@ -508,7 +515,7 @@ impl Backend {
         // can happen in the LSP editing path).  For first-time loads
         // the cost/benefit is strongly negative.
         if was_already_parsed {
-            let mut cache = self.resolved_class_cache.lock();
+            let mut cache = self.resolved_class_cache.write();
             for cls in &arc_classes {
                 let fqn = cls.fqn();
                 let _ = crate::virtual_members::evict_fqn(&mut cache, &fqn);
@@ -645,15 +652,17 @@ impl Backend {
                         };
 
                         // Check if this is the function we're looking for.
-                        if result.is_none() && (fqn == name || func.name == name) {
+                        if result.is_none()
+                            && (fqn.eq_ignore_ascii_case(name)
+                                || func.name.eq_ignore_ascii_case(name))
+                        {
                             result = Some(func.clone());
                         }
 
                         // Cache the FQN so future lookups hit Phase 1.
                         // No short-name fallback: `resolve_function_name`
                         // already builds namespace-qualified candidates.
-                        fmap.entry(fqn)
-                            .or_insert_with(|| (stub_uri.clone(), func.clone()));
+                        fmap.or_insert_with(fqn, || (stub_uri.clone(), func.clone()));
                     }
                 }
 
@@ -717,11 +726,19 @@ impl Backend {
             // In multi-namespace files, prefer the class whose
             // file_namespace matches the current namespace context.
             let lookup = short_name(name);
-            let ns_atom = file_namespace.as_ref().map(|ns| crate::atom::atom(ns));
+            let ns_matches = |c: &ClassInfo| match (&c.file_namespace, file_namespace) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                (None, None) => true,
+                _ => false,
+            };
             let local_match = local_classes
                 .iter()
-                .find(|c| c.name == lookup && c.file_namespace == ns_atom)
-                .or_else(|| local_classes.iter().find(|c| c.name == lookup));
+                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c))
+                .or_else(|| {
+                    local_classes
+                        .iter()
+                        .find(|c| c.name.eq_ignore_ascii_case(lookup))
+                });
             if let Some(cls) = local_match {
                 return Some(Arc::clone(cls));
             }
@@ -914,5 +931,120 @@ impl Backend {
     /// found.
     pub(crate) fn constant_loader(&self) -> impl Fn(&str) -> Option<Option<String>> + '_ {
         move |name: &str| self.lookup_global_constant(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! PHP resolves class, function, and method names case-insensitively
+    //! (B25).  These tests exercise each lookup phase with a casing that
+    //! differs from the declaration.
+
+    use crate::Backend;
+
+    static STDCLASS_STUB: &str = "<?php class stdClass {}";
+    static STRING_FUNCTIONS_STUB: &str = "<?php function strlen(string $string): int {}";
+
+    #[test]
+    fn class_lookup_ignores_case_for_parsed_classes() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///user.php",
+            "<?php namespace App\\Models; class User {}",
+        );
+
+        for name in [
+            "App\\Models\\User",
+            "app\\models\\user",
+            "APP\\MODELS\\USER",
+        ] {
+            let cls = backend.find_or_load_class(name);
+            assert!(cls.is_some(), "lookup for {name:?} should resolve");
+            assert_eq!(cls.unwrap().name, "User", "declared spelling is kept");
+        }
+    }
+
+    #[test]
+    fn class_lookup_ignores_case_for_stubs() {
+        let mut stubs = std::collections::HashMap::new();
+        stubs.insert("stdClass", STDCLASS_STUB);
+        let backend = Backend::new_test_with_stubs(stubs);
+
+        for name in ["stdClass", "stdclass", "STDCLASS"] {
+            let cls = backend.find_or_load_class(name);
+            assert!(cls.is_some(), "lookup for {name:?} should resolve");
+            assert_eq!(cls.unwrap().name, "stdClass");
+        }
+    }
+
+    #[test]
+    fn negative_cache_does_not_pin_per_casing() {
+        let backend = Backend::new_test();
+
+        // Miss with one casing populates the negative cache…
+        assert!(backend.find_or_load_class("app\\foo").is_none());
+        assert!(backend.class_not_found_cache.read().contains("APP\\FOO"));
+
+        // …but once the class is parsed, every casing resolves again.
+        backend.update_ast("file:///foo.php", "<?php namespace App; class Foo {}");
+        assert!(backend.find_or_load_class("app\\foo").is_some());
+        assert!(backend.find_or_load_class("APP\\FOO").is_some());
+    }
+
+    #[test]
+    fn function_lookup_ignores_case_for_user_functions() {
+        let backend = Backend::new_test();
+        backend.update_ast("file:///helpers.php", "<?php function myHelper() {}");
+
+        for name in ["myHelper", "myhelper", "MYHELPER"] {
+            let func = backend.find_or_load_function(&[name]);
+            assert!(func.is_some(), "lookup for {name:?} should resolve");
+            assert_eq!(func.unwrap().name, "myHelper");
+        }
+    }
+
+    #[test]
+    fn function_lookup_ignores_case_for_stubs() {
+        let mut function_stubs = std::collections::HashMap::new();
+        function_stubs.insert("strlen", STRING_FUNCTIONS_STUB);
+        let backend = Backend::new_test_with_all_stubs(
+            std::collections::HashMap::new(),
+            function_stubs,
+            std::collections::HashMap::new(),
+        );
+
+        for name in ["strlen", "STRLEN", "StrLen"] {
+            let func = backend.find_or_load_function(&[name]);
+            assert!(func.is_some(), "lookup for {name:?} should resolve");
+            assert_eq!(func.unwrap().name, "strlen");
+        }
+    }
+
+    #[test]
+    fn method_lookup_ignores_case() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///cls.php",
+            "<?php class Widget { public function getValue(): int { return 1; } }",
+        );
+
+        let cls = backend.find_or_load_class("Widget").expect("class");
+        for name in ["getValue", "getvalue", "GETVALUE"] {
+            assert!(cls.has_method(name), "has_method({name:?})");
+            assert_eq!(cls.get_method(name).expect("get_method").name, "getValue");
+            assert!(
+                cls.get_method_arc(name).is_some(),
+                "get_method_arc({name:?})"
+            );
+        }
+
+        // The indexed path (post-`rebuild_method_index`) must agree.
+        let mut indexed = crate::types::ClassInfo::clone(&cls);
+        indexed.rebuild_method_index();
+        assert!(indexed.has_method("GETVALUE"));
+        assert_eq!(
+            indexed.get_method("getvalue").expect("indexed").name,
+            "getValue"
+        );
     }
 }

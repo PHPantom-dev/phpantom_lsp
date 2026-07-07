@@ -461,171 +461,6 @@ methods, or document this as a known limitation.
 
 ---
 
-#### L11. Relation dot-notation string completion and column name string completion
-
-**Impact: Medium-High · Effort: Medium-High**
-
-Many Eloquent methods accept string arguments that refer to
-**relationship names** (with dot-notation for nested eager loads) or
-**column/attribute names**. PHPantom should offer completion inside
-these string literals.
-
-##### Relation string completion
-
-Eloquent methods like `with()`, `load()`, `has()`, `whereHas()`,
-`doesntHave()`, `whereDoesntHave()`, `withCount()`, `loadCount()`,
-`loadMissing()`, and `loadMorph()` accept relationship names as
-string arguments. These names correspond to public methods on the model
-that return a relationship instance (`HasMany`, `BelongsTo`, etc.).
-
-Dot-notation chains traverse nested relationships:
-
-```php
-// Eager-load: User → mother() → sister() → son()
-$users = User::with(['mother.sister.son'])->get();
-
-// Constrained eager load:
-User::with(['posts' => function ($q) { ... }])->get();
-
-// Nested with counts:
-User::withCount(['posts', 'comments.replies'])->get();
-```
-
-**Implementation:**
-
-1. Detect when the cursor is inside a string argument to one of the
-   target methods (listed above) where the receiver is an Eloquent
-   model or Builder.
-2. Resolve the model class from the receiver type (e.g. `User` from
-   `User::with(...)` or from the Builder's generic parameter).
-3. Scan the model for public methods whose return type extends one of
-   the relationship base classes (`HasOne`, `HasMany`, `BelongsTo`,
-   `BelongsToMany`, `HasOneThrough`, `HasManyThrough`,
-   `MorphOne`, `MorphMany`, `MorphTo`, `MorphToMany`,
-   `MorphedByMany`).
-4. Offer those method names as completions.
-5. When the string already contains a dot (e.g. `'mother.si|'`),
-   resolve the chain segment-by-segment: `mother()` returns
-   `BelongsTo<Person>`, so look up `Person`'s relationship methods
-   for the next segment.
-6. Inside array literals (`['posts', 'comments.|']`), trigger on each
-   element independently. Also handle the `=>` closure form where the
-   key is the relation string.
-
-**Target methods (non-exhaustive):**
-
-| Method | Where | Notes |
-|--------|-------|-------|
-| `with()` | Builder, Model | Eager loading |
-| `without()` | Builder | Remove eager load |
-| `load()` | Model | Lazy eager load |
-| `loadMissing()` | Model | Load if not loaded |
-| `loadCount()` | Model | Lazy count load |
-| `loadMorph()` | Model | Morph relation load |
-| `has()` | Builder | Existence query |
-| `orHas()` | Builder | OR existence |
-| `doesntHave()` | Builder | Non-existence |
-| `orDoesntHave()` | Builder | OR non-existence |
-| `whereHas()` | Builder | Constrained existence |
-| `orWhereHas()` | Builder | OR constrained |
-| `whereDoesntHave()` | Builder | Constrained non-existence |
-| `withCount()` | Builder | Count sub-select |
-| `withSum()` | Builder | Aggregate |
-| `withAvg()` | Builder | Aggregate |
-| `withMin()` | Builder | Aggregate |
-| `withMax()` | Builder | Aggregate |
-| `withExists()` | Builder | Existence flag |
-
-##### Column name string completion
-
-Several Eloquent and Query Builder methods accept column name strings.
-PHPantom already synthesizes `where{PropertyName}()` dynamic methods
-from model properties, but the same property names should also be
-offered as string completions inside methods that take column
-arguments:
-
-```php
-// Column name as string:
-User::where('middle_name', 'like', '%foo%');
-User::whereIn('status', ['active', 'pending']);
-User::orderBy('created_at');
-User::select(['id', 'name', 'email']);
-User::pluck('email');
-
-// Also in update/insert arrays (keys are column names):
-$user->update(['middle_name' => 'Jane']);
-```
-
-**Implementation:**
-
-1. Detect when the cursor is inside a string argument to a method on
-   a Builder or Model where the parameter represents a column name.
-   The parameter name or position in the known method signatures
-   identifies column-position arguments (e.g. the first argument to
-   `where()`, `whereIn()`, `orderBy()`, `groupBy()`, `select()`,
-   `pluck()`, `value()`, `increment()`, `decrement()`, etc.).
-2. Resolve the model class from the Builder's generic parameter.
-3. Collect all known property names from the model: `$casts`,
-   `$fillable`, `$guarded`, `$hidden`, `$visible`, `$attributes`
-   defaults, `@property` annotations, accessor methods, and
-   timestamp columns.
-4. Offer those names as string completions.
-
-**Target methods (non-exhaustive):**
-
-| Method | Column parameter position |
-|--------|--------------------------|
-| `where()` | 1st argument |
-| `orWhere()` | 1st argument |
-| `whereIn()` | 1st argument |
-| `whereNotIn()` | 1st argument |
-| `whereBetween()` | 1st argument |
-| `whereNull()` | 1st argument |
-| `whereNotNull()` | 1st argument |
-| `orderBy()` | 1st argument |
-| `orderByDesc()` | 1st argument |
-| `groupBy()` | all arguments |
-| `having()` | 1st argument |
-| `select()` | all arguments |
-| `addSelect()` | all arguments |
-| `pluck()` | 1st argument |
-| `value()` | 1st argument |
-| `increment()` | 1st argument |
-| `decrement()` | 1st argument |
-| `latest()` | 1st argument |
-| `oldest()` | 1st argument |
-
-##### `model-property<T>` type resolution
-
-Larastan defines a `model-property<Model>` pseudo-type that represents
-the union of column/attribute names on a given Eloquent model as string
-literals. PHPantom currently does not recognize this type, which
-produces false "unknown class" diagnostics when it appears in
-docblocks (see [#33](https://github.com/AJenbo/phpantom_lsp/issues/33)).
-
-```php
-/** @return array{process: array<model-property<Process>, mixed>} */
-public function broadcastWith(): array { return []; }
-```
-
-This should be handled as part of L11 since the column name knowledge
-is the same data:
-
-1. **Minimum viable:** Recognize `model-property<T>` as a `string`
-   subtype so it never triggers an "unknown class" diagnostic.
-2. **Full resolution:** When the generic argument resolves to an
-   Eloquent model, expand `model-property<Process>` to the concrete
-   union of known property names (from `$casts`, `$fillable`,
-   `@property`, accessors, timestamps, etc.). This enables type
-   checking at call sites and connects directly to the column name
-   list that L11's string completion already builds.
-
-**Relationship with L1 (Facade completion):** This feature is
-independent and can be implemented before or after L1. The column
-name source (model property list) is the same data that
-`LaravelModelProvider` already collects for virtual property
-synthesis and `where{PropertyName}()` dynamic methods.
-
 #### L12. `HasUuids` / `HasUlids` trait — `$id` typed as `string`
 
 **Impact: Low-Medium · Effort: Low**
@@ -688,4 +523,135 @@ Approach 2 is likely the best balance. The factory virtual member
 provider already knows the model type; it would need to emit
 different return types for `create()`/`make()` based on whether
 the chain includes a count-setting call.
+
+---
+
+## Laravel string-context intelligence (completion, hover, diagnostics)
+
+This is the set of features that live *inside string literals* passed to
+Laravel helpers and facades: `route('...')`, `config('...')`, `env('...')`,
+`__('...')`, `view('...')`, and so on. The official Laravel VS Code
+extension (https://github.com/laravel/vs-code-extension) is built almost
+entirely around this layer, and PhpStorm + Laravel Idea cover it too.
+
+### Why we do this statically (and they boot the app)
+
+The Laravel extension gathers these facts by **booting the user's
+application** in the background and introspecting the live container
+(`app('router')->getRoutes()`, `config()->all()`, `app()->getBindings()`,
+etc.). PhpStorm's Laravel Idea and `barryvdh/laravel-ide-helper` do the
+same thing differently: they generate a snapshot (JSON payload or PHP
+stubs) that the IDE then reads.
+
+All three share two problems:
+
+1. **A snapshot is one environment on one code path.** The booted values
+   reflect whatever bindings, config, and routes are registered under the
+   default boot. A controller that rebinds a service, a config value that
+   differs in production, or a route registered behind a feature flag is
+   either invisible or actively wrong. The answer is "true for that boot,"
+   not "true here."
+2. **Staleness.** A snapshot is only as fresh as its last regeneration
+   (manual for ide-helper, periodic background re-boot for the extension).
+   Static scanning with a file watcher updates the instant the source file
+   changes, not at the next heartbeat.
+
+Our position (consistent with the **No application booting** philosophy
+above): the overwhelming majority of these facts live in static files we
+can parse and keep fresh for free — `routes/*.php` (`->name()`),
+`config/*.php` return arrays, `lang/**` PHP + JSON, `.env`, and
+`resources/views/**`. We recover ~90% of the value with no code execution,
+no stale snapshot, and correct behaviour on a project that doesn't even
+boot. The dynamic tail (routes/config/bindings registered at runtime by a
+closure) is the only part a snapshot wins on, and that is exactly the code
+that is hard to reason about anyway.
+
+### What already works
+
+Go-to-definition is implemented for **route names** (`route()`), **config
+keys**, **env vars**, **translation keys**, and **view names** via the
+declaration scanners in `virtual_members/laravel/{route_names, config_keys,
+env_vars, trans_keys, view_names}.rs`. These walk the relevant source files
+and resolve a string key to its declaration site. `LaravelStringKey` also
+flows through find-references, rename, and document-highlight. **Eloquent
+relation and column name strings** have completion (`completion/eloquent_string.rs`).
+
+The scanners already enumerate every valid key for go-to-definition. The
+items below mostly wire that existing enumeration into three more LSP
+endpoints rather than building new analysis.
+
+#### L14. Diagnostics for Laravel string keys
+
+**Impact: High · Effort: Medium**
+
+No Laravel string key is currently validated. A typo in `route('dashbaord')`,
+`config('app.naem')`, `env('DB_CONNCTION')`, `__('auth.failedd')`, or
+`view('layouts.ap')` produces no warning — the bug surfaces only at runtime.
+This is the single highest-value gap, because it catches a class of error
+that PHP itself never reports.
+
+Emit a warning when a string argument in a recognised context resolves to no
+declaration. The candidate set is the same one the go-to-definition scanners
+already build, so the diagnostic is "key not in the collected set." Each
+construct reuses its existing scanner:
+
+- `route('name')` → not in collected `->name()` declarations.
+- `config('a.b.c')` → not in flattened `config/*.php` keys.
+- `env('KEY')` → not in `.env` / `.env.example`.
+- `__()`/`trans()`/`trans_choice()` → not in `lang/**` keys.
+- `view('a.b')` → no matching file under `resources/views/`.
+
+Pair each with a quick-fix where cheap: "create missing view file,"
+"add missing key to `.env` (copy from `.env.example`)" (mirrors the
+extension's two quick-fixes). Guard against false positives from genuinely
+dynamic keys (e.g. `config($key)` with a variable, or
+`route("admin.$section")` interpolation) by only flagging plain string
+literals.
+
+#### L15. Completion for Laravel string keys
+
+**Impact: High · Effort: Medium**
+
+Completion exists only for Eloquent relations/columns. Extend it to offer
+route names, config keys (dot-notation drill-down), env var names,
+translation keys, and view names inside the corresponding string contexts.
+The candidate lists are exactly the declaration sets the go-to scanners
+already produce; the work is detecting the string-literal cursor context
+(the symbol-map already records these as `LaravelStringKey`) and returning
+the collected keys as completion items.
+
+#### L16. Hover for Laravel string keys
+
+**Impact: Medium · Effort: Low-Medium**
+
+`SymbolKind::LaravelStringKey` currently returns `None` from hover
+(`hover/mod.rs`). Show the resolved target: the config/env/translation
+*value*, the route's URI + action, or the view's file path. The data is
+already loaded by the go-to scanners; this is formatting it as hover markdown.
+
+#### L17. Additional string contexts without booting
+
+**Impact: Medium · Effort: Medium**
+
+Constructs the extension covers that we don't, and that are statically
+recoverable (no booting):
+
+- **Middleware aliases** — completion/go-to/diagnostics for `->middleware('auth')`.
+  Aliases are declared statically in `bootstrap/app.php`
+  (`$middleware->alias([...])`) on Laravel 11+, or the HTTP Kernel's
+  `$middlewareAliases` on older versions. Scan that array.
+- **Asset paths** — `asset('...')` against a filesystem walk of `public/`.
+- **Validation rules** — completion for the rule strings in
+  `'field' => 'required|email'`. This is a fixed, known rule list plus
+  parameter snippets (the extension hardcodes ~50 rules); no project data
+  needed.
+- **Inertia page paths** — `Inertia::render('...')` against a filesystem
+  walk of `resources/js/Pages` (extension/extensions from `inertia` config,
+  read statically). Only relevant to Inertia projects.
+
+**Explicitly still out of scope** (see the table at the top): container
+binding names (`app('...')`), facade string aliases, and anything else that
+requires the live container. These genuinely cannot be resolved without
+booting, and a snapshot of them is the "true for one boot" half-truth we are
+choosing not to ship.
 

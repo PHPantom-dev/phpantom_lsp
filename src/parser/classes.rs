@@ -22,7 +22,7 @@ use mago_syntax::ast::sequence::Sequence;
 fn has_scope_attribute(method: &Method<'_>) -> bool {
     for attr_list in method.attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
-            if attr.name.last_segment() == "Scope" {
+            if last_segment(attr.name.value()) == b"Scope" {
                 return true;
             }
         }
@@ -48,8 +48,8 @@ fn extract_attribute_targets(
 
     for attr_list in attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
-            let short = attr.name.last_segment();
-            if short != "Attribute" {
+            let short = last_segment(attr.name.value());
+            if short != b"Attribute" {
                 continue;
             }
 
@@ -146,7 +146,7 @@ fn parse_attribute_target_flags(text: &str) -> u8 {
 use mago_syntax::ast::*;
 
 use crate::Backend;
-use crate::atom::{Atom, AtomMap, atom};
+use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str, last_segment};
 use crate::docblock;
 use crate::types::*;
 use crate::virtual_members::laravel::infer_relationship_from_body;
@@ -273,8 +273,8 @@ fn extract_collected_by_attribute(
 ) -> Option<String> {
     for attr_list in attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
-            let short = attr.name.last_segment();
-            if short != "CollectedBy" {
+            let short = last_segment(attr.name.value());
+            if short != b"CollectedBy" {
                 continue;
             }
             let arg_list = attr.argument_list.as_ref()?;
@@ -299,8 +299,8 @@ fn extract_use_eloquent_builder_attribute(
 ) -> Option<String> {
     for attr_list in attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
-            let short = attr.name.last_segment();
-            if short != "UseEloquentBuilder" {
+            let short = last_segment(attr.name.value());
+            if short != b"UseEloquentBuilder" {
                 continue;
             }
             let arg_list = attr.argument_list.as_ref()?;
@@ -443,7 +443,7 @@ fn extract_casts_definitions<'a>(
         match member {
             ClassLikeMember::Property(Property::Plain(plain)) => {
                 for item in plain.items.iter() {
-                    let var_name = item.variable().name.to_string();
+                    let var_name = bytes_to_str(item.variable().name).to_string();
                     let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
                     if stripped != "casts" {
                         continue;
@@ -458,7 +458,7 @@ fn extract_casts_definitions<'a>(
                     }
                 }
             }
-            ClassLikeMember::Method(method) if method.name.value == "casts" => {
+            ClassLikeMember::Method(method) if method.name.value == b"casts" => {
                 if let MethodBody::Concrete(block) = &method.body {
                     let start = block.left_brace.start.offset as usize;
                     let end = block.right_brace.end.offset as usize;
@@ -597,7 +597,7 @@ fn extract_attributes_definitions<'a>(
     for member in members {
         if let ClassLikeMember::Property(Property::Plain(plain)) = member {
             for item in plain.items.iter() {
-                let var_name = item.variable().name.to_string();
+                let var_name = bytes_to_str(item.variable().name).to_string();
                 let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
                 if stripped != "attributes" {
                     continue;
@@ -685,7 +685,7 @@ fn extract_timestamp_config<'a>(
         match member {
             ClassLikeMember::Property(Property::Plain(plain)) => {
                 for item in plain.items.iter() {
-                    let var_name = item.variable().name.to_string();
+                    let var_name = bytes_to_str(item.variable().name).to_string();
                     let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
                     if stripped != "timestamps" {
                         continue;
@@ -707,7 +707,7 @@ fn extract_timestamp_config<'a>(
             }
             ClassLikeMember::Constant(constant) => {
                 for item in constant.items.iter() {
-                    let name = item.name.value.to_string();
+                    let name = bytes_to_str(item.name.value).to_string();
                     if name != "CREATED_AT" && name != "UPDATED_AT" {
                         continue;
                     }
@@ -755,7 +755,7 @@ fn extract_column_names<'a>(
     for member in members {
         if let ClassLikeMember::Property(Property::Plain(plain)) = member {
             for item in plain.items.iter() {
-                let var_name = item.variable().name.to_string();
+                let var_name = bytes_to_str(item.variable().name).to_string();
                 let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
                 if !targets.contains(&stripped) {
                     continue;
@@ -793,7 +793,7 @@ fn extract_dates_definitions<'a>(
     for member in members {
         if let ClassLikeMember::Property(Property::Plain(plain)) = member {
             for item in plain.items.iter() {
-                let var_name = item.variable().name.to_string();
+                let var_name = bytes_to_str(item.variable().name).to_string();
                 let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
                 if stripped != "dates" {
                     continue;
@@ -881,6 +881,25 @@ fn infer_relationship_from_method<'a>(
 }
 
 impl Backend {
+    /// De-duplicate parsed class-likes by `(name, namespace)`, keeping the
+    /// first declaration in source order.
+    ///
+    /// A class-like declared in more than one branch of a conditional —
+    /// e.g. Doctrine's `ServiceEntityRepository`, defined differently for
+    /// ORM2 vs ORM3 inside an `if`/`else` version guard — yields one
+    /// [`ClassInfo`] per branch once we descend into conditional bodies.
+    /// Keeping the first declaration makes resolution deterministic and
+    /// matches PHPantom's existing first-occurrence-wins convention
+    /// (`classmap_scanner`, `find_class_by_name`, `fqn_uri_index`) as well
+    /// as PHPStan/Psalm. This must run before the classes reach
+    /// `fqn_class_index`, whose insert is last-wins and would otherwise pick
+    /// the wrong (later) branch.
+    pub(crate) fn dedup_class_likes_first_wins(items: &mut Vec<(ClassInfo, Option<String>)>) {
+        let mut seen: std::collections::HashSet<(Atom, Option<String>)> =
+            std::collections::HashSet::new();
+        items.retain(|(cls, ns)| seen.insert((cls.name, ns.clone())));
+    }
+
     /// Recursively walk statements and extract class information.
     /// This handles classes at the top level as well as classes nested
     /// inside namespace declarations.
@@ -901,17 +920,22 @@ impl Backend {
                         continue;
                     }
 
-                    let class_name = atom(class.name.value);
+                    let class_name = atom_bytes(class.name.value);
 
                     let parent_class = class
                         .extends
                         .as_ref()
-                        .and_then(|ext| ext.types.first().map(|ident| atom(ident.value())));
+                        .and_then(|ext| ext.types.first().map(|ident| atom_bytes(ident.value())));
 
                     let interfaces: Vec<Atom> = class
                         .implements
                         .as_ref()
-                        .map(|imp| imp.types.iter().map(|ident| atom(ident.value())).collect())
+                        .map(|imp| {
+                            imp.types
+                                .iter()
+                                .map(|ident| atom_bytes(ident.value()))
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     let doc_info = extract_class_docblock(class, doc_ctx);
@@ -934,6 +958,10 @@ impl Backend {
                     use_generics.extend(inline_use_generics);
 
                     let keyword_offset = class.class.span.start.offset;
+                    let decl_start_offset = class
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
 
@@ -982,6 +1010,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class,
                         interfaces,
                         used_traits,
@@ -1034,7 +1063,7 @@ impl Backend {
                         continue;
                     }
 
-                    let iface_name = atom(iface.name.value);
+                    let iface_name = atom_bytes(iface.name.value);
 
                     // Interfaces can extend multiple parent interfaces.
                     // Store the first one in `parent_class` for backward
@@ -1044,7 +1073,12 @@ impl Backend {
                     let all_parents: Vec<Atom> = iface
                         .extends
                         .as_ref()
-                        .map(|ext| ext.types.iter().map(|ident| atom(ident.value())).collect())
+                        .map(|ext| {
+                            ext.types
+                                .iter()
+                                .map(|ident| atom_bytes(ident.value()))
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     let parent_class = all_parents.first().copied();
@@ -1066,6 +1100,10 @@ impl Backend {
                     );
 
                     let keyword_offset = iface.interface.span.start.offset;
+                    let decl_start_offset = iface
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = iface.left_brace.start.offset;
                     let end_offset = iface.right_brace.end.offset;
 
@@ -1083,6 +1121,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class,
                         interfaces: all_parents,
                         used_traits,
@@ -1129,7 +1168,7 @@ impl Backend {
                         continue;
                     }
 
-                    let trait_name = atom(trait_def.name.value);
+                    let trait_name = atom_bytes(trait_def.name.value);
 
                     let doc_info = extract_class_docblock(trait_def, doc_ctx);
 
@@ -1148,6 +1187,10 @@ impl Backend {
                     );
 
                     let keyword_offset = trait_def.r#trait.span.start.offset;
+                    let decl_start_offset = trait_def
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = trait_def.left_brace.start.offset;
                     let end_offset = trait_def.right_brace.end.offset;
 
@@ -1165,6 +1208,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class: None,
                         interfaces: vec![],
                         used_traits,
@@ -1211,7 +1255,7 @@ impl Backend {
                         continue;
                     }
 
-                    let enum_name = atom(enum_def.name.value);
+                    let enum_name = atom_bytes(enum_def.name.value);
 
                     let ExtractedMembers {
                         methods,
@@ -1241,7 +1285,12 @@ impl Backend {
                     let mut interfaces: Vec<Atom> = enum_def
                         .implements
                         .as_ref()
-                        .map(|imp| imp.types.iter().map(|ident| atom(ident.value())).collect())
+                        .map(|imp| {
+                            imp.types
+                                .iter()
+                                .map(|ident| atom_bytes(ident.value()))
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     // Also add the implicit interface to the interfaces
@@ -1255,6 +1304,10 @@ impl Backend {
                     }
 
                     let keyword_offset = enum_def.r#enum.span.start.offset;
+                    let decl_start_offset = enum_def
+                        .attribute_lists
+                        .first()
+                        .map_or(keyword_offset, |a| a.span().start.offset);
                     let start_offset = enum_def.left_brace.start.offset;
                     let end_offset = enum_def.right_brace.end.offset;
 
@@ -1273,6 +1326,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         keyword_offset,
+                        decl_start_offset,
                         parent_class: None,
                         interfaces,
                         used_traits,
@@ -1325,6 +1379,94 @@ impl Backend {
                         doc_ctx,
                     );
                 }
+                // Named class-likes can be declared inside conditional and
+                // control-flow blocks — most notably Doctrine's
+                // `ServiceEntityRepository`, defined inside an
+                // `if (! property_exists(EntityRepository::class, '_entityName'))`
+                // guard that selects the ORM2 vs ORM3 base class. Descend into
+                // these container bodies so such declarations are indexed with
+                // their parent class and `@extends` generics, not merely
+                // discovered by name. Anonymous classes nested in the
+                // non-container statements within these bodies are still
+                // collected via the `_` arm when the recursion reaches them.
+                Statement::If(if_stmt) => {
+                    Self::extract_classes_from_statements(
+                        if_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                    for else_if in if_stmt.body.else_if_statements() {
+                        Self::extract_classes_from_statements(else_if.iter(), classes, doc_ctx);
+                    }
+                    if let Some(else_stmts) = if_stmt.body.else_statements() {
+                        Self::extract_classes_from_statements(else_stmts.iter(), classes, doc_ctx);
+                    }
+                }
+                Statement::Block(block) => {
+                    Self::extract_classes_from_statements(
+                        block.statements.iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::Try(try_stmt) => {
+                    Self::extract_classes_from_statements(
+                        try_stmt.block.statements.iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                    for catch in try_stmt.catch_clauses.iter() {
+                        Self::extract_classes_from_statements(
+                            catch.block.statements.iter(),
+                            classes,
+                            doc_ctx,
+                        );
+                    }
+                    if let Some(finally) = &try_stmt.finally_clause {
+                        Self::extract_classes_from_statements(
+                            finally.block.statements.iter(),
+                            classes,
+                            doc_ctx,
+                        );
+                    }
+                }
+                Statement::Switch(switch_stmt) => {
+                    for case in switch_stmt.body.cases() {
+                        Self::extract_classes_from_statements(
+                            case.statements().iter(),
+                            classes,
+                            doc_ctx,
+                        );
+                    }
+                }
+                Statement::While(while_stmt) => {
+                    Self::extract_classes_from_statements(
+                        while_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::DoWhile(do_while) => {
+                    Self::extract_classes_from_statements(
+                        std::iter::once(do_while.statement),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::For(for_stmt) => {
+                    Self::extract_classes_from_statements(
+                        for_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
+                Statement::Foreach(foreach_stmt) => {
+                    Self::extract_classes_from_statements(
+                        foreach_stmt.body.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
+                }
                 _ => {
                     // Walk into all other statement types to find anonymous
                     // classes nested inside expressions, control flow, method
@@ -1346,12 +1488,17 @@ impl Backend {
         let parent_class = anon
             .extends
             .as_ref()
-            .and_then(|ext| ext.types.first().map(|ident| atom(ident.value())));
+            .and_then(|ext| ext.types.first().map(|ident| atom_bytes(ident.value())));
 
         let interfaces: Vec<Atom> = anon
             .implements
             .as_ref()
-            .map(|imp| imp.types.iter().map(|ident| atom(ident.value())).collect())
+            .map(|imp| {
+                imp.types
+                    .iter()
+                    .map(|ident| atom_bytes(ident.value()))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let ExtractedMembers {
@@ -1380,6 +1527,7 @@ impl Backend {
             start_offset,
             end_offset,
             keyword_offset,
+            decl_start_offset: start_offset,
             parent_class,
             interfaces,
             used_traits,
@@ -1880,7 +2028,7 @@ impl Backend {
                         continue;
                     }
 
-                    let name = atom(method.name.value);
+                    let name = atom_bytes(method.name.value);
                     let name_offset = method.name.span.start.offset;
                     let php_version = doc_ctx.and_then(|ctx| ctx.php_version);
                     let mut parameters = extract_parameters(
@@ -1938,6 +2086,15 @@ impl Backend {
                             native_return_type.as_ref(),
                             parsed_doc_type.as_ref(),
                         );
+
+                        // Apply #[ArrayShape] override if present.
+                        let effective = if let Some(ctx) = doc_ctx {
+                            effective.map(|ty| {
+                                super::apply_array_shape_override(ty, &method.attribute_lists, ctx)
+                            })
+                        } else {
+                            effective
+                        };
 
                         let conditional = docblock::extract_conditional_return_type_from_info(info);
 
@@ -2044,8 +2201,18 @@ impl Backend {
                         // #[Deprecated] attribute on the method itself.
                         let depr_info =
                             merge_deprecation_info(None, &method.attribute_lists, doc_ctx);
+
+                        // Apply #[ArrayShape] override even without a docblock.
+                        let effective_ret = if let Some(ctx) = doc_ctx {
+                            native_return_type.clone().map(|ty| {
+                                super::apply_array_shape_override(ty, &method.attribute_lists, ctx)
+                            })
+                        } else {
+                            native_return_type.clone()
+                        };
+
                         (
-                            native_return_type.clone(),
+                            effective_ret,
                             None,
                             depr_info.message,
                             depr_info.replacement,
@@ -2067,7 +2234,7 @@ impl Backend {
                         constructor_body = Some(&method.body);
                         for param in method.parameter_list.parameters.iter() {
                             if param.is_promoted_property() {
-                                let raw_name = param.variable.name.to_string();
+                                let raw_name = bytes_to_str(param.variable.name).to_string();
                                 let prop_name =
                                     atom(raw_name.strip_prefix('$').unwrap_or(&raw_name));
                                 let saved_native_hint =
@@ -2114,7 +2281,7 @@ impl Backend {
                                     if let Expression::Instantiation(inst) = dv.value
                                         && let Expression::Identifier(ident) = inst.class
                                     {
-                                        let raw = ident.value().to_string();
+                                        let raw = bytes_to_str(ident.value()).to_string();
                                         let fqn = resolve_name_via_ctx(&raw, doc_ctx);
                                         return Some(PhpType::Named(fqn));
                                     }
@@ -2424,7 +2591,7 @@ impl Backend {
                             ctx.content.get(start..end).map(|s| s.to_string())
                         });
                         constants.push(ConstantInfo {
-                            name: atom(item.name.value),
+                            name: atom_bytes(item.name.value),
                             name_offset: item.name.span.start.offset,
                             type_hint: type_hint.clone(),
                             visibility,
@@ -2440,7 +2607,7 @@ impl Backend {
                     }
                 }
                 ClassLikeMember::EnumCase(enum_case) => {
-                    let case_name = atom(enum_case.item.name().value);
+                    let case_name = atom_bytes(enum_case.item.name().value);
                     let case_name_offset = enum_case.item.name().span.start.offset;
                     let enum_value = if let EnumCaseItem::Backed(backed) = &enum_case.item {
                         let start = backed.value.span().start.offset as usize;
@@ -2468,7 +2635,7 @@ impl Backend {
                 }
                 ClassLikeMember::TraitUse(trait_use) => {
                     for trait_name_ident in trait_use.trait_names.iter() {
-                        used_traits.push(atom(trait_name_ident.value()));
+                        used_traits.push(atom_bytes(trait_name_ident.value()));
                     }
 
                     // Extract `@use` generics from the docblock on the
@@ -2499,12 +2666,14 @@ impl Backend {
                         for adaptation in spec.adaptations.iter() {
                             match adaptation {
                                 TraitUseAdaptation::Precedence(prec) => {
-                                    let trait_name = atom(prec.method_reference.trait_name.value());
-                                    let method_name = atom(prec.method_reference.method_name.value);
+                                    let trait_name =
+                                        atom_bytes(prec.method_reference.trait_name.value());
+                                    let method_name =
+                                        atom_bytes(prec.method_reference.method_name.value);
                                     let insteadof: Vec<Atom> = prec
                                         .trait_names
                                         .iter()
-                                        .map(|id| atom(id.value()))
+                                        .map(|id| atom_bytes(id.value()))
                                         .collect();
                                     trait_precedences.push(TraitPrecedence {
                                         trait_name,
@@ -2516,14 +2685,15 @@ impl Backend {
                                     let (trait_name, method_name) =
                                         match &alias_adapt.method_reference {
                                             TraitUseMethodReference::Identifier(ident) => {
-                                                (None, atom(ident.value))
+                                                (None, atom_bytes(ident.value))
                                             }
                                             TraitUseMethodReference::Absolute(abs) => (
-                                                Some(atom(abs.trait_name.value())),
-                                                atom(abs.method_name.value),
+                                                Some(atom_bytes(abs.trait_name.value())),
+                                                atom_bytes(abs.method_name.value),
                                             ),
                                         };
-                                    let alias = alias_adapt.alias.as_ref().map(|a| atom(a.value));
+                                    let alias =
+                                        alias_adapt.alias.as_ref().map(|a| atom_bytes(a.value));
                                     let visibility = alias_adapt.visibility.as_ref().map(|m| {
                                         if m.is_private() {
                                             Visibility::Private
@@ -2559,16 +2729,16 @@ impl Backend {
                     && let Expression::Assignment(assign) = expr_stmt.expression
                     && let Expression::Access(Access::Property(pa)) = assign.lhs
                     && let Expression::Variable(Variable::Direct(dv)) = pa.object
-                    && dv.name == "$this"
+                    && dv.name == b"$this"
                     && let ClassLikeMemberSelector::Identifier(ident) = &pa.property
                     && let Expression::Instantiation(inst) = assign.rhs
                     && let Expression::Identifier(class_ident) = inst.class
                 {
-                    let prop_name = ident.value.to_string();
+                    let prop_name = bytes_to_str(ident.value).to_string();
                     if let Some(prop) = properties.iter_mut().find(|p| {
                         p.name == prop_name && p.type_hint.is_none() && p.native_type_hint.is_none()
                     }) {
-                        let raw = class_ident.value().to_string();
+                        let raw = bytes_to_str(class_ident.value()).to_string();
                         let fqn = resolve_name_via_ctx(&raw, doc_ctx);
                         prop.type_hint = Some(PhpType::Named(fqn));
                     }
@@ -2655,6 +2825,73 @@ mod tests {
         assert_eq!(
             parse_attribute_target_flags("SOME_UNKNOWN_CONST"),
             attribute_target::TARGET_ALL,
+        );
+    }
+
+    /// A class declared inside an `if` block (e.g. a version guard, like
+    /// Doctrine's `ServiceEntityRepository`) must be indexed with its native
+    /// parent and its `@extends Parent<Concrete>` generics — not merely
+    /// discovered by name.
+    #[test]
+    fn conditional_class_inside_if_is_extracted_with_parent_and_generics() {
+        let src = r#"<?php
+/** @template T of object */
+class Repo {}
+class Entity {}
+if (\PHP_VERSION_ID >= 80000) {
+    /** @extends Repo<Entity> */
+    class ConditionalRepo extends Repo {}
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let conditional = classes
+            .iter()
+            .find(|(c, _)| c.name == atom("ConditionalRepo"))
+            .map(|(c, _)| c)
+            .expect("class declared inside `if` should be indexed");
+
+        assert_eq!(
+            conditional.parent_class,
+            Some(atom("Repo")),
+            "conditional class should carry its native parent",
+        );
+        assert!(
+            conditional
+                .extends_generics
+                .iter()
+                .any(|(parent, args)| *parent == atom("Repo") && !args.is_empty()),
+            "conditional class should carry its `@extends Repo<Entity>` generics, got {:?}",
+            conditional.extends_generics,
+        );
+    }
+
+    /// When the same class name is declared in both branches of a conditional
+    /// (the Doctrine ORM2-vs-ORM3 shape), the first declaration in source
+    /// order wins and exactly one `ClassInfo` is produced.
+    #[test]
+    fn conditional_class_in_both_branches_keeps_first() {
+        let src = r#"<?php
+if (\defined('SOME_FLAG')) {
+    class Dup extends First {}
+} else {
+    class Dup extends Second {}
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let dups: Vec<_> = classes
+            .iter()
+            .filter(|(c, _)| c.name == atom("Dup"))
+            .collect();
+
+        assert_eq!(
+            dups.len(),
+            1,
+            "duplicate-branch class must be de-duplicated"
+        );
+        assert_eq!(
+            dups[0].0.parent_class,
+            Some(atom("First")),
+            "first (source-order) branch should win",
         );
     }
 

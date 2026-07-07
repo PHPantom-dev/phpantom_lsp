@@ -163,6 +163,20 @@ fn method_tag_name_matches_type_keyword() {
     );
 }
 
+#[test]
+fn method_tag_malformed_does_not_panic() {
+    // A malformed signature where `(` is preceded by `>` at index 1
+    // previously underflowed `i - 2` and panicked. It should now be
+    // parsed gracefully (yielding no method).
+    let doc = "/** @method >() */";
+    let methods = extract_method_tags(doc);
+    assert!(methods.is_empty());
+
+    // A few more degenerate shapes that exercise the same scanner.
+    assert!(extract_method_tags("/** @method <>() */").is_empty());
+    assert!(extract_method_tags("/** @method static >() */").is_empty());
+}
+
 // ─── @property tag extraction ───────────────────────────────────────
 
 #[test]
@@ -1962,4 +1976,23 @@ fn conditional_negated_with_template_default() {
     // negated: TAsync is not false → false (since default IS false) → else branch → Response
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
     assert_eq!(result, Some(PhpType::Named("Response".to_string())));
+}
+
+#[test]
+fn method_tag_with_template_params() {
+    let doc = "/** @method TVal get<TVal of mixed>(TVal $default) */";
+    let methods = extract_method_tags(doc);
+    assert_eq!(methods.len(), 1, "Should parse one method");
+    assert_eq!(methods[0].name, "get");
+    assert_eq!(methods[0].return_type_str().as_deref(), Some("TVal"));
+    assert_eq!(methods[0].template_params.len(), 1);
+    assert_eq!(methods[0].template_params[0].as_str(), "TVal");
+    assert!(
+        methods[0]
+            .template_param_bounds
+            .contains_key(&phpantom_lsp::atom::atom("TVal"))
+    );
+    assert_eq!(methods[0].template_bindings.len(), 1);
+    assert_eq!(methods[0].template_bindings[0].0.as_str(), "TVal");
+    assert_eq!(methods[0].template_bindings[0].1.as_str(), "$default");
 }

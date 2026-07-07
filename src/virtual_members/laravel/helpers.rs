@@ -239,7 +239,7 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
                 return chain_name_prefix(mc.object, content);
             };
-            if ident.value.eq_ignore_ascii_case("name") {
+            if ident.value.eq_ignore_ascii_case(b"name") {
                 let arg_name = mc
                     .argument_list
                     .arguments
@@ -259,7 +259,7 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
                 return String::new();
             };
-            if ident.value.eq_ignore_ascii_case("name") {
+            if ident.value.eq_ignore_ascii_case(b"name") {
                 sc.argument_list
                     .arguments
                     .iter()
@@ -295,8 +295,8 @@ pub(crate) fn walk_all_php_expressions(
     visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
 ) {
     let arena = Bump::new();
-    let file_id = FileId::new("input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     for stmt in program.statements.iter() {
         if walk_stmt_exprs(stmt, visitor).is_break() {
             return;

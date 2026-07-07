@@ -94,6 +94,11 @@ pub(crate) enum ClassRefContext {
     TypeHint,
     /// In a `use` import statement at file level.
     UseImport,
+    /// As a PHP attribute (`#[Foo(...)]`).  Like `New`, this invokes the
+    /// class constructor, but — unlike `New` — it is valid on any
+    /// instantiable class and does not produce "cannot instantiate"
+    /// diagnostics.
+    Attribute,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +140,17 @@ pub(crate) enum SymbolKind {
     /// A `$variable` token (usage or definition site).
     Variable {
         /// Name without `$` prefix.
+        name: String,
+    },
+
+    /// A string literal argument inside `compact('var')` that references
+    /// a local variable by name.
+    ///
+    /// The span covers the string content inside the quotes so rename and
+    /// go-to-definition can treat it as a variable reference while still
+    /// replacing only the bare name text.
+    CompactVariable {
+        /// Variable name without `$` prefix.
         name: String,
     },
 

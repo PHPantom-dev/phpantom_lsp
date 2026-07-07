@@ -17,6 +17,7 @@ use super::{
     CallSite, ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan,
     TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite,
 };
+use crate::atom::bytes_to_str;
 use crate::util::strip_fqn_prefix;
 
 // ─── Extraction context ─────────────────────────────────────────────────────
@@ -165,7 +166,11 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     // step below removes any duplicates from already-processed docblocks.
     for t in program.trivia.iter() {
         if t.kind == TriviaKind::DocBlockComment {
-            let _tpl = extract_docblock_symbols(t.value, t.span.start.offset, &mut ctx.spans);
+            let _tpl = extract_docblock_symbols(
+                bytes_to_str(t.value),
+                t.span.start.offset,
+                &mut ctx.spans,
+            );
         }
     }
 
@@ -180,7 +185,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     for t in program.trivia.iter() {
         if t.kind.is_comment() {
             let mut byte_cursor = t.span.start.offset as usize;
-            for line_text in t.value.split('\n') {
+            for line_text in bytes_to_str(t.value).split('\n') {
                 // `line_text` may end with '\r' on Windows; strip it for
                 // length calculation but keep the byte advance correct.
                 let display = line_text.trim_end_matches('\r');
@@ -197,7 +202,11 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
                 byte_cursor += line_text.len() + 1;
             }
             if t.kind == TriviaKind::DocBlockComment {
-                emit_phpdoc_tag_keywords(t.value, t.span.start.offset, &mut ctx.spans);
+                emit_phpdoc_tag_keywords(
+                    bytes_to_str(t.value),
+                    t.span.start.offset,
+                    &mut ctx.spans,
+                );
             }
         }
     }
@@ -265,7 +274,7 @@ fn extract_from_statement<'a>(
         Statement::Namespace(ns) => {
             // Emit a span for the namespace name itself so rename can target it.
             if let Some(ref ident) = ns.name {
-                let name = ident.value().to_string();
+                let name = bytes_to_str(ident.value()).to_string();
                 if !name.is_empty() {
                     ctx.spans.push(SymbolSpan {
                         start: ident.span().start.offset,
@@ -368,7 +377,10 @@ fn extract_from_statement<'a>(
                 extract_from_expression(key_expr, ctx, scope_start);
                 // Emit VarDefSite for foreach key variable.
                 if let Expression::Variable(Variable::Direct(dv)) = key_expr {
-                    let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                    let name = {
+                        let s = bytes_to_str(dv.name);
+                        s.strip_prefix('$').unwrap_or(s).to_string()
+                    };
                     let offset = dv.span.start.offset;
                     ctx.var_defs.push(VarDefSite {
                         offset,
@@ -385,7 +397,10 @@ fn extract_from_statement<'a>(
             extract_from_expression(value_expr, ctx, scope_start);
             // Emit VarDefSite for foreach value variable.
             if let Expression::Variable(Variable::Direct(dv)) = value_expr {
-                let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                let name = {
+                    let s = bytes_to_str(dv.name);
+                    s.strip_prefix('$').unwrap_or(s).to_string()
+                };
                 let offset = dv.span.start.offset;
                 ctx.var_defs.push(VarDefSite {
                     offset,
@@ -448,7 +463,10 @@ fn extract_from_statement<'a>(
                 extract_from_hint_ctx(&catch.hint, &mut ctx.spans, ClassRefContext::Catch);
                 // The caught variable.
                 if let Some(ref var) = catch.variable {
-                    let var_name = var.name.strip_prefix('$').unwrap_or(var.name).to_string();
+                    let var_name = {
+                        let s = bytes_to_str(var.name);
+                        s.strip_prefix('$').unwrap_or(s).to_string()
+                    };
                     ctx.spans.push(SymbolSpan {
                         start: var.span.start.offset,
                         end: var.span.end.offset,
@@ -491,7 +509,10 @@ fn extract_from_statement<'a>(
             emit_keyword(&global.global, ctx);
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
-                    let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                    let name = {
+                        let s = bytes_to_str(dv.name);
+                        s.strip_prefix('$').unwrap_or(s).to_string()
+                    };
                     ctx.spans.push(SymbolSpan {
                         start: dv.span.start.offset,
                         end: dv.span.end.offset,
@@ -515,7 +536,10 @@ fn extract_from_statement<'a>(
             emit_keyword(&static_stmt.r#static, ctx);
             for item in static_stmt.items.iter() {
                 let dv = item.variable();
-                let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                let name = {
+                    let s = bytes_to_str(dv.name);
+                    s.strip_prefix('$').unwrap_or(s).to_string()
+                };
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
                     end: dv.span.end.offset,
@@ -539,7 +563,10 @@ fn extract_from_statement<'a>(
             for val in unset_stmt.values.iter() {
                 extract_from_expression(val, ctx, scope_start);
                 if let Expression::Variable(Variable::Direct(dv)) = val {
-                    let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                    let name = {
+                        let s = bytes_to_str(dv.name);
+                        s.strip_prefix('$').unwrap_or(s).to_string()
+                    };
                     ctx.var_defs.push(VarDefSite {
                         offset: dv.span.start.offset,
                         name,
@@ -783,7 +810,7 @@ fn extract_from_switch_body<'a>(
 
 fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Class name — declaration site, not a reference.
-    let name = class.name.value.to_string();
+    let name = bytes_to_str(class.name.value).to_string();
     ctx.spans.push(SymbolSpan {
         start: class.name.span.start.offset,
         end: class.name.span.end.offset,
@@ -796,7 +823,7 @@ fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Extends.
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
-            let raw = ident.value().to_string();
+            let raw = bytes_to_str(ident.value()).to_string();
             ctx.spans.push(class_ref_span_ctx(
                 ident.span().start.offset,
                 ident.span().end.offset,
@@ -809,7 +836,7 @@ fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Implements.
     if let Some(ref implements) = class.implements {
         for ident in implements.types.iter() {
-            let raw = ident.value().to_string();
+            let raw = bytes_to_str(ident.value()).to_string();
             ctx.spans.push(class_ref_span_ctx(
                 ident.span().start.offset,
                 ident.span().end.offset,
@@ -845,7 +872,7 @@ fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionCtx<'a>) {
 
 fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Interface name — declaration site, not a reference.
-    let name = iface.name.value.to_string();
+    let name = bytes_to_str(iface.name.value).to_string();
     ctx.spans.push(SymbolSpan {
         start: iface.name.span.start.offset,
         end: iface.name.span.end.offset,
@@ -857,7 +884,7 @@ fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut ExtractionCtx<
 
     if let Some(ref extends) = iface.extends {
         for ident in extends.types.iter() {
-            let raw = ident.value().to_string();
+            let raw = bytes_to_str(ident.value()).to_string();
             ctx.spans.push(class_ref_span_ctx(
                 ident.span().start.offset,
                 ident.span().end.offset,
@@ -891,7 +918,7 @@ fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut ExtractionCtx<
 
 fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Trait name — declaration site, not a reference.
-    let name = trait_def.name.value.to_string();
+    let name = bytes_to_str(trait_def.name.value).to_string();
     ctx.spans.push(SymbolSpan {
         start: trait_def.name.span.start.offset,
         end: trait_def.name.span.end.offset,
@@ -925,7 +952,7 @@ fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut ExtractionCtx<'a>)
 
 fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Enum name — declaration site, not a reference.
-    let name = enum_def.name.value.to_string();
+    let name = bytes_to_str(enum_def.name.value).to_string();
     ctx.spans.push(SymbolSpan {
         start: enum_def.name.span.start.offset,
         end: enum_def.name.span.end.offset,
@@ -937,7 +964,7 @@ fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
 
     if let Some(ref implements) = enum_def.implements {
         for ident in implements.types.iter() {
-            let raw = ident.value().to_string();
+            let raw = bytes_to_str(ident.value()).to_string();
             ctx.spans.push(class_ref_span_ctx(
                 ident.span().start.offset,
                 ident.span().end.offset,
@@ -986,11 +1013,12 @@ fn extract_from_attribute_lists<'a>(
     for attr_list in attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
             // The attribute name (e.g. `\Illuminate\...\CollectedBy`).
-            let raw = attr.name.value().to_string();
-            ctx.spans.push(class_ref_span(
+            let raw = bytes_to_str(attr.name.value()).to_string();
+            ctx.spans.push(class_ref_span_ctx(
                 attr.name.span().start.offset,
                 attr.name.span().end.offset,
                 &raw,
+                ClassRefContext::Attribute,
             ));
 
             // Attribute arguments — also emit a CallSite so that
@@ -1033,7 +1061,7 @@ fn extract_from_class_member<'a>(member: &'a ClassLikeMember<'a>, ctx: &mut Extr
             }
 
             for ident in trait_use.trait_names.iter() {
-                let raw = ident.value().to_string();
+                let raw = bytes_to_str(ident.value()).to_string();
                 ctx.spans.push(class_ref_span_ctx(
                     ident.span().start.offset,
                     ident.span().end.offset,
@@ -1053,7 +1081,7 @@ fn extract_from_class_member<'a>(member: &'a ClassLikeMember<'a>, ctx: &mut Extr
                     .trait_names
                     .iter()
                     .next()
-                    .map(|id| id.value().to_string());
+                    .map(|id| bytes_to_str(id.value()).to_string());
 
                 for adaptation in spec.adaptations.iter() {
                     match adaptation {
@@ -1083,7 +1111,7 @@ fn extract_from_class_member<'a>(member: &'a ClassLikeMember<'a>, ctx: &mut Extr
                 start: case_name_ident.span.start.offset,
                 end: case_name_ident.span.end.offset,
                 kind: SymbolKind::MemberDeclaration {
-                    name: case_name_ident.value.to_string(),
+                    name: bytes_to_str(case_name_ident.value).to_string(),
                     is_static: true,
                 },
             });
@@ -1116,14 +1144,14 @@ fn extract_from_trait_alias_adaptation<'a>(
     match &alias_adapt.method_reference {
         TraitUseMethodReference::Absolute(abs) => {
             // Emit ClassReference for the trait name.
-            let trait_raw = abs.trait_name.value().to_string();
+            let trait_raw = bytes_to_str(abs.trait_name.value()).to_string();
             ctx.spans.push(class_ref_span(
                 abs.trait_name.span().start.offset,
                 abs.trait_name.span().end.offset,
                 &trait_raw,
             ));
             // Emit MemberAccess for the original method name.
-            let method_name = abs.method_name.value.to_string();
+            let method_name = bytes_to_str(abs.method_name.value).to_string();
             ctx.spans.push(SymbolSpan {
                 start: abs.method_name.span.start.offset,
                 end: abs.method_name.span.end.offset,
@@ -1140,7 +1168,7 @@ fn extract_from_trait_alias_adaptation<'a>(
             // Unqualified reference: use the first trait name from the
             // `use` list, or fall back to `self`.
             let subject = first_trait_name.unwrap_or("self").to_string();
-            let method_name = ident.value.to_string();
+            let method_name = bytes_to_str(ident.value).to_string();
             ctx.spans.push(SymbolSpan {
                 start: ident.span.start.offset,
                 end: ident.span.end.offset,
@@ -1159,7 +1187,7 @@ fn extract_from_trait_alias_adaptation<'a>(
     // Using `self` as the subject so that `resolve_trait_alias` on
     // the owning class maps the alias back to the original method.
     if let Some(ref alias_ident) = alias_adapt.alias {
-        let alias_name = alias_ident.value.to_string();
+        let alias_name = bytes_to_str(alias_ident.value).to_string();
         ctx.spans.push(SymbolSpan {
             start: alias_ident.span.start.offset,
             end: alias_ident.span.end.offset,
@@ -1185,7 +1213,7 @@ fn extract_from_trait_precedence_adaptation<'a>(
     ctx: &mut ExtractionCtx<'a>,
 ) {
     // Emit ClassReference for the trait name in the method reference.
-    let trait_raw = prec.method_reference.trait_name.value().to_string();
+    let trait_raw = bytes_to_str(prec.method_reference.trait_name.value()).to_string();
     ctx.spans.push(class_ref_span(
         prec.method_reference.trait_name.span().start.offset,
         prec.method_reference.trait_name.span().end.offset,
@@ -1193,7 +1221,7 @@ fn extract_from_trait_precedence_adaptation<'a>(
     ));
 
     // Emit MemberAccess for the method name.
-    let method_name = prec.method_reference.method_name.value.to_string();
+    let method_name = bytes_to_str(prec.method_reference.method_name.value).to_string();
     ctx.spans.push(SymbolSpan {
         start: prec.method_reference.method_name.span.start.offset,
         end: prec.method_reference.method_name.span.end.offset,
@@ -1208,7 +1236,7 @@ fn extract_from_trait_precedence_adaptation<'a>(
 
     // Emit ClassReference for each `insteadof` trait name.
     for ident in prec.trait_names.iter() {
-        let raw = ident.value().to_string();
+        let raw = bytes_to_str(ident.value()).to_string();
         ctx.spans.push(class_ref_span(
             ident.span().start.offset,
             ident.span().end.offset,
@@ -1224,7 +1252,7 @@ fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut ExtractionCtx<'a>) 
         start: method.name.span.start.offset,
         end: method.name.span.end.offset,
         kind: SymbolKind::MemberDeclaration {
-            name: method.name.value.to_string(),
+            name: bytes_to_str(method.name.value).to_string(),
             is_static,
         },
     });
@@ -1314,12 +1342,10 @@ fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut ExtractionCtx<'a>) 
         {
             let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         }
-        let name = param
-            .variable
-            .name
-            .strip_prefix('$')
-            .unwrap_or(param.variable.name)
-            .to_string();
+        let name = {
+            let s = bytes_to_str(param.variable.name);
+            s.strip_prefix('$').unwrap_or(s).to_string()
+        };
         let param_offset = param.variable.span.start.offset;
         // Emit a Variable span so the symbol map covers the parameter
         // token itself (needed for GTD-from-parameter-to-type-hint).
@@ -1414,7 +1440,10 @@ fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut ExtractionCtx<'a
         Property::Plain(plain) => {
             for item in plain.items.iter() {
                 let var = item.variable();
-                let name = var.name.strip_prefix('$').unwrap_or(var.name).to_string();
+                let name = {
+                    let s = bytes_to_str(var.name);
+                    s.strip_prefix('$').unwrap_or(s).to_string()
+                };
                 let var_offset = var.span.start.offset;
                 ctx.spans.push(SymbolSpan {
                     start: var_offset,
@@ -1440,7 +1469,10 @@ fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut ExtractionCtx<'a
         }
         Property::Hooked(hooked) => {
             let var = hooked.item.variable();
-            let name = var.name.strip_prefix('$').unwrap_or(var.name).to_string();
+            let name = {
+                let s = bytes_to_str(var.name);
+                s.strip_prefix('$').unwrap_or(s).to_string()
+            };
             let var_offset = var.span.start.offset;
             ctx.spans.push(SymbolSpan {
                 start: var_offset,
@@ -1477,7 +1509,7 @@ fn extract_from_class_constant<'a>(
             start: item.name.span.start.offset,
             end: item.name.span.end.offset,
             kind: SymbolKind::MemberDeclaration {
-                name: item.name.value.to_string(),
+                name: bytes_to_str(item.name.value).to_string(),
                 is_static: true,
             },
         });
@@ -1508,7 +1540,7 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
     extract_from_attribute_lists(&func.attribute_lists, ctx, 0);
 
     // Function name as a navigable reference.
-    let name = func.name.value.to_string();
+    let name = bytes_to_str(func.name.value).to_string();
     ctx.spans.push(SymbolSpan {
         start: func.name.span.start.offset,
         end: func.name.span.end.offset,
@@ -1581,12 +1613,10 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
             let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         }
         // Emit VarDefSite for each parameter.
-        let pname = param
-            .variable
-            .name
-            .strip_prefix('$')
-            .unwrap_or(param.variable.name)
-            .to_string();
+        let pname = {
+            let s = bytes_to_str(param.variable.name);
+            s.strip_prefix('$').unwrap_or(s).to_string()
+        };
         let param_offset = param.variable.span.start.offset;
         // Emit a Variable span so the symbol map covers the parameter
         // token itself (needed for GTD-from-parameter-to-type-hint).
@@ -1626,7 +1656,7 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
 
 fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
     fn register_use_item(item: &UseItem<'_>, spans: &mut Vec<SymbolSpan>) {
-        let raw = item.name.value().to_string();
+        let raw = bytes_to_str(item.name.value()).to_string();
         // Use statement names are always fully qualified (even without a
         // leading `\`), so force `is_fqn = true`.  `class_ref_span`
         // derives the flag from a leading `\` which use statements omit.
@@ -1684,7 +1714,7 @@ fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
 fn extract_from_hint_ctx(hint: &Hint<'_>, spans: &mut Vec<SymbolSpan>, ref_ctx: ClassRefContext) {
     match hint {
         Hint::Identifier(ident) => {
-            let raw = ident.value().to_string();
+            let raw = bytes_to_str(ident.value()).to_string();
             let name_clean = strip_fqn_prefix(&raw).to_string();
             if is_navigable_type(&name_clean) {
                 spans.push(class_ref_span_ctx(
@@ -1737,6 +1767,34 @@ fn extract_from_hint_ctx(hint: &Hint<'_>, spans: &mut Vec<SymbolSpan>, ref_ctx: 
 
 // ─── Expression extractor ───────────────────────────────────────────────────
 
+fn extract_variable_symbol_spans<'a>(
+    var: &'a Variable<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    match var {
+        Variable::Direct(dv) => {
+            let raw = bytes_to_str(dv.name);
+            if raw == "$this" {
+                ctx.spans.push(SymbolSpan {
+                    start: dv.span.start.offset,
+                    end: dv.span.end.offset,
+                    kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
+                });
+            } else {
+                let name = raw.strip_prefix('$').unwrap_or(raw).to_string();
+                ctx.spans.push(SymbolSpan {
+                    start: dv.span.start.offset,
+                    end: dv.span.end.offset,
+                    kind: SymbolKind::Variable { name },
+                });
+            }
+        }
+        Variable::Indirect(iv) => extract_from_expression(iv.expression, ctx, scope_start),
+        Variable::Nested(nv) => extract_variable_symbol_spans(nv.variable, ctx, scope_start),
+    }
+}
+
 fn extract_from_expression<'a>(
     expr: &'a Expression<'a>,
     ctx: &mut ExtractionCtx<'a>,
@@ -1745,7 +1803,7 @@ fn extract_from_expression<'a>(
     match expr {
         // ── Variables ──
         Expression::Variable(Variable::Direct(dv)) => {
-            let raw = dv.name;
+            let raw = bytes_to_str(dv.name);
             if raw == "$this" {
                 // `$this` is semantically equivalent to `static` for
                 // go-to-definition — resolve it to the enclosing class.
@@ -1789,7 +1847,7 @@ fn extract_from_expression<'a>(
 
         // ── Identifiers (standalone class/constant references) ──
         Expression::Identifier(ident) => {
-            let name = ident.value().to_string();
+            let name = bytes_to_str(ident.value()).to_string();
             let name_clean = strip_fqn_prefix(&name).to_string();
             if is_navigable_type(&name_clean) {
                 ctx.spans.push(class_ref_span(
@@ -1805,7 +1863,7 @@ fn extract_from_expression<'a>(
             emit_keyword(&inst.new, ctx);
             match inst.class {
                 Expression::Identifier(ident) => {
-                    let raw = ident.value().to_string();
+                    let raw = bytes_to_str(ident.value()).to_string();
                     ctx.spans.push(class_ref_span_ctx(
                         ident.span().start.offset,
                         ident.span().end.offset,
@@ -1858,8 +1916,15 @@ fn extract_from_expression<'a>(
             Call::Function(func_call) => {
                 match func_call.function {
                     Expression::Identifier(ident) => {
-                        let name = ident.value().to_string();
+                        let name = bytes_to_str(ident.value()).to_string();
                         let name_clean = strip_fqn_prefix(&name).to_string();
+                        if name_clean.eq_ignore_ascii_case("compact") {
+                            try_emit_compact_string_spans(
+                                &func_call.argument_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
                         ctx.spans.push(SymbolSpan {
                             start: ident.span().start.offset,
                             end: ident.span().end.offset,
@@ -1927,7 +1992,7 @@ fn extract_from_expression<'a>(
                 extract_from_expression(method_call.object, ctx, scope_start);
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
-                    let member_name = ident.value.to_string();
+                    let member_name = bytes_to_str(ident.value).to_string();
                     if is_laravel_config_repository_call(method_call.object, &member_name) {
                         try_emit_laravel_string_span(
                             crate::symbol_map::LaravelStringKind::Config,
@@ -1962,7 +2027,7 @@ fn extract_from_expression<'a>(
                 extract_from_expression(method_call.object, ctx, scope_start);
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
-                    let member_name = ident.value.to_string();
+                    let member_name = bytes_to_str(ident.value).to_string();
                     if is_laravel_config_repository_call(method_call.object, &member_name) {
                         try_emit_laravel_string_span(
                             crate::symbol_map::LaravelStringKind::Config,
@@ -1999,7 +2064,7 @@ fn extract_from_expression<'a>(
                 emit_class_expr_span(static_call.class, ctx, scope_start);
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
-                    let member_name = ident.value.to_string();
+                    let member_name = bytes_to_str(ident.value).to_string();
                     // Emit call site for static method call: `Class::method(...)`
                     emit_call_site(
                         format!("{}::{}", &subject_text, &member_name),
@@ -2068,38 +2133,56 @@ fn extract_from_expression<'a>(
                     let subject_text = expr_to_subject_text(pa.object);
                     extract_from_expression(pa.object, ctx, scope_start);
 
-                    if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                        let member_name = ident.value.to_string();
-                        ctx.spans.push(SymbolSpan {
-                            start: ident.span.start.offset,
-                            end: ident.span.end.offset,
-                            kind: SymbolKind::MemberAccess {
-                                subject_text,
-                                member_name,
-                                is_static: false,
-                                is_method_call: false,
-                                is_docblock_reference: false,
-                            },
-                        });
+                    match &pa.property {
+                        ClassLikeMemberSelector::Identifier(ident) => {
+                            let member_name = bytes_to_str(ident.value).to_string();
+                            ctx.spans.push(SymbolSpan {
+                                start: ident.span.start.offset,
+                                end: ident.span.end.offset,
+                                kind: SymbolKind::MemberAccess {
+                                    subject_text,
+                                    member_name,
+                                    is_static: false,
+                                    is_method_call: false,
+                                    is_docblock_reference: false,
+                                },
+                            });
+                        }
+                        ClassLikeMemberSelector::Variable(var) => {
+                            extract_variable_symbol_spans(var, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Expression(selector) => {
+                            extract_from_expression(selector.expression, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Missing(_) => {}
                     }
                 }
                 Access::NullSafeProperty(pa) => {
                     let subject_text = expr_to_subject_text(pa.object);
                     extract_from_expression(pa.object, ctx, scope_start);
 
-                    if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                        let member_name = ident.value.to_string();
-                        ctx.spans.push(SymbolSpan {
-                            start: ident.span.start.offset,
-                            end: ident.span.end.offset,
-                            kind: SymbolKind::MemberAccess {
-                                subject_text,
-                                member_name,
-                                is_static: false,
-                                is_method_call: false,
-                                is_docblock_reference: false,
-                            },
-                        });
+                    match &pa.property {
+                        ClassLikeMemberSelector::Identifier(ident) => {
+                            let member_name = bytes_to_str(ident.value).to_string();
+                            ctx.spans.push(SymbolSpan {
+                                start: ident.span.start.offset,
+                                end: ident.span.end.offset,
+                                kind: SymbolKind::MemberAccess {
+                                    subject_text,
+                                    member_name,
+                                    is_static: false,
+                                    is_method_call: false,
+                                    is_docblock_reference: false,
+                                },
+                            });
+                        }
+                        ClassLikeMemberSelector::Variable(var) => {
+                            extract_variable_symbol_spans(var, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Expression(selector) => {
+                            extract_from_expression(selector.expression, ctx, scope_start)
+                        }
+                        ClassLikeMemberSelector::Missing(_) => {}
                     }
                 }
                 Access::StaticProperty(spa) => {
@@ -2107,7 +2190,10 @@ fn extract_from_expression<'a>(
                     emit_class_expr_span(spa.class, ctx, scope_start);
 
                     if let Variable::Direct(dv) = &spa.property {
-                        let prop_name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                        let prop_name = {
+                            let s = bytes_to_str(dv.name);
+                            s.strip_prefix('$').unwrap_or(s).to_string()
+                        };
                         ctx.spans.push(SymbolSpan {
                             start: dv.span.start.offset,
                             end: dv.span.end.offset,
@@ -2126,7 +2212,7 @@ fn extract_from_expression<'a>(
                     emit_class_expr_span(cca.class, ctx, scope_start);
 
                     if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
-                        let const_name = ident.value.to_string();
+                        let const_name = bytes_to_str(ident.value).to_string();
                         if const_name == "class" {
                             // `Foo::class` — the navigable part is `Foo`.
                         } else {
@@ -2160,7 +2246,10 @@ fn extract_from_expression<'a>(
             // Emit VarDefSite for simple variable assignments: `$var = ...`
             match assign.lhs {
                 Expression::Variable(Variable::Direct(dv)) => {
-                    let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                    let name = {
+                        let s = bytes_to_str(dv.name);
+                        s.strip_prefix('$').unwrap_or(s).to_string()
+                    };
                     let kind = if assign.operator.is_assign() {
                         VarDefKind::Assignment
                     } else {
@@ -2206,7 +2295,7 @@ fn extract_from_expression<'a>(
             // Tag the RHS of `instanceof` with the Instanceof context.
             if bin.operator.is_instanceof() {
                 if let Expression::Identifier(ident) = bin.rhs {
-                    let raw = ident.value().to_string();
+                    let raw = bytes_to_str(ident.value()).to_string();
                     ctx.spans.push(class_ref_span_ctx(
                         ident.span().start.offset,
                         ident.span().end.offset,
@@ -2225,7 +2314,7 @@ fn extract_from_expression<'a>(
         Expression::UnaryPrefix(un) => {
             if un.operator.is_cast() {
                 let op_start = un.operator.span().start.offset;
-                let raw = un.operator.as_str();
+                let raw = bytes_to_str(un.operator.as_bytes());
                 if let Some(open) = raw.find('(')
                     && let Some(close) = raw.find(')')
                 {
@@ -2264,9 +2353,11 @@ fn extract_from_expression<'a>(
 
         // ── Array ──
         Expression::Array(array) => {
+            try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
+            try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {
@@ -2294,12 +2385,10 @@ fn extract_from_expression<'a>(
                 if let Some(ref hint) = param.hint {
                     extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
                 }
-                let name = param
-                    .variable
-                    .name
-                    .strip_prefix('$')
-                    .unwrap_or(param.variable.name)
-                    .to_string();
+                let name = {
+                    let s = bytes_to_str(param.variable.name);
+                    s.strip_prefix('$').unwrap_or(s).to_string()
+                };
                 ctx.spans.push(SymbolSpan {
                     start: param.variable.span.start.offset,
                     end: param.variable.span.end.offset,
@@ -2322,12 +2411,10 @@ fn extract_from_expression<'a>(
             }
             if let Some(ref use_clause) = closure.use_clause {
                 for var in use_clause.variables.iter() {
-                    let name = var
-                        .variable
-                        .name
-                        .strip_prefix('$')
-                        .unwrap_or(var.variable.name)
-                        .to_string();
+                    let name = {
+                        let s = bytes_to_str(var.variable.name);
+                        s.strip_prefix('$').unwrap_or(s).to_string()
+                    };
                     ctx.spans.push(SymbolSpan {
                         start: var.variable.span.start.offset,
                         end: var.variable.span.end.offset,
@@ -2372,12 +2459,10 @@ fn extract_from_expression<'a>(
                 if let Some(ref hint) = param.hint {
                     extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
                 }
-                let name = param
-                    .variable
-                    .name
-                    .strip_prefix('$')
-                    .unwrap_or(param.variable.name)
-                    .to_string();
+                let name = {
+                    let s = bytes_to_str(param.variable.name);
+                    s.strip_prefix('$').unwrap_or(s).to_string()
+                };
                 ctx.spans.push(SymbolSpan {
                     start: param.variable.span.start.offset,
                     end: param.variable.span.end.offset,
@@ -2467,7 +2552,7 @@ fn extract_from_expression<'a>(
             // Extends.
             if let Some(ref extends) = anon.extends {
                 for ident in extends.types.iter() {
-                    let raw = ident.value().to_string();
+                    let raw = bytes_to_str(ident.value()).to_string();
                     ctx.spans.push(class_ref_span(
                         ident.span().start.offset,
                         ident.span().end.offset,
@@ -2479,7 +2564,7 @@ fn extract_from_expression<'a>(
             // Implements.
             if let Some(ref implements) = anon.implements {
                 for ident in implements.types.iter() {
-                    let raw = ident.value().to_string();
+                    let raw = bytes_to_str(ident.value()).to_string();
                     ctx.spans.push(class_ref_span(
                         ident.span().start.offset,
                         ident.span().end.offset,
@@ -2584,7 +2669,7 @@ fn extract_from_expression<'a>(
         // constant references — including namespaced ones.  These are
         // never class names, so always emit `ConstantReference`.
         Expression::ConstantAccess(ca) => {
-            let name = ca.name.value().to_string();
+            let name = bytes_to_str(ca.name.value()).to_string();
             let name_clean = strip_fqn_prefix(&name).to_string();
             ctx.spans.push(SymbolSpan {
                 start: ca.name.span().start.offset,
@@ -2605,7 +2690,7 @@ fn extract_from_expression<'a>(
         Expression::PartialApplication(partial) => match partial {
             PartialApplication::Function(func_pa) => match func_pa.function {
                 Expression::Identifier(ident) => {
-                    let name = ident.value().to_string();
+                    let name = bytes_to_str(ident.value()).to_string();
                     let name_clean = strip_fqn_prefix(&name).to_string();
                     ctx.spans.push(SymbolSpan {
                         start: ident.span().start.offset,
@@ -2624,7 +2709,7 @@ fn extract_from_expression<'a>(
                 let subject_text = expr_to_subject_text(method_pa.object);
                 extract_from_expression(method_pa.object, ctx, scope_start);
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_pa.method {
-                    let member_name = ident.value.to_string();
+                    let member_name = bytes_to_str(ident.value).to_string();
                     ctx.spans.push(SymbolSpan {
                         start: ident.span.start.offset,
                         end: ident.span.end.offset,
@@ -2642,7 +2727,7 @@ fn extract_from_expression<'a>(
                 let subject_text = expr_to_subject_text(static_pa.class);
                 emit_class_expr_span(static_pa.class, ctx, scope_start);
                 if let ClassLikeMemberSelector::Identifier(ident) = &static_pa.method {
-                    let member_name = ident.value.to_string();
+                    let member_name = bytes_to_str(ident.value).to_string();
                     ctx.spans.push(SymbolSpan {
                         start: ident.span.start.offset,
                         end: ident.span.end.offset,
@@ -2680,7 +2765,10 @@ fn collect_destructuring_var_defs(
         };
         match value_expr {
             Expression::Variable(Variable::Direct(dv)) => {
-                let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                let name = {
+                    let s = bytes_to_str(dv.name);
+                    s.strip_prefix('$').unwrap_or(s).to_string()
+                };
                 var_defs.push(VarDefSite {
                     offset: dv.span.start.offset,
                     name,
@@ -2764,7 +2852,7 @@ fn emit_class_expr_span<'a>(
 ) {
     match expr {
         Expression::Identifier(ident) => {
-            let raw = ident.value().to_string();
+            let raw = bytes_to_str(ident.value()).to_string();
             ctx.spans.push(class_ref_span(
                 ident.span().start.offset,
                 ident.span().end.offset,
@@ -2846,7 +2934,7 @@ fn emit_call_site(
             Argument::Named(named) => {
                 arg_offsets.push(named.name.span.start.offset);
                 named_arg_indices.push(i as u32);
-                named_arg_names.push(named.name.value.to_string());
+                named_arg_names.push(bytes_to_str(named.name.value).to_string());
             }
         }
     }
@@ -2937,16 +3025,16 @@ fn collect_untyped_closure_site(
 /// `resolve_target_classes` expects.
 fn expr_to_subject_text(expr: &Expression<'_>) -> String {
     match expr {
-        Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
         Expression::Self_(_) => "self".to_string(),
         Expression::Static(_) => "static".to_string(),
         Expression::Parent(_) => "parent".to_string(),
-        Expression::Identifier(ident) => ident.value().to_string(),
+        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
 
         Expression::Access(Access::Property(pa)) => {
             let obj = expr_to_subject_text(pa.object);
             if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                format!("{}->{}", obj, ident.value)
+                format!("{}->{}", obj, bytes_to_str(ident.value))
             } else {
                 obj
             }
@@ -2954,7 +3042,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
         Expression::Access(Access::NullSafeProperty(pa)) => {
             let obj = expr_to_subject_text(pa.object);
             if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                format!("{}?->{}", obj, ident.value)
+                format!("{}?->{}", obj, bytes_to_str(ident.value))
             } else {
                 obj
             }
@@ -2962,7 +3050,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
         Expression::Access(Access::StaticProperty(spa)) => {
             let class_text = expr_to_subject_text(spa.class);
             if let Variable::Direct(dv) = &spa.property {
-                format!("{}::{}", class_text, dv.name)
+                format!("{}::{}", class_text, bytes_to_str(dv.name))
             } else {
                 class_text
             }
@@ -2971,7 +3059,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let class_text = expr_to_subject_text(cca.class);
             match &cca.constant {
                 ClassLikeConstantSelector::Identifier(ident) => {
-                    format!("{}::{}", class_text, ident.value)
+                    format!("{}::{}", class_text, bytes_to_str(ident.value))
                 }
                 _ => class_text,
             }
@@ -2981,7 +3069,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let obj = expr_to_subject_text(mc.object);
             if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
                 let args_text = format_all_call_args(&mc.argument_list.arguments);
-                format!("{}->{}({})", obj, ident.value, args_text)
+                format!("{}->{}({})", obj, bytes_to_str(ident.value), args_text)
             } else {
                 format!("{}->?()", obj)
             }
@@ -2990,7 +3078,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let obj = expr_to_subject_text(mc.object);
             if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
                 let args_text = format_all_call_args(&mc.argument_list.arguments);
-                format!("{}?->{}({})", obj, ident.value, args_text)
+                format!("{}?->{}({})", obj, bytes_to_str(ident.value), args_text)
             } else {
                 format!("{}?->?()", obj)
             }
@@ -2999,7 +3087,12 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let class_text = expr_to_subject_text(sc.class);
             if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
                 let args_text = format_all_call_args(&sc.argument_list.arguments);
-                format!("{}::{}({})", class_text, ident.value, args_text)
+                format!(
+                    "{}::{}({})",
+                    class_text,
+                    bytes_to_str(ident.value),
+                    args_text
+                )
             } else {
                 format!("{}::?()", class_text)
             }
@@ -3108,7 +3201,8 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                     // `s.raw` includes surrounding quotes (e.g. `'key'`).
                     // Strip them to get the bare key, then re-wrap in
                     // single quotes for the subject format.
-                    let inner = crate::util::unquote_php_string(s.raw).unwrap_or(s.raw);
+                    let raw_str = bytes_to_str(s.raw);
+                    let inner = crate::util::unquote_php_string(raw_str).unwrap_or(raw_str);
                     format!("['{}']", inner)
                 }
                 _ => "[]".to_string(),
@@ -3164,7 +3258,7 @@ fn format_arg_expr(expr: &Expression<'_>) -> String {
         // Foo::class
         Expression::Access(Access::ClassConstant(cca)) => {
             if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
-                && ident.value == "class"
+                && ident.value == b"class"
             {
                 let class_text = expr_to_subject_text(cca.class);
                 return format!("{}::class", class_text);
@@ -3172,11 +3266,11 @@ fn format_arg_expr(expr: &Expression<'_>) -> String {
             "...".to_string()
         }
         // String literals: 'web', "guard"
-        Expression::Literal(Literal::String(lit_str)) => lit_str.raw.to_string(),
+        Expression::Literal(Literal::String(lit_str)) => bytes_to_str(lit_str.raw).to_string(),
         // Integer literals: 0, 42
-        Expression::Literal(Literal::Integer(lit_int)) => lit_int.raw.to_string(),
+        Expression::Literal(Literal::Integer(lit_int)) => bytes_to_str(lit_int.raw).to_string(),
         // Float literals: 3.14
-        Expression::Literal(Literal::Float(lit_float)) => lit_float.raw.to_string(),
+        Expression::Literal(Literal::Float(lit_float)) => bytes_to_str(lit_float.raw).to_string(),
         // null
         Expression::Literal(Literal::Null(_)) => "null".to_string(),
         // true
@@ -3184,7 +3278,7 @@ fn format_arg_expr(expr: &Expression<'_>) -> String {
         // false
         Expression::Literal(Literal::False(_)) => "false".to_string(),
         // $variable
-        Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
         // new ClassName(…) → "new ClassName()"
         Expression::Instantiation(inst) => {
             let class_text = expr_to_subject_text(inst.class);
@@ -3234,7 +3328,7 @@ fn format_arg_expr(expr: &Expression<'_>) -> String {
 fn format_callable_params(params: &FunctionLikeParameterList<'_>) -> String {
     let mut parts = Vec::new();
     for param in params.parameters.iter() {
-        let name = param.variable.name.to_string();
+        let name = bytes_to_str(param.variable.name).to_string();
         let type_text = param
             .hint
             .as_ref()
@@ -3264,7 +3358,7 @@ fn is_assert_instanceof(expr: &Expression<'_>) -> bool {
     };
     if let Expression::Call(Call::Function(func_call)) = expr {
         let func_name = match func_call.function {
-            Expression::Identifier(ident) => ident.value(),
+            Expression::Identifier(ident) => bytes_to_str(ident.value()),
             _ => return false,
         };
         let func_name = func_name.strip_prefix('\\').unwrap_or(func_name);
@@ -3327,6 +3421,135 @@ fn try_emit_laravel_string_span(
     });
 }
 
+/// Detect an array-callable literal — `[Class::class, 'method']` or
+/// `[$object, 'method']` — and emit a [`SymbolKind::MemberAccess`] span over
+/// the method-name string so that go-to-definition, references, and rename
+/// treat it like a real `Class::method` / `$object->method` reference.
+///
+/// This is the shape Laravel routes use for controller actions
+/// (`Route::get('/', [IndexPageController::class, 'indexPage'])`), but the
+/// pattern is generic PHP (event listeners, `array_map`, etc.).
+///
+/// Only fires for a two-element array whose first element is a `::class`
+/// constant or a variable and whose second element is a plain string literal.
+fn try_emit_array_callable_span(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    // Exactly two positional (value) elements: `[<callee>, '<method>']`.
+    let mut values = elements.iter().filter_map(|el| match el {
+        ArrayElement::Value(v) => Some(v.value),
+        _ => None,
+    });
+    let (Some(first), Some(second), None) = (values.next(), values.next(), values.next()) else {
+        return;
+    };
+    // The whole array must have been exactly those two elements (no
+    // key/value or variadic entries mixed in).
+    if elements.iter().count() != 2 {
+        return;
+    }
+
+    // Second element must be a plain string literal — the method name.
+    let Expression::Literal(literal::Literal::String(s)) = second else {
+        return;
+    };
+
+    // First element determines the subject and access kind.
+    let (subject_text, is_static) = match first {
+        // `Class::class` — static-style access on the class name.
+        Expression::Access(Access::ClassConstant(cca)) => {
+            let is_class_const = matches!(
+                &cca.constant,
+                ClassLikeConstantSelector::Identifier(ident)
+                    if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
+            );
+            if !is_class_const {
+                return;
+            }
+            (expr_to_subject_text(cca.class), true)
+        }
+        // `$this` / `$object` — instance-style access.
+        Expression::Variable(Variable::Direct(dv)) => (bytes_to_str(dv.name).to_string(), false),
+        _ => return,
+    };
+    if subject_text.is_empty() {
+        return;
+    }
+
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let member_name = if let Some(value) = s.value {
+        bytes_to_str(value)
+    } else {
+        &content[inner_start as usize..inner_end as usize]
+    };
+    // Guard against non-identifier strings (e.g. `[$a, 'some text']`).
+    if member_name.is_empty()
+        || !member_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || member_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        return;
+    }
+
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::MemberAccess {
+            subject_text,
+            member_name: member_name.to_string(),
+            is_static,
+            is_method_call: true,
+            is_docblock_reference: false,
+        },
+    });
+}
+
+/// If `argument_list` belongs to a `compact()` call, emit one
+/// [`SymbolKind::CompactVariable`] span per direct string-literal argument.
+fn try_emit_compact_string_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for arg in argument_list.arguments.iter() {
+        let Expression::Literal(literal::Literal::String(s)) = arg.value() else {
+            continue;
+        };
+        let inner_start = s.span.start.offset + 1;
+        let inner_end = s.span.end.offset - 1;
+        if inner_start >= inner_end || inner_end as usize > content.len() {
+            continue;
+        }
+
+        let name = if let Some(value) = s.value {
+            bytes_to_str(value)
+        } else {
+            &content[inner_start as usize..inner_end as usize]
+        };
+        if name.is_empty() {
+            continue;
+        }
+
+        spans.push(SymbolSpan {
+            start: inner_start,
+            end: inner_end,
+            kind: SymbolKind::CompactVariable {
+                name: name.to_string(),
+            },
+        });
+    }
+}
+
 /// Returns `true` if `name` is a method on Laravel's `Repository` config contract
 /// that accepts a config key as its first argument.
 fn is_config_repository_method(name: &str) -> bool {
@@ -3356,7 +3579,7 @@ fn is_laravel_config_repository_call(object: &Expression<'_>, member_name: &str)
     match object {
         Expression::Call(Call::Function(func_call)) => match func_call.function {
             Expression::Identifier(ident) => {
-                strip_fqn_prefix(ident.value()).eq_ignore_ascii_case("config")
+                strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("config")
             }
             _ => false,
         },

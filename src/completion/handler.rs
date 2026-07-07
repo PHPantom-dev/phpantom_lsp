@@ -178,7 +178,7 @@ fn filter_current_file_functions(
         let fmap = backend.global_functions().read();
         fmap.iter()
             .filter(|(_, (uri, _))| uri == current_uri)
-            .map(|(key, _)| key.clone())
+            .map(|(key, _)| key.to_owned())
             .collect()
     };
     if current_funcs.is_empty() {
@@ -257,7 +257,7 @@ impl Backend {
     /// Tries each completion strategy in priority order and returns the
     /// first one that produces results.  Falls back to no completions
     /// when nothing matches.
-    pub(crate) async fn handle_completion(
+    pub(crate) fn handle_completion(
         &self,
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>> {
@@ -368,6 +368,32 @@ impl Backend {
             // access in PHP (only `"{$arr['key']}"` does).
             if !matches!(string_ctx, StringContext::SimpleInterpolation)
                 && let Some(response) = self.try_array_shape_completion(&content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
+            // ── Eloquent relation/column string completion ──────────
+            // Like array shape completion, this triggers inside string
+            // literals where the cursor is in a method argument position
+            // for an Eloquent method that accepts relation or column names.
+            if matches!(
+                string_ctx,
+                StringContext::InStringLiteral | StringContext::NotInString
+            ) && let Some(response) =
+                self.try_eloquent_string_completion(&content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
+            // ── Array callable method completion ────────────────────
+            // Like array shape and Eloquent string completion, this
+            // triggers inside string literals — specifically the
+            // method-name string in `[Class::class, 'method']`.
+            if matches!(
+                string_ctx,
+                StringContext::InStringLiteral | StringContext::NotInString
+            ) && let Some(response) =
+                self.try_array_callable_completion(&uri, &content, position, &ctx)
             {
                 return Ok(Some(response));
             }

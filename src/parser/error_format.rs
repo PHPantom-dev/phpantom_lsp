@@ -326,7 +326,7 @@ mod tests {
     }
 
     fn span(start: u32, end: u32) -> Span {
-        Span::new(FileId::new("test.php"), pos(start), pos(end))
+        Span::new(FileId::new(b"test.php"), pos(start), pos(end))
     }
 
     #[test]
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn unexpected_eof_with_expected() {
-        let file_id = FileId::new("test.php");
+        let file_id = FileId::new(b"test.php");
         let err =
             ParseError::UnexpectedEndOfFile(Box::new([TokenKind::Semicolon]), file_id, pos(100));
         let msg = format_parse_error(&err);
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn unexpected_eof_no_expected() {
-        let file_id = FileId::new("test.php");
+        let file_id = FileId::new(b"test.php");
         let err = ParseError::UnexpectedEndOfFile(Box::new([]), file_id, pos(50));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected end of file");
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn syntax_error_unexpected_char() {
-        let file_id = FileId::new("test.php");
+        let file_id = FileId::new(b"test.php");
         let err = ParseError::SyntaxError(SyntaxError::UnexpectedToken(file_id, b'#', pos(5)));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected character `#`");
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn syntax_error_unrecognized_char() {
-        let file_id = FileId::new("test.php");
+        let file_id = FileId::new(b"test.php");
         let err = ParseError::SyntaxError(SyntaxError::UnrecognizedToken(file_id, b'@', pos(10)));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unrecognized character `@`");
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn syntax_error_eof() {
-        let file_id = FileId::new("test.php");
+        let file_id = FileId::new(b"test.php");
         let err = ParseError::SyntaxError(SyntaxError::UnexpectedEndOfFile(file_id, pos(50)));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected end of file");
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn non_graphic_byte() {
-        let file_id = FileId::new("test.php");
+        let file_id = FileId::new(b"test.php");
         let err = ParseError::SyntaxError(SyntaxError::UnexpectedToken(file_id, 0x01, pos(0)));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected byte 0x01");

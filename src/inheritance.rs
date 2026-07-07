@@ -64,7 +64,9 @@ pub(crate) struct TraitContext<'a> {
 /// (including recursive calls) so that every addition is checked in O(1)
 /// instead of scanning the full member vectors.
 pub(crate) struct MergeDedup {
-    /// Method names already merged.
+    /// Method names already merged, lowercased (PHP method names are
+    /// case-insensitive, so a child `getvalue()` overrides a parent
+    /// `getValue()`).
     pub methods: AtomSet,
     /// Property names already merged.
     pub properties: AtomSet,
@@ -72,11 +74,38 @@ pub(crate) struct MergeDedup {
     pub constants: AtomSet,
 }
 
+/// Reserve the names of `@method` tags declared in `docblock` into the
+/// method dedup set.
+///
+/// A `@method` tag declares a method on the class that carries it.  That
+/// declaration overrides any method of the same name inherited from a
+/// superclass, exactly like a real overriding method would.  The virtual
+/// members themselves are synthesized later by the PHPDoc provider; this
+/// only stakes the claim so the inheritance walk stops merging the inherited
+/// real method over the `@method` declaration.
+fn reserve_method_tag_names(docblock: Option<&str>, dedup: &mut MergeDedup) {
+    let Some(doc) = docblock else {
+        return;
+    };
+    if !doc.contains("@method") {
+        return;
+    }
+    for m in crate::docblock::extract_method_tags(doc) {
+        dedup
+            .methods
+            .insert(crate::atom::ascii_lowercase_atom(&m.name));
+    }
+}
+
 impl MergeDedup {
     /// Build from the members already present on a `ClassInfo`.
     fn from_class(class: &ClassInfo) -> Self {
         Self {
-            methods: class.methods.iter().map(|m| m.name).collect(),
+            methods: class
+                .methods
+                .iter()
+                .map(|m| crate::atom::ascii_lowercase_atom(&m.name))
+                .collect(),
             properties: class.properties.iter().map(|p| p.name).collect(),
             constants: class.constants.iter().map(|c| c.name).collect(),
         }
@@ -338,6 +367,14 @@ pub(crate) fn resolve_class_with_inheritance(
     // addition is tracked in O(1) across all recursion levels.
     let mut dedup = MergeDedup::from_class(&merged);
 
+    // Stake a claim on the class's own `@method` tag names before merging
+    // any inherited members.  A `@method` declaration overrides a method of
+    // the same name inherited from a superclass, exactly like a real
+    // overriding method would (the virtual members themselves are
+    // synthesized later by the PHPDoc provider — here we only prevent the
+    // inheritance walk from merging the inherited real method over them).
+    reserve_method_tag_names(class.class_docblock.as_deref(), &mut dedup);
+
     // 1. Merge traits used by this class.
     //    PHP precedence: class methods > trait methods > inherited methods.
     //    Since `merged` already contains the class's own members, we only
@@ -391,6 +428,14 @@ pub(crate) fn resolve_class_with_inheritance(
         } else {
             break;
         };
+
+        // Stake a claim on this ancestor's `@method` tag names at its depth
+        // in the hierarchy, so that a real method of the same name inherited
+        // from a *farther* ancestor does not shadow the `@method`
+        // declaration.  Reserved before the ancestor's own members are
+        // merged so a real method on this same ancestor still wins over its
+        // own `@method` tag.
+        reserve_method_tag_names(parent.class_docblock.as_deref(), &mut dedup);
 
         // Build the substitution map for this parent level.
         //
@@ -486,7 +531,10 @@ pub(crate) fn resolve_class_with_inheritance(
             if method.visibility == Visibility::Private {
                 continue;
             }
-            if !dedup.methods.insert(method.name) {
+            if !dedup
+                .methods
+                .insert(crate::atom::ascii_lowercase_atom(&method.name))
+            {
                 // Child already has this method — enrich it from parent.
                 let mut ancestor_method = (**method).clone();
                 if !level_subs.is_empty() {
@@ -496,7 +544,7 @@ pub(crate) fn resolve_class_with_inheritance(
                     .methods
                     .make_mut()
                     .iter_mut()
-                    .find(|m| m.name == method.name)
+                    .find(|m| m.name.eq_ignore_ascii_case(&method.name))
                 {
                     enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
                 }
@@ -594,7 +642,7 @@ pub(crate) fn resolve_class_with_inheritance(
                 .methods
                 .make_mut()
                 .iter_mut()
-                .find(|m| m.name == method.name)
+                .find(|m| m.name.eq_ignore_ascii_case(&method.name))
             {
                 let mut ancestor_method = (**method).clone();
                 if !iface_subs.is_empty() {
@@ -920,7 +968,10 @@ fn merge_traits_into(
                 if method.visibility == Visibility::Private {
                     continue;
                 }
-                if !dedup.methods.insert(method.name) {
+                if !dedup
+                    .methods
+                    .insert(crate::atom::ascii_lowercase_atom(&method.name))
+                {
                     continue;
                 }
                 merged.methods.push(Arc::clone(method));
@@ -960,7 +1011,7 @@ fn merge_traits_into(
             // `TraitA::method insteadof TraitB`, then when merging
             // TraitB's methods, `method` should be skipped.
             let excluded = ctx.precedences.iter().any(|p| {
-                p.method_name == method.name
+                p.method_name.eq_ignore_ascii_case(&method.name)
                     && p.insteadof
                         .iter()
                         .any(|excluded_trait| excluded_trait == trait_name)
@@ -969,7 +1020,10 @@ fn merge_traits_into(
                 continue;
             }
 
-            if !dedup.methods.insert(method.name) {
+            if !dedup
+                .methods
+                .insert(crate::atom::ascii_lowercase_atom(&method.name))
+            {
                 continue;
             }
             let mut method = (**method).clone();
@@ -978,7 +1032,7 @@ fn merge_traits_into(
             // For example, `TraitA::method as protected` changes the
             // visibility of `method` without creating an alias.
             for alias in ctx.aliases {
-                if alias.method_name == method.name
+                if alias.method_name.eq_ignore_ascii_case(&method.name)
                     && alias.alias.is_none()
                     && let Some(vis) = alias.visibility
                 {
@@ -1043,7 +1097,7 @@ fn merge_traits_into(
             let source_method = trait_info
                 .methods
                 .iter()
-                .find(|m| m.name == alias.method_name);
+                .find(|m| m.name.eq_ignore_ascii_case(&alias.method_name));
             let source_method = match source_method {
                 Some(m) => m,
                 None => continue,
@@ -1051,7 +1105,10 @@ fn merge_traits_into(
 
             // Skip if an alias with this name already exists.
             let alias_atom = atom(alias_name);
-            if !dedup.methods.insert(alias_atom) {
+            if !dedup
+                .methods
+                .insert(crate::atom::ascii_lowercase_atom(alias_name))
+            {
                 continue;
             }
 
@@ -1117,8 +1174,24 @@ fn build_trait_substitution_map(
     };
 
     let mut map = HashMap::new();
+    // Right-align a short argument list to the trailing template params,
+    // matching PHPStan/Psalm convention for `@use Collection<User>`.
+    let offset = right_align_offset(
+        &trait_info.template_params,
+        &trait_info.template_param_bounds,
+        type_args.len(),
+    );
     for (i, param_name) in trait_info.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
+        if i < offset {
+            let fallback = trait_info
+                .template_param_bounds
+                .get(param_name)
+                .cloned()
+                .unwrap_or_else(PhpType::mixed);
+            map.insert(param_name.to_string(), fallback);
+            continue;
+        }
+        if let Some(arg) = type_args.get(i - offset) {
             map.insert(param_name.to_string(), arg.clone());
         }
     }
@@ -1182,8 +1255,28 @@ fn build_substitution_map(
 
     let mut map = HashMap::new();
 
+    // Right-align a short argument list to the trailing template params,
+    // matching `build_generic_subs` and PHPStan/Psalm convention so that
+    // `@extends Collection<User>` binds `User` to the value parameter.
+    let offset = right_align_offset(
+        &parent.template_params,
+        &parent.template_param_bounds,
+        type_args.len(),
+    );
+
     for (i, param_name) in parent.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
+        if i < offset {
+            // Skipped leading (key-like) param: fall back to its declared
+            // bound or `mixed` so the raw template name never leaks.
+            let fallback = parent
+                .template_param_bounds
+                .get(param_name)
+                .cloned()
+                .unwrap_or_else(PhpType::mixed);
+            map.insert(param_name.to_string(), fallback);
+            continue;
+        }
+        if let Some(arg) = type_args.get(i - offset) {
             // Apply any active substitutions to the type argument.
             // This handles chaining: if arg is "T" and active_subs has
             // {T => Foo}, the result is {param_name => Foo}.
@@ -1313,18 +1406,11 @@ pub(crate) fn build_generic_subs(
     // The heuristic only activates when every skipped leading param
     // has an `array-key` (or `int` / `string`) bound, which is the
     // universal convention for collection key parameters.
-    let offset = if type_args.len() < class.template_params.len() {
-        let skip = class.template_params.len() - type_args.len();
-        let all_skipped_are_key_like = class.template_params[..skip].iter().all(|param| {
-            class
-                .template_param_bounds
-                .get(param)
-                .is_some_and(is_key_like_bound)
-        });
-        if all_skipped_are_key_like { skip } else { 0 }
-    } else {
-        0
-    };
+    let offset = right_align_offset(
+        &class.template_params,
+        &class.template_param_bounds,
+        type_args.len(),
+    );
 
     let mut subs = HashMap::new();
     for (i, param_name) in class.template_params.iter().enumerate() {
@@ -1432,6 +1518,33 @@ pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[PhpType]) -> Cl
 /// that are conventionally used as collection key bounds.  This is
 /// used by [`apply_generic_args`] to right-align generic arguments
 /// when fewer arguments than template parameters are provided.
+/// Compute the right-alignment offset when fewer type arguments are
+/// provided than template parameters.
+///
+/// PHP/PHPStan/Psalm bind a short generic argument list to the *trailing*
+/// template parameters: `Collection<User>` against `Collection<TKey,
+/// TValue>` binds `TValue => User` and leaves `TKey` to its bound. The
+/// heuristic only activates when every skipped leading parameter has a
+/// key-like bound (`array-key`, `int`, or `string`), the universal
+/// convention for collection key parameters. Otherwise it returns `0`
+/// (left-aligned) so unrelated generics are not mis-bound.
+fn right_align_offset(
+    template_params: &[Atom],
+    template_param_bounds: &crate::atom::AtomMap<PhpType>,
+    num_args: usize,
+) -> usize {
+    if num_args >= template_params.len() {
+        return 0;
+    }
+    let skip = template_params.len() - num_args;
+    let all_skipped_are_key_like = template_params[..skip].iter().all(|param| {
+        template_param_bounds
+            .get(param)
+            .is_some_and(is_key_like_bound)
+    });
+    if all_skipped_are_key_like { skip } else { 0 }
+}
+
 fn is_key_like_bound(bound: &PhpType) -> bool {
     match bound {
         PhpType::Named(_) => bound.is_array_key() || bound.is_int() || bound.is_string_type(),

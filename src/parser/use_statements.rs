@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use mago_syntax::ast::*;
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::util::short_name;
 
 impl Backend {
@@ -54,14 +55,14 @@ impl Backend {
             }
             UseItems::TypedList(list) => {
                 // `use function Foo\{bar, baz};` or `use const Foo\{BAR, BAZ};`
-                let prefix = list.namespace.value();
+                let prefix = bytes_to_str(list.namespace.value());
                 for item in list.items.iter() {
                     Self::register_use_item(item, Some(prefix), use_map);
                 }
             }
             UseItems::MixedList(list) => {
                 // `use Foo\{Bar, function baz, const QUX};`
-                let prefix = list.namespace.value();
+                let prefix = bytes_to_str(list.namespace.value());
                 for maybe_typed in list.items.iter() {
                     Self::register_use_item(&maybe_typed.item, Some(prefix), use_map);
                 }
@@ -79,7 +80,7 @@ impl Backend {
         group_prefix: Option<&str>,
         use_map: &mut HashMap<String, String>,
     ) {
-        let item_name = item.name.value();
+        let item_name = bytes_to_str(item.name.value());
 
         // Build the fully-qualified name
         let fqn = if let Some(prefix) = group_prefix {
@@ -90,7 +91,7 @@ impl Backend {
 
         // The short (imported) name is either the alias or the last segment
         let alias_name = if let Some(ref alias) = item.alias {
-            alias.identifier.value.to_string()
+            bytes_to_str(alias.identifier.value).to_string()
         } else {
             // Last segment of the FQN
             short_name(&fqn).to_string()
@@ -109,7 +110,7 @@ impl Backend {
                 // Both implicit (`namespace Foo;`) and brace-delimited
                 // (`namespace Foo { ... }`) forms may have a name.
                 if let Some(ident) = &namespace.name {
-                    let name = ident.value();
+                    let name = bytes_to_str(ident.value());
                     if !name.is_empty() {
                         return Some(name.to_string());
                     }

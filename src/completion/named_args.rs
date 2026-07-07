@@ -422,13 +422,17 @@ pub fn split_args_top_level(text: &str) -> Vec<String> {
                 while i < chars.len() {
                     current.push(chars[i]);
                     if chars[i] == q {
-                        // Check for escaping
-                        let mut backslashes = 0u32;
-                        let mut k = current.len() - 1;
-                        while k > 0 && current.as_bytes()[k - 1] == b'\\' {
-                            backslashes += 1;
-                            k -= 1;
-                        }
+                        // Count the backslashes immediately preceding this
+                        // quote (skipping the quote we just pushed). An even
+                        // count means the quote is not escaped and closes the
+                        // string. Counting by `char` keeps this correct on
+                        // lines with multibyte characters.
+                        let backslashes = current
+                            .chars()
+                            .rev()
+                            .skip(1)
+                            .take_while(|&c| c == '\\')
+                            .count();
                         if backslashes.is_multiple_of(2) {
                             break;
                         }

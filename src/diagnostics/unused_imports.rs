@@ -347,6 +347,8 @@ const PHPDOC_TYPE_TAGS: &[&str] = &[
     "@psalm-var",
     "@phpstan-extends",
     "@phpstan-implements",
+    "@phpstan-require-extends",
+    "@phpstan-require-implements",
     "@psalm-extends",
     "@psalm-implements",
 ];
@@ -361,6 +363,34 @@ fn line_contains_phpdoc_type_tag(line: &str) -> bool {
 /// Check whether a byte is a valid PHP identifier character.
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b > 0x7F
+}
+
+/// Whether a simple (non-group, non-alias) `use` line imports exactly `fqn`.
+///
+/// Extracts the imported name from the line (handling `use function` /
+/// `use const`) and compares it to `fqn` segment-for-segment, ignoring a
+/// leading namespace separator on either side. This avoids matching
+/// `use App\FooBar;` when looking for `use App\Foo;`.
+fn simple_use_imports_exact(trimmed_line: &str, fqn: &str) -> bool {
+    let body = match trimmed_line.strip_prefix("use ") {
+        Some(b) => b,
+        None => return false,
+    };
+    // `use function Foo\bar;` / `use const Foo\BAR;`
+    let body = body
+        .strip_prefix("function ")
+        .or_else(|| body.strip_prefix("const "))
+        .unwrap_or(body);
+    let name = match body.split(';').next() {
+        Some(n) => n.trim(),
+        None => return false,
+    };
+    // A simple import has no alias clause; reject if one is present so the
+    // dedicated alias path handles it.
+    if name.contains(" as ") {
+        return false;
+    }
+    name.trim_start_matches('\\') == fqn.trim_start_matches('\\')
 }
 
 /// Find the source range of the `use` statement that imports a given FQN
@@ -399,8 +429,10 @@ fn find_use_statement_range(
                 // Check if the FQN prefix matches and the short name is in the group
                 is_group_import_match(trimmed, fqn, short_name)
             } else {
-                // Simple: `use Foo\Bar;`
-                trimmed.contains(fqn)
+                // Simple: `use Foo\Bar;`. Compare the imported name exactly
+                // rather than by substring so `use App\Foo;` is not matched
+                // by the `use App\FooBar;` line that shares its prefix.
+                simple_use_imports_exact(trimmed, fqn)
             };
 
             if is_match {

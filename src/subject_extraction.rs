@@ -571,6 +571,33 @@ fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<String> {
     // Check what precedes the function name to determine the kind of
     // call expression.
 
+    // Null-safe method call: `$var?->method()`.  Checked before the plain
+    // `->` arm because that arm's two-character match (`-` then `>`) also
+    // matches `?->`; handling it here preserves the operator and recurses
+    // through the full receiver instead of collapsing it to a bare name.
+    if i >= 3 && chars[i - 3] == '?' && chars[i - 2] == '-' && chars[i - 1] == '>' {
+        // The receiver may itself be a call expression ending with `)` —
+        // e.g. `make()?->method(...)` — so recurse the same way the plain
+        // `->` arm does.
+        let mut j = i - 3;
+        while j > 0 && chars[j - 1] == ' ' {
+            j -= 1;
+        }
+        if j > 0
+            && chars[j - 1] == ')'
+            && let Some(inner_call) = extract_call_subject(chars, j)
+        {
+            return Some(format!("{}?->{}", inner_call, rhs));
+        }
+        // Use `extract_arrow_subject` (which skips the leading `?`) so that
+        // property/call chains like `$a->b?->c()` are fully captured as
+        // `$a->b?->c()` rather than the bare identifier `b?->c()`.
+        let inner_subject = extract_arrow_subject(chars, i - 3);
+        if !inner_subject.is_empty() {
+            return Some(format!("{}?->{}", inner_subject, rhs));
+        }
+    }
+
     // Instance method call: `$this->method()` / `$var->method()` /
     // `app()->method()` (chained call expression)
     if i >= 2 && chars[i - 2] == '-' && chars[i - 1] == '>' {
@@ -594,14 +621,6 @@ fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<String> {
         let inner_subject = extract_arrow_subject(chars, arrow_pos);
         if !inner_subject.is_empty() {
             return Some(format!("{}->{}", inner_subject, rhs));
-        }
-    }
-
-    // Null-safe method call: `$var?->method()`
-    if i >= 3 && chars[i - 3] == '?' && chars[i - 2] == '-' && chars[i - 1] == '>' {
-        let inner_subject = extract_simple_variable(chars, i - 3);
-        if !inner_subject.is_empty() {
-            return Some(format!("{}?->{}", inner_subject, rhs));
         }
     }
 

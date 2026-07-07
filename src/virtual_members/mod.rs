@@ -55,7 +55,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 
 use crate::atom::{Atom, atom};
 use crate::inheritance::{
@@ -80,6 +80,117 @@ use crate::virtual_members::laravel::patches::apply_laravel_patches;
 /// order-independent) to avoid near-miss cache entries.
 pub type ResolvedClassCacheKey = (Atom, Vec<String>);
 
+/// The inner store behind a [`ResolvedClassCache`].
+///
+/// Holds the resolved-class map plus two auxiliary indices that make
+/// eviction proportional to the number of dependent classes rather than
+/// the size of the whole cache:
+///
+/// * `fqn_keys` maps a class FQN to every generic-arg variant stored
+///   under it, so all variants of a class can be removed without scanning.
+/// * `reverse_deps` maps a dependency string (a parent / trait / interface
+///   / mixin / cast value, exactly as stored on the dependent class) to the
+///   set of cache keys that reference it, so the transitive eviction
+///   cascade is a graph walk rather than repeated full-cache scans.
+///
+/// All three structures are kept consistent by going through [`Self::insert`],
+/// [`Self::clear`], and [`evict_fqn`]; callers never mutate the map directly.
+#[derive(Default)]
+pub struct ResolvedCacheInner {
+    /// Resolved classes keyed by FQN + concrete generic args.
+    map: HashMap<ResolvedClassCacheKey, Arc<ClassInfo>>,
+    /// FQN → all cache keys (generic-arg variants) stored under it.
+    fqn_keys: HashMap<String, HashSet<ResolvedClassCacheKey>>,
+    /// Dependency string → cache keys whose class directly depends on it.
+    ///
+    /// The string is stored verbatim from the dependent class (it may be a
+    /// fully-qualified name or a short name), mirroring the dual FQN /
+    /// short-name matching that eviction performs.
+    reverse_deps: HashMap<String, HashSet<ResolvedClassCacheKey>>,
+}
+
+impl ResolvedCacheInner {
+    /// Look up a resolved class by its `(FQN, generic args)` key.
+    pub fn get(&self, key: &ResolvedClassCacheKey) -> Option<&Arc<ClassInfo>> {
+        self.map.get(key)
+    }
+
+    /// Whether a key is present in the cache.
+    pub fn contains_key(&self, key: &ResolvedClassCacheKey) -> bool {
+        self.map.contains_key(key)
+    }
+
+    /// Number of cached entries (used by eviction tests).
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Whether the cache is empty (used by eviction tests).
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// Insert a resolved class, updating the FQN and reverse-dependency
+    /// indices so eviction stays cheap.
+    pub fn insert(&mut self, key: ResolvedClassCacheKey, value: Arc<ClassInfo>) {
+        // When replacing an existing entry, drop its old reverse-dep edges
+        // first so a changed dependency set does not leave stale edges.
+        if let Some(old_deps) = self.map.get(&key).map(|c| dependency_keys(c)) {
+            for dep in old_deps {
+                self.unlink_reverse_edge(&dep, &key);
+            }
+        }
+
+        let fqn = key.0.to_string();
+        for dep in dependency_keys(&value) {
+            self.reverse_deps
+                .entry(dep)
+                .or_default()
+                .insert(key.clone());
+        }
+        self.fqn_keys.entry(fqn).or_default().insert(key.clone());
+        self.map.insert(key, value);
+    }
+
+    /// Remove all entries and indices.
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.fqn_keys.clear();
+        self.reverse_deps.clear();
+    }
+
+    /// Remove `key` from the reverse-dependency edge under `dep`, pruning
+    /// the entry entirely when it becomes empty.
+    fn unlink_reverse_edge(&mut self, dep: &str, key: &ResolvedClassCacheKey) {
+        if let Some(set) = self.reverse_deps.get_mut(dep) {
+            set.remove(key);
+            if set.is_empty() {
+                self.reverse_deps.remove(dep);
+            }
+        }
+    }
+
+    /// Remove every generic-arg variant of `fqn`, cleaning up both indices.
+    ///
+    /// Returns `true` when at least one entry was present and removed.
+    fn remove_all_variants(&mut self, fqn: &str) -> bool {
+        let keys = match self.fqn_keys.remove(fqn) {
+            Some(set) => set,
+            None => return false,
+        };
+        for key in keys {
+            if let Some(value) = self.map.remove(&key) {
+                for dep in dependency_keys(&value) {
+                    self.unlink_reverse_edge(&dep, &key);
+                }
+            }
+        }
+        true
+    }
+}
+
 /// Thread-safe cache of fully-resolved classes, keyed by FQN + generic args.
 ///
 /// Stored on [`Backend`](crate::Backend) and selectively invalidated
@@ -87,11 +198,16 @@ pub type ResolvedClassCacheKey = (Atom, Vec<String>);
 /// Within a single request cycle (completion, hover, etc.) the cache
 /// eliminates redundant calls to [`resolve_class_fully`] for the same
 /// class at the same generic instantiation.
-pub type ResolvedClassCache = Arc<Mutex<HashMap<ResolvedClassCacheKey, Arc<ClassInfo>>>>;
+///
+/// Uses an [`RwLock`] rather than a mutex because the cache is read-mostly
+/// during resolution (lookups vastly outnumber inserts), so concurrent
+/// requests under a sustained keystroke barrage can read in parallel
+/// instead of serializing on a single lock.
+pub type ResolvedClassCache = Arc<RwLock<ResolvedCacheInner>>;
 
 /// Create a new, empty [`ResolvedClassCache`].
 pub fn new_resolved_class_cache() -> ResolvedClassCache {
-    Arc::new(Mutex::new(HashMap::new()))
+    Arc::new(RwLock::new(ResolvedCacheInner::default()))
 }
 
 // ─── Thread-local resolved-class cache access ───────────────────────────────
@@ -179,111 +295,92 @@ pub fn active_resolved_class_cache() -> Option<&'static ResolvedClassCache> {
 /// from its parent.  When the parent's `@property` docblock changes,
 /// the child's cache entry still holds the old inherited property and
 /// must be discarded.
-pub fn evict_fqn(
-    cache: &mut HashMap<ResolvedClassCacheKey, Arc<ClassInfo>>,
-    fqn: &str,
-) -> Vec<String> {
+///
+/// The dependent set is found by walking the reverse-dependency index
+/// maintained by [`ResolvedCacheInner`], so the cost is proportional to
+/// the number of dependents rather than the size of the whole cache.
+/// The returned vector lists the seed FQN followed by every transitively
+/// evicted dependent, or is empty when nothing matched.
+pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
     // Fast path: nothing to evict from an empty cache.
-    if cache.is_empty() {
+    if cache.map.is_empty() {
         return vec![];
     }
 
-    // Remove direct matches for this FQN (any generic-arg variant).
-    let before = cache.len();
-    cache.retain(|(k, _), _| k != fqn);
-    let removed_direct = cache.len() < before;
-
-    // If the FQN wasn't in the cache, do a single pass to check
-    // whether any remaining entry depends on it.  When nothing
-    // depends on it either (the overwhelmingly common case during
-    // bulk loading), skip the expensive transitive loop entirely.
-    if !removed_direct {
-        let seed = [fqn.to_string()];
-        let has_dependent = cache.values().any(|cls| depends_on_any(cls, &seed));
-        if !has_dependent {
-            return vec![];
-        }
-    }
-
-    // Transitive eviction: repeatedly scan for classes whose
-    // inheritance chain references any already-evicted FQN.
+    // Walk the reverse-dependency graph starting from `fqn`, collecting the
+    // seed plus every transitively dependent FQN.  Each step is an O(1) index
+    // lookup, so the cost is proportional to the dependent set rather than the
+    // whole cache.  `evicted` preserves [seed, ...dependents] discovery order.
     let mut evicted: Vec<String> = vec![fqn.to_string()];
+    let mut seen: HashSet<String> = HashSet::from([fqn.to_string()]);
+    let mut frontier: Vec<String> = vec![fqn.to_string()];
 
-    loop {
-        let mut newly_evicted: Vec<String> = Vec::new();
+    while let Some(current) = frontier.pop() {
+        // A dependent class stores the dependency either as the FQN or as the
+        // short name, so look under both (mirroring the previous dual match).
+        let short = crate::util::short_name(&current);
+        let mut dependents: Vec<String> = Vec::new();
+        if let Some(set) = cache.reverse_deps.get(current.as_str()) {
+            dependents.extend(set.iter().map(|k| k.0.to_string()));
+        }
+        if short != current.as_str()
+            && let Some(set) = cache.reverse_deps.get(short)
+        {
+            dependents.extend(set.iter().map(|k| k.0.to_string()));
+        }
 
-        for ((cached_fqn, _), cls) in cache.iter() {
-            let cached_fqn_str = cached_fqn.to_string();
-            if depends_on_any(cls, &evicted) && !evicted.contains(&cached_fqn_str) {
-                newly_evicted.push(cached_fqn_str);
+        for dep in dependents {
+            if seen.insert(dep.clone()) {
+                evicted.push(dep.clone());
+                frontier.push(dep);
             }
         }
+    }
 
-        if newly_evicted.is_empty() {
-            break;
-        }
-
-        for dep_fqn in &newly_evicted {
-            cache.retain(|(k, _), _| k != dep_fqn);
-            evicted.push(dep_fqn.clone());
+    // Remove every generic-arg variant of each collected FQN.  All dependents
+    // come from the reverse index (so they are present), but the seed may not
+    // have been cached — when nothing was actually removed, report no eviction
+    // to match the previous "return empty when nothing matched" behaviour.
+    let mut any_removed = false;
+    for f in &evicted {
+        if cache.remove_all_variants(f) {
+            any_removed = true;
         }
     }
 
-    evicted
+    if any_removed { evicted } else { vec![] }
 }
 
-/// Check whether `cls` directly depends on any FQN in `fqns` through
-/// its `parent_class`, `used_traits`, `interfaces`, `mixins`, or
+/// Collect the dependency strings a class references through its
+/// `parent_class`, `used_traits`, `interfaces`, `mixins`, and
 /// `casts_definitions`.
 ///
-/// Comparisons are done against both the raw field value and the short
-/// name of the evicted FQN, because the cached `ClassInfo` may store
-/// parent/trait/interface names as short names (same-file references)
-/// or as FQNs (cross-file, post-resolution).
+/// Each value is stored verbatim as it appears on the class: it may be a
+/// fully-qualified name (cross-file, post-resolution) or a short name
+/// (same-file reference).  Eviction looks up the reverse index under both
+/// the evicted FQN and its short name, so storing the raw value here
+/// reproduces the dual FQN / short-name matching.
 ///
-/// The `casts_definitions` check ensures that when a cast class is
-/// edited (e.g. its `@implements CastsAttributes<T>` annotation
-/// changes), models referencing that cast class via `$casts` are
-/// transitively evicted from the resolved-class cache.
-fn depends_on_any(cls: &ClassInfo, fqns: &[String]) -> bool {
-    for fqn in fqns {
-        let short = crate::util::short_name(fqn);
+/// Cast values may carry a `:argument` suffix (e.g. `"DecimalCast:8:2"`);
+/// only the class portion is recorded.
+fn dependency_keys(cls: &ClassInfo) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
 
-        // parent_class
-        if let Some(ref parent) = cls.parent_class
-            && (parent == fqn || parent == short)
-        {
-            return true;
-        }
+    if let Some(ref parent) = cls.parent_class {
+        keys.push(parent.to_string());
+    }
+    keys.extend(cls.used_traits.iter().map(|t| t.to_string()));
+    keys.extend(cls.interfaces.iter().map(|i| i.to_string()));
+    keys.extend(cls.mixins.iter().map(|m| m.to_string()));
 
-        // used_traits
-        if cls.used_traits.iter().any(|t| t == fqn || t == short) {
-            return true;
-        }
-
-        // interfaces
-        if cls.interfaces.iter().any(|i| i == fqn || i == short) {
-            return true;
-        }
-
-        // mixins
-        if cls.mixins.iter().any(|m| m == fqn || m == short) {
-            return true;
-        }
-
-        // casts_definitions — cast type values may reference class FQNs
-        // (e.g. `"App\\Casts\\DecimalCast"` or `"DecimalCast:8:2"`).
-        // Strip the `:argument` suffix before comparing.
-        if let Some(laravel) = cls.laravel()
-            && laravel.casts_definitions.iter().any(|(_, cast_type)| {
-                let class_part = cast_type.split(':').next().unwrap_or(cast_type);
-                class_part == fqn || class_part == short
-            })
-        {
-            return true;
+    if let Some(laravel) = cls.laravel() {
+        for (_, cast_type) in &laravel.casts_definitions {
+            let class_part = cast_type.split(':').next().unwrap_or(cast_type);
+            keys.push(class_part.to_string());
         }
     }
-    false
+
+    keys
 }
 
 /// Members synthesized by a provider.
@@ -388,15 +485,17 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
     // Build an index of (name, is_static) → position for O(1) dedup
     // instead of a linear scan per virtual method.  With hundreds of
     // methods on Eloquent models this turns O(N×M) memcmp into O(M).
+    // Keys are lowercased: PHP method names are case-insensitive, so a
+    // `@method getvalue` tag matches a declared `getValue()`.
     let mut method_index: HashMap<(String, bool), usize> = class
         .methods
         .iter()
         .enumerate()
-        .map(|(i, m)| ((m.name.to_string(), m.is_static), i))
+        .map(|(i, m)| ((m.name.to_ascii_lowercase(), m.is_static), i))
         .collect();
 
     for method in virtual_members.methods {
-        let key = (method.name.to_string(), method.is_static);
+        let key = (method.name.to_ascii_lowercase(), method.is_static);
         if let Some(&idx) = method_index.get(&key) {
             if class.methods[idx].has_scope_attribute
                 || matches!(method.name.as_str(), "query" | "newQuery" | "newModelQuery")
@@ -606,7 +705,7 @@ pub fn populate_from_sorted(
         // incremental population run).
         let cache_key: ResolvedClassCacheKey = (atom(fqn), Vec::new());
         {
-            let map = cache.lock();
+            let map = cache.read();
             if map.contains_key(&cache_key) {
                 continue;
             }
@@ -740,7 +839,7 @@ pub fn resolve_class_fully_with_generics(
     let cache_key: ResolvedClassCacheKey = (fqn, generic_arg_strings.to_vec());
 
     if let Some(c) = cache {
-        let map = c.lock();
+        let map = c.read();
         if let Some(cached) = map.get(&cache_key) {
             return Arc::clone(cached);
         }
@@ -759,7 +858,7 @@ pub fn resolve_class_fully_with_generics(
 
     // Store the substituted result.
     if let Some(c) = cache {
-        c.lock().insert(cache_key, Arc::clone(&result));
+        c.write().insert(cache_key, Arc::clone(&result));
     }
 
     let elapsed = started.elapsed();
@@ -821,7 +920,7 @@ fn resolve_class_fully_inner(
     // from that substituted class and cache the result under the bare
     // FQN key `(MockBuilder, [])`, every subsequent lookup gets the
     // contaminated version — causing non-deterministic diagnostics
-    // depending on which thread/file was processed first (B28).
+    // depending on which thread/file was processed first.
     //
     // To prevent this, always try to reload the raw (un-substituted)
     // class from the class_loader.  The class_loader returns the
@@ -836,7 +935,7 @@ fn resolve_class_fully_inner(
 
     // ── Cache lookup ────────────────────────────────────────────────
     if let Some(cache) = cache {
-        let map = cache.lock();
+        let map = cache.read();
         if let Some(cached) = map.get(&cache_key) {
             return Arc::clone(cached);
         }
@@ -1074,7 +1173,7 @@ fn resolve_class_fully_inner(
             if iface_subs.is_empty() {
                 let iface_key: ResolvedClassCacheKey = (iface.fqn(), Vec::new());
                 if let Some(c) = cache {
-                    let map = c.lock();
+                    let map = c.read();
                     if let Some(cached) = map.get(&iface_key) {
                         let resolved_iface = ClassInfo::clone(cached);
                         drop(map);
@@ -1125,7 +1224,7 @@ fn resolve_class_fully_inner(
     merged.rebuild_method_index();
     let result = Arc::new(merged);
     if let Some(cache) = cache {
-        cache.lock().insert(cache_key, Arc::clone(&result));
+        cache.write().insert(cache_key, Arc::clone(&result));
     }
 
     result
