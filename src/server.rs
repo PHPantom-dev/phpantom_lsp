@@ -548,6 +548,14 @@ impl LanguageServer for Backend {
         // parses).  This matches the did_change path.
         self.schedule_diagnostics(uri.clone());
 
+        // Opening a file is a discrete event (not a per-keystroke one),
+        // and the buffer matches what is on disk, so it is a safe and
+        // useful point to run the external tools.  Without this the user
+        // would see no PHPStan/PHPCS/Mago diagnostics until the first
+        // save.  (During editing they are gated to save only; see
+        // `did_save`.)
+        self.schedule_external_diagnostics(uri.clone());
+
         self.log(MessageType::INFO, format!("Opened file: {}", uri))
             .await;
     }
