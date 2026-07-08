@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783553819380,
+  "lastUpdate": 1783554692834,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11763,6 +11763,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b983f6fceb137cddcfa189641f288d74619a7116",
+          "message": "feat(diagnostics): detect declare(strict_types=1) for stricter type\nchecking\n\nRead declare(strict_types=1) from the calling file when checking\ncall argument compatibility so PHP's strict scalar call semantics are\nreflected in type_mismatch_argument diagnostics.\n\nThis hardens the implementation by preserving literal kinds for int,\nfloat, and string values instead of flattening them to raw strings.\nThat keeps float literals from being misclassified as ints and lets\nnumeric literals retain PHP-specific forms such as underscores,\nscientific notation, and hex/binary/octal integers during checks.\n\nNon-strict mode continues to allow PHP's call-time scalar coercions\nsuch as int/float to string and numeric-string to int/float, while\nstrict mode flags those mismatches. Concatenation and other non-call\ncontexts are unchanged.\n\nCloses #203",
+          "timestamp": "2026-07-09T01:37:12+02:00",
+          "tree_id": "4b96c9a7ad9192d0047ffdf516e83ff073470843",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b983f6fceb137cddcfa189641f288d74619a7116"
+        },
+        "date": 1783554691687,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.9,
             "unit": "MiB"
           }
         ]
