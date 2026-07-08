@@ -463,13 +463,22 @@ impl Backend {
                 // The file has no functions now.  If it previously had
                 // functions, remove the stale entries and flag a change
                 // so callers get fresh diagnostics.
-                let mut fmap = self.global_functions.write();
-                let old_fqns: Vec<String> = fmap
-                    .iter()
-                    .filter(|(_, (file_uri, _))| file_uri == uri)
-                    .map(|(fqn, _)| fqn.to_string())
-                    .collect();
+                //
+                // Scan under a read lock first: files that never declared
+                // a top-level function (most class files) hit this branch
+                // on every keystroke, and taking a write lock there would
+                // needlessly contend with the diagnostic threads reading
+                // the map.  Only escalate to a write lock when there is
+                // stale state to remove.
+                let old_fqns: Vec<String> = {
+                    let fmap = self.global_functions.read();
+                    fmap.iter()
+                        .filter(|(_, (file_uri, _))| file_uri == uri)
+                        .map(|(fqn, _)| fqn.to_string())
+                        .collect()
+                };
                 if !old_fqns.is_empty() {
+                    let mut fmap = self.global_functions.write();
                     for fqn in &old_fqns {
                         fmap.remove(fqn);
                     }
