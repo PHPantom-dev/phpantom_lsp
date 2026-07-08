@@ -3064,6 +3064,42 @@ fn resolve_rhs_method_call_inner<'b>(
             }
         });
 
+        // When the method declares a PHPStan conditional return type,
+        // evaluate it against the call-site arguments and prefer the
+        // resolved type. This carries mode-dependent shapes (e.g.
+        // `list<\stdClass>` or `array<string, mixed>|false` from
+        // `PDOStatement::fetch`/`fetchAll`) into consumers that read the
+        // type string (hover, foreach element extraction) rather than the
+        // vague native return type (`array`/`mixed`).
+        let ret_type_string = match method_ref.and_then(|m| m.conditional_return.as_ref()) {
+            Some(cond) => {
+                let params = method_ref.map(|m| m.parameters.as_slice()).unwrap_or(&[]);
+                let tpl = crate::completion::conditional_resolution::TemplateContext::with_params(
+                    method_ref
+                        .map(|m| m.template_params.as_slice())
+                        .unwrap_or(&[]),
+                );
+                crate::completion::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
+                    cond,
+                    params,
+                    &text_args,
+                    Some(&var_resolver),
+                    Some(&ctx.current_class.name),
+                    ctx.class_loader,
+                    &tpl,
+                )
+                .map(|resolved| {
+                    if template_subs.is_empty() {
+                        resolved
+                    } else {
+                        resolved.substitute(&template_subs)
+                    }
+                })
+                .or(ret_type_string)
+            }
+            None => ret_type_string,
+        };
+
         let results = Backend::resolve_method_return_types_with_args(
             owner,
             &method_name,
@@ -3515,6 +3551,38 @@ fn resolve_rhs_static_call(
                 };
                 substituted.replace_self(&owner.fqn())
             });
+
+            // Prefer the conditional return type resolved against the
+            // call-site arguments (see the instance-call path above).
+            let ret_type_string = match method_ref.and_then(|m| m.conditional_return.as_ref()) {
+                Some(cond) => {
+                    let params = method_ref.map(|m| m.parameters.as_slice()).unwrap_or(&[]);
+                    let tpl =
+                        crate::completion::conditional_resolution::TemplateContext::with_params(
+                            method_ref
+                                .map(|m| m.template_params.as_slice())
+                                .unwrap_or(&[]),
+                        );
+                    crate::completion::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
+                        cond,
+                        params,
+                        &text_args,
+                        Some(&var_resolver),
+                        Some(&ctx.current_class.name),
+                        ctx.class_loader,
+                        &tpl,
+                    )
+                    .map(|resolved| {
+                        if template_subs.is_empty() {
+                            resolved
+                        } else {
+                            resolved.substitute(&template_subs)
+                        }
+                    })
+                    .or(ret_type_string)
+                }
+                None => ret_type_string,
+            };
 
             let results = Backend::resolve_method_return_types_with_args(
                 owner,

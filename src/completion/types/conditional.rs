@@ -450,6 +450,33 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     class_loader,
                     tpl,
                 )
+            } else if let Some((cond_class, cond_const)) =
+                class_const_condition_parts(condition.as_ref())
+            {
+                // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
+                // Take the then-branch when the bound argument is the same
+                // class constant.
+                let matched = arg_text
+                    .and_then(|arg| arg.trim().rsplit_once("::"))
+                    .is_some_and(|(arg_class, arg_const)| {
+                        class_const_matches(
+                            cond_class,
+                            cond_const,
+                            arg_class.trim(),
+                            arg_const.trim(),
+                            calling_class_name,
+                        )
+                    });
+                let take_then = matched ^ *negated;
+                resolve_conditional_with_text_args_and_defaults(
+                    if take_then { then_type } else { else_type },
+                    params,
+                    text_args,
+                    var_resolver,
+                    calling_class_name,
+                    class_loader,
+                    tpl,
+                )
             } else {
                 // IsType equivalent: can't statically determine most
                 // conditions, but we handle scalar types and `array` specially.
@@ -656,6 +683,76 @@ fn extract_class_name_from_text(text: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// If `condition` is a class-constant reference such as `PDO::FETCH_ASSOC`,
+/// return its `(class, constant)` parts.
+///
+/// PHPStan conditional return types use class constants as the compared
+/// type, e.g. `@return ($mode is PDO::FETCH_ASSOC ? ... : ...)`. The type
+/// parser represents such a member reference as a `Raw`/`Named` variant
+/// whose payload contains `::`. Wildcard members (`Foo::*`, used by
+/// `int-mask-of<Foo::*>`) and the `::class` pseudo-constant are not real
+/// class constants and return `None`.
+fn class_const_condition_parts(condition: &PhpType) -> Option<(&str, &str)> {
+    let raw = match condition {
+        PhpType::Raw(s) | PhpType::Named(s) => s.as_str(),
+        _ => return None,
+    };
+    let (class, member) = raw.rsplit_once("::")?;
+    if class.is_empty() || member.is_empty() || member.contains('*') || member == "class" {
+        return None;
+    }
+    Some((class, member))
+}
+
+/// Whether an argument referring to the class constant `(arg_class,
+/// arg_const)` matches the condition's `(cond_class, cond_const)`.
+///
+/// Constant names must match exactly; class names are compared on their
+/// short (namespace-stripped) form, case-insensitively, which mirrors
+/// PHP's case-insensitive class-name resolution. `self`/`static`/`parent`
+/// in the argument are resolved against `calling_class_name` first.
+fn class_const_matches(
+    cond_class: &str,
+    cond_const: &str,
+    arg_class: &str,
+    arg_const: &str,
+    calling_class_name: Option<&str>,
+) -> bool {
+    if arg_const != cond_const {
+        return false;
+    }
+    let arg_class = resolve_self_keyword(arg_class, calling_class_name)
+        .unwrap_or_else(|| arg_class.to_string());
+    let cond_short = crate::util::short_name(cond_class.trim_start_matches('\\'));
+    let arg_short = crate::util::short_name(arg_class.trim_start_matches('\\'));
+    arg_short.eq_ignore_ascii_case(cond_short)
+}
+
+/// Extract the `(class, constant)` parts from a class-constant access
+/// expression such as `PDO::FETCH_ASSOC`.
+///
+/// Unlike [`extract_class_string_from_expr`], this rejects the `::class`
+/// pseudo-constant and only matches identifier selectors (not dynamic
+/// `::{$expr}` constant fetches).
+fn extract_class_const_from_expr(expr: &Expression<'_>) -> Option<(String, String)> {
+    if let Expression::Access(Access::ClassConstant(cca)) = expr
+        && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
+        && ident.value != b"class"
+    {
+        let class = match cca.class {
+            Expression::Identifier(class_ident) => {
+                crate::atom::bytes_to_str(class_ident.value()).to_string()
+            }
+            Expression::Self_(_) => "self".to_string(),
+            Expression::Static(_) => "static".to_string(),
+            Expression::Parent(_) => "parent".to_string(),
+            _ => return None,
+        };
+        return Some((class, crate::atom::bytes_to_str(ident.value).to_string()));
+    }
+    None
 }
 
 /// Resolve a PHPStan conditional return type given AST-level call-site
@@ -910,6 +1007,31 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 }
+            } else if let Some((cond_class, cond_const)) =
+                class_const_condition_parts(condition.as_ref())
+            {
+                // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
+                let matched = arg_expr
+                    .and_then(extract_class_const_from_expr)
+                    .is_some_and(|(arg_class, arg_const)| {
+                        class_const_matches(
+                            cond_class,
+                            cond_const,
+                            &arg_class,
+                            &arg_const,
+                            calling_class_name,
+                        )
+                    });
+                let take_then = matched ^ *negated;
+                resolve_conditional_with_args_and_defaults(
+                    if take_then { then_type } else { else_type },
+                    params,
+                    argument_list,
+                    var_resolver,
+                    calling_class_name,
+                    class_loader,
+                    tpl,
+                )
             } else {
                 // IsType equivalent: check scalar types from AST literals.
                 if condition_is_scalar_type(condition.as_ref(), "string")
@@ -1154,4 +1276,93 @@ pub(crate) fn extract_class_string_from_expr(expr: &Expression<'_>) -> Option<St
         };
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A single required parameter with the given name (including `$`).
+    fn param(name: &str) -> ParameterInfo {
+        ParameterInfo {
+            name: crate::atom::atom(name),
+            is_required: true,
+            type_hint: None,
+            native_type_hint: None,
+            description: None,
+            default_value: None,
+            is_variadic: false,
+            is_reference: false,
+            closure_this_type: None,
+        }
+    }
+
+    /// Resolve a `PDOStatement::fetch`-style conditional keyed on the fetch
+    /// mode class constant, returning the resolved type's display string.
+    fn resolve_fetch(text_args: &str) -> Option<String> {
+        // ($mode is PDO::FETCH_OBJ ? \stdClass|false
+        //   : ($mode is PDO::FETCH_ASSOC ? array<string, mixed>|false : mixed))
+        let cond = PhpType::parse(
+            "($mode is PDO::FETCH_OBJ ? \\stdClass|false : ($mode is PDO::FETCH_ASSOC ? array<string, mixed>|false : mixed))",
+        );
+        let params = [param("$mode")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let tpl = TemplateContext::with_params(&[]);
+        resolve_conditional_with_text_args_and_defaults(
+            &cond, &params, text_args, None, None, loader, &tpl,
+        )
+        .map(|t| t.to_string())
+    }
+
+    #[test]
+    fn class_const_condition_selects_matching_branch() {
+        assert!(
+            resolve_fetch("\\PDO::FETCH_OBJ")
+                .unwrap()
+                .contains("stdClass")
+        );
+        assert!(
+            resolve_fetch("\\PDO::FETCH_ASSOC")
+                .unwrap()
+                .contains("array")
+        );
+    }
+
+    #[test]
+    fn class_const_condition_ignores_leading_backslash() {
+        // Argument without a leading backslash still matches the condition.
+        assert!(
+            resolve_fetch("PDO::FETCH_OBJ")
+                .unwrap()
+                .contains("stdClass")
+        );
+    }
+
+    #[test]
+    fn class_const_condition_unlisted_mode_falls_through() {
+        // A mode with no dedicated branch reaches the `mixed` else branch,
+        // which is uninformative and therefore yields no resolved type.
+        assert_eq!(resolve_fetch("\\PDO::FETCH_COLUMN"), None);
+    }
+
+    #[test]
+    fn class_const_condition_requires_matching_class() {
+        // The same constant name on a different class must not match the
+        // `PDO::FETCH_OBJ` branch — it falls through past every PDO branch to
+        // the `mixed` else, yielding no resolved type.
+        assert_eq!(resolve_fetch("Other::FETCH_OBJ"), None);
+        // A different class whose constant matches an inner branch also fails.
+        assert_eq!(resolve_fetch("Other::FETCH_ASSOC"), None);
+    }
+
+    #[test]
+    fn class_const_condition_parts_rejects_non_constants() {
+        assert!(class_const_condition_parts(&PhpType::Named("string".into())).is_none());
+        assert!(class_const_condition_parts(&PhpType::Raw("Foo::*".into())).is_none());
+        assert!(class_const_condition_parts(&PhpType::Raw("Foo::class".into())).is_none());
+        assert_eq!(
+            class_const_condition_parts(&PhpType::Raw("PDO::FETCH_OBJ".into())),
+            Some(("PDO", "FETCH_OBJ"))
+        );
+    }
 }

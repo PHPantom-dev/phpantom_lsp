@@ -11512,3 +11512,81 @@ function test(): void {
         text
     );
 }
+
+/// `PDOStatement::fetch()` carries a PHPStan conditional return type keyed
+/// on the fetch-mode class constant. Passing the mode directly selects the
+/// matching branch (object for `FETCH_OBJ`, array for `FETCH_ASSOC`, and
+/// `mixed` for modes with no dedicated branch or when no mode is passed).
+#[test]
+fn hover_pdo_fetch_mode_dependent_return_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///pdo_fetch.php";
+    let content = r#"<?php
+function probe(\PDOStatement $stmt): void {
+    $obj = $stmt->fetch(\PDO::FETCH_OBJ);
+    $obj;
+    $assoc = $stmt->fetch(\PDO::FETCH_ASSOC);
+    $assoc;
+    $col = $stmt->fetch(\PDO::FETCH_COLUMN);
+    $col;
+    $default = $stmt->fetch();
+    $default;
+}
+"#;
+
+    // FETCH_OBJ selects the `\stdClass|false` branch.
+    let obj = hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $obj")).to_string();
+    assert!(
+        obj.contains("stdClass"),
+        "FETCH_OBJ should be stdClass: {obj}"
+    );
+
+    // FETCH_ASSOC selects the associative-array branch.
+    let assoc =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $assoc")).to_string();
+    assert!(
+        assoc.contains("array"),
+        "FETCH_ASSOC should be an array: {assoc}"
+    );
+    assert!(
+        !assoc.contains("stdClass"),
+        "FETCH_ASSOC should not select the object branch: {assoc}"
+    );
+
+    // FETCH_COLUMN has no dedicated branch → falls through to `mixed`.
+    let col = hover_text(&hover_at(&backend, uri, content, 7, 6).expect("hover $col")).to_string();
+    assert!(
+        !col.contains("stdClass") && !col.contains("array<"),
+        "FETCH_COLUMN should not resolve to a specific branch: {col}"
+    );
+
+    // No mode argument → the conditional cannot be resolved statically.
+    let default =
+        hover_text(&hover_at(&backend, uri, content, 9, 6).expect("hover $default")).to_string();
+    assert!(
+        !default.contains("stdClass") && !default.contains("array<"),
+        "fetch() without a mode should not resolve to a branch: {default}"
+    );
+}
+
+/// `PDOStatement::fetchAll()` resolves to a `list<...>` whose element type
+/// depends on the fetch mode. The element type flows through to `foreach`.
+#[test]
+fn hover_pdo_fetch_all_mode_dependent_element_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///pdo_fetch_all.php";
+    let content = r#"<?php
+function probe(\PDOStatement $stmt): void {
+    foreach ($stmt->fetchAll(\PDO::FETCH_OBJ) as $item) {
+        $item;
+    }
+}
+"#;
+
+    let item =
+        hover_text(&hover_at(&backend, uri, content, 3, 9).expect("hover $item")).to_string();
+    assert!(
+        item.contains("stdClass"),
+        "fetchAll(FETCH_OBJ) elements should be stdClass: {item}"
+    );
+}

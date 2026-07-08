@@ -8,57 +8,6 @@ pipeline so it produces correct data. Downstream consumers
 to second-guess upstream output.
 
 
-## B16. PDOStatement fetch mode-dependent return types
-
-**Blocked on:** [phpstorm-stubs#1882](https://github.com/JetBrains/phpstorm-stubs/pull/1882)
-
-`PDOStatement::fetch()` and `PDOStatement::fetchAll()` return
-different types depending on the fetch mode constant passed as
-the first argument. Once the upstream PR is merged and we update
-our stubs, the existing conditional return type support should
-handle this automatically.
-
-**Tests:** Assertion lines were removed from
-`tests/psalm_assertions/method_call.php` (out of scope until
-upstream stubs land).
-
-
-## B22. Infinite loop on cyclic parent chains in the Eloquent builder provider
-
-**Severity: Critical (server hang) · Confirmed by code reading**
-
-`custom_builder_chain_declares_method`
-(`src/virtual_members/laravel/builder.rs:263-294`) walks the
-`parent_class` chain in a bare `loop {}` with **no visited set and
-no depth cap**. Cyclic inheritance (`class A extends B; class B
-extends A;`) is illegal PHP, but it appears transiently while a
-user edits, and the LSP must never hang on it. Every other parent
-walk in the codebase is guarded — the sibling loop in
-`src/virtual_members/laravel/mod.rs:419-436` uses
-`MAX_INHERITANCE_DEPTH` — this one was missed.
-
-The function is called once per method of the resolved base
-Builder (`merge_base_builder_methods`, builder.rs:245-258), so a
-cycle in any custom-builder parent chain hangs the request thread
-inside `resolve_class_fully`, which is reached from completion,
-hover, and diagnostics. Under `spawn_blocking` this pins a
-blocking thread forever and every subsequent request for the file
-piles up behind the per-key coalesce lock.
-
-**Trigger:**
-
-```php
-class A extends B {}
-class B extends A {}
-class MyBuilder extends A { public function scopeFoo($q) {} }
-```
-
-**Fix:** bound the walk with `MAX_INHERITANCE_DEPTH` exactly like
-`mod.rs:419`, or track visited FQNs in a `HashSet`. While there,
-walk `Arc<ClassInfo>` cursors instead of `class =
-parent_class.as_ref().clone()` per step.
-
-
 ## B23. Deleted functions and stale `define()` data survive edits for the whole session
 
 **Severity: High (stale completions, wrong hover, wrong navigation) · Confirmed**

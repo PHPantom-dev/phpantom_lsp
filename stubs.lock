@@ -11,7 +11,7 @@
 repo = "JetBrains/phpstorm-stubs"
 
 # The pinned commit SHA.
-commit = "517b9ad1adaf2c5453c00ec2fbb02d192a4a9b6c"
+commit = "f6dd2dd35d99fb774251a83555fe07bf2109d57e"
 
 # SHA-256 hash of the GitHub-generated tarball for the commit above.
-sha256 = "d1c4b5363a87d6117feed9d8f6e0a9ddb9b0e3cdf0851a235bcc9caddfbe3e91"
+sha256 = "c7811b69bba0bf6784fa7343e18614f2fd4fca4fe7482e741cea5297909e01a4"
