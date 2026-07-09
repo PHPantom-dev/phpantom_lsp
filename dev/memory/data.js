@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783555595974,
+  "lastUpdate": 1783555627557,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11826,6 +11826,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 40.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4f87b45221867d71235d730ec28515ecda7591e9",
+          "message": "Fix running full diagnostics on file open, and write lock",
+          "timestamp": "2026-07-09T01:52:48+02:00",
+          "tree_id": "0a8c906d97a247b93aed74550f970cab5190bacc",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4f87b45221867d71235d730ec28515ecda7591e9"
+        },
+        "date": 1783555626076,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.6,
             "unit": "MiB"
           },
           {
