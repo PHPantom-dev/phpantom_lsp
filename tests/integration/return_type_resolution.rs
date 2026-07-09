@@ -476,7 +476,7 @@ async fn test_goto_definition_class_from_autoload_files() {
                 let mut fmap = backend.global_functions().write();
                 for func in functions {
                     let fqn = if let Some(ref ns) = func.namespace {
-                        format!("{}\\{}", ns, &func.name)
+                        format!("{}\\{}", ns, func.name)
                     } else {
                         func.name.to_string()
                     };
@@ -947,7 +947,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
                 let mut fmap = backend.global_functions().write();
                 for func in functions {
                     let fqn = if let Some(ref ns) = func.namespace {
-                        format!("{}\\{}", ns, &func.name)
+                        format!("{}\\{}", ns, func.name)
                     } else {
                         func.name.to_string()
                     };

@@ -4510,3 +4510,31 @@ function test(): void {
         "String indexed assignment should preserve string type, got: {diags:?}"
     );
 }
+
+#[test]
+fn no_false_positive_for_ternary_with_array_access_branch() {
+    // When a ternary expression has an array-access branch that resolves
+    // to `mixed` (from `array<string, mixed>`), the resulting variable
+    // type should be `mixed|null`, not just `null`.
+    // See: https://github.com/PHPantom-dev/phpantom_lsp/issues/206
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+/**
+ * @param array<string, mixed> $body
+ */
+function myFunction(array $body): void {
+    $statementHandle = true ? $body['statementHandle'] : null;
+
+    takes_string($statementHandle);
+}
+"#;
+    let diags = collect(php);
+    // `$statementHandle` is `mixed|null`; `mixed` is a supertype of `string`,
+    // so passing it to a `string` parameter should NOT be flagged.
+    // The bug was that the ternary resolved to just `null`.
+    assert!(
+        !has_type_error(&diags),
+        "Ternary with array access branch should resolve to mixed|null, not null: {diags:?}"
+    );
+}

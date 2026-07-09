@@ -1206,7 +1206,7 @@ fn check_unresolvable_class_name(
     raw_type: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    if raw_type.all_members_scalar() {
+    if raw_type.all_members_scalar() || raw_type.is_mixed() {
         return None;
     }
 

@@ -3756,7 +3756,8 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
             | "enum-string"
             // ── Array / list refinements ────────────────────────────
             | "associative-array"
-            // ── Scalar / mixed variants ─────────────────────────────
+        // ── Scalar / mixed variants ─────────────────────────────
+            | "mixed"
             | "empty-scalar"
             | "non-empty-scalar"
             | "non-empty-mixed"
@@ -3898,7 +3899,6 @@ fn is_scalar_name(name: &str) -> bool {
             | "callable"
             | "iterable"
             | "resource"
-            | "mixed"
             | "object"
             | "self"
             | "static"
@@ -5875,7 +5875,7 @@ mod tests {
         assert!(PhpType::string().is_scalar());
         assert!(PhpType::bool().is_scalar());
         assert!(PhpType::float().is_scalar());
-        assert!(PhpType::mixed().is_scalar());
+        assert!(!PhpType::mixed().is_scalar());
         assert!(PhpType::void().is_scalar());
         assert!(PhpType::null().is_scalar());
         assert!(PhpType::array().is_scalar());
