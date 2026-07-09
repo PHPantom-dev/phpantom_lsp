@@ -1655,12 +1655,17 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
 // ─── Use statement extractor ────────────────────────────────────────────────
 
 fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
-    fn register_use_item(item: &UseItem<'_>, spans: &mut Vec<SymbolSpan>) {
-        let raw = bytes_to_str(item.name.value()).to_string();
+    fn register_use_item(item: &UseItem<'_>, prefix: Option<&str>, spans: &mut Vec<SymbolSpan>) {
+        let raw = bytes_to_str(item.name.value());
+        let full = if let Some(prefix) = prefix {
+            format!("{}\\{}", prefix, raw)
+        } else {
+            raw.to_string()
+        };
         // Use statement names are always fully qualified (even without a
         // leading `\`), so force `is_fqn = true`.  `class_ref_span`
         // derives the flag from a leading `\` which use statements omit.
-        let name = strip_fqn_prefix(&raw).to_string();
+        let name = strip_fqn_prefix(&full).to_string();
         spans.push(SymbolSpan {
             start: item.name.span().start.offset,
             end: item.name.span().end.offset,
@@ -1675,25 +1680,27 @@ fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
     match &use_stmt.items {
         UseItems::Sequence(seq) => {
             for use_item in seq.items.iter() {
-                register_use_item(use_item, spans);
+                register_use_item(use_item, None, spans);
             }
         }
         UseItems::TypedSequence(typed_seq) => {
             // Only class imports (not function/const).
             if !typed_seq.r#type.is_function() && !typed_seq.r#type.is_const() {
                 for use_item in typed_seq.items.iter() {
-                    register_use_item(use_item, spans);
+                    register_use_item(use_item, None, spans);
                 }
             }
         }
         UseItems::TypedList(list) => {
             if !list.r#type.is_function() && !list.r#type.is_const() {
+                let prefix = bytes_to_str(list.namespace.value());
                 for use_item in list.items.iter() {
-                    register_use_item(use_item, spans);
+                    register_use_item(use_item, Some(prefix), spans);
                 }
             }
         }
         UseItems::MixedList(list) => {
+            let prefix = bytes_to_str(list.namespace.value());
             for use_item in list.items.iter() {
                 // MixedList items are MaybeTypedUseItem — skip function/const.
                 if let Some(ref typ) = use_item.r#type
@@ -1701,7 +1708,7 @@ fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
                 {
                     continue;
                 }
-                register_use_item(&use_item.item, spans);
+                register_use_item(&use_item.item, Some(prefix), spans);
             }
         }
     }

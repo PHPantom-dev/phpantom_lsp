@@ -29,8 +29,11 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
     // or >= 2 under a braced namespace).
     let mut brace_depth: usize = 0;
     let mut namespace_brace_depth: Option<usize> = None;
+    let mut pending_use_start: Option<usize> = None;
 
     for line in content.split('\n') {
+        let line_brace_depth = brace_depth;
+
         // Update brace depth for braces on this line (crude but
         // sufficient — we only need an approximate depth to tell
         // top-level from class-body).  We skip braces inside strings
@@ -69,8 +72,17 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
         // brace depth: depth 0 normally, or depth 1 when inside a
         // braced `namespace Foo { … }` block.
         let top_level_depth = namespace_brace_depth.map_or(0, |d| d + 1);
-        if trimmed.starts_with("use ") && trimmed.contains(';') && brace_depth == top_level_depth {
-            ranges.push((offset, offset + line.len()));
+        if let Some(start) = pending_use_start {
+            if trimmed.contains(';') {
+                ranges.push((start, offset + line.len()));
+                pending_use_start = None;
+            }
+        } else if line_brace_depth == top_level_depth && trimmed.starts_with("use ") {
+            if trimmed.contains(';') {
+                ranges.push((offset, offset + line.len()));
+            } else {
+                pending_use_start = Some(offset);
+            }
         }
         offset += line.len() + 1; // +1 for '\n'
     }

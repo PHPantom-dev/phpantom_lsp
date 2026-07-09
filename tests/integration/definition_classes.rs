@@ -480,6 +480,150 @@ async fn test_goto_definition_on_use_statement_name() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_cross_file_with_grouped_use_statement() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "Project\\": "src/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/CatalogIndex/Services/Validation/ComplementsScenarioValidation.php",
+                concat!(
+                    "<?php\n",
+                    "namespace Project\\CatalogIndex\\Services\\Validation;\n\n",
+                    "class ComplementsScenarioValidation {}\n",
+                ),
+            ),
+            (
+                "src/CatalogIndex/Services/Validation/ProductByModelValidation.php",
+                concat!(
+                    "<?php\n",
+                    "namespace Project\\CatalogIndex\\Services\\Validation;\n\n",
+                    "class ProductByModelValidation {}\n",
+                ),
+            ),
+        ],
+    );
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Project\\CatalogIndex\\Controllers;\n\n",
+        "use Project\\CatalogIndex\\Services\\Validation\\{ComplementsScenarioValidation, ProductByModelValidation};\n\n",
+        "class ProductController {\n",
+        "    public function test(ComplementsScenarioValidation $a): ProductByModelValidation {\n",
+        "        return new ProductByModelValidation();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 6,
+                character: 25,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve class imported via grouped use statement"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with(
+                    "src/CatalogIndex/Services/Validation/ComplementsScenarioValidation.php"
+                ),
+                "Should point to ComplementsScenarioValidation.php, got: {:?}",
+                path
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_on_grouped_use_statement_name() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "Project\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/CatalogIndex/Services/Validation/ComplementsScenarioValidation.php",
+            concat!(
+                "<?php\n",
+                "namespace Project\\CatalogIndex\\Services\\Validation;\n\n",
+                "class ComplementsScenarioValidation {}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Project\\CatalogIndex\\Controllers;\n\n",
+        "use Project\\CatalogIndex\\Services\\Validation\\{ComplementsScenarioValidation};\n\n",
+        "class ProductController {}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 53,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve class name inside grouped use statement"
+    );
+}
+
+#[tokio::test]
 async fn test_goto_definition_class_reference_via_namespace() {
     let (backend, _dir) = create_psr4_workspace(
         r#"{
