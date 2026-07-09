@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783622855840,
+  "lastUpdate": 1783624329452,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12171,6 +12171,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "a8fa3a501894a8a8bfe3694b4a377225ef48fdfc",
+          "message": "fix: infer array type for += when operands are arrays\n\nThe compound assignment operator += was unconditionally routed to\narithmetic type inference, producing int|float even when both operands\nwere arrays. PHP overloads + / += for array union, and the binary +\noperator already handled this correctly.\n\nSplit AssignmentOperator::Addition out of the arithmetic match arm in\nboth process_compound_assignment and the compound-assignment-as-RHS\npath, checking is_array_like() on either operand before falling through\nto numeric inference.\n\nCloses #150",
+          "timestamp": "2026-07-09T14:00:00-05:00",
+          "tree_id": "b90a478c86d9cc1d67e8c9406306ce99f4ef238f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a8fa3a501894a8a8bfe3694b4a377225ef48fdfc"
+        },
+        "date": 1783624328127,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.8,
             "unit": "MiB"
           }
         ]
