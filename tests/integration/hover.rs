@@ -11640,3 +11640,52 @@ function test(): void {
         "$n after numeric += should not be array: {result}"
     );
 }
+
+/// `ReflectionFunctionAbstract::getAttributes()` has a docblock return type
+/// of `ReflectionAttribute<T>[]`.  The `[]` suffix after a generic type must
+/// be preserved so the result is inferred as an array, not a single
+/// `ReflectionAttribute`.
+#[test]
+fn hover_reflection_get_attributes_returns_array() {
+    let backend = create_test_backend();
+    let uri = "file:///reflection_attrs.php";
+
+    // Provide a minimal stub inline so the test is self-contained.
+    let stub_uri = "file:///reflection_stub.php";
+    let stub = r#"<?php
+/**
+ * @template T
+ */
+class ReflectionAttribute {}
+class ReflectionFunctionAbstract {
+    /**
+     * @template T
+     * @param class-string<T>|null $name
+     * @return ReflectionAttribute<T>[]
+     */
+    public function getAttributes(?string $name = null, int $flags = 0): array {}
+}
+class ReflectionMethod extends ReflectionFunctionAbstract {}
+"#;
+    backend.update_ast(stub_uri, stub);
+
+    let content = r#"<?php
+function test(ReflectionMethod $ref): void {
+    $attrs = $ref->getAttributes();
+    $attrs;
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $attrs")).to_string();
+    assert!(
+        result.contains("array") || result.contains("[]"),
+        "$attrs from getAttributes() should be an array type, got: {result}"
+    );
+    assert!(
+        !result.contains("ReflectionAttribute<")
+            || result.contains("[]")
+            || result.contains("array"),
+        "$attrs should not be a bare ReflectionAttribute without array wrapper: {result}"
+    );
+}
