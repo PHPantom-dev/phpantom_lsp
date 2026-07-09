@@ -6943,6 +6943,7 @@ fn bind_foreach_key<'b>(
     if let Expression::Variable(Variable::Direct(dv)) = key_expr {
         let var_name = bytes_to_str(dv.name).to_string();
         if let Some(it) = iter_type {
+            // Strategy 1: extract from the type's own generic parameters.
             let key_php_type = it.extract_key_type(false);
             if let Some(kt) = key_php_type {
                 let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -6961,6 +6962,30 @@ fn bind_foreach_key<'b>(
                 }
                 return;
             }
+
+            // Strategy 2: class-based fallback for bare collection names.
+            // When the iterable is `PhpType::Named("Finder")` (no generics),
+            // look at the class's implements_generics / extends_generics to
+            // find the key type (e.g. IteratorAggregate<non-empty-string, SplFileInfo>).
+            if let Some(key_type) = resolve_iterable_key_via_class(it, ctx)
+                && !is_unsubstituted_template_param(&key_type)
+            {
+                let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
+                    &key_type,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+                if !resolved.is_empty() {
+                    scope.set(
+                        &var_name,
+                        ResolvedType::from_classes_with_hint(resolved, key_type),
+                    );
+                } else {
+                    scope.set(&var_name, vec![ResolvedType::from_type_string(key_type)]);
+                }
+                return;
+            }
         }
         // Default: key is int|string.
         scope.set(
@@ -6971,6 +6996,64 @@ fn bind_foreach_key<'b>(
             ]))],
         );
     }
+}
+
+/// Resolve the iterable **key** type from a class's `implements_generics`
+/// / `extends_generics`.  Mirrors `resolve_iterable_element_via_class`.
+fn resolve_iterable_key_via_class(
+    iter_type: &PhpType,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let class_name = match iter_type {
+        PhpType::Named(name) => name.as_str(),
+        _ => return None,
+    };
+
+    let classes = crate::completion::type_resolution::type_hint_to_classes_typed(
+        iter_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+
+    if classes.is_empty() {
+        let cls = (ctx.class_loader)(class_name)?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        return super::foreach_resolution::extract_iterable_key_type_from_class(
+            &merged,
+            ctx.class_loader,
+        );
+    }
+
+    for cls in &classes {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let key_type = super::foreach_resolution::extract_iterable_key_type_from_class(
+            &merged,
+            ctx.class_loader,
+        );
+        if let Some(ref kt) = key_type {
+            if let Some(name) = kt.base_name()
+                && merged
+                    .template_params
+                    .iter()
+                    .any(|p| p.as_ref() as &str == name)
+                && let Some(bound) = merged.template_param_bounds.get(&crate::atom::atom(name))
+            {
+                return Some(bound.clone());
+            }
+            return key_type;
+        }
+    }
+
+    None
 }
 
 /// Process a `while` loop.

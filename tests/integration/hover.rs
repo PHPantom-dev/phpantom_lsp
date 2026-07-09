@@ -11689,3 +11689,43 @@ function test(ReflectionMethod $ref): void {
         "$attrs should not be a bare ReflectionAttribute without array wrapper: {result}"
     );
 }
+
+/// Foreach key type should be extracted from a class's
+/// `implements_generics` when the iterable is a bare class name
+/// (e.g. Finder implementing `IteratorAggregate<non-empty-string, SplFileInfo>`).
+#[test]
+fn hover_foreach_key_from_iterator_aggregate_generics() {
+    let backend = create_test_backend();
+    let uri = "file:///foreach_key_iface.php";
+
+    let stub_uri = "file:///finder_stub.php";
+    let stub = r#"<?php
+class SplFileInfo {}
+
+/** @implements \IteratorAggregate<non-empty-string, SplFileInfo> */
+class Finder implements \IteratorAggregate, \Countable {
+    public function getIterator(): \Iterator {}
+    public function count(): int {}
+}
+"#;
+    backend.update_ast(stub_uri, stub);
+
+    let content = r#"<?php
+function test(Finder $files): void {
+    foreach ($files as $filePath => $file) {
+        $filePath;
+    }
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 3, 10).expect("hover $filePath")).to_string();
+    assert!(
+        result.contains("non-empty-string") || result.contains("string"),
+        "$filePath should be non-empty-string (or string), not int|string, got: {result}"
+    );
+    assert!(
+        !result.contains("int|string") && !result.contains("int | string"),
+        "$filePath should not fall back to int|string: {result}"
+    );
+}

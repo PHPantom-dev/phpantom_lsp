@@ -103,6 +103,46 @@ pub(in crate::completion) fn extract_iterable_element_type_from_class(
     None
 }
 
+/// Extract the iterable **key** type from a class's generic annotations.
+///
+/// Mirrors `extract_iterable_element_type_from_class` but returns the
+/// first generic parameter (key) instead of the last (value).  Only
+/// returns a key type when the iterable interface has 2+ generic
+/// parameters (so `list<User>` returns `None` → fallback to `int`).
+pub(in crate::completion) fn extract_iterable_key_type_from_class(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    // 1. Check implements_generics for known iterable interfaces.
+    for (name, args) in &class.implements_generics {
+        let short = short_name(name);
+        if ITERABLE_IFACE_NAMES.contains(&short) && args.len() >= 2 {
+            return Some(args[0].clone());
+        }
+    }
+
+    // 1b. Transitive iterable interfaces.
+    for (name, args) in &class.implements_generics {
+        let short = short_name(name);
+        if !ITERABLE_IFACE_NAMES.contains(&short)
+            && args.len() >= 2
+            && let Some(iface) = class_loader(name)
+            && is_transitive_iterable(&iface, class_loader)
+        {
+            return Some(args[0].clone());
+        }
+    }
+
+    // 2. Check extends_generics.
+    for (_, args) in &class.extends_generics {
+        if args.len() >= 2 {
+            return Some(args[0].clone());
+        }
+    }
+
+    None
+}
+
 /// Check whether an interface transitively extends a known iterable
 /// interface (e.g. `TypedCollection extends IteratorAggregate`).
 fn is_transitive_iterable(
