@@ -4452,3 +4452,41 @@ function test(): void {
         "Binary, octal, and underscored integer literals within range should be allowed, got: {diags:?}"
     );
 }
+
+#[test]
+fn string_literal_argument_ignores_quote_style() {
+    // A double-quoted argument literal must match a single-quoted docblock
+    // literal (and vice versa) when their unquoted contents are identical.
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function order_by(string $column, string $direction): void {}
+
+function test(): void {
+    order_by('id', "desc");
+    order_by('id', 'desc');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "String literal argument should match docblock literal regardless of quote style, got: {diags:?}"
+    );
+}
+
+#[test]
+fn string_literal_argument_still_flags_wrong_value() {
+    // Normalising quote style must not swallow genuinely mismatched values.
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function order_by(string $column, string $direction): void {}
+
+function test(): void {
+    order_by('id', "nope");
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A string literal outside the allowed set should still be flagged, got: {diags:?}"
+    );
+}
