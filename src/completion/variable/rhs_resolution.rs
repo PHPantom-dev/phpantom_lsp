@@ -1559,11 +1559,9 @@ fn resolve_array_literal_generic(
     // Must be an array literal.
     let inner = if trimmed.starts_with('[') && trimmed.ends_with(']') {
         trimmed[1..trimmed.len() - 1].trim()
-    } else if let Some(s) = trimmed.strip_prefix("array(") {
-        s.strip_suffix(')')?.trim()
     } else {
-        // Not an array literal — cannot infer.
-        return None;
+        let s = trimmed.strip_prefix("array(")?;
+        s.strip_suffix(')')?.trim()
     };
 
     if inner.is_empty() {

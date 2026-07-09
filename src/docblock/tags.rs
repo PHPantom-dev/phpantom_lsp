@@ -507,9 +507,9 @@ pub fn find_inline_var_docblock(
     let open_pos = trimmed.rfind("/**")?;
 
     // Ensure nothing but whitespace between the start of the line and `/**`.
-    let line_start = match trimmed.get(..open_pos) {
-        Some(s) => s.rfind('\n').map_or(0, |p| p + 1),
-        None => return None,
+    let line_start = {
+        let s = trimmed.get(..open_pos)?;
+        s.rfind('\n').map_or(0, |p| p + 1)
     };
     let prefix = trimmed.get(line_start..open_pos)?;
     if !prefix.chars().all(|c| c.is_ascii_whitespace()) {

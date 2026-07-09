@@ -137,7 +137,7 @@ impl Backend {
         {
             let idx = self.autoload_constant_index.read();
             let dmap = self.global_defines.read();
-            for (name, _path) in idx.iter() {
+            for name in idx.keys() {
                 if !name.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }

@@ -2003,7 +2003,7 @@ fn extract_from_expression<'a>(
                     }
                     // Emit call site for method call: `$subject->method(...)`
                     emit_call_site(
-                        format!("{}->{}", &subject_text, &member_name),
+                        format!("{}->{}", subject_text, member_name),
                         &method_call.argument_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
@@ -2040,7 +2040,7 @@ fn extract_from_expression<'a>(
                     // Use `->` so resolve_callable handles it the same
                     // as regular method calls.
                     emit_call_site(
-                        format!("{}->{}", &subject_text, &member_name),
+                        format!("{}->{}", subject_text, member_name),
                         &method_call.argument_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
@@ -2067,7 +2067,7 @@ fn extract_from_expression<'a>(
                     let member_name = bytes_to_str(ident.value).to_string();
                     // Emit call site for static method call: `Class::method(...)`
                     emit_call_site(
-                        format!("{}::{}", &subject_text, &member_name),
+                        format!("{}::{}", subject_text, member_name),
                         &static_call.argument_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,

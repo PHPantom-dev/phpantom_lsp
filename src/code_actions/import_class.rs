@@ -367,7 +367,7 @@ impl Backend {
         // ── 3. uri_classes_index (already-parsed files) ───────────────────────────
         {
             let amap = self.uri_classes_index.read();
-            for (_file_uri, classes) in amap.iter() {
+            for classes in amap.values() {
                 for cls in classes {
                     if cls.name.to_lowercase() == name_lower {
                         let fqn = match &cls.file_namespace {

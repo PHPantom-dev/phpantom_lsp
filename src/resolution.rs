@@ -718,7 +718,7 @@ impl Backend {
                     let mut fmap = self.global_functions.write();
                     for func in &functions {
                         let fqn = if let Some(ref ns) = func.namespace {
-                            format!("{}\\{}", ns, &func.name)
+                            format!("{}\\{}", ns, func.name)
                         } else {
                             func.name.to_string()
                         };

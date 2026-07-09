@@ -705,7 +705,7 @@ pub fn detect_phar_references(content: &str, file_dir: &Path) -> Vec<PathBuf> {
         //   '/phpstan.phar/src/'
         // We look for quoted strings containing `.phar` and extract
         // the path up to (and including) the `.phar` extension.
-        for quote in [b'\'', b'"'] {
+        for quote in *b"'\"" {
             let bytes = line.as_bytes();
             let mut i = 0;
             while i < bytes.len() {

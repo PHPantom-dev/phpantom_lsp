@@ -217,7 +217,7 @@ impl Backend {
         // ── 3. uri_classes_index namespace portions ───────────────────────────
         {
             let amap = self.uri_classes_index.read();
-            for (_uri, classes) in amap.iter() {
+            for classes in amap.values() {
                 for cls in classes {
                     if let Some(ns) = &cls.file_namespace {
                         let fqn = format!("{}\\{}", ns, cls.name);

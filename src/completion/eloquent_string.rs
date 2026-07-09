@@ -206,10 +206,9 @@ pub(crate) fn detect_eloquent_string_context(
         (true, stripped)
     } else if let Some(stripped) = before_method_trimmed.strip_suffix("?->") {
         (false, stripped)
-    } else if let Some(stripped) = before_method_trimmed.strip_suffix("->") {
-        (false, stripped)
     } else {
-        return None;
+        let stripped = before_method_trimmed.strip_suffix("->")?;
+        (false, stripped)
     };
 
     // Extract subject (class name or variable).
@@ -501,7 +500,7 @@ impl Backend {
             let detail = return_type.to_string();
 
             items.push(CompletionItem {
-                label: format!("{}{}", prefix, &method_name),
+                label: format!("{}{}", prefix, method_name),
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some(detail),
                 insert_text: Some(insert_text),

@@ -414,7 +414,7 @@ impl Backend {
 
                 for func_info in functions {
                     let fqn = if let Some(ref ns) = func_info.namespace {
-                        format!("{}\\{}", ns, &func_info.name)
+                        format!("{}\\{}", ns, func_info.name)
                     } else {
                         func_info.name.to_string()
                     };
@@ -670,7 +670,7 @@ impl Backend {
                         continue;
                     }
                     let fqn = if let Some(ns) = class_ns {
-                        format!("{}\\{}", ns, &class.name)
+                        format!("{}\\{}", ns, class.name)
                     } else {
                         class.name.to_string()
                     };

@@ -244,7 +244,7 @@ impl Backend {
                 tooltip: param
                     .type_hint
                     .as_ref()
-                    .map(|t| InlayHintTooltip::String(format!("{} {}", t, &param.name))),
+                    .map(|t| InlayHintTooltip::String(format!("{} {}", t, param.name))),
                 padding_left: None,
                 padding_right: Some(true),
                 data: None,
