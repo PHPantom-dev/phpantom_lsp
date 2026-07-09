@@ -3499,6 +3499,48 @@ fn see_tag_qualified_member_spans_aligned() {
 }
 
 #[test]
+fn see_tag_self_member_spans_emitted() {
+    let php = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function bar(): void {}\n",
+        "    /**\n",
+        "     * @see self::bar()\n",
+        "     */\n",
+        "    public function baz(): void {}\n",
+        "}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let self_offset = php.find("self::bar").unwrap() as u32;
+    let self_hit = map.lookup(self_offset).expect("Should find self keyword");
+    match self_hit.kind {
+        SymbolKind::SelfStaticParent(kind) => {
+            assert_eq!(kind, SelfStaticParentKind::Self_);
+        }
+        ref other => panic!("Expected SelfStaticParent for self, got {:?}", other),
+    }
+
+    let bar_offset = php.rfind("bar()").unwrap() as u32;
+    let bar_hit = map.lookup(bar_offset).expect("Should find bar member");
+    match &bar_hit.kind {
+        SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static,
+            is_docblock_reference,
+            ..
+        } => {
+            assert_eq!(subject_text, "self");
+            assert_eq!(member_name, "bar");
+            assert!(*is_static);
+            assert!(*is_docblock_reference);
+        }
+        other => panic!("Expected MemberAccess for bar, got {:?}", other),
+    }
+}
+
+#[test]
 fn see_tag_qualified_class_span_aligned() {
     // A bare qualified class reference (no `::`) also gets the synthetic
     // prefix; its span must not overshoot.

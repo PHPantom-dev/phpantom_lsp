@@ -63,6 +63,16 @@ pub(crate) enum SelfStaticParentKind {
     This,
 }
 
+pub(crate) fn self_static_parent_kind(name: &str) -> Option<SelfStaticParentKind> {
+    match name {
+        "self" => Some(SelfStaticParentKind::Self_),
+        "static" => Some(SelfStaticParentKind::Static),
+        "parent" => Some(SelfStaticParentKind::Parent),
+        "$this" => Some(SelfStaticParentKind::This),
+        _ => None,
+    }
+}
+
 /// The syntactic context in which a `ClassReference` appears.
 ///
 /// Used by the invalid-class-kind diagnostic to check whether the
