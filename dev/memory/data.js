@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783562270652,
+  "lastUpdate": 1783562978793,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11899,6 +11899,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e5221b28292e40e6eaa7c1002723fdb7ec73743e",
+          "message": "A rare internal parser error no longer permanently breaks a file",
+          "timestamp": "2026-07-09T03:55:04+02:00",
+          "tree_id": "1042f56b053cd8e229defdd32d06799d2fbba8f4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e5221b28292e40e6eaa7c1002723fdb7ec73743e"
+        },
+        "date": 1783562977192,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 61.5,
             "unit": "MiB"
           }
         ]
