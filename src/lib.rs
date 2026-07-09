@@ -96,6 +96,12 @@ use ci_map::{CiMap, CiSet};
 /// consumed by the syntax-error diagnostic collector.
 pub(crate) type ParseErrorEntry = (String, u32, u32);
 
+/// The standalone-function FQNs and `define()`/`const` names a single file
+/// contributed to the global symbol maps on its most recent parse:
+/// `(function_fqns, define_names)`.  Stored per URI in
+/// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
+pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
+
 // ─── Module declarations ────────────────────────────────────────────────────
 
 /// Maximum number of LSP requests the tower-lsp transport processes
@@ -288,6 +294,17 @@ pub struct Backend {
     /// `define()` calls or `const` statements.  Used for constant name
     /// completions, hover (showing the value), and go-to-definition.
     pub(crate) global_defines: Arc<RwLock<HashMap<String, DefineInfo>>>,
+    /// Per-URI record of the standalone-function FQNs and `define()`/`const`
+    /// names contributed to [`global_functions`](Self::global_functions) and
+    /// [`global_defines`](Self::global_defines) by the most recent parse of
+    /// each file.
+    ///
+    /// Value is `(function_fqns, define_names)`.  On re-parse this lets
+    /// [`update_ast`](Self::update_ast) evict the symbols an edit deleted or
+    /// renamed in `O(old + new)` — a targeted eviction analogous to the
+    /// `old_fqns` class eviction — instead of scanning the whole global maps
+    /// on every keystroke.
+    pub(crate) uri_globals_index: Arc<RwLock<HashMap<String, UriGlobals>>>,
     /// Autoload function index: function FQN → file path on disk.
     ///
     /// Populated by the lightweight `find_symbols` byte-level scan
@@ -764,6 +781,7 @@ impl Backend {
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
             global_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
+            uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
@@ -846,6 +864,7 @@ impl Backend {
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
             global_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
+            uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
@@ -1269,6 +1288,11 @@ impl Backend {
             self.clear_file_maps(uri_str);
             self.uri_classes_index.write().remove(uri_str);
             self.parsed_uris.write().remove(uri_str);
+            // The global_functions/global_defines entries for these URIs were
+            // just retained out above; drop the per-URI tracking record too so
+            // deleted files don't leave a stale entry behind.  Created/changed
+            // files rebuild it when re-parsed below.
+            self.uri_globals_index.write().remove(uri_str);
         }
 
         // Re-add current symbols for created/changed files.  Deleted files
@@ -1341,6 +1365,7 @@ impl Backend {
             file_namespaces: Arc::clone(&self.file_namespaces),
             global_functions: Arc::clone(&self.global_functions),
             global_defines: Arc::clone(&self.global_defines),
+            uri_globals_index: Arc::clone(&self.uri_globals_index),
             autoload_function_index: Arc::clone(&self.autoload_function_index),
             autoload_constant_index: Arc::clone(&self.autoload_constant_index),
             autoload_file_paths: Arc::clone(&self.autoload_file_paths),

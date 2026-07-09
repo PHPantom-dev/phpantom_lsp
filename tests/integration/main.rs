@@ -113,6 +113,7 @@ mod parser;
 mod php_version;
 mod references;
 mod references_laravel_trans;
+mod reparse_symbol_eviction;
 mod return_type_resolution;
 mod semantic_tokens;
 mod server_lifecycle;

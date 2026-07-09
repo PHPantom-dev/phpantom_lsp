@@ -324,6 +324,21 @@ impl Backend {
                 &namespace,
                 Some(&func_doc_ctx),
             );
+            // Recall the standalone functions and defines this file contributed
+            // on its previous parse so that symbols the edit deleted or renamed
+            // can be evicted from the global maps.  Without this, deleting or
+            // renaming a `function foo()` or `define('X', …)` leaves the old
+            // entry behind for the whole session (stale completion, hover, and
+            // go-to-definition).
+            let (old_function_fqns, old_define_names) = self
+                .uri_globals_index
+                .read()
+                .get(uri)
+                .cloned()
+                .unwrap_or_default();
+            let mut new_function_fqns: Vec<String> = Vec::new();
+            let mut new_define_names: Vec<String> = Vec::new();
+
             if !functions.is_empty() {
                 // Resolve class-like names in function return types and
                 // parameter type hints to FQNs so that cross-file consumers
@@ -373,7 +388,13 @@ impl Backend {
                         }
                     }
                 }
+            }
 
+            // Only take the write lock when this parse contributes functions
+            // or the previous parse did (so removals can be evicted).  The
+            // common case — a class file with no standalone functions that
+            // never had any — skips the lock and the eviction scan entirely.
+            if !functions.is_empty() || !old_function_fqns.is_empty() {
                 let mut fmap = self.global_functions.write();
 
                 // Snapshot old functions declared in this file before
@@ -445,6 +466,7 @@ impl Backend {
                     // builds namespace-qualified candidates, so a short-name
                     // fallback entry is unnecessary and would cause collisions
                     // when two namespaces define the same short name.
+                    new_function_fqns.push(fqn.clone());
                     fmap.insert(fqn, (uri.to_string(), func_info));
                 }
 
@@ -496,16 +518,46 @@ impl Backend {
                 &mut define_entries,
                 content,
             );
-            if !define_entries.is_empty() {
+            if !define_entries.is_empty() || !old_define_names.is_empty() {
                 let mut dmap = self.global_defines.write();
                 for (name, offset, value) in define_entries {
-                    dmap.entry(name)
-                        .or_insert_with(|| crate::types::DefineInfo {
+                    // Overwrite rather than `or_insert_with` so edits to an
+                    // existing `define`/`const` propagate: changing the value
+                    // updates hover, and inserting lines above it updates the
+                    // go-to-definition offset.
+                    new_define_names.push(name.clone());
+                    dmap.insert(
+                        name,
+                        crate::types::DefineInfo {
                             file_uri: uri.to_string(),
                             name_offset: offset,
                             value,
-                        });
+                        },
+                    );
                 }
+
+                // Evict names this file used to contribute but no longer does,
+                // guarding on the stored URI so a constant redefined in another
+                // file is not clobbered.
+                for old_name in &old_define_names {
+                    if new_define_names.contains(old_name) {
+                        continue;
+                    }
+                    if dmap.get(old_name).is_some_and(|d| d.file_uri == uri) {
+                        dmap.remove(old_name);
+                    }
+                }
+            }
+
+            // Record what this parse contributed so the next parse can evict
+            // whatever it removes.  Drop the entry entirely when the file has
+            // no globals, to avoid accumulating empty records for class files.
+            if new_function_fqns.is_empty() && new_define_names.is_empty() {
+                self.uri_globals_index.write().remove(uri);
+            } else {
+                self.uri_globals_index
+                    .write()
+                    .insert(uri.to_string(), (new_function_fqns, new_define_names));
             }
 
             // Post-process: resolve parent_class short names to fully-qualified

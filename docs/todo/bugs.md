@@ -8,41 +8,6 @@ pipeline so it produces correct data. Downstream consumers
 to second-guess upstream output.
 
 
-## B23. Deleted functions and stale `define()` data survive edits for the whole session
-
-**Severity: High (stale completions, wrong hover, wrong navigation) · Confirmed**
-
-`update_ast_inner` only ever **inserts** into the two global
-symbol maps; it never evicts entries that the edit removed:
-
-- `global_functions` (`src/parser/ast_update.rs:376-406`):
-  deleting or renaming a standalone `function foo()` leaves the
-  old entry keyed by its FQN. Completion keeps offering `foo()`,
-  hover shows the old signature, and go-to-definition jumps to a
-  stale byte offset, indefinitely.
-- `global_defines` (`src/parser/ast_update.rs:419-429`): uses
-  `dmap.entry(name).or_insert_with(...)`, so an existing entry is
-  **never updated at all** — not on deletion, and not even when
-  the value or position changes. Editing `define('X', 1)` to
-  `define('X', 2)` keeps showing `1` on hover; inserting a line
-  above the `define` leaves `name_offset` stale, so
-  go-to-definition lands on the wrong position.
-
-Nothing else repairs this while the file is open:
-`apply_watched_file_changes` explicitly skips open files
-(`src/server.rs:2255`), and `did_close` keeps both maps
-(intentionally, for cross-file resolution). Classes handle this
-correctly via `old_fqns` eviction (`ast_update.rs:526-531,
-583-584`); functions and defines need the same treatment.
-
-**Fix:** track which function FQNs / define names the previous
-parse of this URI contributed (analogous to `old_fqns`), evict
-those that disappeared, and make `global_defines` overwrite
-instead of `or_insert_with` so value/offset changes propagate.
-`reindex_files_batch` (`src/lib.rs:1254-1259`) already shows the
-retain-by-URI pattern for the watched-file path.
-
-
 ## B24. `parse_and_cache_content_versioned` leaves stale index entries on re-parse
 
 **Severity: Medium (ghost classes in resolution and hierarchy) · Confirmed**
