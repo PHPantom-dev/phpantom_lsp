@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783624329452,
+  "lastUpdate": 1783625458643,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12205,6 +12205,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "c3f5770ed6677d6a45a420d43dddfa4d566001c6",
+          "message": "fix: preserve [] array suffix after generic, shape, and paren types in docblocks\n\nsplit_type_token returned early after consuming the closing `>`, `}`,\nor `)\\ without checking for trailing `[]` suffixes.  This caused types\nlike `ReflectionAttribute<T>[]` to be parsed as bare\n`ReflectionAttribute<T>`, losing the array wrapper.\n\nAdd consume_array_suffix() and call it in all three closing-delimiter\npaths (angle, brace, paren) before consume_union_intersection_suffix().\nThis also fixes stacked suffixes like `Foo<T>[][]` and combined forms\nlike `array{id: int}[]|null`.\n\nCloses #157",
+          "timestamp": "2026-07-09T14:19:15-05:00",
+          "tree_id": "18ef5b22f6b790177f76228aa0d0ad914a013138",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c3f5770ed6677d6a45a420d43dddfa4d566001c6"
+        },
+        "date": 1783625457250,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.2,
             "unit": "MiB"
           }
         ]
