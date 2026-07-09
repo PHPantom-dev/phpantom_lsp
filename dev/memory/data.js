@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783618696004,
+  "lastUpdate": 1783621962993,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12098,6 +12098,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "91f2f35e402ad2dd1f6bf2320918a117a626b971",
+          "message": "fix: resolve grouped imports correctly\n\nGrouped use imports had two separate issues.\n\nFirst, unknown-class diagnostics skipped only single-line import\ndeclarations. When a grouped use statement was split across multiple\nlines, the imported names on continuation lines were treated as ordinary\nclass references and incorrectly flagged as missing.\n\nSecond, go-to-definition on a class name inside a grouped use\ndeclaration could fail because symbol extraction recorded the grouped\nitem without its namespace prefix, so the declaration-site reference did\nnot carry the correct fully-qualified name.\n\nTrack pending multiline use declarations until their terminating\nsemicolon, and record grouped use items with their full namespace\nprefix. Add regression coverage for parser/resolved-name handling,\nunknown-class diagnostics, and go-to-definition on both grouped import\nusage sites and grouped use declarations.\n\nRelates to #128",
+          "timestamp": "2026-07-09T13:20:17-05:00",
+          "tree_id": "97ef8aed85e797c6aa32fa3dfe9b902ac3c6fb9b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/91f2f35e402ad2dd1f6bf2320918a117a626b971"
+        },
+        "date": 1783621961230,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.1,
             "unit": "MiB"
           },
           {
