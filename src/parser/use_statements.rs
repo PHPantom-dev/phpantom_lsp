@@ -231,6 +231,57 @@ class RegistrationController {
         );
     }
 
+    #[test]
+    fn multiline_grouped_use_populates_use_map_and_resolved_names() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace Controllers\Registration;
+
+use Models\Common\{
+    Disciplines,
+    TeamMembers
+};
+
+class RegistrationController {
+    public function foo(Disciplines $d): TeamMembers {
+    }
+}
+"#;
+        backend.update_ast(uri, content);
+
+        let use_map = backend.file_imports.read();
+        let file_map = use_map
+            .get(uri)
+            .expect("use_map should have an entry for the file");
+
+        assert_eq!(
+            file_map.get("Disciplines"),
+            Some(&"Models\\Common\\Disciplines".to_string())
+        );
+        assert_eq!(
+            file_map.get("TeamMembers"),
+            Some(&"Models\\Common\\TeamMembers".to_string())
+        );
+        drop(use_map);
+
+        let resolved = backend.resolved_names.read();
+        let rn = resolved
+            .get(uri)
+            .expect("resolved_names should have an entry for the file");
+
+        let hint_offset = content
+            .find("Disciplines $d")
+            .expect("should find Disciplines type hint") as u32;
+        assert_eq!(rn.get(hint_offset), Some("Models\\Common\\Disciplines"));
+
+        let ret_offset = content
+            .find("): TeamMembers")
+            .map(|p| p + "): ".len())
+            .expect("should find TeamMembers return type") as u32;
+        assert_eq!(rn.get(ret_offset), Some("Models\\Common\\TeamMembers"));
+    }
+
     /// `use function Foo\bar;` should populate the use_map.
     #[test]
     fn use_function_populates_use_map() {

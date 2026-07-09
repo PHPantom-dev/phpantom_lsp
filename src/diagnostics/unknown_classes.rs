@@ -1237,6 +1237,57 @@ class Panel {}
     }
 
     #[test]
+    fn no_diagnostic_for_multiline_grouped_imports() {
+        let backend = Backend::new_test();
+
+        let uri_dep = "file:///services.php";
+        let content_dep = concat!(
+            "<?php\n",
+            "namespace Project\\CatalogIndex\\Services\\Validation;\n",
+            "class ComplementsScenarioValidation {}\n",
+            "class ProductByModelValidation {}\n",
+        );
+        backend.update_ast(uri_dep, content_dep);
+        {
+            let mut idx = backend.fqn_uri_index.write();
+            idx.insert(
+                "Project\\CatalogIndex\\Services\\Validation\\ComplementsScenarioValidation"
+                    .to_string(),
+                uri_dep.to_string(),
+            );
+            idx.insert(
+                "Project\\CatalogIndex\\Services\\Validation\\ProductByModelValidation".to_string(),
+                uri_dep.to_string(),
+            );
+        }
+
+        let uri = "file:///test.php";
+        let content = concat!(
+            "<?php\n",
+            "namespace Project\\CatalogIndex\\Controllers;\n\n",
+            "use Project\\CatalogIndex\\Services\\Validation\\{\n",
+            "    ComplementsScenarioValidation,\n",
+            "    ProductByModelValidation\n",
+            "};\n\n",
+            "class ProductController {\n",
+            "    public function test(ComplementsScenarioValidation $a): ProductByModelValidation {\n",
+            "        return new ProductByModelValidation();\n",
+            "    }\n",
+            "}\n",
+        );
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("ComplementsScenarioValidation")
+                    || d.message.contains("ProductByModelValidation")),
+            "should not flag classes imported via multiline grouped use, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn no_diagnostic_for_global_class_via_fqn_uri_index_lazy_load() {
         // A global-namespace class (like Mockery) that is discovered by
         // `scan_autoload_files` and placed in fqn_uri_index — but NOT yet
