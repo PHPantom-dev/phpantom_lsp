@@ -11729,3 +11729,128 @@ function test(Finder $files): void {
         "$filePath should not fall back to int|string: {result}"
     );
 }
+
+/// When a closure containing `yield` expressions is assigned to a variable
+/// and then passed to `LazyCollection::make($closure)`, the closure should
+/// expose a Generator return type and the collection should infer the
+/// `<int, string>` template args from it.
+#[test]
+fn hover_exact_discover_closure_and_paths() {
+    let backend = create_test_backend();
+    let uri = "file:///discover.php";
+
+    let stubs = r#"<?php
+namespace Symfony\Component\Finder;
+class SplFileInfo {
+    public function getRealPath(): string|false {}
+}
+/** @implements \IteratorAggregate<non-empty-string, SplFileInfo> */
+class Finder implements \IteratorAggregate, \Countable {
+    public static function create(): self {}
+    public function files(): self {}
+    public function name(string $pattern): self {}
+    /** @param string|list<string> $path */
+    public function path(string|array $path): self {}
+    public function getIterator(): \Iterator {}
+    public function count(): int {}
+}
+
+namespace Illuminate\Contracts\Support;
+/** @template TKey of array-key
+ *  @template TValue */
+interface Arrayable {}
+
+namespace Illuminate\Support;
+interface Enumerable {}
+/**
+ * @template TKey of array-key
+ * @template-covariant TValue
+ * @implements \Illuminate\Support\Enumerable<TKey, TValue>
+ */
+class LazyCollection implements Enumerable {
+    /**
+     * @var (\Closure(): \Generator<TKey, TValue, mixed, void>)|static|array<TKey, TValue>
+     */
+    public $source;
+
+    /**
+     * @param \Illuminate\Contracts\Support\Arrayable<TKey, TValue>|iterable<TKey, TValue>|(\Closure(): \Generator<TKey, TValue, mixed, void>)|self<TKey, TValue>|array<TKey, TValue>|null $source
+     */
+    public function __construct($source = null) {}
+
+    /**
+     * @template TMakeKey of array-key
+     * @template TMakeValue
+     * @param \Illuminate\Contracts\Support\Arrayable<TMakeKey, TMakeValue>|iterable<TMakeKey, TMakeValue>|(\Closure(): \Generator<TMakeKey, TMakeValue, mixed, void>)|self<TMakeKey, TMakeValue>|array<TMakeKey, TMakeValue>|null $items
+     * @return static<TMakeKey, TMakeValue>
+     */
+    public static function make($items = []) {}
+}
+"#;
+    backend.update_ast("file:///vendor_stubs.php", stubs);
+
+    let content = r#"<?php
+use Illuminate\Support\LazyCollection;
+use Symfony\Component\Finder\Finder;
+
+class Demo {
+    /**
+     * @param string|list<string> $path
+     * @return LazyCollection<int, string>
+     */
+    public function discover(string|array $path): LazyCollection
+    {
+        $closure = function () use ($path) {
+            $files = Finder::create()->files()->name('*.php')->path($path);
+
+            foreach ($files as $filePath => $file) {
+                yield (string) $file->getRealPath();
+            }
+        };
+
+        $paths = LazyCollection::make($closure);
+
+        $closure;
+        $paths;
+    }
+}
+"#;
+
+    let closure_hover =
+        hover_text(&hover_at(&backend, uri, content, 21, 10).expect("hover $closure")).to_string();
+    assert!(
+        closure_hover.contains("Closure")
+            && closure_hover.contains("Generator")
+            && closure_hover.contains("void"),
+        "$closure should include Generator return type, got: {closure_hover}"
+    );
+
+    let paths_hover =
+        hover_text(&hover_at(&backend, uri, content, 22, 10).expect("hover $paths")).to_string();
+    assert!(
+        !paths_hover.contains("Closure"),
+        "$paths should not resolve to Closure generics, got: {paths_hover}"
+    );
+}
+
+#[test]
+fn hover_generator_closure_infers_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///generator_return.php";
+    let content = r#"<?php
+function test(): void {
+    $closure = function () {
+        yield (string) 'x';
+        return 123;
+    };
+    $closure;
+}
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 6, 6).expect("hover $closure")).to_string();
+    assert!(
+        hover.contains("Generator") && hover.contains("string") && hover.contains("int"),
+        "$closure should expose Generator<int, string, mixed, int>-like type, got: {hover}"
+    );
+}

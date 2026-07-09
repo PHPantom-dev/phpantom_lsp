@@ -2112,6 +2112,26 @@ impl Backend {
                     }
                 }
                 TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
+                    // When the argument is a closure and the param hint
+                    // union contains a Callable variant (e.g.
+                    // `iterable<T>|(Closure(): Generator<T>)`), try yield
+                    // inference first — before array-like or hierarchy
+                    // extraction, which would incorrectly bind `Closure`.
+                    if let Some(concrete) = Self::try_closure_return_type_for_template(
+                        arg_text,
+                        tpl_name,
+                        tpl_position,
+                        param_hint,
+                        ctx,
+                    ) {
+                        crate::completion::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            concrete,
+                        );
+                        continue;
+                    }
+
                     // For array-like wrappers (`array<T>`, `list<T>`, etc.)
                     // resolve the argument to its array type and extract the
                     // positional generic argument.
@@ -2327,20 +2347,48 @@ impl Backend {
                                 concrete,
                             );
                         } else {
-                            crate::completion::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                resolved_type,
+                            // When the wrapper extraction fails and the
+                            // argument is a closure, try callable return
+                            // type inference as a fallback.  This handles
+                            // union param types like
+                            // `iterable<T>|(Closure(): Generator<T>)|null`
+                            // where the classifier picked GenericWrapper
+                            // from `iterable<T>` but the arg is a closure.
+                            let closure_fallback = Self::try_closure_return_type_for_template(
+                                arg_text,
+                                tpl_name,
+                                tpl_position,
+                                param_hint,
+                                ctx,
                             );
+                            if let Some(concrete) = closure_fallback {
+                                crate::completion::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    concrete,
+                                );
+                            } else {
+                                crate::completion::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    resolved_type,
+                                );
+                            }
                         }
                     }
                 }
                 TemplateBindingMode::CallableReturnType => {
                     // `@param callable(...): T $cb` — extract the closure's
                     // return type annotation from the argument text.
-                    if let Some(ret_type) =
+                    // Fall back to yield inference for generator closures.
+                    let ret_type =
                         super::source::helpers::extract_closure_return_type_from_text(arg_text)
-                    {
+                            .or_else(|| {
+                                super::source::helpers::infer_generator_type_from_closure_yields(
+                                    arg_text,
+                                )
+                            });
+                    if let Some(ret_type) = ret_type {
                         crate::completion::variable::rhs_resolution::insert_or_union(
                             &mut subs,
                             tpl_name.to_string(),
@@ -2441,6 +2489,98 @@ impl Backend {
         }
 
         subs
+    }
+
+    /// When a `GenericWrapper` extraction fails and the argument is a
+    /// closure, try to infer the template param from the closure's
+    /// return type (explicit annotation or yield inference).
+    ///
+    /// This handles union param types like
+    /// `iterable<TKey, TValue>|(Closure(): Generator<TKey, TValue, mixed, void>)`
+    /// where the classifier picked `GenericWrapper("iterable", pos)` but
+    /// the arg is actually a closure.  We look for a `Callable` variant
+    /// in the param hint union whose return type contains the template
+    /// param, infer the closure's return type (via annotation or yields),
+    /// and extract the generic arg at `tpl_position`.
+    pub(crate) fn try_closure_return_type_for_template(
+        arg_text: &str,
+        tpl_name: &str,
+        tpl_position: usize,
+        param_hint: Option<&PhpType>,
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        // Check that the param hint union contains a Callable variant
+        // whose return type is a Generic containing the template param.
+        let callable_return_type =
+            Self::find_callable_return_generic_in_hint(param_hint?, tpl_name)?;
+
+        let trimmed = arg_text.trim();
+
+        // Infer the closure's effective return type.
+        let closure_ret = if let Some(ret) =
+            super::source::helpers::extract_closure_return_type_from_text(arg_text).or_else(|| {
+                super::source::helpers::infer_generator_type_from_closure_yields(arg_text)
+            }) {
+            ret
+        } else {
+            // Variable/chain argument like `$closure`: resolve the argument
+            // type and, when it is a typed Closure(), unwrap its return type.
+            let resolved = Self::resolve_arg_text_to_type(trimmed, ctx)?;
+            match resolved.callable_return_type() {
+                Some(ret) if resolved.is_closure() => ret.clone(),
+                _ => return None,
+            }
+        };
+
+        // Match the inferred return type against the expected generic
+        // shape.  E.g., if callable returns `Generator<TKey, TValue, ...>`
+        // and we inferred `Generator<int, string, mixed, mixed>`, extract
+        // the arg at tpl_position.
+        if let (
+            PhpType::Generic(expected_name, _),
+            PhpType::Generic(inferred_name, inferred_args),
+        ) = (&callable_return_type, &closure_ret)
+        {
+            let exp_short = crate::util::short_name(expected_name);
+            let inf_short = crate::util::short_name(inferred_name);
+            if exp_short.eq_ignore_ascii_case(inf_short) {
+                return inferred_args.get(tpl_position).cloned();
+            }
+        }
+
+        // If the return type itself IS the template param (Closure(): T),
+        // return the whole inferred type.
+        if callable_return_type.is_named(tpl_name) {
+            return Some(closure_ret);
+        }
+
+        None
+    }
+
+    /// Search a (possibly union) param type for a `Callable` variant whose
+    /// return type is a Generic containing the given template param name.
+    /// Returns that Generic return type if found.
+    fn find_callable_return_generic_in_hint(hint: &PhpType, tpl_name: &str) -> Option<PhpType> {
+        match hint {
+            PhpType::Union(members) => {
+                for m in members {
+                    if let Some(found) = Self::find_callable_return_generic_in_hint(m, tpl_name) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            PhpType::Nullable(inner) => Self::find_callable_return_generic_in_hint(inner, tpl_name),
+            PhpType::Callable { return_type, .. } => {
+                if let Some(rt) = return_type
+                    && crate::completion::variable::rhs_resolution::type_contains_name(rt, tpl_name)
+                {
+                    return Some(rt.as_ref().clone());
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     /// Resolve an argument text string to a type name.

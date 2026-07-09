@@ -246,6 +246,269 @@ pub(in crate::completion) fn extract_closure_return_type_from_text(text: &str) -
     Some(PhpType::parse(ret_type))
 }
 
+/// Infer a `Generator<TKey, TValue>` return type from yield expressions
+/// in a closure or function literal that has no explicit return type.
+///
+/// Scans the closure body for `yield` statements (at the top brace
+/// depth, not inside nested closures/functions) and infers:
+/// - **Value type**: from PHP casts like `(string)`, literal types, or
+///   falls back to `mixed`.
+/// - **Key type**: `int` for bare `yield $expr`, or inferred from
+///   `yield $key => $value`.
+///
+/// Returns `None` if the text doesn't contain `yield`.
+pub(in crate::completion) fn infer_generator_type_from_closure_yields(
+    text: &str,
+) -> Option<PhpType> {
+    let trimmed = text.trim();
+
+    // Must be a closure or function literal.
+    let is_arrow = trimmed.starts_with("fn")
+        && trimmed
+            .get(2..3)
+            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
+    let is_closure = trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+
+    if !is_arrow && !is_closure {
+        return None;
+    }
+
+    // Find the opening `{` of the body.
+    let body_start = trimmed.find('{')?;
+    let body = &trimmed[body_start + 1..];
+
+    // Scan for `yield` at any depth within the closure body,
+    // but skip nested function/closure definitions.
+    let mut depth = 0i32;
+    let mut nested_fn_depth = 0i32; // tracks brace depth inside nested fn/closure
+    let mut value_type: Option<PhpType> = None;
+    let mut key_type: Option<PhpType> = None;
+    let mut found_yield = false;
+    let mut return_type: Option<PhpType> = None;
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        let c = bytes[i];
+        match c {
+            b'{' => depth += 1,
+            b'}' => {
+                if depth == 0 {
+                    break; // end of closure body
+                }
+                depth -= 1;
+                if nested_fn_depth > 0 {
+                    nested_fn_depth -= 1;
+                }
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                // Skip line comments.
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'\'' | b'"' => {
+                // Skip string literals.
+                let quote = c;
+                i += 1;
+                while i < len && bytes[i] != quote {
+                    if bytes[i] == b'\\' {
+                        i += 1; // skip escaped char
+                    }
+                    i += 1;
+                }
+            }
+            // Detect nested `function` or `fn` keywords to skip
+            // their bodies (yields inside nested closures belong
+            // to a different generator).
+            b'f' if nested_fn_depth == 0
+                && (body[i..].starts_with("function")
+                    && body
+                        .as_bytes()
+                        .get(i + 8)
+                        .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+                    || body[i..].starts_with("fn")
+                        && body
+                            .as_bytes()
+                            .get(i + 2)
+                            .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')) =>
+            {
+                // Skip ahead to the opening `{` of the nested function
+                // and mark the depth so we ignore everything inside.
+                if let Some(brace) = body[i..].find('{') {
+                    i += brace; // will hit `{` on next iteration
+                    nested_fn_depth = 1;
+                }
+            }
+            b'y' if nested_fn_depth == 0
+                && body[i..].starts_with("yield")
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
+                && i + 5 < len
+                && !bytes[i + 5].is_ascii_alphanumeric()
+                && bytes[i + 5] != b'_' =>
+            {
+                found_yield = true;
+                let after_yield = body[i + 5..].trim_start();
+
+                // Skip `yield from` — that delegates to another iterator.
+                if after_yield.starts_with("from")
+                    && after_yield
+                        .as_bytes()
+                        .get(4)
+                        .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+                {
+                    i += 5;
+                    continue;
+                }
+
+                // Check for `yield $key => $value` vs bare `yield $value`.
+                if let Some(semi_pos) = find_statement_end(after_yield) {
+                    let yield_expr = after_yield[..semi_pos].trim();
+                    if let Some(arrow_pos) = find_fat_arrow_outside_parens(yield_expr) {
+                        // yield $key => $value
+                        let key_text = yield_expr[..arrow_pos].trim();
+                        let val_text = yield_expr[arrow_pos + 2..].trim();
+                        if key_type.is_none() {
+                            key_type = infer_type_from_simple_expr(key_text);
+                        }
+                        if value_type.is_none() {
+                            value_type = infer_type_from_simple_expr(val_text);
+                        }
+                    } else {
+                        // bare yield $value — key is int
+                        if key_type.is_none() {
+                            key_type = Some(PhpType::int());
+                        }
+                        if value_type.is_none() {
+                            value_type = infer_type_from_simple_expr(yield_expr);
+                        }
+                    }
+                }
+            }
+            b'r' if nested_fn_depth == 0
+                && body[i..].starts_with("return")
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
+                && i + 6 < len
+                && !bytes[i + 6].is_ascii_alphanumeric()
+                && bytes[i + 6] != b'_' =>
+            {
+                let after_return = body[i + 6..].trim_start();
+                if let Some(semi_pos) = find_statement_end(after_return) {
+                    let return_expr = after_return[..semi_pos].trim();
+                    let inferred = if return_expr.is_empty() {
+                        PhpType::void()
+                    } else {
+                        infer_type_from_simple_expr(return_expr).unwrap_or_else(PhpType::mixed)
+                    };
+                    return_type = Some(match return_type.take() {
+                        Some(existing) if existing.equivalent(&inferred) => existing,
+                        Some(existing) => PhpType::Union(vec![existing, inferred]),
+                        None => inferred,
+                    });
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if !found_yield {
+        return None;
+    }
+
+    let key = key_type.unwrap_or_else(PhpType::int);
+    let value = value_type.unwrap_or_else(PhpType::mixed);
+    let ret = return_type.unwrap_or_else(PhpType::void);
+
+    Some(PhpType::Generic(
+        "Generator".to_string(),
+        vec![key, value, PhpType::mixed(), ret],
+    ))
+}
+
+/// Find the end of a statement (`;` or `}`) at brace/paren depth 0.
+fn find_statement_end(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            ';' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find `=>` outside parentheses/brackets in a yield expression.
+fn find_fat_arrow_outside_parens(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len().saturating_sub(1) {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b'=' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Infer a type from a simple expression (cast, literal, etc.).
+fn infer_type_from_simple_expr(expr: &str) -> Option<PhpType> {
+    let trimmed = expr.trim();
+
+    // PHP cast: (string), (int), (float), (bool), (array), (object)
+    if trimmed.starts_with('(')
+        && let Some(close) = trimmed.find(')')
+    {
+        let cast = trimmed[1..close].trim().to_lowercase();
+        match cast.as_str() {
+            "string" => return Some(PhpType::string()),
+            "int" | "integer" => return Some(PhpType::int()),
+            "float" | "double" | "real" => return Some(PhpType::float()),
+            "bool" | "boolean" => return Some(PhpType::bool()),
+            "array" => return Some(PhpType::Named("array".to_string())),
+            "object" => return Some(PhpType::Named("object".to_string())),
+            _ => {} // might be a parenthesized expression, not a cast
+        }
+    }
+
+    // String literal
+    if (trimmed.starts_with('"') || trimmed.starts_with('\'')) && trimmed.len() >= 2 {
+        return Some(PhpType::string());
+    }
+
+    // Numeric literal
+    if trimmed.bytes().next().is_some_and(|b| b.is_ascii_digit()) {
+        if trimmed.contains('.') {
+            return Some(PhpType::float());
+        }
+        return Some(PhpType::int());
+    }
+
+    // true / false / null
+    match trimmed.to_lowercase().as_str() {
+        "true" | "false" => return Some(PhpType::bool()),
+        "null" => return Some(PhpType::null()),
+        _ => {}
+    }
+
+    // Can't infer from text alone — caller may use resolve_arg_text_to_type.
+    None
+}
+
 /// Extract the type annotation of the Nth parameter from a closure or
 /// arrow-function literal.
 ///
