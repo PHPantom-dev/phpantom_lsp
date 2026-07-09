@@ -4931,6 +4931,13 @@ fn process_array_key_assignment<'b>(
             return;
         }
 
+        // If the base variable is a string, bracket-indexed assignment
+        // (`$str[0] = 'z'`) modifies the string in-place — the variable
+        // remains a string, it does NOT become an array.
+        if base_type.is_string_subtype() {
+            return;
+        }
+
         // Extract all keys in the chain.
         let all_string_keys: Option<Vec<String>> = key_chain
             .iter()

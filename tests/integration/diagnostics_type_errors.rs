@@ -4490,3 +4490,23 @@ function test(): void {
         "A string literal outside the allowed set should still be flagged, got: {diags:?}"
     );
 }
+
+#[test]
+fn no_false_positive_for_string_indexed_assignment() {
+    // When a string variable is modified via bracket-index assignment
+    // (`$str[0] = 'z'`), the variable should remain a `string` — it
+    // must NOT be widened to `array<int, string>`.
+    // See: https://github.com/PHPantom-dev/phpantom_lsp/issues/207
+    let php = r#"<?php
+function test(): void {
+    $x = "abc";
+    $x[0] = "z";
+    echo bin2hex($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "String indexed assignment should preserve string type, got: {diags:?}"
+    );
+}
