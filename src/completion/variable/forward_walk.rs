@@ -4184,8 +4184,22 @@ fn process_compound_assignment<'b>(
         | AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
         | AssignmentOperator::BitwiseXor(_) => PhpType::int(),
-        AssignmentOperator::Addition(_)
-        | AssignmentOperator::Subtraction(_)
+        AssignmentOperator::Addition(_) => {
+            // PHP overloads `+` / `+=` for array union vs numeric addition.
+            // If either operand is array-like, the result is array.
+            let lhs_types = scope.get(&var_name).to_vec();
+            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+            let either_is_array = lhs_types
+                .iter()
+                .chain(rhs_types.iter())
+                .any(|rt| rt.type_string.is_array_like());
+            if either_is_array {
+                PhpType::Named("array".to_string())
+            } else {
+                infer_arithmetic_result_type(&lhs_types, &rhs_types, false)
+            }
+        }
+        AssignmentOperator::Subtraction(_)
         | AssignmentOperator::Multiplication(_)
         | AssignmentOperator::Division(_)
         | AssignmentOperator::Exponentiation(_) => {
@@ -4355,8 +4369,25 @@ fn resolve_rhs_with_scope<'b>(
             | AssignmentOperator::BitwiseAnd(_)
             | AssignmentOperator::BitwiseOr(_)
             | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
-            AssignmentOperator::Addition(_)
-            | AssignmentOperator::Subtraction(_)
+            AssignmentOperator::Addition(_) => {
+                // PHP overloads `+` / `+=` for array union vs numeric addition.
+                let lhs_types = if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
+                    scope.get(bytes_to_str(dv.name)).to_vec()
+                } else {
+                    vec![]
+                };
+                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                let either_is_array = lhs_types
+                    .iter()
+                    .chain(rhs_types.iter())
+                    .any(|rt| rt.type_string.is_array_like());
+                if either_is_array {
+                    Some(PhpType::Named("array".to_string()))
+                } else {
+                    Some(infer_arithmetic_result_type(&lhs_types, &rhs_types, false))
+                }
+            }
+            AssignmentOperator::Subtraction(_)
             | AssignmentOperator::Multiplication(_)
             | AssignmentOperator::Division(_)
             | AssignmentOperator::Exponentiation(_) => {
