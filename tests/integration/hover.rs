@@ -11590,3 +11590,53 @@ function probe(\PDOStatement $stmt): void {
         "fetchAll(FETCH_OBJ) elements should be stdClass: {item}"
     );
 }
+
+/// `+=` on arrays is an array union in PHP, not numeric addition.
+/// The inferred type must be `array`, not `int|float`.
+#[test]
+fn hover_array_plus_assign_infers_array() {
+    let backend = create_test_backend();
+    let uri = "file:///array_plus_assign.php";
+    let content = r#"<?php
+function test(): void {
+    $array = ['a' => 1];
+    $array += ['foo' => 'bar'];
+    $array;
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $array")).to_string();
+    assert!(
+        result.contains("array"),
+        "$array after += with array literal should be array, got: {result}"
+    );
+    assert!(
+        !result.contains("int|float"),
+        "$array after += should not be int|float: {result}"
+    );
+}
+
+/// Numeric `+=` should still infer `int|float` (regression guard).
+#[test]
+fn hover_numeric_plus_assign_still_infers_numeric() {
+    let backend = create_test_backend();
+    let uri = "file:///numeric_plus_assign.php";
+    let content = r#"<?php
+function test(): void {
+    $n = 1;
+    $n += 2;
+    $n;
+}
+"#;
+
+    let result = hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $n")).to_string();
+    assert!(
+        result.contains("int"),
+        "$n after numeric += should contain int, got: {result}"
+    );
+    assert!(
+        !result.contains("array"),
+        "$n after numeric += should not be array: {result}"
+    );
+}
