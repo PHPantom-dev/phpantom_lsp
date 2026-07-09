@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783625458643,
+  "lastUpdate": 1783628692089,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12239,6 +12239,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "a2ff1b5efd1c4fc4d6b6d72bee5f7a66c6c4d8df",
+          "message": "fix: infer foreach key type from class implements_generics\n\nWhen iterating over a class like Finder that implements\nIteratorAggregate<non-empty-string, SplFileInfo>, the foreach key\nvariable fell back to int|string because bind_foreach_key only\nchecked the type's own generic parameters via extract_key_type().\n\nAdd extract_iterable_key_type_from_class() in foreach_resolution.rs\n(mirrors the existing element/value extractor) and\nresolve_iterable_key_via_class() in forward_walk.rs. bind_foreach_key\nnow uses this as a Strategy 2 fallback, matching the pattern already\nused by bind_foreach_value.\n\nRelates to #144",
+          "timestamp": "2026-07-09T15:12:35-05:00",
+          "tree_id": "dec7218eb0f0031573cb5b6677ce30bc83e11566",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a2ff1b5efd1c4fc4d6b6d72bee5f7a66c6c4d8df"
+        },
+        "date": 1783628691010,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 49.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 60.9,
             "unit": "MiB"
           }
         ]
