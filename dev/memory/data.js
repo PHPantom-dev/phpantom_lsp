@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783621962993,
+  "lastUpdate": 1783622855840,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12137,6 +12137,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "efb56fc6b7866f15d56d9197288798368c30ded8",
+          "message": "fix: add missing schema for phpcs and mago\n\nRelated #135",
+          "timestamp": "2026-07-09T13:35:17-05:00",
+          "tree_id": "732a44a0a0ba2d3f889f396f1fc76470fb89e053",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/efb56fc6b7866f15d56d9197288798368c30ded8"
+        },
+        "date": 1783622854815,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64,
             "unit": "MiB"
           }
         ]
