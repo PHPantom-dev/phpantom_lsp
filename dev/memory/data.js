@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783571859701,
+  "lastUpdate": 1783605327492,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11967,6 +11967,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "3a102b316856faa4a38f20f2f16c9a19d5e2ecf6",
+          "message": "fix: preserve string type on bracket-indexed assignment\n\nString indexed assignment ($str[0] = 'z') incorrectly widened the\nvariable's type from string to array<int, string>. In PHP, bracket\nindexing on a string modifies it in-place — the variable remains a\nstring.\n\nAdd an early return in process_array_key_assignment when the base type\nis a string subtype, mirroring the existing guard for object types.\n\nFixes #207",
+          "timestamp": "2026-07-09T08:41:02-05:00",
+          "tree_id": "247945539cde234c86db5f55a0eda18551cd56f9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3a102b316856faa4a38f20f2f16c9a19d5e2ecf6"
+        },
+        "date": 1783605325985,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.5,
             "unit": "MiB"
           }
         ]
