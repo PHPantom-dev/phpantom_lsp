@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783610935531,
+  "lastUpdate": 1783618696004,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12069,6 +12069,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "675496a9618e29b80c845cb0ab73fdf14a7dcb1a",
+          "message": "fix: support self member references in @see tags\n\nDocblock @see extraction already handled ClassName::member references,\nbut dropped self::member, static::member, and parent::member during\nsymbol extraction because those keywords were filtered out as non-\nnavigable class names.\n\nTeach @see extraction to treat self/static/parent like the rest of the\nsymbol map does, emitting SelfStaticParent for the left-hand side and a\nnormal docblock MemberAccess for the referenced member. This restores\ngo-to-definition for class docblocks that refer to their own members.\n\nCloses #211",
+          "timestamp": "2026-07-09T12:25:41-05:00",
+          "tree_id": "31b1e7fd9b7dee275c329305c6d7edfc94c2b3ec",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/675496a9618e29b80c845cb0ab73fdf14a7dcb1a"
+        },
+        "date": 1783618693939,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.8,
             "unit": "MiB"
           }
         ]
