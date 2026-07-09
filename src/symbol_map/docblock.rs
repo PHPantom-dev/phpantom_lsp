@@ -24,7 +24,9 @@ use crate::docblock::types::split_type_token;
 use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
-use super::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolSpan};
+use super::{
+    ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolSpan, self_static_parent_kind,
+};
 use crate::util::strip_fqn_prefix;
 
 // ─── Navigability filter ────────────────────────────────────────────────────
@@ -966,15 +968,9 @@ fn emit_type_spans_from_ast(
             // `static`, `self`, and `parent` are parsed as keywords by
             // mago but should still produce SelfStaticParent spans.
             let name = bytes_to_str(k.value);
-            if name == "static" || name == "self" || name == "parent" {
+            if let Some(ssp_kind) = self_static_parent_kind(name) {
                 let start = base_offset + k.span.start.offset;
                 let end = base_offset + k.span.end.offset;
-                let ssp_kind = match name {
-                    "self" => SelfStaticParentKind::Self_,
-                    "static" => SelfStaticParentKind::Static,
-                    "parent" => SelfStaticParentKind::Parent,
-                    _ => unreachable!(),
-                };
                 spans.push(SymbolSpan {
                     start,
                     end,
@@ -1008,13 +1004,7 @@ fn emit_type_spans_from_ast(
 fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<SymbolSpan>) {
     // Handle `self`, `static`, `parent` — they're class-like but get
     // a special span kind.
-    if name == "static" || name == "self" || name == "parent" {
-        let ssp_kind = match name {
-            "self" => SelfStaticParentKind::Self_,
-            "static" => SelfStaticParentKind::Static,
-            "parent" => SelfStaticParentKind::Parent,
-            _ => unreachable!(),
-        };
+    if let Some(ssp_kind) = self_static_parent_kind(name) {
         spans.push(SymbolSpan {
             start,
             end,
@@ -1440,18 +1430,20 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             return;
         }
 
-        // Skip non-navigable class names (scalars, etc.).
+        // Accept regular class names and self/static/parent.
         let clean_class = class_part.trim_start_matches('\\');
-        if !is_navigable_type(clean_class) {
+        let is_self_like = self_static_parent_kind(clean_class).is_some();
+        if !is_self_like && !is_navigable_type(clean_class) {
             return;
         }
 
-        // Emit a ClassReference span for the class portion. Lengths and the
-        // separator position were measured on the prefixed string, so undo
-        // the synthetic prefix to land on the original source bytes.
+        // Emit a ClassReference or SelfStaticParent span for the class
+        // portion. Lengths and the separator position were measured on the
+        // prefixed string, so undo the synthetic prefix to land on the
+        // original source bytes.
         let class_start = file_offset;
         let class_end = file_offset + class_part.len() as u32 - prefix_len;
-        spans.push(class_ref_span(class_start, class_end, class_part));
+        emit_identifier_span(clean_class, class_start, class_end, spans);
 
         // Emit a MemberAccess span for the member portion.
         let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
@@ -1480,7 +1472,15 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         // If it looks like a class (starts with uppercase or `\`),
         // emit as ClassReference; otherwise skip.
         let clean = reference.trim_start_matches('\\');
-        if clean.is_empty() || !is_navigable_type(clean) {
+        let self_like = self_static_parent_kind(clean);
+        if clean.is_empty() || (self_like.is_none() && !is_navigable_type(clean)) {
+            return;
+        }
+
+        if self_like.is_some() {
+            let start = file_offset;
+            let end = file_offset + reference.len() as u32 - prefix_len;
+            emit_identifier_span(clean, start, end, spans);
             return;
         }
 
