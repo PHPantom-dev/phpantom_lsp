@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783708922473,
+  "lastUpdate": 1783709959931,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12749,6 +12749,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "5a429cc876704d8c6c97c33dd3f797dcce55a1d3",
+          "message": "feat: support overloaded function signatures in type checking\n\nFunctions with multiple PHP signatures (like strtr, implode,\narray_keys) now store alternate parameter lists in FunctionInfo.\noverloads. During stub parsing, duplicate function declarations\nwith different parameter counts are merged into overloads.\n\nThe type checker tries all overloads before emitting a diagnostic:\nif the call matches ANY signature, no error is reported.\n\nFixes #165",
+          "timestamp": "2026-07-10T13:46:16-05:00",
+          "tree_id": "3597449d80711cffdcdf262ed77114cd28fa385f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5a429cc876704d8c6c97c33dd3f797dcce55a1d3"
+        },
+        "date": 1783709958566,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.7,
             "unit": "MiB"
           }
         ]
