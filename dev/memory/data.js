@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783707582830,
+  "lastUpdate": 1783707823883,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12681,6 +12681,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "68f83e78604468fbea92bf19405cdc3a09460853",
+          "message": "fix: iterator_to_array now returns array instead of iterator type\n\niterator_to_array($iter) where $iter is Iterator<Foo> now correctly\nresolves to list<Foo> (or array<K, V> when both key and value generic\nparams are available) instead of returning the raw Iterator type.\n\nRoot cause: resolve_array_func_raw_type returned the raw iterator\ntype directly instead of wrapping the extracted element type in an\narray. Also used extract_value_type(true) which skipped scalar\nelement types.\n\nFix: extract key/value types from the iterator and construct the\nappropriate array type (generic_array for key+value, list for\nvalue-only, bare array as fallback).\n\nFixes #173.",
+          "timestamp": "2026-07-10T13:11:18-05:00",
+          "tree_id": "796c77045f60dd8cfa03ac2027041e8b0fface81",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/68f83e78604468fbea92bf19405cdc3a09460853"
+        },
+        "date": 1783707822142,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 49.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64,
             "unit": "MiB"
           }
         ]
