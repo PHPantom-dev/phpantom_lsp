@@ -825,8 +825,9 @@ fn test_class_sort_text_format() {
         false,
         &table,
     );
-    // quality='a' (exact), origin='0', tier='2', affinity=9999-4=9995 → "9995", demote='0', gap=5-5=0 → "000"
-    assert_eq!(result, "a0299950000_order");
+    // quality='a' (exact), source='2', origin='0', affinity=9999-4=9995 → "9995", demote='0', gap=5-5=0 → "000"
+    // source_tier sorts before origin_tier so imported items always rank first.
+    assert_eq!(result, "a2099950000_order");
 }
 
 #[test]

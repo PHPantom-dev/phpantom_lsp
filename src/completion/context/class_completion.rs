@@ -989,7 +989,7 @@ pub(in crate::completion) fn match_quality(short_name: &str, prefix: &str) -> ch
 
 /// Assemble a sort_text string for a class name completion item.
 ///
-/// The format is `{match_quality}{origin_tier}{source_tier}{affinity}{demote}{gap}_{short_name_lower}`
+/// The format is `{match_quality}{source_tier}{origin_tier}{affinity}{demote}{gap}_{short_name_lower}`
 /// where:
 /// - `match_quality`: `'a'` exact, `'b'` starts-with, `'c'` contains
 /// - `source_tier`: `'0'` use-imported, `'1'` same-namespace, `'2'` everything else
@@ -1003,6 +1003,11 @@ pub(in crate::completion) fn match_quality(short_name: &str, prefix: &str) -> ch
 ///   first.  This smooths the visual transition as a prefix match
 ///   narrows toward an exact match (e.g. typing "Pro" ranks `Product`
 ///   above `ProductFilterTerm` when both share the same affinity).
+///
+/// **`source_tier` sorts before `origin_tier`** so that an already-imported
+/// class always ranks above a non-imported one, regardless of where it
+/// comes from.  A vendor class that's already in the file's `use` map
+/// is more relevant than a project class the user hasn't imported yet.
 pub(in crate::completion) fn class_sort_text(
     short_name: &str,
     fqn: &str,
@@ -1023,8 +1028,8 @@ pub(in crate::completion) fn class_sort_text(
     format!(
         "{}{}{}{}{}{}_{}",
         quality,
-        origin_tier,
         source_tier,
+        origin_tier,
         affinity,
         demote,
         gap,

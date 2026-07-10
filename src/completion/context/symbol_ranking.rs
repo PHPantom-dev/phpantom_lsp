@@ -11,11 +11,13 @@ pub(crate) fn flat_symbol_sort_text(
     source_tier: char,
 ) -> String {
     let quality = super::class_completion::match_quality(short_name, prefix);
+    // source_tier before origin_tier: imported symbols always rank above
+    // non-imported ones, regardless of provenance.
     format!(
         "{}{}{}_{}",
         quality,
-        origin_tier,
         source_tier,
+        origin_tier,
         short_name.to_lowercase()
     )
 }
