@@ -192,6 +192,96 @@ async fn test_class_name_completion_prioritizes_project_core_explicit_then_trans
     );
 }
 
+/// After a `composer` change the origin ranking must be rebuilt: a package
+/// that was transitive but is now an explicit dependency should be promoted
+/// ahead of the packages that remain transitive.
+#[tokio::test]
+async fn test_composer_change_refreshes_completion_provenance() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let composer_path = dir.path().join("composer.json");
+    // Initially neither vendor package is required, so both are transitive.
+    fs::write(
+        &composer_path,
+        r#"{ "name": "demo/project", "require": {} }"#,
+    )
+    .expect("write composer.json");
+
+    // Equal-length class names so the only ranking difference is the origin
+    // tier: "ExAlpha" (stays transitive) sorts before "ExOmega" by name,
+    // and promoting ExOmega's package must flip that order.
+    for (pkg, ns, class) in [
+        ("stays/trans", "Stays\\Trans", "ExAlpha"),
+        ("promoted/dep", "Promoted\\Dep", "ExOmega"),
+    ] {
+        let file = dir.path().join(format!("vendor/{pkg}/src/{class}.php"));
+        fs::create_dir_all(file.parent().unwrap()).expect("mkdir pkg");
+        fs::write(
+            &file,
+            format!("<?php\nnamespace {ns};\nclass {class} {{}}\n"),
+        )
+        .expect("write vendor class");
+    }
+
+    let composer_dir = dir.path().join("vendor/composer");
+    fs::create_dir_all(&composer_dir).expect("mkdir vendor/composer");
+    fs::write(
+        composer_dir.join("installed.json"),
+        r#"{
+            "packages": [
+                { "name": "stays/trans", "install-path": "../stays/trans",
+                  "autoload": { "psr-4": { "Stays\\Trans\\": ["src/"] } } },
+                { "name": "promoted/dep", "install-path": "../promoted/dep",
+                  "autoload": { "psr-4": { "Promoted\\Dep\\": ["src/"] } } }
+            ]
+        }"#,
+    )
+    .expect("write installed.json");
+
+    let backend = create_test_backend_with_full_stubs();
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = "<?php\nnew Ex\n";
+    let dep_pos = |fqns: &[&str], fqn: &str| fqns.iter().position(|f| *f == fqn);
+
+    // Before the change both are transitive (tier 3), so they tie-break by
+    // name: ExAlpha before ExOmega.
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+    let classes = class_items(&items);
+    let before = fqns(&classes);
+    assert!(
+        dep_pos(&before, "Stays\\Trans\\ExAlpha") < dep_pos(&before, "Promoted\\Dep\\ExOmega"),
+        "expected transitive packages tie-broken by name, got: {before:?}"
+    );
+
+    // A `composer require promoted/dep` promotes it to an explicit
+    // dependency; the editor notifies us of the composer.json change.
+    fs::write(
+        &composer_path,
+        r#"{ "name": "demo/project", "require": { "promoted/dep": "*" } }"#,
+    )
+    .expect("rewrite composer.json");
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&composer_path).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        })
+        .await;
+
+    // Now promoted/dep is explicit (tier 2) and must sort ahead of the
+    // still-transitive stays/trans (tier 3), flipping the order.
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+    let classes = class_items(&items);
+    let after = fqns(&classes);
+    assert!(
+        dep_pos(&after, "Promoted\\Dep\\ExOmega") < dep_pos(&after, "Stays\\Trans\\ExAlpha"),
+        "expected newly-explicit dependency promoted ahead of transitive one, got: {after:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_function_completion_prioritizes_project_core_explicit_then_transitive() {
     let backend = create_test_backend_with_full_stubs();

@@ -1955,6 +1955,9 @@ impl Backend {
                 idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
             }
         }
+        // Cache the package roots so path-based origin lookups
+        // (functions, constants) can classify lazily parsed symbols.
+        *self.vendor_package_origin_roots.write() = vendor_package_roots;
 
         // ── Drupal: scan web-root directories (gitignore bypassed) ──
         // Drupal's .gitignore excludes web/core, web/modules/contrib,
@@ -2371,8 +2374,17 @@ impl Backend {
             let vendor_dir = composer::get_vendor_dir(&pkg);
             let vendor_path = root.join(&vendor_dir);
 
-            // Rebuild vendor classmap.
-            let vendor_scan = classmap_scanner::scan_vendor_packages(root, &vendor_dir);
+            // Rebuild vendor classmap, tracking dependency provenance so
+            // completion ranking stays accurate after a composer change.
+            let explicit_deps = composer::explicit_dependency_names(&pkg);
+            let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+                root,
+                &vendor_dir,
+                &HashSet::new(),
+                &explicit_deps,
+            );
+            let vendor_package_roots =
+                classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
             {
                 let vendor_uri_prefix = if let Ok(canonical) = vendor_path.canonicalize() {
                     format!("{}/", crate::util::path_to_uri(&canonical))
@@ -2382,29 +2394,49 @@ impl Backend {
 
                 // Remove old vendor entries and insert new ones.
                 let mut idx = self.fqn_uri_index.write();
+                let mut origins = self.fqn_origin_index.write();
                 idx.retain(|_, v| !v.starts_with(&vendor_uri_prefix));
                 for (fqn, path) in vendor_scan.classmap {
+                    let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
+                    origins.insert(fqn.clone(), origin);
                     idx.insert(fqn, crate::util::path_to_uri(&path));
                 }
             }
             {
                 let mut fi = self.autoload_function_index.write();
+                let mut origins = self.autoload_function_origin_index.write();
                 // Purge functions that pointed into the old vendor tree
                 // before re-inserting, so symbols removed by a
                 // `composer update` no longer resolve.
                 fi.retain(|_, v| !v.starts_with(&vendor_path));
                 for (fqn, path) in vendor_scan.function_index {
+                    let origin = vendor_scan
+                        .function_origins
+                        .get(&fqn)
+                        .copied()
+                        .unwrap_or(crate::ClassCompletionOrigin::Project);
+                    origins.insert(fqn.clone(), origin);
                     fi.insert(fqn, path);
                 }
             }
             {
                 let mut ci = self.autoload_constant_index.write();
+                let mut origins = self.autoload_constant_origin_index.write();
                 // Same for constants from the old vendor tree.
                 ci.retain(|_, v| !v.starts_with(&vendor_path));
                 for (name, path) in vendor_scan.constant_index {
+                    let origin = vendor_scan
+                        .constant_origins
+                        .get(&name)
+                        .copied()
+                        .unwrap_or(crate::ClassCompletionOrigin::Project);
+                    origins.insert(name.clone(), origin);
                     ci.insert(name, path);
                 }
             }
+
+            // Refresh the cached package roots for path-based lookups.
+            *self.vendor_package_origin_roots.write() = vendor_package_roots;
 
             // Rescan autoload files (they may have changed).
             self.scan_autoload_files(root, &vendor_dir);

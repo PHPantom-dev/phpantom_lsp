@@ -1171,7 +1171,7 @@ impl Backend {
 
     pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
         if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
-            return ClassCompletionOrigin::VendorExplicit;
+            return ClassCompletionOrigin::CoreStub;
         }
         if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)
             && let Ok(path) = url.to_file_path()
