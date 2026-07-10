@@ -2459,6 +2459,119 @@ class Real {}
     }
 
     #[test]
+    fn scan_vendor_packages_custom_autoloader_full_scans_package() {
+        // Mirrors Rector: the package's only autoload entry is a `files`
+        // bootstrap that registers its own `spl_autoload_register`
+        // callback. No PSR-4 or classmap entry covers the real classes,
+        // which live in `src/` and `rules/` under the `Rector\`
+        // namespace. Because we cannot execute the runtime autoloader,
+        // the scanner must full-scan the package directory to discover
+        // them.
+        let dir = tempfile::tempdir().unwrap();
+        let vendor = dir.path().join("vendor");
+        let composer_dir = vendor.join("composer");
+        std::fs::create_dir_all(&composer_dir).unwrap();
+
+        let pkg = vendor.join("rector").join("rector");
+        std::fs::create_dir_all(pkg.join("src").join("Config")).unwrap();
+        std::fs::create_dir_all(pkg.join("rules").join("CodingStyle")).unwrap();
+        std::fs::write(
+            pkg.join("bootstrap.php"),
+            "<?php\nspl_autoload_register(function (string $class): void {});",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("src").join("Config").join("RectorConfig.php"),
+            "<?php\nnamespace Rector\\Config;\nclass RectorConfig {}",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("rules").join("CodingStyle").join("SomeRector.php"),
+            "<?php\nnamespace Rector\\CodingStyle;\nclass SomeRector {}",
+        )
+        .unwrap();
+
+        let installed = serde_json::json!({
+            "packages": [
+                {
+                    "name": "rector/rector",
+                    "install-path": "../rector/rector",
+                    "autoload": {
+                        "files": ["bootstrap.php"]
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            composer_dir.join("installed.json"),
+            serde_json::to_string(&installed).unwrap(),
+        )
+        .unwrap();
+
+        let result = scan_vendor_packages(dir.path(), "vendor");
+        assert!(
+            result.classmap.contains_key("Rector\\Config\\RectorConfig"),
+            "classes under src/ must be discovered via the full-scan fallback"
+        );
+        assert!(
+            result
+                .classmap
+                .contains_key("Rector\\CodingStyle\\SomeRector"),
+            "classes under rules/ must be discovered via the full-scan fallback"
+        );
+    }
+
+    #[test]
+    fn scan_vendor_packages_files_autoload_without_autoloader_is_not_full_scanned() {
+        // A plain `files` autoload (no spl_autoload_register) must NOT
+        // trigger a full package scan — only the listed file is indexed.
+        // This guards against regressing the custom-autoloader heuristic
+        // into an unconditional full scan of every `files` package.
+        let dir = tempfile::tempdir().unwrap();
+        let vendor = dir.path().join("vendor");
+        let composer_dir = vendor.join("composer");
+        std::fs::create_dir_all(&composer_dir).unwrap();
+
+        let pkg = vendor.join("acme").join("helpers");
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("functions.php"),
+            "<?php\nfunction acme_helper(): void {}",
+        )
+        .unwrap();
+        // A class that is only reachable via a real PSR-4 autoloader —
+        // there is none declared, so it must stay undiscovered.
+        std::fs::write(
+            pkg.join("src").join("Internal.php"),
+            "<?php\nnamespace Acme\\Helpers;\nclass Internal {}",
+        )
+        .unwrap();
+
+        let installed = serde_json::json!({
+            "packages": [
+                {
+                    "name": "acme/helpers",
+                    "install-path": "../acme/helpers",
+                    "autoload": {
+                        "files": ["functions.php"]
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            composer_dir.join("installed.json"),
+            serde_json::to_string(&installed).unwrap(),
+        )
+        .unwrap();
+
+        let result = scan_vendor_packages(dir.path(), "vendor");
+        assert!(
+            !result.classmap.contains_key("Acme\\Helpers\\Internal"),
+            "a plain files autoload must not trigger a full package scan"
+        );
+    }
+
+    #[test]
     fn scan_workspace_fallback_finds_all() {
         let dir = tempfile::tempdir().unwrap();
         let sub = dir.path().join("lib");
