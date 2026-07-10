@@ -264,11 +264,27 @@ impl Backend {
             SymbolKind::ClassDeclaration { name }
             | SymbolKind::MemberDeclaration { name, .. }
             | SymbolKind::NamespaceDeclaration { name } => {
-                // The cursor is on a declaration name.  Return the
-                // symbol's own location so that editors can detect
-                // "definition == current position" and fall back to
-                // Find References (e.g. VS Code's
-                // editor.gotoLocation.alternativeDefinitionCommand).
+                // The cursor is on a declaration name, so "go to
+                // definition" has nowhere to jump — we are already at the
+                // definition.  Implement "Declaration or Usages" by
+                // returning the symbol's usages instead.
+                //
+                // VS Code achieves this by detecting "definition ==
+                // current position" and running Find References itself
+                // (editor.gotoLocation.alternativeDefinitionCommand), but
+                // PHPStorm simply navigates to the returned location and
+                // stops.  Returning the usages directly makes the feature
+                // work uniformly across clients.
+                let usages = self.find_references(uri, content, position, false);
+                if let Some(usages) = usages
+                    && !usages.is_empty()
+                {
+                    return Some(usages);
+                }
+
+                // No usages found: fall back to the declaration's own
+                // location so clients that rely on the self-location
+                // signal (VS Code) still trigger their reference fallback.
                 let parsed_uri = Url::parse(uri).ok()?;
                 let start = crate::util::offset_to_position(content, cursor_offset as usize);
                 let end =
