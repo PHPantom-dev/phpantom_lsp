@@ -5060,3 +5060,41 @@ function formatDateLike(object $value): string {
         diags
     );
 }
+
+// ─── Reassignment in if-branch must not leak into the elseif *condition* ────
+
+#[test]
+fn no_false_unknown_member_in_elseif_condition_after_reassign() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // The then-branch reassigns `$value` to a type without `format()`.  A
+    // member access in the following elseif *condition* must resolve
+    // `$value` against the clean pre-branch scope (where it is still
+    // `HasFormat`), not the leaked then-branch type.  This exercises the
+    // scope snapshot recorded at the elseif condition boundary — the body
+    // snapshots recorded by the forward walker do not cover the condition.
+    let php = r#"<?php
+class HasFormat {
+    public function format(): string { return 'formatted'; }
+}
+class NoFormat {
+    public function other(): string { return 'other'; }
+}
+
+function test(HasFormat $value, bool $flag): string {
+    if ($flag) {
+        $value = new NoFormat();
+    } elseif ($value->format() === 'x') {
+        return 'a';
+    }
+
+    return 'b';
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, php);
+    assert!(
+        diags.is_empty(),
+        "reassignment in if-branch must not leak into the elseif condition: {:?}",
+        diags
+    );
+}
