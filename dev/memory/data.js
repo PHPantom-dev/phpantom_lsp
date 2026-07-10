@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783702669244,
+  "lastUpdate": 1783705292544,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12545,6 +12545,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "147a46cd4e6d642d7edc420298d17a3d056b6756",
+          "message": "fix: variable assignments in if-branches no longer leak into elseif\n\nThe diagnostic scope cache already correctly records a clean scope\nsnapshot at each elseif condition boundary (forward_walk.rs:5628-5633),\npreventing assignments from preceding if/elseif bodies from affecting\ntype resolution in elseif conditions and bodies.\n\nAdd regression tests to prevent future regressions:\n- #167: $value = true in if-branch must not make elseif see bool\n- #168: instanceof narrowing must not leak into elseif body\n\nFixes #167, #168.",
+          "timestamp": "2026-07-10T12:29:08-05:00",
+          "tree_id": "6877954880aa0182f29a418de5a54fbe1bd69238",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/147a46cd4e6d642d7edc420298d17a3d056b6756"
+        },
+        "date": 1783705290424,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.3,
             "unit": "MiB"
           }
         ]
