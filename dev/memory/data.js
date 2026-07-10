@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783705292544,
+  "lastUpdate": 1783706735266,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12579,6 +12579,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "741d0db1eea2cb61395bd2acd0a35a8edeb28880",
+          "message": "fix: reassign from own array offset now updates variable type\n\n$value = $value[0] after $value held list<string>|false now correctly\nnarrows $value to string instead of keeping the old array|false type.\n\nRoot cause: resolve_rhs_array_access called extract_value_type(true)\nwhich skips scalar element types (designed for completion filtering).\nChanged to extract_element_type() (= extract_value_type(false)) so\nscalar types like string are preserved during assignment resolution.\n\nFixes #169.",
+          "timestamp": "2026-07-10T12:54:31-05:00",
+          "tree_id": "822ae9207506ecf76c165162ce0e3d80c171abb0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/741d0db1eea2cb61395bd2acd0a35a8edeb28880"
+        },
+        "date": 1783706733711,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.7,
             "unit": "MiB"
           }
         ]
