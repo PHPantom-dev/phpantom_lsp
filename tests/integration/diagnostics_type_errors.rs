@@ -4681,3 +4681,51 @@ function test(): void {
         type_error_messages(&diags)
     );
 }
+
+// ─── Issue #167: assignment in if-branch must not leak into elseif condition ─
+
+#[test]
+fn no_false_positive_for_var_reassigned_in_if_branch() {
+    let php = r#"<?php
+function normalizeBooleanString(string $value): bool
+{
+    if (mb_strtolower($value) === 't') {
+        $value = true;
+    } elseif (mb_strtolower($value) === 'f') {
+        $value = false;
+    }
+
+    return (bool) $value;
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Assignment in if-branch must not affect elseif condition (issue #167): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #167 (variant): simpler reproduction without stubs ───────────────
+
+#[test]
+fn no_false_positive_for_var_reassigned_in_if_branch_simple() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(string $value): void
+{
+    if ($value === 't') {
+        $value = true;
+    } elseif ($value === 'f') {
+        takes_string($value);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Assignment in if-branch must not leak into elseif (issue #167): {:?}",
+        type_error_messages(&diags)
+    );
+}

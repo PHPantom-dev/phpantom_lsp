@@ -5031,3 +5031,32 @@ class MyController {
         with_diags
     );
 }
+
+// ─── Issue #168: instanceof narrowing must not leak into elseif body ────────
+
+#[test]
+fn no_false_unknown_member_in_elseif_after_instanceof() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class KnownDateLike {
+    public function format(): string { return 'formatted'; }
+}
+
+function formatDateLike(object $value): string {
+    if ($value instanceof KnownDateLike) {
+        $value = $value->format();
+    } elseif (is_callable([$value, 'getTime'])) {
+        $value = (string) $value->getTime();
+    }
+
+    return (string) $value;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, php);
+    assert!(
+        diags.is_empty(),
+        "instanceof narrowing from if-branch must not leak into elseif (issue #168): {:?}",
+        diags
+    );
+}
