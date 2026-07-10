@@ -330,6 +330,7 @@ fn run_php_cs_fixer(
             .arg("--quiet")
             .arg("--no-interaction")
             .arg(temp.path()),
+        "php-cs-fixer",
         timeout,
     );
 
@@ -413,10 +414,7 @@ fn run_pint(
                 if start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!(
-                        "Formatter timed out after {}ms",
-                        timeout.as_millis()
-                    ));
+                    return Err(format!("pint timed out after {}ms", timeout.as_millis()));
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -446,6 +444,7 @@ fn run_phpcbf(
             .arg("--no-colors")
             .arg("-q")
             .arg(temp.path()),
+        "phpcbf",
         timeout,
     );
 
@@ -510,16 +509,21 @@ struct CommandResult {
 
 /// Spawn a command, wait for it with a timeout, and return the result.
 ///
-/// Stdout is suppressed.  Stderr is captured for error reporting.
+/// Stdin is redirected to `/dev/null` so the child cannot inherit and steal
+/// bytes from the language server's own stdin (the JSON-RPC input pipe) —
+/// doing so corrupts the LSP stream and kills the connection.  Stdout is
+/// suppressed.  Stderr is captured for error reporting.
 fn run_command_with_timeout(
     command: &mut Command,
+    tool_name: &str,
     timeout: Duration,
 ) -> Result<CommandResult, String> {
     let mut child = command
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn formatter: {}", e))?;
+        .map_err(|e| format!("Failed to spawn {}: {}", tool_name, e))?;
 
     let start = std::time::Instant::now();
     loop {
@@ -545,7 +549,8 @@ fn run_command_with_timeout(
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
-                        "Formatter timed out after {}ms",
+                        "{} timed out after {}ms",
+                        tool_name,
                         timeout.as_millis()
                     ));
                 }
@@ -553,7 +558,7 @@ fn run_command_with_timeout(
             }
             Err(e) => {
                 let _ = child.kill();
-                return Err(format!("Error waiting for formatter: {}", e));
+                return Err(format!("Error waiting for {}: {}", tool_name, e));
             }
         }
     }
