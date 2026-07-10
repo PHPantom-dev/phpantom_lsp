@@ -5625,6 +5625,12 @@ fn process_if_statement_body<'b>(
             apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
             let _ = prev_idx;
         }
+        // Record a scope snapshot at the elseif condition boundary so
+        // that diagnostic variable lookups inside the condition don't
+        // pick up assignments from preceding if/elseif bodies.
+        if is_diagnostic_scope_active() {
+            record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
+        }
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
@@ -5638,6 +5644,12 @@ fn process_if_statement_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
         for ei in body.else_if_clauses.iter() {
             apply_condition_narrowing_inverse(ei.condition, &mut else_scope, ctx);
+        }
+        // Record a scope snapshot at the else boundary so that
+        // diagnostic variable lookups inside the else body don't
+        // pick up assignments from the if/elseif bodies.
+        if is_diagnostic_scope_active() {
+            record_scope_snapshot(else_clause.statement.span().start.offset, &else_scope);
         }
         walk_body_forward(std::iter::once(else_clause.statement), &mut else_scope, ctx);
         let exits = statement_unconditionally_exits(else_clause.statement);
@@ -5825,6 +5837,12 @@ fn process_if_colon_body<'b>(
     let mut all_scopes = vec![then_scope];
     for ei in body.else_if_clauses.iter() {
         let mut ei_scope = pre_if_scope.clone();
+        // Record a scope snapshot at the elseif condition boundary so
+        // that diagnostic variable lookups inside the condition don't
+        // pick up assignments from preceding if/elseif bodies.
+        if is_diagnostic_scope_active() {
+            record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
+        }
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
@@ -5834,6 +5852,12 @@ fn process_if_colon_body<'b>(
     if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
+        // Record a scope snapshot at the else boundary.
+        if is_diagnostic_scope_active()
+            && let Some(first_stmt) = else_clause.statements.first()
+        {
+            record_scope_snapshot(first_stmt.span().start.offset, &else_scope);
+        }
         walk_body_forward(else_clause.statements.iter(), &mut else_scope, ctx);
         all_scopes.push(else_scope);
     } else {
