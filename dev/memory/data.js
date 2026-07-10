@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783674799553,
+  "lastUpdate": 1783676721412,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12307,6 +12307,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c90500405f0787031524a0578026aafa61b45050",
+          "message": "feat: infer Generator type from closure yield expressions for template binding (#217)\n\nCo-authored-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-10T11:33:09+02:00",
+          "tree_id": "9e863eecc5a9cd11da888a38006bd6040e78fa23",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c90500405f0787031524a0578026aafa61b45050"
+        },
+        "date": 1783676720318,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 61.9,
             "unit": "MiB"
           }
         ]
