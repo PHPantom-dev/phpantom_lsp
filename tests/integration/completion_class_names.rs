@@ -163,9 +163,14 @@ async fn test_class_name_completion_prioritizes_project_core_explicit_then_trans
     *backend.workspace_root().write() = Some(dir.path().to_path_buf());
     backend.initialized(InitializedParams {}).await;
 
+    // Use a file in the App namespace so that App\RuntimeException is
+    // same-namespace (source '1') and all other RuntimeException variants
+    // are non-imported (source '2').  This isolates origin_tier ordering
+    // for non-imported classes.  (Without a namespace the global core
+    // RuntimeException would be same-namespace and sort first.)
     let uri = Url::parse("file:///app.php").unwrap();
-    let text = "<?php\nnew RuntimeE\n";
-    let items = complete_at(&backend, &uri, text, 1, 12).await;
+    let text = "<?php\nnamespace App;\nnew RuntimeE\n";
+    let items = complete_at(&backend, &uri, text, 2, 12).await;
     let classes = class_items(&items);
 
     let project_pos = classes
@@ -323,11 +328,13 @@ async fn test_function_completion_prioritizes_project_core_explicit_then_transit
     let items = complete_at(&backend, &uri, text, 1, 9).await;
     let funcs = function_items(&items);
     let sorts: Vec<String> = funcs.iter().filter_map(|i| i.sort_text.clone()).collect();
+    // sort_text format: {quality}{source}{origin}_name
+    // source_tier sorts before origin_tier.
     assert!(
         sorts.iter().any(|s| s.starts_with("b00_"))
-            && sorts.iter().any(|s| s.starts_with("b10_"))
-            && sorts.iter().any(|s| s.starts_with("b21_"))
-            && sorts.iter().any(|s| s.starts_with("b31_")),
+            && sorts.iter().any(|s| s.starts_with("b01_"))
+            && sorts.iter().any(|s| s.starts_with("b12_"))
+            && sorts.iter().any(|s| s.starts_with("b13_")),
         "expected project/core/explicit/transitive sort tiers in function completions, got: {sorts:?}"
     );
 }
@@ -858,12 +865,13 @@ async fn test_class_name_completion_same_namespace() {
         class_fqns
     );
 
-    // Same-namespace should have source tier '1' at position 2.
+    // Same-namespace should have source tier '1' at position 1
+    // (source_tier sorts before origin_tier).
     let service_item = find_by_fqn(&classes, "App\\UserService").unwrap();
     let sort = service_item.sort_text.as_deref().unwrap_or("");
     assert!(
-        sort.len() > 2 && &sort[2..3] == "1",
-        "Same-namespace classes should have source tier '1' at position 2, got: {:?}",
+        sort.len() > 1 && &sort[1..2] == "1",
+        "Same-namespace classes should have source tier '1' at position 1, got: {:?}",
         sort
     );
 }
