@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783678998388,
+  "lastUpdate": 1783679547206,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12438,6 +12438,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 39.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e600605445cb13e7e65967c5862845b5cab0fe3e",
+          "message": "External formatters no longer corrupt the connection",
+          "timestamp": "2026-07-10T12:20:02+02:00",
+          "tree_id": "10e519ebb236b4e5ac48fe57d28de67a0a91e153",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e600605445cb13e7e65967c5862845b5cab0fe3e"
+        },
+        "date": 1783679546163,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.9,
             "unit": "MiB"
           },
           {
