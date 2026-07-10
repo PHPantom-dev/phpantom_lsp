@@ -285,7 +285,7 @@ pub(crate) fn vendor_package_roots(
     workspace_root: &Path,
     vendor_dir: &str,
     explicit_deps: &HashSet<String>,
-) -> Vec<(PathBuf, crate::ClassCompletionOrigin)> {
+) -> Vec<(PathBuf, crate::ClassCompletionOrigin, String)> {
     let vendor_path = workspace_root.join(vendor_dir);
     let installed_path = vendor_path.join("composer").join("installed.json");
     let Ok(content) = std::fs::read_to_string(&installed_path) else {
@@ -304,31 +304,27 @@ pub(crate) fn vendor_package_roots(
     let composer_dir = vendor_path.join("composer");
     let mut roots = Vec::new();
     for package in packages {
-        let origin = package
+        let pkg_name = package
             .get("name")
             .and_then(|n| n.as_str())
-            .map(|name| {
-                if explicit_deps.contains(name) {
-                    crate::ClassCompletionOrigin::VendorExplicit
-                } else {
-                    crate::ClassCompletionOrigin::VendorTransitive
-                }
-            })
-            .unwrap_or(crate::ClassCompletionOrigin::VendorTransitive);
+            .unwrap_or("unknown/unknown");
+        let origin = if explicit_deps.contains(pkg_name) {
+            crate::ClassCompletionOrigin::VendorExplicit
+        } else {
+            crate::ClassCompletionOrigin::VendorTransitive
+        };
         let pkg_path =
             if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
                 composer_dir.join(install_path)
-            } else if let Some(pkg_name) = package.get("name").and_then(|n| n.as_str()) {
-                vendor_path.join(pkg_name)
             } else {
-                continue;
+                vendor_path.join(pkg_name)
             };
         let pkg_path = pkg_path.canonicalize().unwrap_or(pkg_path);
         if pkg_path.is_dir() {
-            roots.push((pkg_path, origin));
+            roots.push((pkg_path, origin, pkg_name.to_string()));
         }
     }
-    roots.sort_by_key(|(p, _)| std::cmp::Reverse(p.components().count()));
+    roots.sort_by_key(|(p, _, _)| std::cmp::Reverse(p.components().count()));
     roots
 }
 

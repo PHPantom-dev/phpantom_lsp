@@ -509,7 +509,8 @@ pub struct Backend {
     ///
     /// Used to classify function/constant/class symbols by whether they
     /// originate from explicit or transitive Composer dependencies.
-    pub(crate) vendor_package_origin_roots: Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin)>>>,
+    pub(crate) vendor_package_origin_roots:
+        Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin, String)>>>,
     /// Monotonically increasing version counter for diagnostic debouncing.
     ///
     /// Bumped on every `did_change`.  A background diagnostic task
@@ -1166,30 +1167,48 @@ impl Backend {
         &self.open_files
     }
 
-    pub(crate) fn completion_origin_for_path(&self, path: &Path) -> ClassCompletionOrigin {
-        let vendor_paths = self.vendor_dir_paths.lock();
-        if !vendor_paths.iter().any(|vp| path.starts_with(vp)) {
-            return ClassCompletionOrigin::Project;
-        }
-        let roots = self.vendor_package_origin_roots.read();
-        for (root, origin) in roots.iter() {
-            if path.starts_with(root) {
-                return *origin;
-            }
-        }
-        ClassCompletionOrigin::VendorTransitive
+    pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
+        self.package_info_for_uri(uri).0
     }
 
-    pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
+    /// Return the completion origin **and** the Composer package name
+    /// (e.g. `"laravel/framework"`) for the given file path.
+    ///
+    /// Returns `(ClassCompletionOrigin::Project, None)` for project files,
+    /// `(ClassCompletionOrigin::CoreStub, None)` for stubs, and
+    /// `(origin, Some(package_name))` for vendor files.
+    pub(crate) fn package_info_for_path(
+        &self,
+        path: &Path,
+    ) -> (ClassCompletionOrigin, Option<String>) {
+        let vendor_paths = self.vendor_dir_paths.lock();
+        if !vendor_paths.iter().any(|vp| path.starts_with(vp)) {
+            return (ClassCompletionOrigin::Project, None);
+        }
+        let roots = self.vendor_package_origin_roots.read();
+        for (root, origin, pkg_name) in roots.iter() {
+            if path.starts_with(root) {
+                return (*origin, Some(pkg_name.clone()));
+            }
+        }
+        (ClassCompletionOrigin::VendorTransitive, None)
+    }
+
+    /// Return the completion origin **and** the Composer package name
+    /// for the given file URI.
+    pub(crate) fn package_info_for_uri(
+        &self,
+        uri: &str,
+    ) -> (ClassCompletionOrigin, Option<String>) {
         if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
-            return ClassCompletionOrigin::CoreStub;
+            return (ClassCompletionOrigin::CoreStub, None);
         }
         if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)
             && let Ok(path) = url.to_file_path()
         {
-            return self.completion_origin_for_path(&path);
+            return self.package_info_for_path(&path);
         }
-        ClassCompletionOrigin::Project
+        (ClassCompletionOrigin::Project, None)
     }
 
     /// Borrow the PHPStan diagnostics cache (used by integration tests
