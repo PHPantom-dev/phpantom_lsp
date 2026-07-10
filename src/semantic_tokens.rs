@@ -15,11 +15,14 @@
 //! `defaultLibrary` modifier so that themes can distinguish them from
 //! user-defined symbols.
 
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::diagnostics::unknown_members::member_exists;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
-use crate::types::ClassLikeKind;
+use crate::types::{ClassInfo, ClassLikeKind};
 
 // ─── Token type indices ─────────────────────────────────────────────────────
 //
@@ -235,6 +238,8 @@ impl Backend {
         // time, which is O(n²) on large files (the demo file alone takes ~17s).
         let line_index = crate::util::LineIndex::new(content);
 
+        let is_blade = self.is_blade_file(uri);
+
         for span in &symbol_map.spans {
             let length = span.end.saturating_sub(span.start);
             if length == 0 {
@@ -247,10 +252,16 @@ impl Backend {
                     is_fqn,
                     context,
                 } => {
-                    // Use-import names: Tree-sitter highlights these as
-                    // @module, but the closest LSP semantic token type is
-                    // `type` (Zed has no mapping for `namespace`).
+                    // Use-import names: only Blade files need these tokens
+                    // (no PHP grammar is active there).  In regular PHP
+                    // files the editor's own grammar (Tree-sitter/TextMate)
+                    // already highlights the import prolog per name segment;
+                    // a single token spanning the whole path (backslashes
+                    // included) would visibly override that coloring.
                     if *context == crate::symbol_map::ClassRefContext::UseImport {
+                        if !is_blade {
+                            continue;
+                        }
                         (TT_TYPE, 0)
                     } else if self.is_template_param(name, span.start, symbol_map) {
                         (TT_TYPE_PARAMETER, 0)
@@ -274,25 +285,33 @@ impl Backend {
                     is_static,
                     is_method_call,
                     subject_text,
-                    ..
+                    is_docblock_reference,
                 } => {
                     let tt = if *is_method_call {
                         TT_METHOD
                     } else {
                         TT_PROPERTY
                     };
-                    let mut mods = if *is_static { TM_STATIC } else { 0 };
+                    let base_mods = if *is_static { TM_STATIC } else { 0 };
 
-                    // Try to resolve deprecation/readonly from the subject's class.
-                    mods |= self.resolve_member_modifiers(
+                    // Verify the member exists on the resolved subject class
+                    // and pick up deprecated/static modifiers from it.
+                    match self.resolve_member_modifiers(
                         subject_text,
                         member_name,
+                        *is_static,
                         *is_method_call,
-                        uri,
+                        *is_docblock_reference,
+                        span.start,
                         ctx,
-                    );
-
-                    (tt, mods)
+                    ) {
+                        Some(mods) => (tt, base_mods | mods),
+                        // The subject resolved to a known class and the
+                        // member is verifiably absent — skip the token so
+                        // the text keeps its default coloring (e.g. a plain
+                        // string for `[Foo::class, 'mispelledMethod']`).
+                        None => continue,
+                    }
                 }
 
                 SymbolKind::MemberDeclaration { name, is_static } => {
@@ -339,7 +358,15 @@ impl Backend {
                     }
                 },
 
-                SymbolKind::NamespaceDeclaration { .. } => (TT_NAMESPACE, TM_DECLARATION),
+                SymbolKind::NamespaceDeclaration { .. } => {
+                    // Same reasoning as use imports: leave the namespace
+                    // declaration to the editor's own grammar in regular
+                    // PHP files; emit only where no PHP grammar runs.
+                    if !is_blade {
+                        continue;
+                    }
+                    (TT_NAMESPACE, TM_DECLARATION)
+                }
 
                 SymbolKind::ConstantReference { name: _ } => {
                     // Check if this is a PHP attribute name (starts after `#[`).
@@ -497,21 +524,133 @@ impl Backend {
         mods
     }
 
-    /// Resolve member-level modifiers (deprecated, readonly, static)
-    /// by attempting to look up the member in the subject's resolved class.
+    /// Resolve member-level modifiers (deprecated, readonly, static) by
+    /// looking up the member in the subject's resolved class, and verify
+    /// that the member exists at all.
+    ///
+    /// Returns:
+    /// - `Some(mods)` — the member was found (`mods` carries its
+    ///   deprecated/static/readonly bits), or the subject could not be
+    ///   cheaply resolved to a single class (variables, call chains,
+    ///   unknown classes) and the token is emitted unmodified.
+    /// - `None` — the subject resolved to a known class and the member is
+    ///   verifiably absent (including magic-method fallbacks).  The caller
+    ///   skips the token so the text keeps its default coloring.
+    ///
+    /// Only cheap, unambiguous subjects are resolved: bare class names
+    /// (`Foo`, `App\Foo`, `\App\Foo`) and `$this`/`self`/`static`/`parent`
+    /// via the enclosing class.  Anything else would require full
+    /// expression resolution, which is too expensive to run for every
+    /// member access on every semantic-tokens request.
+    #[allow(clippy::too_many_arguments)]
     fn resolve_member_modifiers(
         &self,
-        _subject_text: &str,
-        _member_name: &str,
-        _is_method_call: bool,
-        _uri: &str,
-        _ctx: &crate::types::FileContext,
-    ) -> u32 {
-        // Full subject resolution is expensive. Skip it for now and
-        // rely on the basic is_static flag from the SymbolKind.
-        // A future enhancement can resolve the subject to add
-        // deprecated/readonly modifiers.
-        0
+        subject_text: &str,
+        member_name: &str,
+        is_static: bool,
+        is_method_call: bool,
+        is_docblock_reference: bool,
+        offset: u32,
+        ctx: &crate::types::FileContext,
+    ) -> Option<u32> {
+        /// The subject could not be verified — emit the token as-is.
+        const UNVERIFIED: Option<u32> = Some(0);
+
+        // Docblock references (`@see Order::$channel_type`) use `::` for
+        // every member kind, so the static/instance split below does not
+        // apply.  Keep emitting unconditionally.
+        if is_docblock_reference {
+            return UNVERIFIED;
+        }
+
+        let base: Arc<ClassInfo> = match subject_text {
+            "$this" | "self" | "static" | "parent" => {
+                // Innermost class whose byte range contains the access
+                // (handles nested anonymous classes).
+                let Some(enclosing) = ctx
+                    .classes
+                    .iter()
+                    .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
+                    .max_by_key(|c| c.start_offset)
+                else {
+                    return UNVERIFIED;
+                };
+                // Inside a trait, `$this`/`self`/`static` refer to the
+                // (unknown) using class — members that live there cannot
+                // be verified against the trait alone.
+                if enclosing.kind == ClassLikeKind::Trait {
+                    return UNVERIFIED;
+                }
+                if subject_text == "parent" {
+                    let Some(ref parent_name) = enclosing.parent_class else {
+                        return UNVERIFIED;
+                    };
+                    let fqn = ctx.resolve_name_at(parent_name, offset);
+                    match self.find_or_load_class(&fqn) {
+                        Some(c) => c,
+                        None => return UNVERIFIED,
+                    }
+                } else {
+                    Arc::clone(enclosing)
+                }
+            }
+            s if is_bare_class_name(s) => {
+                let fqn = match s.strip_prefix('\\') {
+                    Some(stripped) => stripped.to_string(),
+                    None => ctx.resolve_name_at(s, offset),
+                };
+                match self.find_or_load_class(&fqn) {
+                    Some(c) => c,
+                    None => return UNVERIFIED,
+                }
+            }
+            // Variables and expression chains: full resolution is too
+            // expensive here — emit unconditionally.
+            _ => return UNVERIFIED,
+        };
+
+        // stdClass is the universal object container — any member goes.
+        if base.name == "stdClass" {
+            return UNVERIFIED;
+        }
+
+        let class_loader = |name: &str| self.find_or_load_class(name);
+        let resolved = crate::virtual_members::resolve_class_fully_cached(
+            &base,
+            &class_loader,
+            &self.resolved_class_cache,
+        );
+
+        if member_exists(&resolved, member_name, is_static, is_method_call) {
+            return Some(member_extra_modifiers(
+                &resolved,
+                member_name,
+                is_static,
+                is_method_call,
+            ));
+        }
+
+        // Magic catch-alls: the member is dispatchable at runtime even
+        // though it has no declaration — keep the token.
+        if is_method_call {
+            let magic = if is_static { "__callStatic" } else { "__call" };
+            if resolved
+                .methods
+                .iter()
+                .any(|m| m.name.eq_ignore_ascii_case(magic))
+            {
+                return UNVERIFIED;
+            }
+        } else if !is_static
+            && resolved
+                .methods
+                .iter()
+                .any(|m| m.name.eq_ignore_ascii_case("__get"))
+        {
+            return UNVERIFIED;
+        }
+
+        None
     }
 
     /// Classify a MemberDeclaration as method, property, or constant.
@@ -777,6 +916,65 @@ impl Backend {
 
         tokens
     }
+}
+
+/// Check whether a member-access subject is a bare class name
+/// (`Foo`, `App\Foo`, `\App\Foo`) rather than a variable or an
+/// expression chain.
+fn is_bare_class_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c == '\\' || c == '_' || c.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\')
+}
+
+/// Collect modifier bits (deprecated, static, readonly) for a member that
+/// is known to exist on the fully-resolved class.
+fn member_extra_modifiers(
+    class: &ClassInfo,
+    member_name: &str,
+    is_static: bool,
+    is_method_call: bool,
+) -> u32 {
+    let mut mods = 0;
+    if is_method_call {
+        if let Some(m) = class
+            .methods
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(member_name))
+        {
+            if m.is_static {
+                mods |= TM_STATIC;
+            }
+            if m.deprecation_message.is_some() {
+                mods |= TM_DEPRECATED;
+            }
+        }
+    } else if is_static {
+        // Constants first (most common in `Class::NAME` usage), then
+        // static properties (`Class::$prop`).
+        if let Some(c) = class.constants.iter().find(|c| c.name == member_name) {
+            mods |= TM_READONLY;
+            if c.deprecation_message.is_some() {
+                mods |= TM_DEPRECATED;
+            }
+        } else if let Some(p) = class.properties.iter().find(|p| {
+            p.is_static && (p.name == member_name || format!("${}", p.name) == member_name)
+        }) && p.deprecation_message.is_some()
+        {
+            mods |= TM_DEPRECATED;
+        }
+    } else if let Some(p) = class.properties.iter().find(|p| p.name == member_name) {
+        if p.is_static {
+            mods |= TM_STATIC;
+        }
+        if p.deprecation_message.is_some() {
+            mods |= TM_DEPRECATED;
+        }
+    }
+    mods
 }
 
 /// Map a [`ClassLikeKind`] to a semantic token type index.

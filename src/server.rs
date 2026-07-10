@@ -119,6 +119,20 @@ impl LanguageServer for Backend {
         self.supports_work_done_progress
             .store(client_supports_work_done_progress, Ordering::Release);
 
+        // Detect whether the client supports server-initiated semantic
+        // token refreshes (`workspace/semanticTokens/refresh`).  Used to
+        // re-pull tokens after background didChange parses commit a new
+        // symbol map.
+        let client_supports_semantic_tokens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.semantic_tokens.as_ref())
+            .and_then(|st| st.refresh_support)
+            .unwrap_or(false);
+        self.supports_semantic_tokens_refresh
+            .store(client_supports_semantic_tokens_refresh, Ordering::Release);
+
         // Detect whether the client supports dynamic registration for
         // type hierarchy.
         let client_supports_type_hierarchy_dynamic_registration = params
@@ -610,6 +624,7 @@ impl LanguageServer for Backend {
         } else {
             let backend = self.clone_for_blocking();
             tokio::spawn(async move {
+                let refresh_backend = backend.clone_for_blocking();
                 let uri_for_diagnostics = uri.clone();
                 let result = tokio::task::spawn_blocking(move || {
                     let parse_lock = {
@@ -627,7 +642,7 @@ impl LanguageServer for Backend {
                         .get(&uri)
                         .is_some_and(|current| Arc::ptr_eq(current, &text));
                     if !is_latest_text {
-                        return;
+                        return false;
                     }
 
                     let started = std::time::Instant::now();
@@ -641,11 +656,28 @@ impl LanguageServer for Backend {
                         );
                     }
                     backend.schedule_diagnostics(uri_for_diagnostics);
+                    true
                 })
                 .await;
 
-                if let Err(err) = result {
-                    tracing::error!("PHPantom: didChange parse task failed: {}", err);
+                match result {
+                    // A new symbol map was committed.  Tokens the editor
+                    // already holds were computed from the pre-edit map
+                    // (the semanticTokens request usually races ahead of
+                    // this background parse), so ask for a re-pull.
+                    Ok(true) => {
+                        if refresh_backend
+                            .supports_semantic_tokens_refresh
+                            .load(Ordering::Acquire)
+                            && let Some(ref client) = refresh_backend.client
+                        {
+                            let _ = client.semantic_tokens_refresh().await;
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        tracing::error!("PHPantom: didChange parse task failed: {}", err);
+                    }
                 }
             });
         }

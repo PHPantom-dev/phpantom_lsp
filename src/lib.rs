@@ -661,6 +661,15 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `workspace/semanticTokens/refresh`.
+    ///
+    /// Set during `initialize` based on the client's
+    /// `workspace.semanticTokens.refreshSupport` capability.  When `true`,
+    /// the server asks the client to re-pull semantic tokens after a
+    /// background `didChange` parse commits a new symbol map — without
+    /// this, editors keep showing tokens computed from the pre-edit
+    /// symbol map until the next unrelated request.
+    pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
     /// Shared flag set to `true` when the LSP `shutdown` request is
     /// received.  Background workers (diagnostic, PHPStan, PHPCS) check this
     /// flag on each iteration and exit their loops.  The PHPStan
@@ -866,6 +875,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
@@ -952,6 +962,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
@@ -1502,6 +1513,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             config: Mutex::new(self.config.lock().clone()),

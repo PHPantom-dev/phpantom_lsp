@@ -917,7 +917,7 @@ fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: 
     class.constants.iter().any(|c| c.name == member_name)
 }
 
-fn member_exists(
+pub(crate) fn member_exists(
     class: &ClassInfo,
     member_name: &str,
     is_static: bool,
