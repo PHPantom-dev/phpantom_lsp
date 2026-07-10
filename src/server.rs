@@ -1875,6 +1875,11 @@ impl Backend {
                 .await;
         }
 
+        let explicit_deps = composer_json
+            .as_ref()
+            .map(crate::composer::explicit_dependency_names)
+            .unwrap_or_default();
+
         let (classmap, source_label) = match strategy {
             IndexingStrategy::None => {
                 let cm = composer::parse_autoload_classmap(root, &vendor_dir);
@@ -1897,7 +1902,12 @@ impl Backend {
 
                 // Merge vendor packages (excluded from the workspace
                 // walk above, scanned separately here).
-                let vendor_scan = classmap_scanner::scan_vendor_packages(root, &vendor_dir);
+                let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+                    root,
+                    &vendor_dir,
+                    &HashSet::new(),
+                    &explicit_deps,
+                );
                 for (fqcn, path) in vendor_scan.classmap {
                     scan.classmap.entry(fqcn).or_insert(path);
                 }
@@ -1930,10 +1940,18 @@ impl Backend {
             }
         };
 
-        let symbol_count = classmap.len();
+        let vendor_package_roots =
+            classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
+
+        let class_entries: Vec<(String, PathBuf)> = classmap.into_iter().collect();
+        let symbol_count = class_entries.len();
         {
             let mut idx = self.fqn_uri_index.write();
-            for (fqn, path) in classmap {
+            let mut origins = self.fqn_origin_index.write();
+            origins.clear();
+            for (fqn, path) in class_entries {
+                let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
+                origins.insert(fqn.clone(), origin);
                 idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
             }
         }
@@ -2729,8 +2747,13 @@ impl Backend {
         );
 
         // Scan vendor packages from installed.json.
-        let vendor_scan =
-            classmap_scanner::scan_vendor_packages_with_skip(project_root, vendor_dir, skip_paths);
+        let explicit_deps = crate::composer::explicit_dependency_names(package);
+        let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+            project_root,
+            vendor_dir,
+            skip_paths,
+            &explicit_deps,
+        );
 
         let mut result = WorkspaceScanResult {
             classmap,
@@ -2762,17 +2785,47 @@ impl Backend {
     pub(crate) fn populate_autoload_indices(&self, scan: &WorkspaceScanResult) {
         if !scan.function_index.is_empty() {
             let mut idx = self.autoload_function_index.write();
+            let mut origins = self.autoload_function_origin_index.write();
             for (fqn, path) in &scan.function_index {
                 idx.or_insert_with(fqn.as_str(), || path.clone());
+                let origin = scan
+                    .function_origins
+                    .get(fqn)
+                    .copied()
+                    .unwrap_or(crate::ClassCompletionOrigin::Project);
+                origins.insert(fqn.clone(), origin);
             }
         }
         if !scan.constant_index.is_empty() {
             let mut idx = self.autoload_constant_index.write();
+            let mut origins = self.autoload_constant_origin_index.write();
             for (name, path) in &scan.constant_index {
                 idx.entry(name.clone()).or_insert_with(|| path.clone());
+                let origin = scan
+                    .constant_origins
+                    .get(name)
+                    .copied()
+                    .unwrap_or(crate::ClassCompletionOrigin::Project);
+                origins.insert(name.clone(), origin);
             }
         }
     }
+}
+
+fn classify_class_origin(
+    path: &Path,
+    vendor_path: &Path,
+    vendor_package_roots: &[(PathBuf, crate::ClassCompletionOrigin)],
+) -> crate::ClassCompletionOrigin {
+    if !path.starts_with(vendor_path) {
+        return crate::ClassCompletionOrigin::Project;
+    }
+    for (root, origin) in vendor_package_roots {
+        if path.starts_with(root) {
+            return *origin;
+        }
+    }
+    crate::ClassCompletionOrigin::VendorTransitive
 }
 
 #[cfg(test)]
