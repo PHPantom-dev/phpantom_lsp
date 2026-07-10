@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783723218725,
+  "lastUpdate": 1783723220886,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12953,6 +12953,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "20a9aa1e54fe902df147ce05a258e1b5d8046486",
+          "message": "fix: rank imported/same-namespace symbols above non-imported in completion\n\nSwap source_tier before origin_tier in the sort_text key for class,\nfunction, and constant completions. Previously origin_tier (project >\ncore > vendor) came first, so a non-imported project class could\noutrank an already-imported vendor class. Now an imported symbol always\nranks above a non-imported one regardless of provenance.\n\nAffects class_sort_text in class_completion.rs and\nflat_symbol_sort_text in symbol_ranking.rs.",
+          "timestamp": "2026-07-10T17:28:16-05:00",
+          "tree_id": "4056dac9650291fb7ad9167d85bfda59ee4accc9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/20a9aa1e54fe902df147ce05a258e1b5d8046486"
+        },
+        "date": 1783723219691,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.9,
             "unit": "MiB"
           }
         ]
