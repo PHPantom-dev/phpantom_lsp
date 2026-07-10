@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783677123681,
+  "lastUpdate": 1783677982060,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12375,6 +12375,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7849069c2de1c55b10b10912c2536ddc48dfa3fa",
+          "message": "Add test for non PRS-4 vendor loading",
+          "timestamp": "2026-07-10T11:54:32+02:00",
+          "tree_id": "de1e7fe209dac7867d75644bb6543cb20c7a6305",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7849069c2de1c55b10b10912c2536ddc48dfa3fa"
+        },
+        "date": 1783677980176,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 49.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.4,
             "unit": "MiB"
           }
         ]
