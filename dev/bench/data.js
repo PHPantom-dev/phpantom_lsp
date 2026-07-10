@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783702415935,
+  "lastUpdate": 1783705030536,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -70847,6 +70847,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.074,
             "range": "± 0.018",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "147a46cd4e6d642d7edc420298d17a3d056b6756",
+          "message": "fix: variable assignments in if-branches no longer leak into elseif\n\nThe diagnostic scope cache already correctly records a clean scope\nsnapshot at each elseif condition boundary (forward_walk.rs:5628-5633),\npreventing assignments from preceding if/elseif bodies from affecting\ntype resolution in elseif conditions and bodies.\n\nAdd regression tests to prevent future regressions:\n- #167: $value = true in if-branch must not make elseif see bool\n- #168: instanceof narrowing must not leak into elseif body\n\nFixes #167, #168.",
+          "timestamp": "2026-07-10T12:29:08-05:00",
+          "tree_id": "6877954880aa0182f29a418de5a54fbe1bd69238",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/147a46cd4e6d642d7edc420298d17a3d056b6756"
+        },
+        "date": 1783705028866,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 5.64,
+            "range": "± 0.176",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.044,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.122,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.164,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.25,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.247,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.938,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.812,
+            "range": "± 0.113",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.126,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.06,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.05,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.071,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.693,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.24,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.257,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.073,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.053,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.124,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.093,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.087,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.195,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.048,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.438,
+            "range": "± 0.06",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.06,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.037,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.035,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 47.143,
+            "range": "± 0.272",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.102,
+            "range": "± 0.015",
             "unit": "ms"
           }
         ]
