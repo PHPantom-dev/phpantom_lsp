@@ -385,6 +385,19 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── Laravel route controller method completion ─────────
+            // Inside `Route::controller(X::class)->group(fn(){…})`,
+            // the 2nd argument string of Route::get/post/patch/… is a
+            // controller method name.
+            if matches!(
+                string_ctx,
+                StringContext::InStringLiteral | StringContext::NotInString
+            ) && let Some(response) =
+                self.try_laravel_route_controller_completion(&uri, &content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
             // ── Array callable method completion ────────────────────
             // Like array shape and Eloquent string completion, this
             // triggers inside string literals — specifically the

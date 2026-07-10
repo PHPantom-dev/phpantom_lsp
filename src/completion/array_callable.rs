@@ -319,7 +319,11 @@ impl Backend {
 
 /// Resolve a short/relative class name to FQN using use statements
 /// and the namespace from the file context.
-fn resolve_class_name_to_fqn(backend: &Backend, name: &str, ctx: &FileContext) -> Option<String> {
+pub(super) fn resolve_class_name_to_fqn(
+    backend: &Backend,
+    name: &str,
+    ctx: &FileContext,
+) -> Option<String> {
     let clean = name.trim_start_matches('\\');
     // Check use map.
     if let Some(fqn) = ctx.use_map.get(clean) {

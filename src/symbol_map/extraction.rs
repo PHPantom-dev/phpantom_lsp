@@ -2026,6 +2026,22 @@ fn extract_from_expression<'a>(
                             is_docblock_reference: false,
                         },
                     });
+                    // Laravel: if this is a ->group() call, check for
+                    // ->controller(X::class) in the chain and emit MemberAccess
+                    // spans for route method-name strings inside the closure.
+                    if ident.value.eq_ignore_ascii_case(b"group")
+                        && let Some(controller) =
+                            laravel_route_find_controller_in_chain(method_call.object)
+                    {
+                        for arg in method_call.argument_list.arguments.iter() {
+                            laravel_route_scan_group_body(
+                                arg.value(),
+                                &controller,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                    }
                 }
                 extract_from_arguments(&method_call.argument_list.arguments, ctx, scope_start);
             }
@@ -3606,5 +3622,216 @@ fn arg_contains_instanceof(expr: &Expression<'_>) -> bool {
             arg_contains_instanceof(bin.lhs) || arg_contains_instanceof(bin.rhs)
         }
         _ => false,
+    }
+}
+
+// ─── Laravel route controller method spans ──────────────────────────────────
+
+/// HTTP method names used in Laravel route definitions.
+///
+/// `Route::get(…)`, `Route::post(…)`, etc.  `match` is excluded because
+/// its action argument is in a different position (3rd, not 2nd).
+const ROUTE_HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "options", "any"];
+
+/// Walk a fluent method chain backwards looking for `->controller(X::class)`.
+///
+/// Returns the class name (as written in source, e.g. `"WorkItemController"`)
+/// if found, `None` otherwise.  Handles both instance-method chains
+/// (`->prefix('…')->controller(X::class)`) and a static entry point
+/// (`Route::controller(X::class)`).
+fn laravel_route_find_controller_in_chain(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Call(Call::Method(mc)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method
+                && ident.value.eq_ignore_ascii_case(b"controller")
+            {
+                return laravel_route_extract_class_arg(&mc.argument_list);
+            }
+            laravel_route_find_controller_in_chain(mc.object)
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &sc.method
+                && ident.value.eq_ignore_ascii_case(b"controller")
+            {
+                return laravel_route_extract_class_arg(&sc.argument_list);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Extract the class name from the first argument when it is a `X::class`
+/// constant access.  Returns the source text of `X` (e.g.
+/// `"WorkItemResourceController"` or `"App\\Http\\Controllers\\Foo"`).
+fn laravel_route_extract_class_arg(args: &ArgumentList<'_>) -> Option<String> {
+    let first_arg = args.arguments.iter().next()?;
+    if let Expression::Access(Access::ClassConstant(cca)) = first_arg.value() {
+        let is_class = matches!(
+            &cca.constant,
+            ClassLikeConstantSelector::Identifier(ident)
+                if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
+        );
+        if is_class {
+            let name = expr_to_subject_text(cca.class);
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Walk the closure (or arrow function) body passed to `->group()`.
+fn laravel_route_scan_group_body(
+    expr: &Expression<'_>,
+    controller: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match expr {
+        Expression::Closure(closure) => {
+            for stmt in closure.body.statements.iter() {
+                laravel_route_scan_stmt(stmt, controller, content, spans);
+            }
+        }
+        Expression::ArrowFunction(af) => {
+            laravel_route_scan_expr(af.expression, controller, content, spans);
+        }
+        _ => {}
+    }
+}
+
+/// Scan a statement for route definition calls with controller method strings.
+fn laravel_route_scan_stmt(
+    stmt: &Statement<'_>,
+    controller: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match stmt {
+        Statement::Expression(e) => {
+            laravel_route_scan_expr(e.expression, controller, content, spans);
+        }
+        Statement::Return(r) => {
+            if let Some(v) = r.value {
+                laravel_route_scan_expr(v, controller, content, spans);
+            }
+        }
+        Statement::If(if_stmt) => {
+            for s in if_stmt.body.statements() {
+                laravel_route_scan_stmt(s, controller, content, spans);
+            }
+            for stmts in if_stmt.body.else_if_statements() {
+                for s in stmts {
+                    laravel_route_scan_stmt(s, controller, content, spans);
+                }
+            }
+            if let Some(else_stmts) = if_stmt.body.else_statements() {
+                for s in else_stmts {
+                    laravel_route_scan_stmt(s, controller, content, spans);
+                }
+            }
+        }
+        Statement::Foreach(fe) => {
+            for s in fe.body.statements() {
+                laravel_route_scan_stmt(s, controller, content, spans);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Scan an expression for `Route::get(…)` / `Route::post(…)` / etc. and
+/// emit a [`SymbolKind::MemberAccess`] span for the action string.
+///
+/// Also recurses into nested `->group()` calls that do **not** declare
+/// their own `->controller()` (inheriting the parent controller), while
+/// stopping at nested groups that **do** declare a new controller (those
+/// are handled by their own extraction-time invocation).
+fn laravel_route_scan_expr(
+    expr: &Expression<'_>,
+    controller: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match expr {
+        // Chained call: Route::patch('cancel', 'cancel')->name('cancel')
+        Expression::Call(Call::Method(mc)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method
+                && ident.value.eq_ignore_ascii_case(b"group")
+            {
+                // Nested group — check for its own controller.
+                if laravel_route_find_controller_in_chain(mc.object).is_some() {
+                    return; // Own controller; handled separately.
+                }
+                // No new controller — inherit the parent's.
+                for arg in mc.argument_list.arguments.iter() {
+                    laravel_route_scan_group_body(arg.value(), controller, content, spans);
+                }
+                return;
+            }
+            // Walk the inner object (chain before ->name() etc.).
+            laravel_route_scan_expr(mc.object, controller, content, spans);
+        }
+        // Route::patch('cancel', 'cancel')
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let subject = expr_to_subject_text(sc.class);
+            if !strip_fqn_prefix(&subject).eq_ignore_ascii_case("Route") {
+                return;
+            }
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return;
+            };
+            let method_lower = bytes_to_str(ident.value).to_ascii_lowercase();
+            if !ROUTE_HTTP_METHODS.iter().any(|m| *m == method_lower) {
+                return;
+            }
+            // Second argument is the controller method name.
+            let mut args_iter = sc.argument_list.arguments.iter();
+            let _uri_arg = args_iter.next(); // skip first (URI)
+            let Some(action_arg) = args_iter.next() else {
+                return;
+            };
+            let Expression::Literal(literal::Literal::String(s)) = action_arg.value() else {
+                return;
+            };
+
+            let inner_start = s.span.start.offset + 1;
+            let inner_end = s.span.end.offset - 1;
+            if inner_start >= inner_end || inner_end as usize > content.len() {
+                return;
+            }
+            let method_name = if let Some(value) = s.value {
+                bytes_to_str(value)
+            } else {
+                &content[inner_start as usize..inner_end as usize]
+            };
+            // Must look like a valid PHP method name.
+            if method_name.is_empty()
+                || !method_name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                || method_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
+            {
+                return;
+            }
+
+            spans.push(SymbolSpan {
+                start: inner_start,
+                end: inner_end,
+                kind: SymbolKind::MemberAccess {
+                    subject_text: controller.to_string(),
+                    member_name: method_name.to_string(),
+                    is_static: true,
+                    is_method_call: true,
+                    is_docblock_reference: false,
+                },
+            });
+        }
+        _ => {}
     }
 }

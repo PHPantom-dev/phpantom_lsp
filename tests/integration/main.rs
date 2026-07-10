@@ -107,6 +107,7 @@ mod implementation;
 mod inlay_hints;
 mod laravel_custom_builder;
 mod laravel_references;
+mod laravel_route_controller;
 mod linked_editing;
 mod lsp_concurrency;
 mod parser;
