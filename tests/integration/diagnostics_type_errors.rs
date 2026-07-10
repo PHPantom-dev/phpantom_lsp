@@ -4751,7 +4751,7 @@ function normalizeBooleanString(string $value): bool
     let diags = collect_with_full_stubs(php);
     assert!(
         !has_type_error(&diags),
-        "@phpstan-type Field alias should be compatible with string (issue #166): {:?}",
+        "Assignment in if-branch must not affect elseif condition (issue #167): {:?}",
         type_error_messages(&diags)
     );
 }

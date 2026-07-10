@@ -210,6 +210,7 @@ fn find_string_key_usages(
 }
 
 pub use helpers::extends_eloquent_model;
+pub(crate) use helpers::walk_all_php_expressions;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
 
 pub(crate) use accessors::is_accessor_method;
