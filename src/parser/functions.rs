@@ -122,14 +122,21 @@ impl Backend {
                     // Check for a #[LanguageLevelTypeAware] override on the
                     // function's return type.  When present, it replaces the
                     // native type hint with the version-appropriate string.
-                    let native_return_type = if let Some(ctx) = doc_ctx
+                    let lang_level_return = if let Some(ctx) = doc_ctx
                         && let Some(ver) = ctx.php_version
                     {
                         super::extract_language_level_type(&func.attribute_lists, ctx, ver)
-                            .or(raw_native_return_type)
                     } else {
-                        raw_native_return_type
+                        None
                     };
+                    // The `#[LanguageLevelTypeAware]` attribute is JetBrains'
+                    // authoritative, version-resolved return type.  When it is
+                    // present the accompanying `@return` docblock is legacy
+                    // text (e.g. `resource|false` left over from before the
+                    // handle→object migration) and must not be allowed to
+                    // widen the attribute type back to the old value.
+                    let return_from_lang_level = lang_level_return.is_some();
+                    let native_return_type = lang_level_return.or(raw_native_return_type);
 
                     // Apply PHPDoc `@return` override for the function.
                     // Also extract PHPStan conditional return types,
@@ -162,10 +169,14 @@ impl Backend {
                             .as_ref()
                             .and_then(docblock::extract_return_type_from_info);
 
-                        let effective = docblock::resolve_effective_type_typed(
-                            native_return_type.as_ref(),
-                            parsed_doc_return.as_ref(),
-                        );
+                        let effective = if return_from_lang_level {
+                            native_return_type.clone()
+                        } else {
+                            docblock::resolve_effective_type_typed(
+                                native_return_type.as_ref(),
+                                parsed_doc_return.as_ref(),
+                            )
+                        };
 
                         // If the effective return type is bare `array` (or
                         // nullable/union containing array) and the function

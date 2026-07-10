@@ -1,4 +1,7 @@
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{
+    create_test_backend, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs,
+};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -14,6 +17,15 @@ fn collect(php: &str) -> Vec<Diagnostic> {
 
 fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
     let backend = create_test_backend_with_function_stubs();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    out
+}
+
+fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend_with_full_stubs();
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
@@ -4536,5 +4548,63 @@ function myFunction(array $body): void {
     assert!(
         !has_type_error(&diags),
         "Ternary with array access branch should resolve to mixed|null, not null: {diags:?}"
+    );
+}
+
+// ─── Resource → object migrated handles (phpstorm-stubs) ─────────────────────
+
+#[test]
+fn no_diagnostic_for_finfo_handle_after_false_check() {
+    // finfo_open() returns `finfo|false` on PHP 8.1+ (via a
+    // `#[LanguageLevelTypeAware]` attribute), even though its `@return`
+    // docblock still says the legacy `resource|false`. After narrowing away
+    // `false`, the handle is a `finfo`, which finfo_file()/finfo_close()
+    // accept. No `type_mismatch_argument` should fire.
+    let php = r#"<?php
+function check_finfo(): void
+{
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    if ($finfo === false) {
+        throw new RuntimeException('finfo_open failed');
+    }
+
+    finfo_file($finfo, __FILE__);
+    finfo_close($finfo);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "finfo handle should resolve to finfo, not resource|false: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_pgsql_result_handle_after_false_check() {
+    // pg_query() returns `PgSql\Result|false` on PHP 8.1+; pg_fetch_assoc()
+    // and pg_free_result() expect `PgSql\Result`. Chained handle migration.
+    let php = r#"<?php
+function check_pgsql(): void
+{
+    $connection = pg_connect('host=localhost dbname=test');
+    if ($connection === false) {
+        throw new RuntimeException('pg_connect failed');
+    }
+
+    $result = pg_query($connection, 'select 1');
+    if ($result === false) {
+        throw new RuntimeException('pg_query failed');
+    }
+
+    pg_fetch_assoc($result);
+    pg_free_result($result);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "pg handles should resolve to their 8.1+ object types: {:?}",
+        type_error_messages(&diags)
     );
 }

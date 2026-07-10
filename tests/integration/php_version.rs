@@ -269,6 +269,67 @@ function array_combine(array $keys, array $values): array {}
 }
 
 #[test]
+fn language_level_return_type_wins_over_stale_return_docblock() {
+    // phpstorm-stubs keep the legacy `@return resource|false` docblock but
+    // declare the version-aware type via `#[LanguageLevelTypeAware]`. On PHP
+    // 8.1+ the attribute type (`finfo|false`) must win over the stale docblock
+    // (`resource|false`) instead of being widened back to a resource.
+    let backend = create_test_backend();
+
+    let stub_content = r#"<?php
+use JetBrains\PhpStorm\Internal\LanguageLevelTypeAware;
+
+/**
+ * Create a new fileinfo resource
+ * @return resource|false a magic database resource on success or FALSE on failure.
+ */
+#[LanguageLevelTypeAware(['8.1' => 'finfo|false'], default: 'resource|false')]
+function finfo_open(int $flags = 0, ?string $magic_database = null) {}
+"#;
+
+    let functions = backend.parse_functions_versioned(stub_content, Some(PhpVersion::new(8, 4)));
+    assert_eq!(functions.len(), 1);
+    assert_eq!(
+        functions[0]
+            .return_type
+            .as_ref()
+            .map(|t| t.to_string())
+            .as_deref(),
+        Some("finfo|false"),
+        "8.1+ attribute type should win over the legacy @return docblock"
+    );
+}
+
+#[test]
+fn language_level_return_type_uses_default_on_old_version() {
+    // On PHP 7.4 the attribute has no matching entry, so it falls back to its
+    // `default` (`resource|false`), which happens to equal the docblock.
+    let backend = create_test_backend();
+
+    let stub_content = r#"<?php
+use JetBrains\PhpStorm\Internal\LanguageLevelTypeAware;
+
+/**
+ * @return resource|false a magic database resource on success or FALSE on failure.
+ */
+#[LanguageLevelTypeAware(['8.1' => 'finfo|false'], default: 'resource|false')]
+function finfo_open(int $flags = 0, ?string $magic_database = null) {}
+"#;
+
+    let functions = backend.parse_functions_versioned(stub_content, Some(PhpVersion::new(7, 4)));
+    assert_eq!(functions.len(), 1);
+    assert_eq!(
+        functions[0]
+            .return_type
+            .as_ref()
+            .map(|t| t.to_string())
+            .as_deref(),
+        Some("resource|false"),
+        "pre-8.1 should use the attribute default"
+    );
+}
+
+#[test]
 fn function_without_version_attribute_always_included() {
     let backend = create_test_backend();
 

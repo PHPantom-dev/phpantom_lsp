@@ -2045,14 +2045,18 @@ impl Backend {
                     // Check for a #[LanguageLevelTypeAware] override on the
                     // method's return type.  When present, it replaces the
                     // native type hint with the version-appropriate string.
-                    let native_return_type = if let Some(ctx) = doc_ctx
+                    let lang_level_return = if let Some(ctx) = doc_ctx
                         && let Some(ver) = ctx.php_version
                     {
                         super::extract_language_level_type(&method.attribute_lists, ctx, ver)
-                            .or(raw_native_return_type)
                     } else {
-                        raw_native_return_type
+                        None
                     };
+                    // The `#[LanguageLevelTypeAware]` attribute is JetBrains'
+                    // authoritative, version-resolved return type, so the
+                    // accompanying legacy `@return` docblock must not widen it.
+                    let return_from_lang_level = lang_level_return.is_some();
+                    let native_return_type = lang_level_return.or(raw_native_return_type);
                     let is_static = method.modifiers.iter().any(|m| m.is_static());
                     let visibility = extract_visibility(method.modifiers.iter());
 
@@ -2082,10 +2086,14 @@ impl Backend {
                         method_template_bindings,
                     ) = if let Some(ref info) = method_docblock_info {
                         let parsed_doc_type = docblock::extract_return_type_from_info(info);
-                        let effective = docblock::resolve_effective_type_typed(
-                            native_return_type.as_ref(),
-                            parsed_doc_type.as_ref(),
-                        );
+                        let effective = if return_from_lang_level {
+                            native_return_type.clone()
+                        } else {
+                            docblock::resolve_effective_type_typed(
+                                native_return_type.as_ref(),
+                                parsed_doc_type.as_ref(),
+                            )
+                        };
 
                         // Apply #[ArrayShape] override if present.
                         let effective = if let Some(ctx) = doc_ctx {
