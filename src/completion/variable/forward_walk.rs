@@ -5837,6 +5837,16 @@ fn process_if_colon_body<'b>(
     let mut all_scopes = vec![then_scope];
     for ei in body.else_if_clauses.iter() {
         let mut ei_scope = pre_if_scope.clone();
+        // The elseif branch only runs when the if condition and every
+        // preceding elseif condition were false, so apply their inverse
+        // narrowing before walking this branch.
+        apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
+        for prev_ei in body.else_if_clauses.iter() {
+            if std::ptr::eq(prev_ei, ei) {
+                break;
+            }
+            apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
+        }
         // Record a scope snapshot at the elseif condition boundary so
         // that diagnostic variable lookups inside the condition don't
         // pick up assignments from preceding if/elseif bodies.
@@ -5851,7 +5861,13 @@ fn process_if_colon_body<'b>(
     }
     if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
+        // The else branch only runs when the if condition and every
+        // elseif condition were false, so apply the inverse of all of
+        // them.
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
+        for ei in body.else_if_clauses.iter() {
+            apply_condition_narrowing_inverse(ei.condition, &mut else_scope, ctx);
+        }
         // Record a scope snapshot at the else boundary.
         if is_diagnostic_scope_active()
             && let Some(first_stmt) = else_clause.statements.first()
@@ -5861,7 +5877,16 @@ fn process_if_colon_body<'b>(
         walk_body_forward(else_clause.statements.iter(), &mut else_scope, ctx);
         all_scopes.push(else_scope);
     } else {
-        all_scopes.push(pre_if_scope);
+        // No else clause — the pre-if scope is the implicit "all
+        // conditions were false" path.  Apply the inverse of the if
+        // condition (and every elseif condition) so information from a
+        // failed condition is reflected in the merged scope.
+        let mut implicit_else_scope = pre_if_scope.clone();
+        apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+        for ei in body.else_if_clauses.iter() {
+            apply_condition_narrowing_inverse(ei.condition, &mut implicit_else_scope, ctx);
+        }
+        all_scopes.push(implicit_else_scope);
     }
 
     // Merge all surviving scopes.

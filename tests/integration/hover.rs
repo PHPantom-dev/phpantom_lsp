@@ -8523,6 +8523,88 @@ function test(string $role): void {
     );
 }
 
+// ── Alternate if:/endif; syntax: inverse narrowing in branch merge ──────
+
+/// After an `if (…): … endif;` written in the alternate colon syntax, the
+/// scope merged past the block must reflect inverse narrowing from the
+/// (failed) condition, just like the brace syntax does.  Here the then-body
+/// reassigns `$acct` to a non-null `Account`, and the implicit "condition was
+/// false" path (`$acct === null` was false, so `$acct` is not null) also
+/// yields `Account`.  Both merge to a plain `Account`, not `Account|null`.
+#[test]
+fn hover_colon_syntax_merges_inverse_narrowing_after_endif() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class Account {
+    public function name(): string { return ''; }
+}
+function test(?Account $acct): void {
+    if ($acct === null):
+        $acct = new Account();
+    endif;
+    $acct;
+}
+"#;
+    // Hover on `$acct` at line 8 (the bare `$acct;` after `endif;`).
+    let hover = hover_at(&backend, uri, php, 8, 5);
+    assert!(
+        hover.is_some(),
+        "should produce hover for $acct after endif"
+    );
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("Account"),
+        "hover should resolve $acct to Account after endif, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("?Account") && !text.contains("null"),
+        "the implicit else path (`$acct === null` was false) narrows away null, got: {}",
+        text
+    );
+}
+
+/// In the alternate colon syntax, the `else:` branch walked during the
+/// branch merge must have the inverse of every preceding condition applied
+/// (the `if` condition and each `elseif` condition).  Here the `else` branch
+/// reassigns `$y` from `$x`, which is only reachable when `$x` is neither
+/// `Cat` nor `Dog`, so it must narrow to `Bird`.
+#[test]
+fn hover_colon_syntax_else_branch_inverse_narrows_from_elseif() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class Cat {}
+class Dog {}
+class Bird {}
+function test(Cat|Dog|Bird $x): void {
+    if ($x instanceof Cat):
+        $y = 'cat';
+    elseif ($x instanceof Dog):
+        $y = 'dog';
+    else:
+        $y = $x;
+    endif;
+    $y;
+}
+"#;
+    // Hover on `$y` at line 12 (the bare `$y;` after `endif;`).
+    let hover = hover_at(&backend, uri, php, 12, 5);
+    assert!(hover.is_some(), "should produce hover for $y after endif");
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("Bird"),
+        "$y in the else branch should narrow $x to Bird, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("Cat") && !text.contains("Dog"),
+        "the else branch excludes Cat (if) and Dog (elseif), got: {}",
+        text
+    );
+}
+
 /// When a method returns `TValue|null` and `TValue` is substituted with
 /// a concrete class, the `|null` component must be preserved in hover output.
 #[test]
