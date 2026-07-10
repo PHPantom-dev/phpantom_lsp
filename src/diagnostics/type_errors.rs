@@ -137,6 +137,17 @@ fn is_type_compatible(
         return true;
     }
 
+    // Same escape hatch for the argument type — an unexpanded
+    // @phpstan-type / @psalm-type alias on the arg side would also
+    // cause false positives (e.g. `Payload` passed to `?array`).
+    if let PhpType::Named(name) = arg_type
+        && !name.contains('\\')
+        && !crate::php_type::is_builtin_non_class_type(name)
+        && class_loader(name).is_none()
+    {
+        return true;
+    }
+
     // Skip anonymous class arguments.  Anonymous classes are stored
     // with synthetic names (`__anonymous@<offset>`) that are not
     // indexed globally, so the class loader cannot resolve their
@@ -1567,6 +1578,16 @@ impl Backend {
                                 name.to_string()
                             }
                         });
+                        // Expand @phpstan-type / @psalm-type aliases so
+                        // that e.g. `Payload` becomes `array{name: string,
+                        // phone: string}` before the compatibility check.
+                        let ty = crate::completion::types::resolution::resolve_type_alias_typed(
+                            &ty,
+                            &current_class_info.fqn(),
+                            &file_ctx.classes,
+                            &class_loader,
+                        )
+                        .unwrap_or(ty);
                         resolved_args.push(ResolvedArg { ty, start, end });
                     }
                     result.insert(

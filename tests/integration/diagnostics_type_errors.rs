@@ -4725,7 +4725,65 @@ function test(string $value): void
     let diags = collect(php);
     assert!(
         !has_type_error(&diags),
-        "Assignment in if-branch must not leak into elseif (issue #167): {:?}",
+        "After $value = $value[0], type should no longer be array|false (issue #169): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #166: @phpstan-type aliases must not trigger false positives ──────
+
+#[test]
+fn no_false_positive_for_phpstan_type_alias_to_array() {
+    let php = r#"<?php
+/**
+ * @phpstan-type Payload = array{name: string, phone: string}
+ */
+final class Api {
+    /** @var Payload */
+    private array $payload;
+
+    public function __construct() {
+        $this->payload = ['name' => 'Alex', 'phone' => '123'];
+    }
+
+    public function submit(): array {
+        return Sender::post('/lead', $this->payload);
+    }
+}
+
+final class Sender {
+    public static function post(string $url, ?array $postData = null): array {
+        return [];
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "@phpstan-type Payload alias should be compatible with ?array (issue #166): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_phpstan_type_alias_to_string_union() {
+    let php = r#"<?php
+/**
+ * @phpstan-type Field = 'id'|'name'
+ */
+final class Filter {
+    /**
+     * @param Field $field
+     */
+    public function isDefined($field): bool {
+        return property_exists($this, $field);
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "@phpstan-type Field alias should be compatible with string (issue #166): {:?}",
         type_error_messages(&diags)
     );
 }
