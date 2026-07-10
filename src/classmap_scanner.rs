@@ -308,7 +308,13 @@ pub(crate) fn vendor_package_roots(
             .get("name")
             .and_then(|n| n.as_str())
             .unwrap_or("unknown/unknown");
-        let origin = if explicit_deps.contains(pkg_name) {
+        // Symfony polyfill packages provide backports of PHP core
+        // classes and extension functions (e.g. `symfony/polyfill-php83`
+        // ships `\Override`).  Classify them as core stubs so they
+        // sort and display like built-in PHP symbols, not vendor deps.
+        let origin = if pkg_name.starts_with("symfony/polyfill-") {
+            crate::ClassCompletionOrigin::CoreStub
+        } else if explicit_deps.contains(pkg_name) {
             crate::ClassCompletionOrigin::VendorExplicit
         } else {
             crate::ClassCompletionOrigin::VendorTransitive
