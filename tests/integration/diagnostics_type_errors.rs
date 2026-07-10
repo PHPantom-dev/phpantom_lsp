@@ -4701,7 +4701,47 @@ function normalizeBooleanString(string $value): bool
     let diags = collect_with_full_stubs(php);
     assert!(
         !has_type_error(&diags),
-        "Assignment in if-branch must not affect elseif condition (issue #167): {:?}",
+        "@phpstan-type Field alias should be compatible with string (issue #166): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #173: iterator_to_array must return array, not iterator ──────────
+
+#[test]
+fn no_false_positive_for_iterator_to_array_with_class_element() {
+    let php = r#"<?php
+class Foo {}
+
+function take_array(array $array): void {}
+
+/** @param \Iterator<Foo> $iterator */
+function make_array(\Iterator $iterator): array {
+    return take_array(iterator_to_array($iterator));
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "iterator_to_array should return array, not Iterator (issue #173): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_iterator_to_array_with_scalar_element() {
+    let php = r#"<?php
+function take_array(array $array): void {}
+
+/** @param \Iterator<string> $iterator */
+function make_array(\Iterator $iterator): array {
+    return take_array(iterator_to_array($iterator));
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "iterator_to_array with scalar element should also return array: {:?}",
         type_error_messages(&diags)
     );
 }

@@ -217,14 +217,20 @@ pub(in crate::completion) fn resolve_array_func_raw_type(
     }
 
     // iterator_to_array: converts an iterator to an array, preserving
-    // the value type.  `iterator_to_array($iter)` where `$iter` is
-    // `Iterator<int, Foo>` produces `array<int, Foo>`.
+    // key and value types.  `iterator_to_array($iter)` where `$iter`
+    // is `Iterator<int, Foo>` produces `array<int, Foo>`.  When only
+    // a value type is available (single generic param), produces
+    // `list<Foo>`.
     if func_name.eq_ignore_ascii_case("iterator_to_array") {
         let iter_expr = super::resolution::first_arg_expr(args)?;
         let raw = super::resolution::resolve_arg_raw_type(iter_expr, ctx)?;
-        if raw.extract_value_type(true).is_some() {
-            return Some(raw);
-        }
+        let val = raw.extract_element_type().cloned();
+        let key = raw.extract_key_type(false).cloned();
+        return match (key, val) {
+            (Some(k), Some(v)) => Some(PhpType::generic_array(k, v)),
+            (None, Some(v)) => Some(PhpType::list(v)),
+            _ => Some(PhpType::array()),
+        };
     }
 
     // Element-extracting functions: wrap element type in list<> so
