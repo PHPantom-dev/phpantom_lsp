@@ -4796,6 +4796,23 @@ function make_array(\Iterator $iterator): array {
     );
 }
 
+// ─── Issue #165: strtr() with replace-pairs array — overloaded signature ────
+
+#[test]
+fn no_false_positive_for_strtr_with_array() {
+    let php = r#"<?php
+$result = strtr('Hello :name', [
+    ':name' => 'Alex',
+]);
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "strtr() with array replace_pairs should be valid (issue #165): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
 // ─── Issue #167 (variant): simpler reproduction without stubs ───────────────
 
 #[test]

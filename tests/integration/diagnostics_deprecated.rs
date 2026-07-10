@@ -2215,6 +2215,7 @@ fn replace_deprecated_function_call_action_offered() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );

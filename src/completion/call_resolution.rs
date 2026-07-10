@@ -602,6 +602,7 @@ impl Backend {
         ResolvedCallableTarget {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
+            overloads: func.overloads.clone(),
             ..Default::default()
         }
     }
@@ -688,6 +689,7 @@ impl Backend {
                     parameters: vec![],
                     return_type: None,
                     accepts_any_args: true,
+                    ..Default::default()
                 });
             }
         };
@@ -2986,6 +2988,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 parameters,
                 return_type: return_type.as_deref().cloned(),
                 accepts_any_args: false,
+                ..Default::default()
             })
         }
         PhpType::Named(name)
@@ -2995,6 +2998,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 parameters: vec![],
                 return_type: None,
                 accepts_any_args: true,
+                ..Default::default()
             })
         }
         PhpType::Union(members) => {

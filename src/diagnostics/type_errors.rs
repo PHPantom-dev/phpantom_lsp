@@ -1761,6 +1761,37 @@ impl Backend {
                     continue;
                 }
 
+                // When the function has overloaded signatures, check
+                // whether the argument is compatible with the same
+                // positional parameter in any overload.  Only emit the
+                // diagnostic when ALL signatures reject it.
+                if !resolved.overloads.is_empty() {
+                    let compatible_with_overload = resolved.overloads.iter().any(|alt_params| {
+                        if let Some(alt_param) = alt_params.get(positional_idx.saturating_sub(1)) {
+                            if let Some(ref alt_type) = alt_param.type_hint
+                                && !alt_type.is_untyped()
+                                && !alt_type.is_mixed()
+                            {
+                                return is_type_compatible(
+                                    arg_type,
+                                    alt_type,
+                                    &class_loader,
+                                    strict_types,
+                                );
+                            }
+                            true // no type hint on alt param = compatible
+                        } else {
+                            // This overload has fewer params — the arg
+                            // doesn't correspond to any parameter, so
+                            // it's not relevant for this check.
+                            false
+                        }
+                    });
+                    if compatible_with_overload {
+                        continue;
+                    }
+                }
+
                 // Emit diagnostic.
                 let range = match self.offset_range_to_lsp_range(
                     uri,

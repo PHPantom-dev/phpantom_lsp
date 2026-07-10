@@ -524,6 +524,7 @@ mod tests {
             template_param_bounds: Default::default(),
             template_bindings: Vec::new(),
             is_polyfill: false,
+            overloads: Vec::new(),
         };
         apply_function_stub_patches(&mut func);
         assert!(

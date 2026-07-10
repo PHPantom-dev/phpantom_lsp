@@ -1018,6 +1018,12 @@ pub(crate) struct ResolvedCallableTarget {
     /// the argument-count diagnostic must not flag extra arguments, while
     /// signature help still shows the (empty) signature.
     pub accepts_any_args: bool,
+    /// Alternate parameter lists from overloaded function declarations.
+    ///
+    /// Populated from `FunctionInfo::overloads` when resolving standalone
+    /// function calls.  The type checker tries each overload and only
+    /// emits a diagnostic when the call is incompatible with ALL.
+    pub overloads: Vec<Vec<ParameterInfo>>,
 }
 /// Stores extracted information about a standalone PHP function.
 ///
@@ -1155,6 +1161,17 @@ pub struct FunctionInfo {
     /// not shadow the stub's signature, deprecation status, or other
     /// metadata.
     pub is_polyfill: bool,
+    /// Alternate parameter lists from overloaded function declarations.
+    ///
+    /// Some PHP functions (e.g. `strtr`, `implode`, `array_keys`) have
+    /// multiple valid signatures that differ in parameter count and types.
+    /// Stubs represent these as separate `function` declarations with the
+    /// same name.  During parsing, duplicates are merged into this field.
+    ///
+    /// The type checker tries the primary `parameters` first, then each
+    /// overload.  A diagnostic is only emitted when the call is
+    /// incompatible with ALL signatures.
+    pub overloads: Vec<Vec<ParameterInfo>>,
 }
 
 impl FunctionInfo {
@@ -1210,6 +1227,10 @@ impl FunctionInfo {
             if !a.signature_eq(b) {
                 return false;
             }
+        }
+
+        if self.overloads.len() != other.overloads.len() {
+            return false;
         }
 
         true
@@ -3468,6 +3489,7 @@ mod tests {
             template_param_bounds: Default::default(),
             throws: Vec::new(),
             is_polyfill: false,
+            overloads: Vec::new(),
         }
     }
 

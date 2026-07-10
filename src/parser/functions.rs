@@ -402,27 +402,46 @@ impl Backend {
 
                     let func_tpl_atoms: Vec<crate::atom::Atom> =
                         func_template_params.iter().map(|s| atom(s)).collect();
-                    functions.push(FunctionInfo {
-                        name,
-                        name_offset,
-                        parameters,
-                        native_return_type,
-                        return_type,
-                        description,
-                        return_description,
-                        links: link_urls,
-                        see_refs,
-                        namespace: current_namespace.clone(),
-                        conditional_return,
-                        type_assertions,
-                        deprecation_message,
-                        deprecated_replacement,
-                        template_params: func_tpl_atoms,
-                        template_param_bounds: func_template_param_bounds,
-                        template_bindings: func_template_bindings,
-                        throws,
-                        is_polyfill: false,
-                    });
+                    // Merge overloaded function declarations: when a
+                    // function with the same name already exists (common
+                    // in phpstorm-stubs for functions like `strtr`,
+                    // `implode`, `array_keys`), add the new parameter
+                    // list as an overload instead of pushing a duplicate.
+                    if let Some(existing) = functions.iter_mut().find(|f| {
+                        f.name.eq_ignore_ascii_case(&name)
+                                && f.namespace == *current_namespace
+                                // Only merge when parameter counts differ —
+                                // true overloads (strtr, implode) always
+                                // differ in arity.  Same-name functions
+                                // with the same param count are version
+                                // variants, not overloads.
+                                && f.parameters.len() != parameters.len()
+                    }) {
+                        existing.overloads.push(parameters);
+                    } else {
+                        functions.push(FunctionInfo {
+                            name,
+                            name_offset,
+                            parameters,
+                            native_return_type,
+                            return_type,
+                            description,
+                            return_description,
+                            links: link_urls,
+                            see_refs,
+                            namespace: current_namespace.clone(),
+                            conditional_return,
+                            type_assertions,
+                            deprecation_message,
+                            deprecated_replacement,
+                            template_params: func_tpl_atoms,
+                            template_param_bounds: func_template_param_bounds,
+                            template_bindings: func_template_bindings,
+                            throws,
+                            is_polyfill: false,
+                            overloads: Vec::new(),
+                        });
+                    }
                 }
                 Statement::Namespace(namespace) => {
                     let ns_name = namespace

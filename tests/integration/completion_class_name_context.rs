@@ -2529,6 +2529,7 @@ async fn test_use_import_excludes_constants_and_functions() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );
@@ -2662,6 +2663,7 @@ async fn test_use_function_shows_only_functions() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );

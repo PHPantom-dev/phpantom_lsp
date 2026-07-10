@@ -1171,6 +1171,7 @@ fn test_find_cross_file_propagated_throws_function_call() {
         template_bindings: Vec::new(),
         throws: vec![PhpType::parse("DatabaseException")],
         is_polyfill: false,
+        overloads: vec![],
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
@@ -1304,6 +1305,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         template_bindings: Vec::new(),
         throws: vec![PhpType::parse("HelperException")],
         is_polyfill: false,
+        overloads: vec![],
     };
 
     let function_loader = move |name: &str| -> Option<FunctionInfo> {
