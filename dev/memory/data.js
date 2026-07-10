@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783723220886,
+  "lastUpdate": 1783723948329,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12987,6 +12987,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "5b54443ddd19c1dece8de4f42725f47d0e985c7f",
+          "message": "fix: classify symfony/polyfill-* packages as PHP core stubs\n\nPackages like symfony/polyfill-php83 backport PHP core classes and\nextension functions (e.g. \\Override). They were classified as\ntransitive vendor dependencies, which gave them low sort priority\nin completion and incorrect provenance display.\n\nNow any package whose name starts with 'symfony/polyfill-' is\nclassified as CoreStub, matching the built-in PHP stubs.",
+          "timestamp": "2026-07-10T17:38:17-05:00",
+          "tree_id": "d89287786582e8dda9e6e47c5c3d64c46c2614b5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5b54443ddd19c1dece8de4f42725f47d0e985c7f"
+        },
+        "date": 1783723946956,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.1,
             "unit": "MiB"
           }
         ]
