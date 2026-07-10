@@ -2879,12 +2879,12 @@ impl Backend {
 fn classify_class_origin(
     path: &Path,
     vendor_path: &Path,
-    vendor_package_roots: &[(PathBuf, crate::ClassCompletionOrigin)],
+    vendor_package_roots: &[(PathBuf, crate::ClassCompletionOrigin, String)],
 ) -> crate::ClassCompletionOrigin {
     if !path.starts_with(vendor_path) {
         return crate::ClassCompletionOrigin::Project;
     }
-    for (root, origin) in vendor_package_roots {
+    for (root, origin, _pkg_name) in vendor_package_roots {
         if path.starts_with(root) {
             return *origin;
         }

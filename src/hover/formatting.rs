@@ -43,6 +43,32 @@ pub(super) fn format_deprecation_line(msg: &str) -> String {
     }
 }
 
+/// Format a provenance line showing where a symbol comes from.
+///
+/// Returns a short Markdown line with an emoji indicator:
+/// - `🟢 laravel/framework` — direct Composer dependency
+/// - `🟠 phpstan/phpstan` — transitive dependency
+/// - `🟣 PHP` — core/stub (built-in PHP class or extension)
+/// - `None` — project code (no badge needed)
+pub(super) fn format_provenance_line(
+    origin: crate::ClassCompletionOrigin,
+    package_name: Option<&str>,
+) -> Option<String> {
+    use crate::ClassCompletionOrigin;
+    match origin {
+        ClassCompletionOrigin::Project => None,
+        ClassCompletionOrigin::CoreStub => Some("🟣 `PHP`".to_string()),
+        ClassCompletionOrigin::VendorExplicit => {
+            let name = package_name.unwrap_or("vendor");
+            Some(format!("🟢 `{}`", name))
+        }
+        ClassCompletionOrigin::VendorTransitive => {
+            let name = package_name.unwrap_or("vendor");
+            Some(format!("🟠 `{}` *(transitive)*", name))
+        }
+    }
+}
+
 /// Format a visibility keyword.
 pub(super) fn format_visibility(vis: Visibility) -> &'static str {
     match vis {
@@ -323,6 +349,7 @@ pub(super) fn build_class_member_block_with_var(
 pub(crate) fn hover_for_function(
     func: &FunctionInfo,
     resolved_see: Option<&[ResolvedSeeRef]>,
+    provenance: Option<String>,
 ) -> Hover {
     let native_params = format_native_params(&func.parameters);
 
@@ -378,6 +405,10 @@ pub(crate) fn hover_for_function(
     // Build a clean code block with just the signature.
     let code = format!("```php\n<?php\n{}{};\n```", ns_line, signature);
     lines.push(code);
+
+    if let Some(prov) = provenance {
+        lines.push(prov);
+    }
 
     make_hover(lines.join("\n\n"))
 }

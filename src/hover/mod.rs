@@ -440,6 +440,28 @@ impl Backend {
         }
     }
 
+    /// Return a Markdown provenance line for a class FQN, or `None` for
+    /// project-local classes.
+    pub(crate) fn provenance_line_for_class(&self, fqn: &str) -> Option<String> {
+        let class_uri = self.fqn_uri_index.read().get(fqn).cloned()?;
+        let (origin, pkg_name) = self.package_info_for_uri(&class_uri);
+        format_provenance_line(origin, pkg_name.as_deref())
+    }
+
+    /// Return a Markdown provenance line for a function by name.
+    ///
+    /// Looks up the function's file path in the autoload index and
+    /// resolves the package info from it.
+    pub(crate) fn provenance_line_for_function(&self, func_name: &str) -> Option<String> {
+        let path = self.autoload_function_index.read().get(func_name).cloned();
+        if let Some(path) = path {
+            let (origin, pkg_name) = self.package_info_for_path(&path);
+            format_provenance_line(origin, pkg_name.as_deref())
+        } else {
+            None
+        }
+    }
+
     /// Handle a `textDocument/hover` request.
     ///
     /// Returns `Some(Hover)` when the symbol under the cursor can be
@@ -1096,7 +1118,8 @@ impl Backend {
     ) -> Option<Hover> {
         if let Some(func) = function_loader(name) {
             let resolved_see = self.resolve_see_refs(&func.see_refs, uri, content);
-            Some(hover_for_function(&func, Some(&resolved_see)))
+            let provenance = self.provenance_line_for_function(name);
+            Some(hover_for_function(&func, Some(&resolved_see), provenance))
         } else {
             None
         }
@@ -1216,6 +1239,10 @@ impl Backend {
         );
         lines.push(code);
 
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
+
         make_hover(lines.join("\n\n"))
     }
 
@@ -1290,6 +1317,10 @@ impl Backend {
         );
         lines.push(code);
 
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
+
         make_hover(lines.join("\n\n"))
     }
 
@@ -1355,6 +1386,10 @@ impl Backend {
             &member_line,
         );
         lines.push(code);
+
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
 
         make_hover(lines.join("\n\n"))
     }
@@ -1458,6 +1493,10 @@ impl Backend {
                 "```php\n<?php\n{}{} {{\n{}}}\n```",
                 ns_line, signature, body_lines
             ));
+        }
+
+        if let Some(prov) = self.provenance_line_for_class(&cls.fqn()) {
+            lines.push(prov);
         }
 
         make_hover(lines.join("\n\n"))

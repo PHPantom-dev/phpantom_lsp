@@ -265,7 +265,8 @@ impl Backend {
         let function_loader = self.function_loader(ctx);
         if let Some(func) = function_loader(&data.member_name) {
             let resolved_see = self.resolve_see_refs(&func.see_refs, &data.uri, content);
-            let hover = hover_for_function(&func, Some(&resolved_see));
+            let provenance = self.provenance_line_for_function(&data.member_name);
+            let hover = hover_for_function(&func, Some(&resolved_see), provenance);
             if let Some(md) = extract_hover_markdown(hover) {
                 set_documentation(item, md);
             }

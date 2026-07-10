@@ -180,7 +180,7 @@ impl crate::Backend {
         let empty_use_map = std::collections::HashMap::new();
         let loader = self.function_loader_with(&empty_use_map, &None);
         let content = if let Some(func) = loader("e") {
-            crate::hover::hover_for_function(&func, None).contents
+            crate::hover::hover_for_function(&func, None, None).contents
         } else {
             HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
