@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783706735266,
+  "lastUpdate": 1783707416778,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12613,6 +12613,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "c77dc347ca5df981b2d31d45daec3c3e0e2228c9",
+          "message": "fix: expand @phpstan-type aliases before argument type checking\n\nType aliases declared via @phpstan-type / @psalm-type (e.g. Payload,\nField, ValueType) are now expanded to their underlying types before\nargument compatibility checking. Previously the alias name was kept\nas-is and treated as an unknown class, producing false diagnostics\nlike 'expects ?array, got Payload'.\n\nTwo-part fix:\n1. Call resolve_type_alias_typed() during arg type resolution in\n   type_errors.rs to expand aliases to their underlying types.\n2. Add a safety-net escape hatch in is_type_compatible() for arg\n   types that are unresolvable non-class names (unexpanded aliases\n   from other files).\n\nFixes #166.",
+          "timestamp": "2026-07-10T13:04:42-05:00",
+          "tree_id": "08cc85c4cdf7a2fc1487ff33fb3acaafe0e08002",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c77dc347ca5df981b2d31d45daec3c3e0e2228c9"
+        },
+        "date": 1783707415075,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.5,
             "unit": "MiB"
           }
         ]
