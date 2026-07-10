@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783722568555,
+  "lastUpdate": 1783723218725,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12914,6 +12914,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 39.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "8f4a79d4f44567ccab49900087cfce537ef33a57",
+          "message": "feat: display package provenance in hover\n\nShow a colored badge in hover indicating where a symbol comes from:\n- 🟢 `package/name` for direct Composer dependencies\n- 🟠 `package/name` *(transitive)* for transitive dependencies\n- 🟣 `PHP` for core/extension symbols\n- No badge for project-local symbols\n\nThe vendor_package_origin_roots data structure now stores the Composer\npackage name alongside the origin tier and install path, read from\nvendor/composer/installed.json. New package_info_for_path/uri methods\non Backend return both the origin and the package name.\n\nProvenance is shown in hover for classes, methods, properties,\nconstants, and standalone functions.\n\nCloses #228.",
+          "timestamp": "2026-07-10T17:27:57-05:00",
+          "tree_id": "70e332196d0d6e598165195327ff380893004edd",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8f4a79d4f44567ccab49900087cfce537ef33a57"
+        },
+        "date": 1783723217340,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.6,
             "unit": "MiB"
           },
           {
