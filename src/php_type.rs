@@ -2684,14 +2684,48 @@ impl PhpType {
             return literal_is_subtype_of(lit, supertype);
         }
 
-        // ── IntRange <: int ─────────────────────────────────────────
-        if matches!(self, PhpType::IntRange(..))
-            && let PhpType::Named(sup) = supertype
+        // ── IntRange <: int / refined-int / IntRange ────────────────
+        if let PhpType::IntRange(sub_min, sub_max) = self {
+            match supertype {
+                // IntRange <: int, numeric, scalar, array-key
+                PhpType::Named(sup) => {
+                    let sup_l = sup.to_ascii_lowercase();
+                    if matches!(
+                        sup_l.as_str(),
+                        "int" | "integer" | "numeric" | "scalar" | "array-key"
+                    ) {
+                        return true;
+                    }
+                    // IntRange <: refined-int (e.g. int<0,max> <: non-negative-int)
+                    if let Some((sup_min, sup_max)) = refined_int_to_range(&sup_l) {
+                        return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
+                    }
+                    // IntRange <: non-zero-int — the range must not contain 0.
+                    // Either entirely positive (min >= 1) or entirely negative (max <= -1).
+                    if sup_l == "non-zero-int" {
+                        let lo = parse_range_bound(sub_min);
+                        let hi = parse_range_bound(sub_max);
+                        return lo >= 1 || hi <= -1;
+                    }
+                    return false;
+                }
+                // IntRange <: IntRange (e.g. int<1,100> <: int<0,max>)
+                PhpType::IntRange(sup_min, sup_max) => {
+                    return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
+                }
+                _ => {}
+            }
+        }
+
+        // ── refined-int <: IntRange ─────────────────────────────────
+        // e.g. non-negative-int <: int<0,max>, positive-int <: int<0,max>
+        if let PhpType::Named(sub) = self
+            && let PhpType::IntRange(sup_min, sup_max) = supertype
         {
-            return matches!(
-                sup.to_ascii_lowercase().as_str(),
-                "int" | "integer" | "numeric" | "scalar" | "array-key"
-            );
+            let sub_l = sub.to_ascii_lowercase();
+            if let Some((sub_min, sub_max)) = refined_int_to_range(&sub_l) {
+                return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
+            }
         }
 
         // ── Array slice: T[] <: array ───────────────────────────────
@@ -3194,6 +3228,20 @@ fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-negative-int"
                 | "non-zero-int"
         ),
+        // ── refined-int cross-subtyping ─────────────────────────
+        // e.g. positive-int <: non-negative-int (1..max ⊆ 0..max)
+        "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int"
+            if refined_int_to_range(sub_n).is_some() && refined_int_to_range(sup_n).is_some() =>
+        {
+            let (sub_min, sub_max) = refined_int_to_range(sub_n).unwrap();
+            let (sup_min, sup_max) = refined_int_to_range(sup_n).unwrap();
+            int_range_is_subrange(sub_min, sub_max, sup_min, sup_max)
+        }
+
+        // ── non-zero-int supertype ──────────────────────────────
+        // positive-int and negative-int are subtypes of non-zero-int.
+        // non-negative-int and non-positive-int are NOT (they include 0).
+        "non-zero-int" => matches!(sub_n, "positive-int" | "negative-int"),
 
         // ── float supertypes ────────────────────────────────────
         "float" => matches!(
@@ -3442,6 +3490,43 @@ fn literals_equal(left: &LiteralValue, right: &LiteralValue) -> bool {
         }
         _ => left == right,
     }
+}
+
+/// Convert a refined-int type name to its equivalent `(min, max)` range
+/// bounds.  Returns `None` for non-refined types.
+///
+/// - `positive-int`     → `("1", "max")`
+/// - `negative-int`     → `("min", "-1")`
+/// - `non-negative-int` → `("0", "max")`
+/// - `non-positive-int` → `("min", "0")`
+fn refined_int_to_range(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "positive-int" => Some(("1", "max")),
+        "negative-int" => Some(("min", "-1")),
+        "non-negative-int" => Some(("0", "max")),
+        "non-positive-int" => Some(("min", "0")),
+        _ => None,
+    }
+}
+
+/// Parse a range bound string into an `i64`, treating `"min"` as
+/// `i64::MIN` and `"max"` as `i64::MAX`.
+fn parse_range_bound(s: &str) -> i64 {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "min" => i64::MIN,
+        "max" => i64::MAX,
+        v => v.parse::<i64>().unwrap_or(0),
+    }
+}
+
+/// Check whether range `(sub_min, sub_max)` is fully contained within
+/// `(sup_min, sup_max)`.  Both bounds are inclusive.
+fn int_range_is_subrange(sub_min: &str, sub_max: &str, sup_min: &str, sup_max: &str) -> bool {
+    let sub_lo = parse_range_bound(sub_min);
+    let sub_hi = parse_range_bound(sub_max);
+    let sup_lo = parse_range_bound(sup_min);
+    let sup_hi = parse_range_bound(sup_max);
+    sup_lo <= sub_lo && sub_hi <= sup_hi
 }
 
 pub(crate) fn int_literal_is_within_range(value: i64, min: &str, max: &str) -> bool {
@@ -7066,6 +7151,239 @@ mod tests {
             assert!(
                 !PhpType::literal_float("1.0")
                     .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
+            );
+        }
+
+        // ── IntRange <: refined-int ──────────────────────────────────
+
+        #[test]
+        fn int_range_0_max_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_1_max_is_subtype_of_positive_int() {
+            assert!(
+                PhpType::IntRange("1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_1_max_is_subtype_of_non_negative_int() {
+            // positive-int range is a subset of non-negative-int range
+            assert!(
+                PhpType::IntRange("1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_min_neg1_is_subtype_of_negative_int() {
+            assert!(
+                PhpType::IntRange("min".into(), "-1".into())
+                    .is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_min_0_is_subtype_of_non_positive_int() {
+            assert!(
+                PhpType::IntRange("min".into(), "0".into())
+                    .is_subtype_of(&PhpType::Named("non-positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_100_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::IntRange("0".into(), "100".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_neg1_max_is_not_subtype_of_non_negative_int() {
+            assert!(
+                !PhpType::IntRange("-1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_max_is_not_subtype_of_positive_int() {
+            // 0..max includes 0 which is not positive
+            assert!(
+                !PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        // ── refined-int <: IntRange ─────────────────────────────────────
+
+        #[test]
+        fn non_negative_int_is_subtype_of_int_range_0_max() {
+            assert!(
+                PhpType::Named("non-negative-int".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
+            );
+        }
+
+        #[test]
+        fn positive_int_is_subtype_of_int_range_0_max() {
+            assert!(
+                PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
+            );
+        }
+
+        #[test]
+        fn negative_int_is_subtype_of_int_range_min_neg1() {
+            assert!(
+                PhpType::Named("negative-int".into())
+                    .is_subtype_of(&PhpType::IntRange("min".into(), "-1".into()))
+            );
+        }
+
+        #[test]
+        fn positive_int_is_not_subtype_of_int_range_min_neg1() {
+            assert!(
+                !PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::IntRange("min".into(), "-1".into()))
+            );
+        }
+
+        // ── IntRange <: IntRange ────────────────────────────────────────
+
+        #[test]
+        fn int_range_1_50_is_subtype_of_0_100() {
+            assert!(
+                PhpType::IntRange("1".into(), "50".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "100".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_100_is_not_subtype_of_1_50() {
+            assert!(
+                !PhpType::IntRange("0".into(), "100".into())
+                    .is_subtype_of(&PhpType::IntRange("1".into(), "50".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_max_is_subtype_of_0_max() {
+            assert!(
+                PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
+            );
+        }
+
+        // ── refined-int <: refined-int ──────────────────────────────────
+
+        #[test]
+        fn positive_int_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn negative_int_is_subtype_of_non_positive_int() {
+            assert!(
+                PhpType::Named("negative-int".into())
+                    .is_subtype_of(&PhpType::Named("non-positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn non_negative_int_is_not_subtype_of_positive_int() {
+            // non-negative includes 0, positive doesn't
+            assert!(
+                !PhpType::Named("non-negative-int".into())
+                    .is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_int_is_not_subtype_of_negative_int() {
+            assert!(
+                !PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        // ── non-zero-int subtyping ──────────────────────────────────────
+
+        #[test]
+        fn positive_int_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn negative_int_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::Named("negative-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn non_negative_int_is_not_subtype_of_non_zero_int() {
+            // non-negative includes 0
+            assert!(
+                !PhpType::Named("non-negative-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn non_positive_int_is_not_subtype_of_non_zero_int() {
+            // non-positive includes 0
+            assert!(
+                !PhpType::Named("non-positive-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_1_max_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::IntRange("1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_min_neg1_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::IntRange("min".into(), "-1".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_max_is_not_subtype_of_non_zero_int() {
+            // includes 0
+            assert!(
+                !PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_neg5_5_is_not_subtype_of_non_zero_int() {
+            // includes 0
+            assert!(
+                !PhpType::IntRange("-5".into(), "5".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
             );
         }
 
