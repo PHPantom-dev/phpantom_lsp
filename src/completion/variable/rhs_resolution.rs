@@ -1754,8 +1754,8 @@ fn resolve_rhs_array_access<'b>(
             ArrayBracketSegment::StringKey(key) => current
                 .shape_value_type(key)
                 .cloned()
-                .or_else(|| current.extract_value_type(true).cloned()),
-            ArrayBracketSegment::ElementAccess => current.extract_value_type(true).cloned(),
+                .or_else(|| current.extract_element_type().cloned()),
+            ArrayBracketSegment::ElementAccess => current.extract_element_type().cloned(),
         };
 
         if let Some(element) = extracted {

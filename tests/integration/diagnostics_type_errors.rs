@@ -4729,3 +4729,26 @@ function test(string $value): void
         type_error_messages(&diags)
     );
 }
+
+// ─── Issue #169: reassign from own array offset must update type ────────────
+
+#[test]
+fn no_false_positive_after_reassign_from_array_offset() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(string $input): void
+{
+    /** @var list<string>|false $value */
+    $value = ['a', 'b'];
+    $value = $value[0];
+    takes_string($value);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "After $value = $value[0], type should no longer be array|false (issue #169): {:?}",
+        type_error_messages(&diags)
+    );
+}
