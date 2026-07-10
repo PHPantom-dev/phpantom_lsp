@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783687205828,
+  "lastUpdate": 1783702669244,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12511,6 +12511,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "e501c6da5a6113f74c25b6e66f0d32ff285bb361",
+          "message": "fix: int ranges compatible with refined-int pseudo-types (#170)\n\nint<0,max> passed to a non-negative-int parameter no longer triggers\na false type_mismatch_argument diagnostic.\n\nAdded comprehensive subtype relationships between IntRange types and\nrefined-int pseudo-types:\n- IntRange <: refined-int (int<0,max> <: non-negative-int)\n- refined-int <: IntRange (positive-int <: int<0,max>)\n- IntRange <: IntRange (int<1,50> <: int<0,100>)\n- refined-int <: refined-int (positive-int <: non-negative-int)\n\nFixes #170.",
+          "timestamp": "2026-07-10T11:45:33-05:00",
+          "tree_id": "37378d981687a735b01a6b35cc34f565255315cb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e501c6da5a6113f74c25b6e66f0d32ff285bb361"
+        },
+        "date": 1783702667480,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 51,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.4,
             "unit": "MiB"
           }
         ]
