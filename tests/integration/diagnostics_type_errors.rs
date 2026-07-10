@@ -4608,3 +4608,76 @@ function check_pgsql(): void
         type_error_messages(&diags)
     );
 }
+
+// ─── int<0,max> passed to non-negative-int — no diagnostic (#170) ──────────
+
+#[test]
+fn no_diagnostic_for_int_range_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function addCount(int $count): void {}
+
+function test(array $items): void {
+    /** @var int<0, max> $count */
+    $count = 5;
+    addCount($count);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "int<0,max> should be compatible with non-negative-int (issue #170): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── positive-int passed to non-negative-int — no diagnostic ───────────────
+
+#[test]
+fn no_diagnostic_for_positive_int_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function addCount(int $count): void {}
+
+/**
+ * @param positive-int $n
+ */
+function test(int $n): void {
+    addCount($n);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "positive-int should be compatible with non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── int<1,100> passed to non-negative-int — no diagnostic ─────────────────
+
+#[test]
+fn no_diagnostic_for_bounded_int_range_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function addCount(int $count): void {}
+
+function test(): void {
+    /** @var int<1, 100> $count */
+    $count = 50;
+    addCount($count);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "int<1,100> should be compatible with non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
