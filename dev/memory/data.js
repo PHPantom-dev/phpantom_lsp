@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783720132299,
+  "lastUpdate": 1783720406294,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12851,6 +12851,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "e837dcd0e71062b2590ef2345e7907ae551e6729",
+          "message": "feat: Laravel route controller method navigation and completion\n\nAdd go-to-definition, find-references, rename, hover, diagnostics, and\nautocompletion for method-name strings inside\nRoute::controller(X::class)->group(fn(){...}) closures.\n\nThe extraction layer emits standard MemberAccess spans during AST\nextraction, so all existing navigation features work automatically.\nA separate completion module detects the cursor context via text\nscanning and AST parsing to offer controller method completions.\n\nHandles ->controller() anywhere in the fluent chain, chained route\ncalls (->name(), etc.), nested groups where an inner ->controller()\nshadows the outer, and groups without ->controller() that inherit\nthe parent controller.",
+          "timestamp": "2026-07-10T16:41:02-05:00",
+          "tree_id": "189a0cec8bc721e73575dc7894042c2c2470f081",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e837dcd0e71062b2590ef2345e7907ae551e6729"
+        },
+        "date": 1783720404721,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.7,
             "unit": "MiB"
           }
         ]
