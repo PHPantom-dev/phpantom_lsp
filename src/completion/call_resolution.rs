@@ -1509,9 +1509,11 @@ impl Backend {
                                     }
                                 }
                                 TemplateBindingMode::CallableReturnType => {
-                                    if let Some(ret_type) =
+                                    // Fall back to yield inference for generator closures.
+                                    let ret_type =
                                         crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
-                                    {
+                                            .or_else(|| crate::completion::source::helpers::infer_generator_type_from_closure_yields(arg_text));
+                                    if let Some(ret_type) = ret_type {
                                         crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
                                     }
                                 }
@@ -2347,33 +2349,16 @@ impl Backend {
                                 concrete,
                             );
                         } else {
-                            // When the wrapper extraction fails and the
-                            // argument is a closure, try callable return
-                            // type inference as a fallback.  This handles
-                            // union param types like
-                            // `iterable<T>|(Closure(): Generator<T>)|null`
-                            // where the classifier picked GenericWrapper
-                            // from `iterable<T>` but the arg is a closure.
-                            let closure_fallback = Self::try_closure_return_type_for_template(
-                                arg_text,
-                                tpl_name,
-                                tpl_position,
-                                param_hint,
-                                ctx,
+                            // The closure-return-type fallback for union
+                            // param hints like `iterable<T>|(Closure(): T)`
+                            // already ran at the top of this branch, so a
+                            // failed extraction here binds the resolved arg
+                            // type directly.
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                resolved_type,
                             );
-                            if let Some(concrete) = closure_fallback {
-                                crate::completion::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    concrete,
-                                );
-                            } else {
-                                crate::completion::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    resolved_type,
-                                );
-                            }
                         }
                     }
                 }

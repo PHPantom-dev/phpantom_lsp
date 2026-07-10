@@ -283,7 +283,10 @@ pub(in crate::completion) fn infer_generator_type_from_closure_yields(
     // Scan for `yield` at any depth within the closure body,
     // but skip nested function/closure definitions.
     let mut depth = 0i32;
-    let mut nested_fn_depth = 0i32; // tracks brace depth inside nested fn/closure
+    // When inside a nested `function` closure, holds the outer brace depth
+    // at which that closure was declared.  Yields/returns are ignored until
+    // `depth` returns to this level.  `None` while scanning the outer body.
+    let mut nested_fn_base: Option<i32> = None;
     let mut value_type: Option<PhpType> = None;
     let mut key_type: Option<PhpType> = None;
     let mut found_yield = false;
@@ -301,8 +304,8 @@ pub(in crate::completion) fn infer_generator_type_from_closure_yields(
                     break; // end of closure body
                 }
                 depth -= 1;
-                if nested_fn_depth > 0 {
-                    nested_fn_depth -= 1;
+                if nested_fn_base.is_some_and(|base| depth <= base) {
+                    nested_fn_base = None;
                 }
             }
             b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
@@ -323,29 +326,24 @@ pub(in crate::completion) fn infer_generator_type_from_closure_yields(
                     i += 1;
                 }
             }
-            // Detect nested `function` or `fn` keywords to skip
-            // their bodies (yields inside nested closures belong
-            // to a different generator).
-            b'f' if nested_fn_depth == 0
-                && (body[i..].starts_with("function")
-                    && body
-                        .as_bytes()
-                        .get(i + 8)
-                        .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
-                    || body[i..].starts_with("fn")
-                        && body
-                            .as_bytes()
-                            .get(i + 2)
-                            .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')) =>
+            // Detect nested `function` closures so yields inside them
+            // (which belong to a different generator) are ignored until
+            // brace depth returns to the declaration level.  Arrow `fn`
+            // closures are single-expression and cannot contain `yield`,
+            // so they need no special handling.
+            b'f' if nested_fn_base.is_none()
+                && body[i..].starts_with("function")
+                && body
+                    .as_bytes()
+                    .get(i + 8)
+                    .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_') =>
             {
-                // Skip ahead to the opening `{` of the nested function
-                // and mark the depth so we ignore everything inside.
-                if let Some(brace) = body[i..].find('{') {
-                    i += brace; // will hit `{` on next iteration
-                    nested_fn_depth = 1;
-                }
+                // Remember the depth at which the nested closure was
+                // declared; its `{`/`}` are counted normally by the
+                // braces arms, and we resume scanning once we return here.
+                nested_fn_base = Some(depth);
             }
-            b'y' if nested_fn_depth == 0
+            b'y' if nested_fn_base.is_none()
                 && body[i..].starts_with("yield")
                 && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
                 && i + 5 < len
@@ -390,7 +388,7 @@ pub(in crate::completion) fn infer_generator_type_from_closure_yields(
                     }
                 }
             }
-            b'r' if nested_fn_depth == 0
+            b'r' if nested_fn_base.is_none()
                 && body[i..].starts_with("return")
                 && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
                 && i + 6 < len
@@ -1061,5 +1059,59 @@ mod tests {
             extract_closure_param_type_from_text(text, 2),
             Some(PhpType::parse("string"))
         );
+    }
+
+    /// Extract the `<TKey, TValue>` args from an inferred `Generator` type.
+    fn generator_args(text: &str) -> Vec<PhpType> {
+        match infer_generator_type_from_closure_yields(text) {
+            Some(PhpType::Generic(name, args)) if name == "Generator" => args,
+            other => panic!("expected Generator<...>, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_yield_infers_int_key_and_value_type() {
+        let args = generator_args("function () { yield (string) $x; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+    }
+
+    #[test]
+    fn keyed_yield_infers_key_and_value_types() {
+        let args = generator_args("function () { yield 1 => 'a'; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+    }
+
+    #[test]
+    fn not_a_generator_without_yield() {
+        assert_eq!(
+            infer_generator_type_from_closure_yields("function () { return 1; }"),
+            None
+        );
+    }
+
+    /// A nested closure with no inner braces used to make the scan hit its
+    /// `}` at depth 0 and stop early, missing the real yield that follows.
+    #[test]
+    fn nested_closure_without_inner_braces_does_not_end_scan_early() {
+        let args =
+            generator_args("function () { $f = function () { yield 1; }; yield (string) $x; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+    }
+
+    /// A nested closure containing inner braces used to leak its yields into
+    /// the outer generator; the outer yield must win regardless of order.
+    #[test]
+    fn nested_closure_with_inner_braces_does_not_leak_yields() {
+        let args = generator_args(
+            "function () { \
+                $f = function () { foreach ([] as $y) {} yield 1.5; }; \
+                yield (string) $x; \
+            }",
+        );
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
     }
 }
