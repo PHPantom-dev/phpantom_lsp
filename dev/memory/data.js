@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783707416778,
+  "lastUpdate": 1783707582830,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12647,6 +12647,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3bc8743c21c31b387499549580b8fdff827a5486",
+          "message": "A class named after a pseudo-type is no longer shadowed by it",
+          "timestamp": "2026-07-10T20:07:04+02:00",
+          "tree_id": "a782177e5d727128ed258e9f4869f8de7be20dfc",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3bc8743c21c31b387499549580b8fdff827a5486"
+        },
+        "date": 1783707581733,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.2,
             "unit": "MiB"
           }
         ]
