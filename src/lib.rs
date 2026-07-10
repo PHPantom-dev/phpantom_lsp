@@ -80,6 +80,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -316,6 +317,8 @@ pub struct Backend {
     /// `update_ast` on first access instead of eagerly parsing every
     /// file at startup.
     pub(crate) autoload_function_index: Arc<RwLock<CiMap<PathBuf>>>,
+    /// Completion provenance for autoloaded function symbols.
+    pub(crate) autoload_function_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
     /// Autoload constant index: constant name → file path on disk.
     ///
     /// Populated alongside `autoload_function_index` by the
@@ -324,6 +327,8 @@ pub struct Backend {
     /// the file that defines them for lazy resolution via
     /// `update_ast` on first access.
     pub(crate) autoload_constant_index: Arc<RwLock<HashMap<String, PathBuf>>>,
+    /// Completion provenance for autoloaded constant symbols.
+    pub(crate) autoload_constant_origin_index: Arc<RwLock<HashMap<String, ClassCompletionOrigin>>>,
     /// Paths of all files discovered through Composer's
     /// `autoload_files.php` (and their `require_once` chains).
     ///
@@ -356,6 +361,12 @@ pub struct Backend {
     /// - Entries from Composer's `autoload_classmap.php` (merged during
     ///   server initialization).
     pub(crate) fqn_uri_index: Arc<RwLock<CiMap<String>>>,
+    /// Completion provenance for fully-qualified class names.
+    ///
+    /// Used only for ranking class-name completion candidates.  Tracks
+    /// whether a class comes from project code, core/stubs, an explicit
+    /// Composer dependency, or a transitive vendor dependency.
+    pub(crate) fqn_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
     /// Secondary index mapping fully-qualified class names directly to
     /// their parsed `ClassInfo`.
     ///
@@ -494,6 +505,11 @@ pub struct Backend {
     /// vendor directory.  For single-project workspaces, contains
     /// exactly one entry.
     pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
+    /// Canonical vendor package roots paired with completion provenance.
+    ///
+    /// Used to classify function/constant/class symbols by whether they
+    /// originate from explicit or transitive Composer dependencies.
+    pub(crate) vendor_package_origin_roots: Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin)>>>,
     /// Monotonically increasing version counter for diagnostic debouncing.
     ///
     /// Bumped on every `did_change`.  A background diagnostic task
@@ -686,6 +702,26 @@ pub struct Backend {
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClassCompletionOrigin {
+    #[default]
+    Project,
+    CoreStub,
+    VendorExplicit,
+    VendorTransitive,
+}
+
+impl ClassCompletionOrigin {
+    pub(crate) fn sort_tier(self) -> char {
+        match self {
+            Self::Project => '0',
+            Self::CoreStub => '1',
+            Self::VendorExplicit => '2',
+            Self::VendorTransitive => '3',
+        }
+    }
+}
+
 /// Request-coalescing state for expensive whole-file requests (semantic
 /// tokens, code lens, document symbols, folding, links).
 ///
@@ -775,6 +811,7 @@ impl Backend {
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
@@ -783,9 +820,12 @@ impl Backend {
             global_defines: Arc::new(RwLock::new(HashMap::new())),
             uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
+            autoload_function_origin_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
+            autoload_constant_origin_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
             fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
+            fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
@@ -858,6 +898,7 @@ impl Backend {
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
@@ -866,9 +907,12 @@ impl Backend {
             global_defines: Arc::new(RwLock::new(HashMap::new())),
             uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
+            autoload_function_origin_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
+            autoload_constant_origin_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
             fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
+            fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
@@ -1063,6 +1107,12 @@ impl Backend {
         self.stub_constant_index.read()
     }
 
+    pub fn stub_function_index_mut(
+        &self,
+    ) -> parking_lot::RwLockWriteGuard<'_, CiMap<&'static str>> {
+        self.stub_function_index.write()
+    }
+
     /// Write-access the stub constant index (used by integration tests
     /// to inject test stub entries).
     pub fn stub_constant_index_mut(
@@ -1077,10 +1127,20 @@ impl Backend {
         &self.autoload_function_index
     }
 
+    pub fn autoload_function_origin_index(&self) -> &Arc<RwLock<CiMap<ClassCompletionOrigin>>> {
+        &self.autoload_function_origin_index
+    }
+
     /// Borrow the autoload constant index (used by integration tests to
     /// populate discovered constant entries for non-Composer projects).
     pub fn autoload_constant_index(&self) -> &Arc<RwLock<HashMap<String, PathBuf>>> {
         &self.autoload_constant_index
+    }
+
+    pub fn autoload_constant_origin_index(
+        &self,
+    ) -> &Arc<RwLock<HashMap<String, ClassCompletionOrigin>>> {
+        &self.autoload_constant_origin_index
     }
 
     /// Borrow the autoload file paths list (used by integration tests
@@ -1093,6 +1153,32 @@ impl Backend {
     /// file content without going through the LSP `didOpen` path).
     pub fn open_files(&self) -> &Arc<RwLock<HashMap<String, Arc<String>>>> {
         &self.open_files
+    }
+
+    pub(crate) fn completion_origin_for_path(&self, path: &Path) -> ClassCompletionOrigin {
+        let vendor_paths = self.vendor_dir_paths.lock();
+        if !vendor_paths.iter().any(|vp| path.starts_with(vp)) {
+            return ClassCompletionOrigin::Project;
+        }
+        let roots = self.vendor_package_origin_roots.read();
+        for (root, origin) in roots.iter() {
+            if path.starts_with(root) {
+                return *origin;
+            }
+        }
+        ClassCompletionOrigin::VendorTransitive
+    }
+
+    pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
+        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+            return ClassCompletionOrigin::CoreStub;
+        }
+        if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)
+            && let Ok(path) = url.to_file_path()
+        {
+            return self.completion_origin_for_path(&path);
+        }
+        ClassCompletionOrigin::Project
     }
 
     /// Borrow the PHPStan diagnostics cache (used by integration tests
@@ -1367,9 +1453,12 @@ impl Backend {
             global_defines: Arc::clone(&self.global_defines),
             uri_globals_index: Arc::clone(&self.uri_globals_index),
             autoload_function_index: Arc::clone(&self.autoload_function_index),
+            autoload_function_origin_index: Arc::clone(&self.autoload_function_origin_index),
             autoload_constant_index: Arc::clone(&self.autoload_constant_index),
+            autoload_constant_origin_index: Arc::clone(&self.autoload_constant_origin_index),
             autoload_file_paths: Arc::clone(&self.autoload_file_paths),
             fqn_uri_index: Arc::clone(&self.fqn_uri_index),
+            fqn_origin_index: Arc::clone(&self.fqn_origin_index),
             fqn_class_index: Arc::clone(&self.fqn_class_index),
             phar_archives: Arc::clone(&self.phar_archives),
             parsed_uris: Arc::clone(&self.parsed_uris),
@@ -1385,6 +1474,7 @@ impl Backend {
             php_version: Mutex::new(self.php_version()),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
+            vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             diag_version: Arc::clone(&self.diag_version),
             diag_notify: Arc::clone(&self.diag_notify),
             diag_pending_uris: Arc::clone(&self.diag_pending_uris),

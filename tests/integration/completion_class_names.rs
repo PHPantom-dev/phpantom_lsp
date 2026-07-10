@@ -1,8 +1,10 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend_with_function_stubs, create_test_backend_with_stubs,
+    create_psr4_workspace, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs, create_test_backend_with_stubs,
 };
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
+use phpantom_lsp::types::DefineInfo;
 use std::collections::HashMap;
 use std::fs;
 use tower_lsp::LanguageServer;
@@ -73,6 +75,310 @@ fn find_by_fqn<'a>(items: &[&'a CompletionItem], fqn: &str) -> Option<&'a Comple
 /// Extract FQNs from a list of completion item references (via `detail`).
 fn fqns<'a>(items: &'a [&'a CompletionItem]) -> Vec<&'a str> {
     items.iter().filter_map(|i| i.detail.as_deref()).collect()
+}
+
+fn function_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
+    items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .collect()
+}
+
+fn constant_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
+    items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .collect()
+}
+
+#[tokio::test]
+async fn test_class_name_completion_prioritizes_project_core_explicit_then_transitive() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{
+            "name": "demo/project",
+            "require": {
+                "acme/explicit": "*"
+            },
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+    )
+    .expect("failed to write composer.json");
+
+    let project_file = dir.path().join("src/RuntimeException.php");
+    fs::create_dir_all(project_file.parent().unwrap()).expect("mkdir src");
+    fs::write(
+        &project_file,
+        "<?php\nnamespace App;\nclass RuntimeException extends \\RuntimeException {}\n",
+    )
+    .expect("write project class");
+
+    let explicit_file = dir
+        .path()
+        .join("vendor/acme/explicit/src/RuntimeException.php");
+    fs::create_dir_all(explicit_file.parent().unwrap()).expect("mkdir explicit");
+    fs::write(
+        &explicit_file,
+        "<?php\nnamespace Acme\\Explicit;\nclass RuntimeException extends \\RuntimeException {}\n",
+    )
+    .expect("write explicit class");
+
+    let transitive_file = dir
+        .path()
+        .join("vendor/transitive/dep/src/RuntimeException.php");
+    fs::create_dir_all(transitive_file.parent().unwrap()).expect("mkdir transitive");
+    fs::write(
+        &transitive_file,
+        "<?php\nnamespace Transitive\\Dep;\nclass RuntimeException extends \\RuntimeException {}\n",
+    )
+    .expect("write transitive class");
+
+    let composer_dir = dir.path().join("vendor/composer");
+    fs::create_dir_all(&composer_dir).expect("mkdir vendor/composer");
+    fs::write(
+        composer_dir.join("installed.json"),
+        r#"{
+            "packages": [
+                {
+                    "name": "acme/explicit",
+                    "install-path": "../acme/explicit",
+                    "autoload": { "psr-4": { "Acme\\Explicit\\": ["src/"] } }
+                },
+                {
+                    "name": "transitive/dep",
+                    "install-path": "../transitive/dep",
+                    "autoload": { "psr-4": { "Transitive\\Dep\\": ["src/"] } }
+                }
+            ]
+        }"#,
+    )
+    .expect("write installed.json");
+
+    let backend = create_test_backend_with_full_stubs();
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = "<?php\nnew RuntimeE\n";
+    let items = complete_at(&backend, &uri, text, 1, 12).await;
+    let classes = class_items(&items);
+
+    let project_pos = classes
+        .iter()
+        .position(|i| i.detail.as_deref() == Some("App\\RuntimeException"))
+        .expect("project RuntimeException missing");
+    let core_pos = classes
+        .iter()
+        .position(|i| i.detail.as_deref() == Some("RuntimeException"))
+        .expect("core RuntimeException missing");
+    let explicit_pos = classes
+        .iter()
+        .position(|i| i.detail.as_deref() == Some("Acme\\Explicit\\RuntimeException"))
+        .expect("explicit vendor RuntimeException missing");
+    let transitive_pos = classes
+        .iter()
+        .position(|i| i.detail.as_deref() == Some("Transitive\\Dep\\RuntimeException"))
+        .expect("transitive RuntimeException missing");
+
+    assert!(
+        project_pos < core_pos && core_pos < explicit_pos && explicit_pos < transitive_pos,
+        "expected project < core < explicit vendor < transitive vendor, got order: {:?}",
+        fqns(&classes)
+    );
+}
+
+/// After a `composer` change the origin ranking must be rebuilt: a package
+/// that was transitive but is now an explicit dependency should be promoted
+/// ahead of the packages that remain transitive.
+#[tokio::test]
+async fn test_composer_change_refreshes_completion_provenance() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let composer_path = dir.path().join("composer.json");
+    // Initially neither vendor package is required, so both are transitive.
+    fs::write(
+        &composer_path,
+        r#"{ "name": "demo/project", "require": {} }"#,
+    )
+    .expect("write composer.json");
+
+    // Equal-length class names so the only ranking difference is the origin
+    // tier: "ExAlpha" (stays transitive) sorts before "ExOmega" by name,
+    // and promoting ExOmega's package must flip that order.
+    for (pkg, ns, class) in [
+        ("stays/trans", "Stays\\Trans", "ExAlpha"),
+        ("promoted/dep", "Promoted\\Dep", "ExOmega"),
+    ] {
+        let file = dir.path().join(format!("vendor/{pkg}/src/{class}.php"));
+        fs::create_dir_all(file.parent().unwrap()).expect("mkdir pkg");
+        fs::write(
+            &file,
+            format!("<?php\nnamespace {ns};\nclass {class} {{}}\n"),
+        )
+        .expect("write vendor class");
+    }
+
+    let composer_dir = dir.path().join("vendor/composer");
+    fs::create_dir_all(&composer_dir).expect("mkdir vendor/composer");
+    fs::write(
+        composer_dir.join("installed.json"),
+        r#"{
+            "packages": [
+                { "name": "stays/trans", "install-path": "../stays/trans",
+                  "autoload": { "psr-4": { "Stays\\Trans\\": ["src/"] } } },
+                { "name": "promoted/dep", "install-path": "../promoted/dep",
+                  "autoload": { "psr-4": { "Promoted\\Dep\\": ["src/"] } } }
+            ]
+        }"#,
+    )
+    .expect("write installed.json");
+
+    let backend = create_test_backend_with_full_stubs();
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = "<?php\nnew Ex\n";
+    let dep_pos = |fqns: &[&str], fqn: &str| fqns.iter().position(|f| *f == fqn);
+
+    // Before the change both are transitive (tier 3), so they tie-break by
+    // name: ExAlpha before ExOmega.
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+    let classes = class_items(&items);
+    let before = fqns(&classes);
+    assert!(
+        dep_pos(&before, "Stays\\Trans\\ExAlpha") < dep_pos(&before, "Promoted\\Dep\\ExOmega"),
+        "expected transitive packages tie-broken by name, got: {before:?}"
+    );
+
+    // A `composer require promoted/dep` promotes it to an explicit
+    // dependency; the editor notifies us of the composer.json change.
+    fs::write(
+        &composer_path,
+        r#"{ "name": "demo/project", "require": { "promoted/dep": "*" } }"#,
+    )
+    .expect("rewrite composer.json");
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&composer_path).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        })
+        .await;
+
+    // Now promoted/dep is explicit (tier 2) and must sort ahead of the
+    // still-transitive stays/trans (tier 3), flipping the order.
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+    let classes = class_items(&items);
+    let after = fqns(&classes);
+    assert!(
+        dep_pos(&after, "Promoted\\Dep\\ExOmega") < dep_pos(&after, "Stays\\Trans\\ExAlpha"),
+        "expected newly-explicit dependency promoted ahead of transitive one, got: {after:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_function_completion_prioritizes_project_core_explicit_then_transitive() {
+    let backend = create_test_backend_with_full_stubs();
+    let helper_uri = Url::parse("file:///workspace/src/helpers.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: helper_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: "<?php\nnamespace App;\nfunction runtime_helper() {}\n".to_string(),
+            },
+        })
+        .await;
+
+    backend
+        .stub_function_index_mut()
+        .insert("runtime_helper", "<?php function runtime_helper() {} ");
+
+    backend.autoload_function_index().write().insert(
+        "Acme\\Explicit\\runtime_helper",
+        std::path::PathBuf::from("/vendor/acme/explicit.php"),
+    );
+    backend.autoload_function_origin_index().write().insert(
+        "Acme\\Explicit\\runtime_helper",
+        phpantom_lsp::ClassCompletionOrigin::VendorExplicit,
+    );
+    backend.autoload_function_index().write().insert(
+        "Transitive\\Dep\\runtime_helper",
+        std::path::PathBuf::from("/vendor/transitive/dep.php"),
+    );
+    backend.autoload_function_origin_index().write().insert(
+        "Transitive\\Dep\\runtime_helper",
+        phpantom_lsp::ClassCompletionOrigin::VendorTransitive,
+    );
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = "<?php\nruntime_h\n";
+    let items = complete_at(&backend, &uri, text, 1, 9).await;
+    let funcs = function_items(&items);
+    let sorts: Vec<String> = funcs.iter().filter_map(|i| i.sort_text.clone()).collect();
+    assert!(
+        sorts.iter().any(|s| s.starts_with("b00_"))
+            && sorts.iter().any(|s| s.starts_with("b10_"))
+            && sorts.iter().any(|s| s.starts_with("b21_"))
+            && sorts.iter().any(|s| s.starts_with("b31_")),
+        "expected project/core/explicit/transitive sort tiers in function completions, got: {sorts:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_constant_completion_prioritizes_project_core_explicit_then_transitive() {
+    let backend = create_test_backend_with_full_stubs();
+
+    backend.global_defines().write().insert(
+        "APP_RUNTIME_FLAG".to_string(),
+        DefineInfo {
+            file_uri: "file:///workspace/src/constants.php".to_string(),
+            name_offset: 0,
+            value: Some("'project'".to_string()),
+        },
+    );
+    backend.stub_constant_index_mut().insert(
+        "APP_RUNTIME_FLAG_CORE",
+        "<?php const APP_RUNTIME_FLAG_CORE = 1;",
+    );
+
+    backend.autoload_constant_index().write().insert(
+        "APP_RUNTIME_FLAG_VENDOR".to_string(),
+        std::path::PathBuf::from("/vendor/acme/flag.php"),
+    );
+    backend.autoload_constant_origin_index().write().insert(
+        "APP_RUNTIME_FLAG_VENDOR".to_string(),
+        phpantom_lsp::ClassCompletionOrigin::VendorExplicit,
+    );
+    backend.autoload_constant_index().write().insert(
+        "APP_RUNTIME_FLAG_TRANSITIVE".to_string(),
+        std::path::PathBuf::from("/vendor/transitive/flag.php"),
+    );
+    backend.autoload_constant_origin_index().write().insert(
+        "APP_RUNTIME_FLAG_TRANSITIVE".to_string(),
+        phpantom_lsp::ClassCompletionOrigin::VendorTransitive,
+    );
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = "<?php\nAPP_RUNTIME_FLAG\n";
+    let items = complete_at(&backend, &uri, text, 1, 16).await;
+    let consts = constant_items(&items);
+    let names: Vec<&str> = consts.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        names.iter().position(|n| *n == "APP_RUNTIME_FLAG").unwrap()
+            < names
+                .iter()
+                .position(|n| *n == "APP_RUNTIME_FLAG_TRANSITIVE")
+                .unwrap(),
+        "expected project constant before transitive constant, names={names:?}"
+    );
 }
 
 // ─── extract_partial_class_name tests ───────────────────────────────────────
@@ -463,11 +769,11 @@ async fn test_class_name_completion_use_import_has_higher_sort_priority() {
 
     let widget_item = find_by_fqn(&classes, "Acme\\Widget").unwrap();
     let sort = widget_item.sort_text.as_deref().unwrap_or("");
-    // New format: {quality}{tier}{affinity:4}{demote}_{name}
-    // Tier '0' = use-imported, at position 1.
+    // New format: {quality}{origin}{tier}{affinity:4}{demote}_{name}
+    // Tier '0' = use-imported, at position 2.
     assert!(
-        sort.len() > 1 && &sort[1..2] == "0",
-        "Use-imported classes should have source tier '0' at position 1, got: {:?}",
+        sort.len() > 2 && &sort[2..3] == "0",
+        "Use-imported classes should have source tier '0' at position 2, got: {:?}",
         sort
     );
 }
@@ -552,12 +858,12 @@ async fn test_class_name_completion_same_namespace() {
         class_fqns
     );
 
-    // Same-namespace should have source tier '1' at position 1.
+    // Same-namespace should have source tier '1' at position 2.
     let service_item = find_by_fqn(&classes, "App\\UserService").unwrap();
     let sort = service_item.sort_text.as_deref().unwrap_or("");
     assert!(
-        sort.len() > 1 && &sort[1..2] == "1",
-        "Same-namespace classes should have source tier '1' at position 1, got: {:?}",
+        sort.len() > 2 && &sort[2..3] == "1",
+        "Same-namespace classes should have source tier '1' at position 2, got: {:?}",
         sort
     );
 }
@@ -1694,16 +2000,16 @@ async fn test_new_context_demotes_likely_non_instantiable_classmap() {
     let items = complete_at(&backend, &uri, text, 1, 11).await;
     let classes = class_items(&items);
 
-    // New sort_text format: {quality}{tier}{affinity:4}{demote}{gap:3}_{name}
-    // Demote flag is at position 6 ('0' = normal, '1' = demoted).
+    // New sort_text format: {quality}{origin}{tier}{affinity:4}{demote}{gap:3}_{name}
+    // Demote flag is at position 7 ('0' = normal, '1' = demoted).
     // Within the same match quality group, demoted items sort after
     // normal items.
 
-    // Helper: extract the demote flag (position 6) from a sort_text.
+    // Helper: extract the demote flag (position 7) from a sort_text.
     let demote_flag = |item: &CompletionItem| -> char {
         item.sort_text
             .as_deref()
-            .and_then(|s| s.chars().nth(6))
+            .and_then(|s| s.chars().nth(7))
             .unwrap_or('?')
     };
 

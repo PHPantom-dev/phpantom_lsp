@@ -989,10 +989,12 @@ pub(in crate::completion) fn match_quality(short_name: &str, prefix: &str) -> ch
 
 /// Assemble a sort_text string for a class name completion item.
 ///
-/// The format is `{match_quality}{source_tier}{affinity}{demote}{gap}_{short_name_lower}`
+/// The format is `{match_quality}{origin_tier}{source_tier}{affinity}{demote}{gap}_{short_name_lower}`
 /// where:
 /// - `match_quality`: `'a'` exact, `'b'` starts-with, `'c'` contains
 /// - `source_tier`: `'0'` use-imported, `'1'` same-namespace, `'2'` everything else
+/// - `origin_tier`: `'0'` project, `'1'` core/stub, `'2'` explicit vendor,
+///   `'3'` transitive vendor
 /// - `affinity`: 4-digit inverted score (`9999 - score`, so higher scores sort first)
 /// - `demote`: `'0'` normal, `'1'` heuristically demoted
 /// - `gap`: 3-digit distance between short name length and prefix length
@@ -1006,6 +1008,7 @@ pub(in crate::completion) fn class_sort_text(
     fqn: &str,
     prefix: &str,
     source_tier: char,
+    origin_tier: char,
     demoted: bool,
     affinity_table: &HashMap<String, u32>,
 ) -> String {
@@ -1018,8 +1021,9 @@ pub(in crate::completion) fn class_sort_text(
     );
     let demote = if demoted { '1' } else { '0' };
     format!(
-        "{}{}{}{}{}_{}",
+        "{}{}{}{}{}{}_{}",
         quality,
+        origin_tier,
         source_tier,
         affinity,
         demote,
@@ -1214,14 +1218,18 @@ impl ClassItemCtx<'_> {
     /// `\App\Models\U`), the label and filter_text remain the full
     /// FQN so namespace drilling works as expected.
     ///
-    /// The sort_text is computed internally from `source_tier` and
-    /// `demoted` using the affinity table and quality prefix stored
-    /// in `ClassItemCtx`.
+    /// The sort_text is computed internally from `sort_tiers`
+    /// and `demoted` using the affinity table and quality prefix
+    /// stored in `ClassItemCtx`.
+    ///
+    /// `sort_tiers` is `(origin_tier, source_tier)`.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::completion) fn build_item(
         &self,
         texts: ClassItemTexts,
         fqn: &str,
         source_tier: char,
+        origin_tier: char,
         demoted: bool,
         ctor_params: Option<&[ParameterInfo]>,
         is_deprecated: bool,
@@ -1232,6 +1240,7 @@ impl ClassItemCtx<'_> {
             fqn,
             &self.quality_prefix,
             source_tier,
+            origin_tier,
             demoted,
             &self.affinity_table,
         );
@@ -1541,11 +1550,12 @@ impl Backend {
 
         // ── Helper: classify a FQN into source tier and demotion ─────
         //
-        // Returns `None` to exclude, or `Some((tier, demoted, deprecated))`.
+        // Returns `None` to exclude, or
+        // `Some((tier, origin_tier, demoted, deprecated))`.
         //   '0' = use-imported (already in file's use-map)
         //   '1' = same/sub namespace
         //   '2' = everything else
-        let classify = |fqn: &str, sn: &str| -> Option<(char, bool, bool)> {
+        let classify = |fqn: &str, sn: &str| -> Option<(char, char, bool, bool)> {
             // Context-aware kind filtering (instantiability, Throwable, etc.)
             if context.is_class_only() {
                 match self.check_context_match(fqn, context) {
@@ -1573,6 +1583,14 @@ impl Backend {
                 if in_same_or_sub_ns { '1' } else { '2' }
             };
 
+            let origin_tier = self
+                .fqn_origin_index
+                .read()
+                .get(fqn)
+                .copied()
+                .unwrap_or(crate::ClassCompletionOrigin::Project)
+                .sort_tier();
+
             // Demotion: only for unloaded classes where context-match
             // was unknown.
             let demoted = context.is_class_only()
@@ -1585,7 +1603,7 @@ impl Backend {
                 .as_ref()
                 .is_some_and(|c| c.deprecation_message.is_some());
 
-            Some((tier, demoted, deprecated))
+            Some((tier, origin_tier, demoted, deprecated))
         };
 
         // ── Pass 1: fqn_uri_index (project + vendor classes) ────────
@@ -1607,7 +1625,7 @@ impl Backend {
             if !seen_fqns.insert(fqn.clone()) {
                 continue;
             }
-            let Some((tier, demoted, deprecated)) = classify(fqn, sn) else {
+            let Some((tier, origin_tier, demoted, deprecated)) = classify(fqn, sn) else {
                 continue;
             };
             // Skip namespace aliases.
@@ -1644,7 +1662,15 @@ impl Backend {
             } else {
                 None
             };
-            items.push(ctx.build_item(texts, fqn, tier, demoted, ctor.as_deref(), deprecated));
+            items.push(ctx.build_item(
+                texts,
+                fqn,
+                tier,
+                origin_tier,
+                demoted,
+                ctor.as_deref(),
+                deprecated,
+            ));
         }
 
         // ── Pass 2: stub_index (built-in PHP classes) ───────────────
@@ -1658,7 +1684,7 @@ impl Backend {
             if !seen_fqns.insert(fqn.to_string()) {
                 continue;
             }
-            let Some((tier, demoted, deprecated)) = classify(fqn, sn) else {
+            let Some((tier, _origin_tier, demoted, deprecated)) = classify(fqn, sn) else {
                 continue;
             };
             let (mut base_name, filter, mut use_import) = class_edit_texts(
@@ -1690,7 +1716,15 @@ impl Backend {
             } else {
                 None
             };
-            items.push(ctx.build_item(texts, fqn, tier, demoted, ctor.as_deref(), deprecated));
+            items.push(ctx.build_item(
+                texts,
+                fqn,
+                tier,
+                crate::ClassCompletionOrigin::CoreStub.sort_tier(),
+                demoted,
+                ctor.as_deref(),
+                deprecated,
+            ));
         }
 
         // ── Namespace segment items (FQN mode only) ─────────────────

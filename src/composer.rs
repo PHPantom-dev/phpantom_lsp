@@ -888,6 +888,20 @@ pub(crate) fn has_require_dev(package: &ComposerPackage, dep: &str) -> bool {
     package.require_dev.contains_key(dep)
 }
 
+pub(crate) fn explicit_dependency_names(package: &ComposerPackage) -> HashSet<String> {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .filter(|name| {
+            !name.eq_ignore_ascii_case("php")
+                && !name.starts_with("ext-")
+                && !name.starts_with("lib-")
+        })
+        .cloned()
+        .collect()
+}
+
 /// Detect whether the project is a Drupal project and resolve the web root.
 ///
 /// Returns `Some(web_root)` if one of the canonical Drupal core packages is
