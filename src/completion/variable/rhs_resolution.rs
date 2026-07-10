@@ -452,24 +452,27 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::PartialApplication(_)
         | Expression::Closure(_)
         | Expression::ArrowFunction(_) => {
-            // First-class callable syntax (`strlen(...)`),
-            // closure literals (`function() { … }`), and
-            // arrow functions (`fn() => …`) all produce a
-            // `Closure` instance at runtime.
-            // Use the fully-qualified name so that resolution
-            // succeeds even inside a namespace block (unqualified
-            // class names are prefixed with the current namespace
-            // and do NOT fall back to the global scope in PHP).
-            let closure_ty = PhpType::closure();
-            ResolvedType::from_classes_with_hint(
-                crate::completion::type_resolution::type_hint_to_classes_typed(
-                    &closure_ty,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                ),
-                closure_ty,
-            )
+            // Closures produce a `Closure` instance at runtime, but when we
+            // can infer their body return type (explicit `: T`, generator
+            // yields, or arrow-body expression), preserve it in the
+            // `PhpType::Callable` so callers like template binding can use
+            // it through `$closure` variables.
+            let closure_ty = infer_closure_literal_type(expr, ctx);
+            // Always resolve against the plain Closure class so that
+            // methods like bindTo() are available for completion, even
+            // when the inferred type is a typed Callable (Closure(): T).
+            let lookup_ty = PhpType::closure();
+            let classes = crate::completion::type_resolution::type_hint_to_classes_typed(
+                &lookup_ty,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            if classes.is_empty() {
+                vec![ResolvedType::from_type_string(closure_ty)]
+            } else {
+                ResolvedType::from_classes_with_hint(classes, closure_ty)
+            }
         }
         // ── Generator yield-assignment: `$var = yield $expr` ──
         // The value of a yield expression is the TSend type from
@@ -1232,11 +1235,10 @@ fn build_constructor_template_subs(
             TemplateBindingMode::CallableReturnType => {
                 // `@param callable(...): T $cb` — extract the closure's
                 // return type annotation from the argument text.
-                if let Some(ret_type) =
-                    crate::completion::source::helpers::extract_closure_return_type_from_text(
-                        arg_text,
-                    )
-                {
+                // Fall back to yield inference for generator closures.
+                let ret_type = crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
+                    .or_else(|| crate::completion::source::helpers::infer_generator_type_from_closure_yields(arg_text));
+                if let Some(ret_type) = ret_type {
                     subs.insert(tpl_name.to_string(), ret_type);
                 }
             }
@@ -1293,6 +1295,16 @@ fn build_constructor_template_subs(
                 }
             }
             TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
+                if let Some(concrete) = Backend::try_closure_return_type_for_template(
+                    arg_text,
+                    tpl_name,
+                    tpl_position,
+                    param_hint,
+                    rctx,
+                ) {
+                    subs.insert(tpl_name.to_string(), concrete);
+                    continue;
+                }
                 // `@param array<TKey, T> $items` with `[]` → `never`.
                 // An empty array literal has no keys or values, so all
                 // generic type args of array-like wrappers are `never`.
@@ -1447,7 +1459,7 @@ fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBindingMode {
 
 /// Check whether a [`PhpType`] tree contains a [`PhpType::Named`] with the
 /// given name anywhere in its structure.
-fn type_contains_name(ty: &PhpType, name: &str) -> bool {
+pub(crate) fn type_contains_name(ty: &PhpType, name: &str) -> bool {
     match ty {
         PhpType::Named(n) => n == name,
         PhpType::Nullable(inner) | PhpType::Array(inner) => type_contains_name(inner, name),
@@ -1949,11 +1961,10 @@ pub(crate) fn build_function_template_subs(
             TemplateBindingMode::CallableReturnType => {
                 // `@param callable(...): T $cb` — extract the closure's
                 // return type annotation from the argument text.
-                if let Some(ret_type) =
-                    crate::completion::source::helpers::extract_closure_return_type_from_text(
-                        arg_text,
-                    )
-                {
+                // Fall back to yield inference for generator closures.
+                let ret_type = crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
+                    .or_else(|| crate::completion::source::helpers::infer_generator_type_from_closure_yields(arg_text));
+                if let Some(ret_type) = ret_type {
                     insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
                 }
             }
@@ -2010,6 +2021,19 @@ pub(crate) fn build_function_template_subs(
                 }
             }
             TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
+                // When the argument is a closure and the param hint
+                // union contains a Callable variant, try yield inference
+                // before array-like or hierarchy extraction.
+                if let Some(concrete) = Backend::try_closure_return_type_for_template(
+                    arg_text,
+                    tpl_name,
+                    tpl_position,
+                    param_hint,
+                    rctx,
+                ) {
+                    insert_or_union(&mut subs, tpl_name.to_string(), concrete);
+                    continue;
+                }
                 // For `@param array<TKey, TValue> $value` with a variable
                 // argument like `$users`, resolve the variable's raw type
                 // string (e.g. `User[]`, `array<int, User>`) and extract
@@ -2308,6 +2332,48 @@ fn resolve_rhs_call<'b>(
             ctx,
         ),
         Call::StaticMethod(static_call) => resolve_rhs_static_call(static_call, ctx),
+    }
+}
+
+pub(crate) fn infer_closure_literal_type(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> PhpType {
+    let explicit_or_yield = {
+        let span = expr.span();
+        let start = (span.start.offset as usize).min(ctx.content.len());
+        let end = (span.end.offset as usize).min(ctx.content.len());
+        ctx.content.get(start..end).and_then(|text| {
+            crate::completion::source::helpers::extract_closure_return_type_from_text(text).or_else(
+                || {
+                    crate::completion::source::helpers::infer_generator_type_from_closure_yields(
+                        text,
+                    )
+                },
+            )
+        })
+    };
+
+    let inferred_return = explicit_or_yield.or_else(|| match expr {
+        Expression::ArrowFunction(arrow) => {
+            let resolved = resolve_rhs_expression(arrow.expression, ctx);
+            if resolved.is_empty() {
+                None
+            } else {
+                Some(ResolvedType::types_joined(&resolved))
+            }
+        }
+        _ => None,
+    });
+
+    if let Some(ret) = inferred_return {
+        PhpType::Callable {
+            kind: "Closure".to_string(),
+            params: Vec::new(),
+            return_type: Some(Box::new(ret)),
+        }
+    } else {
+        PhpType::closure()
     }
 }
 

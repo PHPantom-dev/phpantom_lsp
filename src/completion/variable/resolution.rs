@@ -1423,10 +1423,13 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
             _ => None,
         },
         // First-class callable syntax, closure literals, and arrow
-        // functions always produce a Closure.
+        // functions always produce a Closure. When we can infer the
+        // body return type, preserve it in a typed `Closure(): T`.
         Expression::PartialApplication(_)
         | Expression::Closure(_)
-        | Expression::ArrowFunction(_) => Some(PhpType::closure()),
+        | Expression::ArrowFunction(_) => {
+            Some(super::rhs_resolution::infer_closure_literal_type(rhs, ctx))
+        }
         _ => None,
     }
 }
