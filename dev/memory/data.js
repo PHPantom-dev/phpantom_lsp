@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783679547206,
+  "lastUpdate": 1783687205828,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12477,6 +12477,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ea54c7467d6655a375a4a8ec8b9140ed211855ef",
+          "message": "Resource-to-object migrated handles no longer trigger false argument\ntype errors",
+          "timestamp": "2026-07-10T14:27:38+02:00",
+          "tree_id": "3c73cd68f93e09e4ae9dd243f2a7d7667f624eb5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ea54c7467d6655a375a4a8ec8b9140ed211855ef"
+        },
+        "date": 1783687204443,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.1,
             "unit": "MiB"
           }
         ]
