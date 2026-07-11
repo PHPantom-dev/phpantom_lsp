@@ -1577,6 +1577,57 @@ class TestCase {
     );
 }
 
+#[test]
+fn no_diagnostic_for_string_literal_binding_class_string_template() {
+    // A string literal naming a class must bind the template `T` to the
+    // class it names, not to the literal's own `string` type. Binding to
+    // `string` would produce the absurd `class-string<string>` parameter
+    // and a guaranteed mismatch against the literal argument.
+    let php = r#"<?php
+class TestCase {
+    /**
+     * @template T
+     * @param class-string<T> $expected
+     * @param mixed $actual
+     */
+    function assertInstanceOf(string $expected, $actual): void {}
+
+    function test(): void {
+        $this->assertInstanceOf('Iterator', $this);
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag string literal 'Iterator' bound through class-string<T>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_class_const_binding_class_string_template() {
+    // The `::class` argument path must keep binding `T` to the named
+    // class, matching the string-literal path.
+    let php = r#"<?php
+class Animal {}
+
+/**
+ * @template T
+ * @param class-string<T> $expected
+ */
+function assert_class(string $expected): void {}
+
+function test(): void {
+    assert_class(Animal::class);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag Animal::class bound through class-string<T>, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: iterable<...> accepts arrays
 // ═══════════════════════════════════════════════════════════════════════════

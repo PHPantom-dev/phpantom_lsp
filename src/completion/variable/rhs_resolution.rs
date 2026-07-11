@@ -1304,14 +1304,8 @@ fn build_constructor_template_subs(
                 }
             }
             TemplateBindingMode::ClassStringInner => {
-                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-                    // Unwrap `class-string<X>` → `X` so that the
-                    // substitution doesn't double-wrap.
-                    let unwrapped = match resolved_type {
-                        PhpType::ClassString(Some(inner)) => *inner,
-                        _ => resolved_type,
-                    };
-                    insert_or_union(&mut subs, tpl_name.to_string(), unwrapped);
+                if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
+                    insert_or_union(&mut subs, tpl_name.to_string(), binding);
                 }
             }
             TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
@@ -1914,6 +1908,72 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
     }
 }
 
+/// Compute the type to bind a template parameter `T` to when it appears
+/// inside a `class-string<T>` parameter hint, given the resolved type of
+/// the call-site argument.  Returns `None` when the argument yields no
+/// usable class, so the caller lets `T` fall back to its declared bound.
+///
+/// This mirrors PHPStan's `GenericClassStringType::inferTemplateTypes`:
+///
+/// - `X::class` resolves to `PhpType::Named("X")` — bound directly to the
+///   class.
+/// - A string literal naming a class (e.g. `'Iterator'`) binds to the
+///   class it names, never to the literal's own `string` type — otherwise
+///   `T` would become `string`, producing the absurd `class-string<string>`.
+/// - `class-string<X>` unwraps to `X` so the substitution does not
+///   double-wrap into `class-string<class-string<X>>`.
+/// - A bare `class-string` (unknown inner class) binds to `object`, the
+///   universal upper bound, so any class-string satisfies the parameter.
+/// - Any other type (e.g. plain `string`) yields `None`; `T` then resolves
+///   to its declared bound rather than the nonsensical `class-string<T>`.
+pub(crate) fn class_string_inner_binding(
+    arg_text: &str,
+    ctx: &crate::completion::resolver::ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    // A quoted string literal naming a class binds to that class.  This is
+    // checked against the raw argument text because `resolve_arg_text_to_type`
+    // collapses every string literal to the bare `string` type, discarding
+    // the content that names the class.
+    let trimmed = arg_text.trim();
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('\'') && trimmed.ends_with('\''))
+            || (trimmed.starts_with('"') && trimmed.ends_with('"')))
+    {
+        let content = trimmed[1..trimmed.len() - 1].trim();
+        // Only treat the literal as a class name when its content is a
+        // valid class identifier; otherwise it doesn't name a class and
+        // must not bind `T`.
+        if content.is_empty()
+            || !content
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+        {
+            return None;
+        }
+        let fqn = match (ctx.class_loader)(content) {
+            Some(cls) => cls.fqn().to_string(),
+            None => content.to_string(),
+        };
+        return Some(PhpType::Named(fqn));
+    }
+
+    match Backend::resolve_arg_text_to_type(arg_text, ctx)? {
+        PhpType::ClassString(Some(inner)) => Some(*inner),
+        PhpType::ClassString(None) => Some(PhpType::Named("object".to_string())),
+        // A class name binds directly; a scalar keyword (`string`, `int`,
+        // …) is not a class, so it must not bind `T` — otherwise a plain
+        // `string` argument would produce `class-string<string>`.
+        PhpType::Named(name) => {
+            if crate::php_type::is_builtin_non_class_type(&name) {
+                None
+            } else {
+                Some(PhpType::Named(name))
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Build a template substitution map for a function-level `@template` call.
 ///
 /// Uses the function's `template_bindings` to match template parameters to
@@ -2030,14 +2090,8 @@ pub(crate) fn build_function_template_subs(
                 }
             }
             TemplateBindingMode::ClassStringInner => {
-                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-                    // Unwrap `class-string<X>` → `X` so that the
-                    // substitution doesn't double-wrap.
-                    let unwrapped = match resolved_type {
-                        PhpType::ClassString(Some(inner)) => *inner,
-                        _ => resolved_type,
-                    };
-                    insert_or_union(&mut subs, tpl_name.to_string(), unwrapped);
+                if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
+                    insert_or_union(&mut subs, tpl_name.to_string(), binding);
                 }
             }
             TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {

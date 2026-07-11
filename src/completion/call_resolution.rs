@@ -2440,17 +2440,15 @@ impl Backend {
                     }
                 }
                 TemplateBindingMode::ClassStringInner => {
-                    if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
-                        // Unwrap `class-string<X>` → `X` so that the
-                        // substitution doesn't double-wrap.
-                        let unwrapped = match resolved_type {
-                            PhpType::ClassString(Some(inner)) => *inner,
-                            _ => resolved_type,
-                        };
+                    if let Some(binding) =
+                        crate::completion::variable::rhs_resolution::class_string_inner_binding(
+                            arg_text, ctx,
+                        )
+                    {
                         crate::completion::variable::rhs_resolution::insert_or_union(
                             &mut subs,
                             tpl_name.to_string(),
-                            unwrapped,
+                            binding,
                         );
                     }
                 }

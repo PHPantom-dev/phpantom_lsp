@@ -1247,11 +1247,16 @@ pub(crate) fn is_subtype_of_typed(
     // class-string<Animal>` only when `Cat` and `Animal` are
     // structurally equal.  Extend to nominal hierarchy so that
     // `class-string<Cat>` is accepted where `class-string<Animal>`
-    // is expected when `Cat extends Animal`.
-    if let (PhpType::ClassString(Some(sub_inner)), PhpType::ClassString(Some(sup_inner))) =
-        (subtype, supertype)
+    // is expected when `Cat extends Animal`.  A bare `class-string`
+    // is treated as `class-string<object>`, so it satisfies
+    // `class-string<object>` (and its `mixed` equivalent) — any class
+    // name is a class-string of some object.
+    if let (PhpType::ClassString(sub_inner), PhpType::ClassString(sup_inner)) = (subtype, supertype)
     {
-        return is_subtype_of_typed(sub_inner, sup_inner, class_loader);
+        let object_bound = PhpType::Named("object".to_string());
+        let sub = sub_inner.as_deref().unwrap_or(&object_bound);
+        let sup = sup_inner.as_deref().unwrap_or(&object_bound);
+        return is_subtype_of_typed(sub, sup, class_loader);
     }
 
     // ── String literal <: class-string<Bound> ────────────────────

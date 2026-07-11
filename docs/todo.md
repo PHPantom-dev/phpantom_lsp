@@ -28,7 +28,6 @@ within the same impact tier.
 | B60 | [Template binding from closure returns through facade `@method`](todo/bugs.md#b60-template-binding-from-closure-return-types-through-facade-method-tags)       | Medium-High | Medium      |
 | L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
 | B54 | [By-ref closure captures flagged as unused variables](todo/bugs.md#b54-variables-captured-by-reference-in-closures-are-flagged-unused)                         | Medium      | Low         |
-| B52 | [String literals bind class-string templates to the string type](todo/bugs.md#b52-string-literals-bind-class-string-templates-to-the-string-type)              | Medium      | Low-Medium  |
 | B53 | [`Class::CONST` args bind templates to the class, not the constant type](todo/bugs.md#b53-template-binding-from-classconst-arguments-binds-the-class-not-the-constant-type) | Medium      | Low-Medium  |
 | B57 | [Parameter nullability lost from docblock overrides and null defaults](todo/bugs.md#b57-parameter-nullability-lost-from-docblock-overrides-and-null-defaults)  | Medium      | Low-Medium  |
 | L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |
@@ -36,6 +35,7 @@ within the same impact tier.
 | B58 | [Positional array-shape indexing unresolved](todo/bugs.md#b58-indexing-a-positional-array-shape-does-not-resolve-the-element-type)                             | Low-Medium  | Low         |
 | B56 | [`__benevolent<T>` pseudo-type reported as unknown class](todo/bugs.md#b56-__benevolentt-pseudo-type-reported-as-unknown-class)                                | Low         | Low         |
 | B59 | [Project class sharing a global interface name breaks subtype checks](todo/bugs.md#b59-project-class-sharing-a-global-interface-name-breaks-subtype-checks)    | Low         | Medium      |
+| B61 | [Indexed access with `??` on a heterogeneous array element widens to `string`](todo/bugs.md#b61-indexed-access-with--on-a-heterogeneous-array-element-widens-to-string) | Low         | Low-Medium  |
 | X4  | [Full background indexing](todo/indexing.md#x4-full-background-indexing) (workspace symbols, fast find-references)                                              | Medium      | High        |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion)                                                                                                       | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |

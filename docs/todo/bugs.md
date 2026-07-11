@@ -15,23 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B52. String literals bind class-string templates to the string type
-
-**Severity: Medium (~25 errors in pdepend/phpmd/api-php) · Reproduced**
-
-`assertInstanceOf('Iterator', $engine->analyze())` reports
-"Argument 1 ($expected) expects class-string<string>, got
-'Iterator'": `T` was bound to the literal's own PHP type
-(`string`) instead of the class it names, producing the absurd
-`class-string<string>` and a guaranteed mismatch. `X::class`
-arguments bind correctly; plain string literals do not. Also
-produces "expects class-string<class-string>, got class-string"
-(api-php `tests/FactoryTest.php`).
-
-**Fix:** when binding `T` through a `class-string<T>` parameter,
-bind to the class named by the literal's content (mirroring the
-`::class` path), never to the literal's own type.
-
 ## B53. Template binding from `Class::CONST` arguments binds the class, not the constant type
 
 **Severity: Medium (~12 errors: phpmd, pdepend, luxplus) · Reproduced**
@@ -178,3 +161,29 @@ shared binding path.
 **Fix:** confirm with a minimal facade fixture, then bind
 method-level templates from closure literal return types in the
 same place existing `@method` template inference runs.
+
+## B61. Indexed access with `??` on a heterogeneous array element widens to `string`
+
+**Severity: Low (~2 errors in pdepend tests) · Reproduced**
+
+```php
+$items = [['int', '$id'], ['array', '$list', ArrayType::class]];
+foreach ($items as $expected) {
+    $expectedTypeClass = $expected[2] ?? ScalarType::class;
+    assertInstanceOf($expectedTypeClass, null); // "expects class-string<object>, got string"
+}
+```
+
+The foreach element `$expected` from a heterogeneous array literal
+is not inferred as a union of positional shapes, so `$expected[2]`
+widens to `string` instead of the `class-string` it actually holds.
+The `?? ScalarType::class` fallback (itself a `class-string`) is
+then lost in the union and the value is passed to a
+`class-string<T>` parameter as a plain `string`
+(pdepend `tests/.../PHPParserVersion81Test.php:1187`, `:1476`).
+Related to positional-shape indexing (see B58) but the trigger here
+is the foreach element type plus the null-coalesce.
+
+**Fix:** infer positional array-shape unions for foreach elements
+of heterogeneous array literals so int-literal indexing and `??`
+preserve the element's `class-string` type.
