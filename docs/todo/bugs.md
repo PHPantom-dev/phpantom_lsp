@@ -15,19 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B56. `__benevolent<T>` pseudo-type reported as unknown class
-
-**Severity: Low (1 error, trivial) · Confirmed from output**
-
-`@var __benevolent<Loop|null>` produces "Class
-'Bladestan\ValueObject\__benevolent' not found"
-(bladestan `src/ValueObject/Loop.php:39`). PHPStan's
-`__benevolent<T>` wrapper should parse as its inner type and
-never be treated as a class name.
-
-**Fix:** recognize `__benevolent<T>` in the type parser and
-unwrap to `T`.
-
 ## B57. Parameter nullability lost from docblock overrides and null defaults
 
 **Severity: Medium (~12 errors across luxplus/api-php/phpmd) · Confirmed from output**

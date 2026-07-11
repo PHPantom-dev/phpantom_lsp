@@ -131,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Promote to constructor property.** Promoting a parameter whose property is declared together with others on one line (`private int $a, $b;`) no longer deletes the sibling properties. The action is now offered only when the property is declared on its own.
 - **`get_defined_vars()` counts as using every variable in scope.** A function or method that calls `get_defined_vars()` (for example to build a debug dump) no longer reports its local variables as unused, since the call reads all of them. Variables local to a nested closure or arrow function are still checked. Contributed by @calebdw in https://github.com/PHPantom-dev/phpantom_lsp/pull/158.
 - **Integer literals now satisfy named refined-int parameter types.** A literal like `1` passed to a `positive-int` or `non-negative-int` parameter no longer produces a false `type_mismatch_argument`, matching the existing behaviour for `int<min,max>` ranges. Passing a literal that genuinely violates the refinement (e.g. `0` to `positive-int`, or a negative literal to `non-negative-int`) is now correctly flagged. `non-zero-int` and `callable-string`-family PHPDoc types, which previously failed to parse and were silently ignored by these checks, are now recognized as well.
+- **PHPStan's `__benevolent<T>` wrapper type is recognized.** A docblock type like `@var __benevolent<Foo|null>` now resolves as its inner type instead of reporting a false "class not found" on the wrapper.
 
 ### Changed
 

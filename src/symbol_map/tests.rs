@@ -1933,6 +1933,41 @@ fn docblock_array_suffix_span_excludes_brackets() {
     );
 }
 
+#[test]
+fn benevolent_wrapper_is_not_a_class_reference() {
+    // PHPStan's `__benevolent<T>` wrapper is a pseudo-type: the wrapper
+    // itself must not produce a ClassReference span (which would feed
+    // the unknown-class diagnostic), but the inner type still does.
+    let php = concat!(
+        "<?php\n",
+        "class Loop {}\n",
+        "class Holder {\n",
+        "    /** @var __benevolent<Loop|null> */\n",
+        "    public $loop;\n",
+        "}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let docblock_start = php.find("/** @var").unwrap();
+    let benevolent_in_doc = php[docblock_start..].find("__benevolent").unwrap() + docblock_start;
+    let hit = map.lookup(benevolent_in_doc as u32);
+    assert!(
+        !matches!(
+            hit.map(|s| &s.kind),
+            Some(SymbolKind::ClassReference { .. })
+        ),
+        "__benevolent must not be a ClassReference, got {:?}",
+        hit.map(|s| &s.kind)
+    );
+
+    let loop_in_doc = php[docblock_start..].find("Loop").unwrap() + docblock_start;
+    let hit = map.lookup(loop_in_doc as u32);
+    match hit.map(|s| &s.kind) {
+        Some(SymbolKind::ClassReference { name, .. }) => assert_eq!(name, "Loop"),
+        other => panic!("Expected ClassReference for Loop, got {:?}", other),
+    }
+}
+
 // ── Conditional return type tests ───────────────────────────────────
 
 #[test]

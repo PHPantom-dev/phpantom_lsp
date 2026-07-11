@@ -3893,6 +3893,8 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
             | "value-of"
             // ── Special keywords ────────────────────────────────────
             | "class"
+            // ── PHPStan lenient-union wrapper ───────────────────────
+            | "__benevolent"
     )
 }
 
@@ -4216,8 +4218,14 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
             let name = bytes_to_str(r.identifier.value).to_string();
             match &r.parameters {
                 Some(params) => {
-                    let args: Vec<PhpType> =
+                    let mut args: Vec<PhpType> =
                         params.entries.iter().map(|e| convert(&e.inner)).collect();
+                    // PHPStan's `__benevolent<T>` wrapper marks a lenient
+                    // union; it is never a class. Treat the type as its
+                    // inner `T`.
+                    if args.len() == 1 && name == "__benevolent" {
+                        return args.pop().unwrap();
+                    }
                     PhpType::Generic(name, args)
                 }
                 None => PhpType::Named(name),
@@ -5147,6 +5155,46 @@ mod tests {
                 assert_eq!(members[1], PhpType::string());
             }
             other => panic!("Expected Union, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_benevolent_unwraps_to_inner_union() {
+        // PHPStan's `__benevolent<T>` wrapper parses as its inner type.
+        let ty = PhpType::parse("__benevolent<Loop|null>");
+        match &ty {
+            PhpType::Union(members) => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(members[0], PhpType::Named("Loop".to_owned()));
+                assert_eq!(members[1], PhpType::null());
+            }
+            other => panic!("Expected Union, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_benevolent_unwraps_single_class() {
+        let ty = PhpType::parse("__benevolent<Foo>");
+        assert_eq!(ty, PhpType::Named("Foo".to_owned()));
+    }
+
+    #[test]
+    fn parse_benevolent_nested_in_generic() {
+        let ty = PhpType::parse("array<int, __benevolent<string|false>>");
+        match &ty {
+            PhpType::Generic(name, args) => {
+                assert_eq!(name, "array");
+                assert_eq!(args.len(), 2);
+                match &args[1] {
+                    PhpType::Union(members) => {
+                        assert_eq!(members.len(), 2);
+                        assert_eq!(members[0], PhpType::string());
+                        assert_eq!(members[1], PhpType::Named("false".to_owned()));
+                    }
+                    other => panic!("Expected Union, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Generic, got {:?}", other),
         }
     }
 

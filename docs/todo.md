@@ -30,7 +30,6 @@ within the same impact tier.
 | B57 | [Parameter nullability lost from docblock overrides and null defaults](todo/bugs.md#b57-parameter-nullability-lost-from-docblock-overrides-and-null-defaults)  | Medium      | Low-Medium  |
 | L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |
 | B58 | [Positional array-shape indexing unresolved](todo/bugs.md#b58-indexing-a-positional-array-shape-does-not-resolve-the-element-type)                             | Low-Medium  | Low         |
-| B56 | [`__benevolent<T>` pseudo-type reported as unknown class](todo/bugs.md#b56-__benevolentt-pseudo-type-reported-as-unknown-class)                                | Low         | Low         |
 | B59 | [Project class sharing a global interface name breaks subtype checks](todo/bugs.md#b59-project-class-sharing-a-global-interface-name-breaks-subtype-checks)    | Low         | Medium      |
 | B61 | [Indexed access with `??` on a heterogeneous array element widens to `string`](todo/bugs.md#b61-indexed-access-with--on-a-heterogeneous-array-element-widens-to-string) | Low         | Low-Medium  |
 | X4  | [Full background indexing](todo/indexing.md#x4-full-background-indexing) (workspace symbols, fast find-references)                                              | Medium      | High        |
