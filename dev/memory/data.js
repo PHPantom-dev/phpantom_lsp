@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783809606105,
+  "lastUpdate": 1783810358119,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13463,6 +13463,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8f83571dccfa60ceb7aa383341d9e16ab7bb958b",
+          "message": "Passing a class constant to a generic parameter infers the constant's\nvalue type",
+          "timestamp": "2026-07-12T00:40:23+02:00",
+          "tree_id": "7a1f461b200ccbc08cb1de46aadae52d58ad62a1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8f83571dccfa60ceb7aa383341d9e16ab7bb958b"
+        },
+        "date": 1783810357007,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.4,
             "unit": "MiB"
           }
         ]
