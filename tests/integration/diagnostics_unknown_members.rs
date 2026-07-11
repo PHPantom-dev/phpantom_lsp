@@ -4339,6 +4339,96 @@ class Renderer {
     );
 }
 
+/// Short-circuit narrowing: the right operand of `||` executes only
+/// when the left is false, so `!$s instanceof Circle || $s->radius()`
+/// sees `$s` narrowed to `Circle` in the right operand.
+#[test]
+fn scope_cache_or_short_circuit_narrows_right_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///test_or_shortcircuit.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s): void {
+        if (!$s instanceof Circle || $s->radius() > 0.0) {
+            return;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' in the right operand of ||, got: {:?}",
+        diags
+    );
+}
+
+/// Short-circuit narrowing mirror: the right operand of `&&` executes
+/// only when the left is true, so `$s instanceof Circle && $s->radius()`
+/// sees `$s` narrowed to `Circle` in the right operand.
+#[test]
+fn scope_cache_and_short_circuit_narrows_right_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///test_and_shortcircuit.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s): void {
+        if ($s instanceof Circle && $s->radius() > 0.0) {
+            return;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' in the right operand of &&, got: {:?}",
+        diags
+    );
+}
+
+/// Nested `&&` inside the right operand of `||`: the inner `&&` chain
+/// narrows independently on top of the outer short-circuit context.
+/// `$node !== $other || ($s instanceof Circle && !$s->radius())` narrows
+/// `$s` to `Circle` for the `$s->radius()` access.
+#[test]
+fn scope_cache_and_chain_inside_or_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///test_and_in_or.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s, int $node, int $other): bool {
+        return $node !== $other
+            || ($s instanceof Circle && $s->radius() > 0.0);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' in nested && inside ||, got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Forward walker scope cache — top-level code
 // ═══════════════════════════════════════════════════════════════════════════

@@ -226,6 +226,14 @@ class TypeNarrowingDemo
         if ($sample instanceof Rock && $sample->crush()) {
             // $sample is Rock here too
         }
+
+        // Short-circuit || narrowing — the right operand of || runs only
+        // when the left is false, so `!$guard instanceof Rock` being false
+        // means $guard IS Rock in the right operand.
+        $guard = pickRockOrBanana();
+        if (!$guard instanceof Rock || !$guard->crush()) {
+            // guard clause body
+        }
     }
 }
 

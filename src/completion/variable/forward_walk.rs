@@ -3004,6 +3004,7 @@ fn process_statement<'b>(
                 // after an instanceof/null guard see the narrowed type.
                 // E.g. `return $x instanceof Foo && $x->bar()`
                 record_and_chain_snapshots(val, scope, ctx);
+                record_or_chain_snapshots(val, scope, ctx);
 
                 // Record narrowed snapshots inside match(true) arms
                 // and ternary instanceof branches.
@@ -3055,6 +3056,7 @@ fn process_expression_statement<'b>(
     // type.  E.g. `$x instanceof Foo && $x->bar()` as an expression
     // statement.
     record_and_chain_snapshots(expr, scope, ctx);
+    record_or_chain_snapshots(expr, scope, ctx);
 
     // Record narrowed snapshots inside match(true) arms and ternary
     // instanceof branches within this expression.
@@ -3502,6 +3504,42 @@ fn apply_cursor_ternary_narrowing<'b>(
                 apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
             }
         }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+            ) =>
+        {
+            // `||` chain: the right operand executes only when the
+            // preceding operands are false, so apply the *inverse*
+            // narrowing from those operands when the cursor is in a
+            // later operand.  E.g. `!$x instanceof Foo || $x->bar()`
+            // narrows `$x` to `Foo` for the `$x->bar()` operand.
+            let operands = collect_or_chain_operands(expr);
+            if operands.len() >= 2 {
+                let mut narrowed = false;
+                for (i, operand) in operands.iter().enumerate() {
+                    let op_span = operand.span();
+                    if cursor >= op_span.start.offset && cursor <= op_span.end.offset {
+                        narrowed = true;
+                        apply_cursor_ternary_narrowing(operand, scope, ctx);
+                        break;
+                    }
+                    // Apply this operand's inverse narrowing for the
+                    // subsequent operands.
+                    if i < operands.len() - 1 {
+                        apply_condition_narrowing_inverse(operand, scope, ctx);
+                    }
+                }
+                if !narrowed {
+                    apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
+                    apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
+                }
+            } else {
+                apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
+                apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
+            }
+        }
         Expression::Binary(bin) => {
             apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
             apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
@@ -3578,8 +3616,77 @@ fn record_and_chain_snapshots<'b>(
         // inside a function call argument.
         record_scope_snapshot_recursive(operand, &narrowed_scope);
 
+        // Refine nested `&&` / `||` chains inside this operand on top of
+        // the accumulated narrowing.  E.g. `$a && ($b instanceof Foo ||
+        // $c) && $a->m()` — the inner `||` operands narrow independently.
+        // These overwrite the coarser snapshots recorded above at the
+        // offsets that carry intra-chain narrowing.
+        record_and_chain_snapshots(operand, &narrowed_scope, ctx);
+        record_or_chain_snapshots(operand, &narrowed_scope, ctx);
+
         // Apply this operand's narrowing for the next operand.
         apply_condition_narrowing(operand, &mut narrowed_scope, ctx);
+    }
+}
+
+/// Record intermediate scope snapshots within `||` chains.
+///
+/// The right operand of `||` executes only when every preceding
+/// operand evaluated to false, so each operand after the first sees
+/// the *inverse* narrowing of all operands before it. This is the
+/// mirror of [`record_and_chain_snapshots`]:
+///
+/// - `!$x instanceof Foo || $x->bar()` — `$x` narrowed to `Foo` for
+///   the `$x->bar()` span (the negation of `!$x instanceof Foo`).
+/// - `$x === null || $x->method()` — `$x` narrowed to non-null for
+///   the `$x->method()` span.
+///
+/// As with the `&&` variant, the narrowing is applied only to
+/// snapshots — it does NOT mutate the caller's scope, so subsequent
+/// statements see the original types.
+fn record_or_chain_snapshots<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if !is_diagnostic_scope_active() {
+        return;
+    }
+
+    let operands = collect_or_chain_operands(expr);
+    if operands.len() < 2 {
+        // Not a `||` chain — the `&&` and match/ternary snapshot
+        // recorders handle the other shapes.
+        return;
+    }
+
+    // Apply the inverse narrowing cumulatively: each operand sees the
+    // negation of all previous operands.
+    let mut narrowed_scope = scope.clone();
+    for (i, operand) in operands.iter().enumerate() {
+        if i == 0 {
+            // First operand: apply its inverse for subsequent operands.
+            apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx);
+            continue;
+        }
+
+        // Record a snapshot at this operand's start offset, and recurse
+        // into sub-expressions so member accesses nested inside calls,
+        // negations, etc. see the narrowed types.
+        record_scope_snapshot(operand.span().start.offset, &narrowed_scope);
+        record_scope_snapshot_recursive(operand, &narrowed_scope);
+
+        // Refine nested `&&` / `||` chains inside this operand on top of
+        // the accumulated inverse narrowing.  E.g. the common idiom
+        // `$parent->child() !== $node || ($x instanceof Foo && !$x->m())`
+        // — the inner `&&` narrows `$x` to `Foo` for `$x->m()`.  These
+        // overwrite the coarser snapshots recorded above at the offsets
+        // that carry intra-chain narrowing.
+        record_and_chain_snapshots(operand, &narrowed_scope, ctx);
+        record_or_chain_snapshots(operand, &narrowed_scope, ctx);
+
+        // Apply this operand's inverse for the next operand.
+        apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx);
     }
 }
 
@@ -5498,7 +5605,10 @@ fn process_if<'b>(
     // member accesses after an instanceof/null guard within the condition
     // see the narrowed type.  E.g. `if ($x !== null && $x->method())`
     // — the `$x->method()` span needs `$x` narrowed to non-null.
+    // The `||` variant handles the short-circuit guard idiom
+    // `!$x instanceof Foo || $x->method()`.
     record_and_chain_snapshots(if_stmt.condition, scope, ctx);
+    record_or_chain_snapshots(if_stmt.condition, scope, ctx);
 
     // Check if the cursor is inside the condition expression.
     // If so, apply inline && narrowing.
@@ -7121,8 +7231,9 @@ fn process_while<'b>(while_stmt: &'b While<'b>, scope: &mut ScopeState, ctx: &Fo
         return;
     }
 
-    // Record `&&` chain snapshots for the while condition.
+    // Record `&&` and `||` chain snapshots for the while condition.
     record_and_chain_snapshots(while_stmt.condition, scope, ctx);
+    record_or_chain_snapshots(while_stmt.condition, scope, ctx);
 
     let pre_loop_scope = scope.clone();
 

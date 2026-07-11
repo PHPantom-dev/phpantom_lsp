@@ -15,27 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B46. Short-circuit narrowing missing on the right side of boolean OR
-
-**Severity: Medium-High (phpmd/pdepend src, common guard idiom) · Reproduced**
-
-```php
-if (!$arg instanceof ASTMemberPrimaryPrefix || !$arg->isStatic()) {
-    continue;
-}
-```
-
-The right operand of `||` executes only when the left is false,
-so `$arg` is `ASTMemberPrimaryPrefix` there — we flag
-`isStatic` as unknown on the declared type instead
-(phpmd `src/Node/Attributes.php:73`,
-`src/Rule/AbstractLocalVariable.php:107`). Verify the `&&`
-mirror case (`$x instanceof T && $x->m()`) while fixing.
-
-**Fix:** propagate left-operand narrowing (negated) into the
-right operand of `||`, and the non-negated form into the right
-operand of `&&`, within a single condition expression.
-
 ## B47. Assignment inside a condition leaves the variable unresolved
 
 **Severity: Medium-High (~40+ errors: pdepend `$token` loops, luxplus) · Reproduced**

@@ -15,6 +15,9 @@
 ///   - `$var instanceof Foo ? $var->method() : …` — ternary narrowing
 ///   - `$var instanceof Foo && $var->method()` — inline `&&` narrowing
 ///     (the RHS of `&&` sees the narrowed type from the LHS)
+///   - `!$var instanceof Foo || $var->method()` — inline `||`
+///     short-circuit narrowing (the RHS of `||` sees the *inverse* of
+///     the LHS, so `$var` is `Foo` where the right operand executes)
 ///   - Guard clauses: `if (!$var instanceof Foo) { return; }` — narrows
 ///     after the if block when the body unconditionally exits via
 ///     `return`, `throw`, `continue`, or `break`.
