@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783749378660,
+  "lastUpdate": 1783786679674,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13157,6 +13157,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a94b054c519165d509f06f785904f7f2d7024d9f",
+          "message": "Assertion methods narrow types through inheritance",
+          "timestamp": "2026-07-11T18:05:22+02:00",
+          "tree_id": "8fe70d8175b5236cc44bbd4d391139bc1416de66",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a94b054c519165d509f06f785904f7f2d7024d9f"
+        },
+        "date": 1783786677242,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.5,
             "unit": "MiB"
           }
         ]
