@@ -15,28 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B57. Parameter nullability lost from docblock overrides and null defaults
-
-**Severity: Medium (~12 errors across luxplus/api-php/phpmd) · Confirmed from output**
-
-Two facets of the same effective-type computation:
-
-1. A docblock `@param MenuItemViewModel[] $menu_items` overriding
-   a native `?array $menu_items` drops the `null`, so passing
-   `null` reports "expects array<MenuItemViewModel>, got null"
-   (luxplus-website `app/View/Components/Menu/Menu.php:136`,
-   7 errors — the flagged calls construct `MenuItemViewModel`,
-   whose param 3 is natively nullable).
-2. A parameter with default `null` (`$baseurl = null`, including
-   the pre-8.4 implicit-nullable form `Type $x = null`) must
-   accept `null` regardless of the docblock type
-   (api-php `src/Api/Test/TestConnection.php:46`, phpmd
-   `src/TextUI/Command.php:404` `$context` resource null).
-
-**Fix:** when merging docblock and native param types, preserve
-native nullability; and union `null` into the effective type when
-the default value is `null`.
-
 ## B58. Indexing a positional array shape does not resolve the element type
 
 **Severity: Low-Medium (~10 errors in pdepend tests) · Confirmed from output**

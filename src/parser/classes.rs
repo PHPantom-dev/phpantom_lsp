@@ -2401,6 +2401,13 @@ impl Backend {
                         }
                     }
 
+                    // A docblock `@param` merge above may have overwritten
+                    // `type_hint` with a non-nullable docblock type. Re-fold
+                    // null for parameters whose default value is `null`.
+                    for param in &mut parameters {
+                        param.apply_null_default();
+                    }
+
                     let has_scope_attr = has_scope_attribute(method);
 
                     // Extract description, return description, link, and

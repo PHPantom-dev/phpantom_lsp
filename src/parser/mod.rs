@@ -1057,7 +1057,7 @@ pub(crate) fn extract_parameters(
             // Check for a #[LanguageLevelTypeAware] override on the
             // parameter.  When present, it replaces the native type hint
             // with the version-appropriate type string.
-            let type_hint = if let Some(ver) = php_version
+            let mut type_hint = if let Some(ver) = php_version
                 && let Some(ctx) = doc_ctx
             {
                 extract_language_level_type_for_param(param, ctx, ver)
@@ -1065,6 +1065,16 @@ pub(crate) fn extract_parameters(
             } else {
                 native_type_hint.clone()
             };
+
+            // A parameter with a literal `null` default accepts null
+            // regardless of its type hint. This covers the pre-8.4
+            // implicit-nullable form `Type $x = null`, which PHP treats
+            // as `?Type`. Fold null into the effective type so callers
+            // passing null are not flagged. Re-applied after any docblock
+            // `@param` merge overwrites `type_hint` (see the callers).
+            if param_default_is_null(param) {
+                type_hint = type_hint.map(PhpType::or_null);
+            }
 
             let default_value = content.and_then(|src| {
                 let dv = param.default_value.as_ref()?;
@@ -1095,6 +1105,17 @@ pub(crate) fn extract_parameters(
             }
         })
         .collect()
+}
+
+/// Whether a parameter's default value is the literal `null`.
+///
+/// Used to detect the implicit-nullable form `Type $x = null`, which PHP
+/// treats as `?Type` (mandatory before 8.4, still permitted after).
+fn param_default_is_null(param: &function_like::parameter::FunctionLikeParameter<'_>) -> bool {
+    let Some(dv) = param.default_value.as_ref() else {
+        return false;
+    };
+    matches!(dv.value, Expression::Literal(Literal::Null(_)))
 }
 
 /// Resolve a class name from a parameter default (`Foo::class`) to its FQN

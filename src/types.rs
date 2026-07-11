@@ -438,6 +438,24 @@ impl ParameterInfo {
             && self.closure_this_type == other.closure_this_type
     }
 
+    /// Fold `null` into the effective type when the default value is the
+    /// literal `null`.
+    ///
+    /// A parameter such as `Type $x = null` accepts null at runtime (the
+    /// pre-8.4 implicit-nullable form), so its effective type must admit
+    /// null. Call this after a docblock `@param` merge has (re)computed
+    /// `type_hint`, since the merge would otherwise drop the implied null.
+    /// The operation is idempotent.
+    pub fn apply_null_default(&mut self) {
+        let defaults_to_null = self
+            .default_value
+            .as_deref()
+            .is_some_and(|d| d.eq_ignore_ascii_case("null"));
+        if defaults_to_null && let Some(t) = self.type_hint.take() {
+            self.type_hint = Some(t.or_null());
+        }
+    }
+
     /// Return the type hint as a string, if present.
     ///
     /// Convenience wrapper around `self.type_hint.as_ref().map(|t| t.to_string())`.

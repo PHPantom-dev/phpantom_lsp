@@ -1561,7 +1561,19 @@ pub fn resolve_effective_type_typed(
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
             if should_override_type_typed(doc, native) {
-                Some(doc.clone())
+                // Preserve nullability from the native hint. A `?array`
+                // native with a non-nullable `@param Foo[]` docblock still
+                // accepts null at runtime, so the effective type is
+                // `Foo[]|null`. This mirrors PHPStan's `decideType`.
+                //
+                // `mixed` is excluded: it accepts null but carries no
+                // explicit null member, so narrowing it through a docblock
+                // is intentional and must not re-add null.
+                if native.accepts_null() && !native.is_mixed() {
+                    Some(doc.clone().or_null())
+                } else {
+                    Some(doc.clone())
+                }
             } else {
                 Some(native.clone())
             }

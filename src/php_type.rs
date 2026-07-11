@@ -718,6 +718,40 @@ impl PhpType {
         matches!(self, PhpType::Named(s) if is_primitive_scalar_name(s))
     }
 
+    /// Whether this type admits `null` as a value.
+    ///
+    /// Returns `true` for `null` itself, a `?T` nullable wrapper, `mixed`,
+    /// and any union that contains a null member. Returns `false` for
+    /// non-nullable types.
+    pub fn accepts_null(&self) -> bool {
+        match self {
+            PhpType::Nullable(_) => true,
+            PhpType::Union(members) => members.iter().any(|m| m.accepts_null()),
+            PhpType::Named(s) => s.eq_ignore_ascii_case("null") || s.eq_ignore_ascii_case("mixed"),
+            _ => false,
+        }
+    }
+
+    /// Return a copy of this type that also admits `null`.
+    ///
+    /// Leaves the type unchanged when it already [`accepts_null`]. A bare
+    /// type `T` becomes `?T`; a union `A|B` becomes `A|B|null`.
+    ///
+    /// [`accepts_null`]: PhpType::accepts_null
+    #[must_use]
+    pub fn or_null(self) -> PhpType {
+        if self.accepts_null() {
+            return self;
+        }
+        match self {
+            PhpType::Union(mut members) => {
+                members.push(PhpType::null());
+                PhpType::Union(members)
+            }
+            other => PhpType::Nullable(Box::new(other)),
+        }
+    }
+
     /// Whether this type is a scalar/built-in type that does not refer
     /// to a user-defined class.
     ///
@@ -5350,6 +5384,32 @@ mod tests {
                 assert_eq!(*inner, PhpType::Named("Foo".to_owned()));
             }
             other => panic!("Expected ClassString(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepts_null_recognises_null_forms() {
+        assert!(PhpType::parse("?int").accepts_null());
+        assert!(PhpType::parse("int|null").accepts_null());
+        assert!(PhpType::null().accepts_null());
+        assert!(PhpType::mixed().accepts_null());
+        assert!(!PhpType::int().accepts_null());
+        assert!(!PhpType::parse("int|string").accepts_null());
+    }
+
+    #[test]
+    fn or_null_adds_null_and_is_idempotent() {
+        assert_eq!(PhpType::int().or_null(), PhpType::parse("?int"));
+        // Already nullable → unchanged.
+        let nullable = PhpType::parse("?int");
+        assert_eq!(nullable.clone().or_null(), nullable);
+        // A union gains a null member rather than a nested wrapper.
+        match PhpType::parse("int|string").or_null() {
+            PhpType::Union(members) => {
+                assert!(members.iter().any(|m| m.is_null()));
+                assert_eq!(members.len(), 3);
+            }
+            other => panic!("Expected Union, got {other:?}"),
         }
     }
 

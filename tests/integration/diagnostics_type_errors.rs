@@ -183,6 +183,68 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_when_docblock_overrides_nullable_native() {
+    // A `@param Item[]` docblock overriding a native `?array` still
+    // accepts null at runtime, so passing null must not be flagged.
+    let php = r#"<?php
+class Item {}
+
+class Component {
+    /**
+     * @param Item[] $items
+     */
+    public function __construct(?array $items) {}
+}
+
+function test(): void {
+    new Component(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag null passed to a docblock-overridden nullable param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_when_default_is_null() {
+    // A parameter with a literal `null` default accepts null even when
+    // the native hint is non-nullable (the pre-8.4 implicit-nullable form).
+    let php = r#"<?php
+function takes_default_null(string $baseurl = null): void {}
+
+function test(): void {
+    takes_default_null(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag null passed to a param with a null default, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_when_docblock_type_and_default_null() {
+    // Combines both facets: docblock type plus a `null` default.
+    let php = r#"<?php
+class Item {}
+
+function takes_items(array $items = null): void {}
+
+function test(): void {
+    takes_items(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag null passed to a param with a null default and array hint, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: subclass passed to parent type ──────────────────────────
 
 #[test]
