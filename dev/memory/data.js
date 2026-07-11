@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783728644713,
+  "lastUpdate": 1783749378660,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13118,6 +13118,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 40.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e8fe8a8499b91f3dc163d6a60148253d23a42d96",
+          "message": "Add diagnostic ignore rules in `.phpantom.toml`",
+          "timestamp": "2026-07-11T07:43:47+02:00",
+          "tree_id": "75a39969749869fb2dbf71e1e3b985ec025abd3d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e8fe8a8499b91f3dc163d6a60148253d23a42d96"
+        },
+        "date": 1783749377359,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.1,
             "unit": "MiB"
           },
           {
