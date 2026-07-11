@@ -15,19 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B48. Error-suppression prefix breaks RHS resolution
-
-**Severity: Medium · Reproduced**
-
-`$xml = @simplexml_load_string($content);` leaves `$xml`
-unresolved — every later member access reports
-`unresolved_member_access` (pdepend
-`src/Baseline/BaselineSetFactory.php:31-32`). Without the `@` the
-same assignment resolves.
-
-**Fix:** unwrap the suppression unary prefix in
-`resolve_rhs_expression` and resolve the inner expression.
-
 ## B49. SimpleXMLElement iteration and children()/attributes() yield untyped elements
 
 **Severity: Medium (~25+ errors in api-php, cascades) · Reproduced**

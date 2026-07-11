@@ -354,6 +354,12 @@ fn resolve_rhs_expression_inner<'b>(
             result
         }
         Expression::Parenthesized(p) => resolve_rhs_expression(p.expression, ctx),
+        // ── Error-suppression prefix: `@expr` ───────────────────────
+        // The `@` operator doesn't change the runtime type of the
+        // expression, so resolve straight through to the operand.
+        Expression::UnaryPrefix(unary) if unary.operator.is_error_control() => {
+            resolve_rhs_expression(unary.operand, ctx)
+        }
         Expression::Match(match_expr) => {
             let is_match_true = match_expr.expression.is_true();
             let mut combined = Vec::new();
