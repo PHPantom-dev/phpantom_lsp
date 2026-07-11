@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783791279355,
+  "lastUpdate": 1783793921607,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13327,6 +13327,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "621e6b7aeb4136049ba1528ecf7f3868388bedb0",
+          "message": "Iterating an object that implements `Iterator` directly now resolves the\nloop variable's type",
+          "timestamp": "2026-07-11T20:06:04+02:00",
+          "tree_id": "3559812dcc0499d248628fde1c378076916433e8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/621e6b7aeb4136049ba1528ecf7f3868388bedb0"
+        },
+        "date": 1783793919340,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 62.2,
             "unit": "MiB"
           }
         ]
