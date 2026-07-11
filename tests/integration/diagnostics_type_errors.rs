@@ -4732,6 +4732,128 @@ function test(): void {
     );
 }
 
+// ─── Integer literals passed to named refined-int pseudo-types (B50) ───────
+
+#[test]
+fn no_diagnostic_for_int_literal_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function takesNonNeg(int $count): void {}
+
+function test(): void {
+    takesNonNeg(1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "literal 1 should satisfy non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_int_literal_passed_to_positive_int() {
+    let php = r#"<?php
+/**
+ * @param positive-int $count
+ */
+function takesPositive(int $count): void {}
+
+function test(): void {
+    takesPositive(1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "literal 1 should satisfy positive-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn type_error_for_zero_literal_passed_to_positive_int() {
+    let php = r#"<?php
+/**
+ * @param positive-int $count
+ */
+function takesPositive(int $count): void {}
+
+function test(): void {
+    takesPositive(0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "literal 0 should violate positive-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn type_error_for_negative_literal_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function takesNonNeg(int $count): void {}
+
+function test(): void {
+    takesNonNeg(-1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "literal -1 should violate non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_int_literal_passed_to_non_zero_int() {
+    let php = r#"<?php
+/**
+ * @param non-zero-int $count
+ */
+function takesNonZero(int $count): void {}
+
+function test(): void {
+    takesNonZero(1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "literal 1 should satisfy non-zero-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn type_error_for_zero_literal_passed_to_non_zero_int() {
+    let php = r#"<?php
+/**
+ * @param non-zero-int $count
+ */
+function takesNonZero(int $count): void {}
+
+function test(): void {
+    takesNonZero(0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "literal 0 should violate non-zero-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
 // ─── Issue #167: assignment in if-branch must not leak into elseif condition ─
 
 #[test]

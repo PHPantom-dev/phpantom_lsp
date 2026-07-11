@@ -3437,7 +3437,7 @@ fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> bool {
             }
             // Integer literal → int (and its supertypes).
             if matches!(lit, LiteralValue::Int(_)) {
-                return matches!(
+                if matches!(
                     sup_l.as_str(),
                     "int"
                         | "integer"
@@ -3447,7 +3447,22 @@ fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> bool {
                         | "number"
                         | "scalar"
                         | "array-key"
-                );
+                ) {
+                    return true;
+                }
+                // Named refined-int types: check the literal's value
+                // against the refinement's constraint directly, rather
+                // than falling through to a name comparison that can
+                // never match a literal.
+                if let Some((min, max)) = refined_int_to_range(&sup_l) {
+                    return lit
+                        .parse_i64()
+                        .is_some_and(|value| int_literal_is_within_range(value, min, max));
+                }
+                if sup_l == "non-zero-int" {
+                    return lit.parse_i64().is_some_and(|value| value != 0);
+                }
+                return false;
             }
             // Float literal → float (and its supertypes).
             if matches!(lit, LiteralValue::Float(_)) {
@@ -4382,11 +4397,15 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         | ast::Type::NegativeInt(k)
         | ast::Type::NonPositiveInt(k)
         | ast::Type::NonNegativeInt(k)
+        | ast::Type::NonZeroInt(k)
         | ast::Type::String(k)
         | ast::Type::StringableObject(k)
         | ast::Type::ArrayKey(k)
         | ast::Type::Numeric(k)
         | ast::Type::Scalar(k)
+        | ast::Type::CallableString(k)
+        | ast::Type::LowercaseCallableString(k)
+        | ast::Type::UppercaseCallableString(k)
         | ast::Type::NumericString(k)
         | ast::Type::NonEmptyString(k)
         | ast::Type::NonEmptyLowercaseString(k)
@@ -7176,6 +7195,71 @@ mod tests {
             assert!(
                 !PhpType::literal_float("1.0")
                     .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
+            );
+        }
+
+        // ── Integer literal <: named refined-int ─────────────────────
+
+        #[test]
+        fn positive_integer_literal_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::literal_int("1").is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_integer_literal_is_subtype_of_positive_int() {
+            assert!(
+                PhpType::literal_int("1").is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_not_subtype_of_positive_int() {
+            assert!(
+                !PhpType::literal_int("0").is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_not_subtype_of_non_zero_int() {
+            assert!(
+                !PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_integer_literal_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::literal_int("1").is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn negative_integer_literal_is_subtype_of_negative_int() {
+            assert!(
+                PhpType::literal_int("-1").is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_integer_literal_is_not_subtype_of_negative_int() {
+            assert!(
+                !PhpType::literal_int("1").is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_subtype_of_non_positive_int() {
+            assert!(
+                PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-positive-int".into()))
             );
         }
 

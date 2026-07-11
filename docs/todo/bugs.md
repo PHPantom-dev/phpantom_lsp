@@ -15,22 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B50. Integer literals rejected by refined-int pseudo-types
-
-**Severity: Medium (clear FP, common PHPUnit pattern) · Reproduced**
-
-`takesNonNeg(1)` against `@param non-negative-int $count` reports
-`type_mismatch_argument` "expects non-negative-int, got 1"
-(luxplus-backoffice `$this->addToAssertionCount(1)`, 6 errors).
-Literal ints already satisfy `int<min,max>` ranges; the named
-refinements (`non-negative-int`, `positive-int`, `negative-int`,
-`non-positive-int`, `non-zero-int`) must accept (or reject)
-literals by value the same way.
-
-**Fix:** in the argument compatibility check, evaluate int
-literals against the named refinement's constraint instead of
-falling through to name comparison.
-
 ## B51. String literal naming a class rejected by `class-string<Bound>`
 
 **Severity: Medium (31 errors in pdepend) · Reproduced**

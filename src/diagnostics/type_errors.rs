@@ -1554,6 +1554,27 @@ impl Backend {
                             Expression::Literal(Literal::Float(f)) => {
                                 PhpType::literal_float(bytes_to_str(f.raw).to_string())
                             }
+                            // Negative numeric literals (`-1`, `-1.5`) parse
+                            // as a unary negation wrapping the literal, not
+                            // as a single `Literal` node, so they need their
+                            // own case to be narrowed the same way.
+                            Expression::UnaryPrefix(unary)
+                                if matches!(
+                                    unary.operator,
+                                    mago_syntax::ast::unary::UnaryPrefixOperator::Negation(_)
+                                ) =>
+                            {
+                                match unary.operand {
+                                    Expression::Literal(Literal::Integer(i)) => match i.value {
+                                        Some(value) => PhpType::literal_int(format!("-{value}")),
+                                        None => ty,
+                                    },
+                                    Expression::Literal(Literal::Float(f)) => {
+                                        PhpType::literal_float(format!("-{}", bytes_to_str(f.raw)))
+                                    }
+                                    _ => ty,
+                                }
+                            }
                             _ => ty,
                         };
                         // Resolve any short class names in the arg type
