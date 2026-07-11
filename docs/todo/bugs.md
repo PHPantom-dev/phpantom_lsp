@@ -15,23 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B53. Template binding from `Class::CONST` arguments binds the class, not the constant type
-
-**Severity: Medium (~12 errors: phpmd, pdepend, luxplus) · Reproduced**
-
-`assertSameLike(WithConsts::CODE, $x)` with `@template T @param T
-$expected` reports "expects FPCheck\WithConsts, got int" — `T`
-was bound to the constant's owning class instead of the
-constant's value type, then the argument (correctly typed `int`)
-mismatches the wrong binding. Real-world:
-`static::assertSame(Command::INVALID, $exitCode)`
-(phpmd `tests/php/PHPMD/TextUI/CommandTest.php:168` and friends;
-same shape with `Response::HTTP_OK` in luxplus).
-
-**Fix:** in call-site template binding, type a
-class-constant-access argument by the constant's declared/value
-type (the same type the argument-check side already computes).
-
 ## B54. Variables captured by reference in closures are flagged unused
 
 **Severity: Medium (unused_variable FP) · Reproduced**

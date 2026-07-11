@@ -1756,6 +1756,43 @@ class MyTest extends TestCase {
 }
 
 #[test]
+fn no_false_positive_for_self_assert_same_with_untyped_class_const() {
+    // Real-world PHPUnit pattern: static::assertSame(Command::INVALID, $x)
+    // where INVALID is an *untyped* class constant with an int value.
+    // The template param must bind to the constant's value type (int),
+    // not the constant's owning class (Command).
+    let php = r#"<?php
+class Command {
+    const SUCCESS = 0;
+    const INVALID = 23;
+}
+
+class TestCase {
+    /**
+     * @template ExpectedType
+     * @param ExpectedType $expected
+     */
+    final public static function assertSame(mixed $expected, mixed $actual, string $message = ''): void {}
+}
+
+class MyTest extends TestCase {
+    public function testExitCode(): void {
+        $exitCode = 23;
+        static::assertSame(Command::INVALID, $exitCode);
+        self::assertSame(Command::SUCCESS, 0);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        !has_type_error(&diags),
+        "Untyped class constant argument should bind the template param to \
+         its value type (int), not the owning class, got: {msgs:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_method_template_with_property_access_arg() {
     // When the first argument to a method-level @template method is
     // $var->prop (property access on a non-$this variable), the

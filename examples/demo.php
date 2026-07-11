@@ -618,6 +618,10 @@ class MethodTemplateDemo
 
         $mapper->wrap(new Product())->first()->getPrice(); // new expression arg → Product
 
+        // Untyped class-constant argument binds T to the constant's value
+        // type (int), not the constant's owning class.
+        $mapper->identity(ConstantTypeDemo::TIMEOUT); // hover → int
+
         // Chained instantiation preserves constructor-inferred generics
         (new ObjectMapper())->wrap(new Pen())->first()->write(); // (new ...)->method() chain with generics
 
@@ -5609,6 +5613,10 @@ function runDemoAssertions(): void
     assert($wrapped instanceof TypedCollection, 'ObjectMapper::wrap() must return TypedCollection');
     $first = $wrapped->first();
     assert($first instanceof Pen, 'wrap(Pen)->first() must return Pen');
+
+    // Untyped class constant argument binds the template to its value type (int).
+    $constValue = $mapper->identity(ConstantTypeDemo::TIMEOUT);
+    assert(is_int($constValue), 'identity(ConstantTypeDemo::TIMEOUT) must return int (constant value type, not owning class)');
 
     // ── ScaffoldingReducible::reduce() — closure return type binding ────
     /** @var ScaffoldingReducible<Pencil> $reducible */

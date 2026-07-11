@@ -2686,8 +2686,8 @@ fn resolve_expression_to_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<Php
 /// Resolve a `ClassName::Member` expression to a type.
 ///
 /// Handles enum cases (`MyEnum::Case` → `MyEnum`) and class constants
-/// (`Foo::BAR` → the constant's type hint, or the class itself as
-/// fallback for untyped constants).
+/// (`Foo::BAR` → the constant's type hint, or the type inferred from
+/// the constant's initializer value for untyped constants).
 fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let (class_part, _member) = text.split_once("::")?;
 
@@ -2725,14 +2725,25 @@ fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<Php
         ctx.class_loader,
         ctx.resolved_class_cache,
     );
-    if let Some(constant) = merged.constants.iter().find(|c| c.name == _member)
-        && let Some(ref hint) = constant.type_hint
-    {
-        return Some(hint.clone());
+    if let Some(constant) = merged.constants.iter().find(|c| c.name == _member) {
+        // Typed class constant — use its declared type.
+        if let Some(ref hint) = constant.type_hint {
+            return Some(hint.clone());
+        }
+        // Untyped constant — infer the value type from the initializer
+        // so template params bind to the constant's value (e.g. `int`)
+        // rather than the owning class.
+        if let Some(ref val) = constant.value
+            && let Some(ty) =
+                crate::completion::variable::rhs_resolution::infer_type_from_constant_value(val)
+        {
+            return Some(ty);
+        }
     }
 
-    // Unknown member or untyped constant — we can't determine the
-    // type, so return None and let the caller skip the diagnostic.
+    // Unknown member or untyped constant we can't classify — we can't
+    // determine the type, so return None and let the caller skip the
+    // diagnostic.
     None
 }
 

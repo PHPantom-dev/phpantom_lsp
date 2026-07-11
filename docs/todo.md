@@ -28,7 +28,6 @@ within the same impact tier.
 | B60 | [Template binding from closure returns through facade `@method`](todo/bugs.md#b60-template-binding-from-closure-return-types-through-facade-method-tags)       | Medium-High | Medium      |
 | L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
 | B54 | [By-ref closure captures flagged as unused variables](todo/bugs.md#b54-variables-captured-by-reference-in-closures-are-flagged-unused)                         | Medium      | Low         |
-| B53 | [`Class::CONST` args bind templates to the class, not the constant type](todo/bugs.md#b53-template-binding-from-classconst-arguments-binds-the-class-not-the-constant-type) | Medium      | Low-Medium  |
 | B57 | [Parameter nullability lost from docblock overrides and null defaults](todo/bugs.md#b57-parameter-nullability-lost-from-docblock-overrides-and-null-defaults)  | Medium      | Low-Medium  |
 | L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |
 | B55 | [Union unknown-member check ignores `__call` catch-alls](todo/bugs.md#b55-union-typed-unknown-member-check-ignores-__call-catch-alls)                          | Low-Medium  | Low         |

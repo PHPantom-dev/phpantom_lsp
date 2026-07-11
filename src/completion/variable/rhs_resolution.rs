@@ -574,7 +574,7 @@ fn resolve_rhs_expression_inner<'b>(
 /// keywords (`true`, `false`), `null`, and array literals (`[...]`,
 /// `array(...)`).  Returns `None` for expressions that cannot be
 /// trivially classified (e.g. concatenation, function calls).
-fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
+pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
     let v = value.trim();
     if v.is_empty() {
         return None;
