@@ -180,6 +180,15 @@ index (X4), the lookup becomes a simple index query.
 Consider implementing after X4 (full background indexing) ships, or
 accept the same scan-based latency that Find References currently has.
 
+**References:**
+- php-lsp: `references/php-lsp/src/navigation/call_hierarchy.rs` — a
+  working Rust implementation (prepare/incoming/outgoing, cross-file)
+  built on the same "wrap Find References + walk the body" shape
+  described above. Their wire-protocol tests
+  (`references/php-lsp/tests/`, call-hierarchy cases in the Symfony
+  suite) show the expected item/range semantics editors rely on.
+- Phpactor: call hierarchy via its references index.
+
 ## F7. Evaluatable expression support (DAP integration)
 
 **Impact: Low-Medium · Effort: Low**
@@ -537,8 +546,23 @@ The operation needs to:
 5. Rewrite each reference to use the new FQN, or update the `use`
    statement and leave short names unchanged.
 
+Once the core move operation exists, also wire it to
+`workspace/willRenameFiles` (declared via server capabilities
+`workspace.fileOperations.willRename`): when the user renames or
+moves a PHP file in the editor's file tree, return a `WorkspaceEdit`
+that updates the namespace declaration and all `use` imports across
+the workspace. This is the same machinery as steps 2-5, just
+triggered by the editor instead of a code action. The companion
+`workspace/willCreateFiles` can then insert a PSR-4-derived
+`namespace` + class stub into newly created files (overlaps with
+F18's namespace computation).
+
 **References:**
 - Phpactor: `MoveClass` refactoring in the class-mover package.
+- php-lsp: `handle_will_rename_files` in
+  `references/php-lsp/src/backend/handlers/workspace.rs` (updates
+  `use` imports workspace-wide on file rename) and their
+  `willCreateFiles` PSR-4 stub insertion.
 
 ## F18. Fix namespace/class name from PSR-4
 

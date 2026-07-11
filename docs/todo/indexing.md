@@ -455,6 +455,12 @@ Store file mtime + content hash per entry. On startup, walk the
 directory, compare mtimes, re-parse only changed files. This is
 Libretto's `IncrementalCache` approach and it works well.
 
+The content hash must be the authority; mtime is only a pre-filter
+to skip hashing files that look unchanged. php-lsp shipped this
+exact bug: their cache was keyed on `mtime + size`, so a
+size-preserving edit within the same mtime second served a stale
+index entry. They later switched to `blake3(uri || content)`.
+
 ### Decision criteria
 
 Implement disk caching only if:

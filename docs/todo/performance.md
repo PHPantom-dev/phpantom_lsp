@@ -556,6 +556,16 @@ isn't needed.
   `references/psalm/src/Psalm/Internal/Provider/ClassLikeStorageCacheProvider.php`
 - Psalm: `FileStorageCacheProvider` for the content-hash invalidation
   pattern
+- php-lsp: persists `FileIndex` entries under `~/.cache/php-lsp/`
+  keyed by `blake3(uri || content)`. They originally keyed on
+  `mtime + size` and shipped a cache-staleness bug (a size-preserving
+  edit within the same mtime second was missed) before switching to
+  content hashing. Confirms the content-hash-as-authority choice
+  above; never trust mtime for correctness, at most as a cheap
+  pre-filter to skip hashing unchanged files.
+- php-lsp: `references/php-lsp/docs/salsa-migration.md` (Phases K1-K4)
+  documents their cache-size cap, reset-on-overflow, and
+  LRU-by-mtime eviction plans — useful pitfall list if P20 ships.
 
 ---
 
