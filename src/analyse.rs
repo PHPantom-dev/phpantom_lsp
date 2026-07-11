@@ -126,6 +126,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         }
     };
 
+    let ignore_rules =
+        crate::diagnostics::ignore_rules::compile_ignore_rules(&cfg.diagnostics.ignore);
+
     // ── 2. Index project ────────────────────────────────────────────
     // Create a headless Backend (no LSP client) and run the same init
     // pipeline as the LSP server.  With client=None the log/progress
@@ -297,6 +300,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                     let done_count = &done_count;
                     let files = &files;
                     let file_data = &file_data;
+                    let ignore_rules = &ignore_rules;
                     std::thread::Builder::new()
                     .name("diag-worker".into())
                     .spawn_scoped(s, move || {
@@ -503,6 +507,20 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // diagnostic line numbers have already been translated
                         // back to original file coordinates.
                         crate::diagnostics::filter_ignored_by_comment(&mut raw, original_content);
+
+                        // ── Apply [[diagnostics.ignore]] config rules ──────
+                        if !ignore_rules.is_empty() {
+                            let relative_path = files[i]
+                                .strip_prefix(root)
+                                .unwrap_or(&files[i])
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            crate::diagnostics::ignore_rules::filter_ignored_by_config(
+                                &mut raw,
+                                &relative_path,
+                                ignore_rules,
+                            );
+                        }
 
                         // For Blade files, translate diagnostic ranges from
                         // virtual PHP coordinates back to original Blade

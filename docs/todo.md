@@ -25,6 +25,26 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
+| B61 | [Exact-type assertion prefix `=` is not parsed](todo/bugs.md#b61-exact-type-assertion-prefix--is-not-parsed) (PHPUnit narrowing)                               | High        | Low         |
+| B44 | [`@phpstan-assert` narrowing only via declaring class name](todo/bugs.md#b44-phpstan-assert-narrowing-only-applies-when-called-via-the-declaring-class-name)   | High        | Medium      |
+| B45 | [No narrowing of property/method-call subjects in ternaries](todo/bugs.md#b45-no-narrowing-of-property-or-method-call-subjects-inside-ternary-conditions)      | High        | Medium      |
+| B47 | [Assignment inside a condition leaves the variable unresolved](todo/bugs.md#b47-assignment-inside-a-condition-leaves-the-variable-unresolved)                  | Medium-High | Medium      |
+| B46 | [Short-circuit narrowing missing on the right side of boolean OR](todo/bugs.md#b46-short-circuit-narrowing-missing-on-the-right-side-of-boolean-or)            | Medium-High | Low-Medium  |
+| B60 | [Template binding from closure returns through facade `@method`](todo/bugs.md#b60-template-binding-from-closure-return-types-through-facade-method-tags)       | Medium-High | Medium      |
+| L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
+| B48 | [Error-suppression prefix breaks RHS resolution](todo/bugs.md#b48-error-suppression-prefix-breaks-rhs-resolution)                                              | Medium      | Low         |
+| B49 | [SimpleXMLElement iteration yields untyped elements](todo/bugs.md#b49-simplexmlelement-iteration-and-childrenattributes-yield-untyped-elements)                | Medium      | Low         |
+| B50 | [Integer literals rejected by refined-int pseudo-types](todo/bugs.md#b50-integer-literals-rejected-by-refined-int-pseudo-types)                                | Medium      | Low         |
+| B51 | [String literal naming a class rejected by `class-string<Bound>`](todo/bugs.md#b51-string-literal-naming-a-class-rejected-by-class-stringbound)                | Medium      | Low         |
+| B54 | [By-ref closure captures flagged as unused variables](todo/bugs.md#b54-variables-captured-by-reference-in-closures-are-flagged-unused)                         | Medium      | Low         |
+| B52 | [String literals bind class-string templates to the string type](todo/bugs.md#b52-string-literals-bind-class-string-templates-to-the-string-type)              | Medium      | Low-Medium  |
+| B53 | [`Class::CONST` args bind templates to the class, not the constant type](todo/bugs.md#b53-template-binding-from-classconst-arguments-binds-the-class-not-the-constant-type) | Medium      | Low-Medium  |
+| B57 | [Parameter nullability lost from docblock overrides and null defaults](todo/bugs.md#b57-parameter-nullability-lost-from-docblock-overrides-and-null-defaults)  | Medium      | Low-Medium  |
+| L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |
+| B55 | [Union unknown-member check ignores `__call` catch-alls](todo/bugs.md#b55-union-typed-unknown-member-check-ignores-__call-catch-alls)                          | Low-Medium  | Low         |
+| B58 | [Positional array-shape indexing unresolved](todo/bugs.md#b58-indexing-a-positional-array-shape-does-not-resolve-the-element-type)                             | Low-Medium  | Low         |
+| B56 | [`__benevolent<T>` pseudo-type reported as unknown class](todo/bugs.md#b56-__benevolentt-pseudo-type-reported-as-unknown-class)                                | Low         | Low         |
+| B59 | [Project class sharing a global interface name breaks subtype checks](todo/bugs.md#b59-project-class-sharing-a-global-interface-name-breaks-subtype-checks)    | Low         | Medium      |
 | X4  | [Full background indexing](todo/indexing.md#x4-full-background-indexing) (workspace symbols, fast find-references)                                              | Medium      | High        |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion)                                                                                                       | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |

@@ -163,6 +163,7 @@
 mod argument_count;
 mod deprecated;
 pub(crate) mod helpers;
+pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod invalid_class_kind;
 mod syntax_errors;
@@ -833,6 +834,22 @@ impl Backend {
             let content: Option<Arc<String>> = self.open_files.read().get(uri_str).cloned();
             if let Some(ref text) = content {
                 filter_ignored_by_comment(&mut full, text);
+            }
+        }
+
+        // ── Apply [[diagnostics.ignore]] config rules ────────────────
+        {
+            let rules = ignore_rules::compile_ignore_rules(&self.config.lock().diagnostics.ignore);
+            if !rules.is_empty()
+                && let Ok(file_path) = uri.to_file_path()
+                && let Some(root) = self.workspace_root.read().clone()
+            {
+                let relative_path = file_path
+                    .strip_prefix(&root)
+                    .unwrap_or(&file_path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                ignore_rules::filter_ignored_by_config(&mut full, &relative_path, &rules);
             }
         }
 

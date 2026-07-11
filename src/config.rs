@@ -79,6 +79,44 @@ pub struct DiagnosticsConfig {
     /// behaviour.
     #[serde(rename = "report-magic-properties")]
     pub report_magic_properties: Option<bool>,
+
+    /// Rules that suppress matching diagnostics, similar to PHPStan's
+    /// `ignoreErrors`.
+    ///
+    /// Each rule may constrain by `message` (regex), `path` (glob,
+    /// relative to the workspace root), and/or `identifier` (the
+    /// diagnostic code, e.g. `"unused_import"`). A diagnostic is
+    /// suppressed when it matches every constraint present on a rule;
+    /// omitted constraints match anything. A rule with no constraints
+    /// at all is rejected (it would silently suppress every
+    /// diagnostic in the project).
+    ///
+    /// ```toml
+    /// [[diagnostics.ignore]]
+    /// path = "tests/**"
+    ///
+    /// [[diagnostics.ignore]]
+    /// identifier = "deprecated_usage"
+    /// message = "^Call to deprecated function some_legacy_helper\\(\\)"
+    /// ```
+    pub ignore: Vec<IgnoreRule>,
+}
+
+/// A single `[[diagnostics.ignore]]` rule.
+///
+/// See [`DiagnosticsConfig::ignore`] for the matching semantics.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct IgnoreRule {
+    /// Regex matched against the diagnostic message.
+    pub message: Option<String>,
+    /// Glob matched against the file path, relative to the workspace
+    /// root. Follows gitignore-style glob syntax: `*` does not cross
+    /// `/`, use `**` to match across directories.
+    pub path: Option<String>,
+    /// Diagnostic identifier (the diagnostic `code`, e.g.
+    /// `"unused_import"`, `"deprecated_usage"`).
+    pub identifier: Option<String>,
 }
 
 impl DiagnosticsConfig {
@@ -546,6 +584,7 @@ mod tests {
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
+        assert!(config.diagnostics.ignore.is_empty());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -575,6 +614,7 @@ mod tests {
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
+        assert!(config.diagnostics.ignore.is_empty());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -662,6 +702,70 @@ mod tests {
         std::fs::write(&path, "[diagnostics]\nextra-arguments = true\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(config.diagnostics.extra_arguments_enabled());
+    }
+
+    #[test]
+    fn diagnostics_ignore_defaults_to_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.diagnostics.ignore.is_empty());
+    }
+
+    #[test]
+    fn parses_diagnostics_ignore_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"
+[[diagnostics.ignore]]
+message = "^Call to deprecated function some_legacy_helper\\(\\)"
+path = "tests/**"
+identifier = "deprecated_usage"
+"#,
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.diagnostics.ignore.len(), 1);
+        let rule = &config.diagnostics.ignore[0];
+        assert_eq!(
+            rule.message.as_deref(),
+            Some("^Call to deprecated function some_legacy_helper\\(\\)")
+        );
+        assert_eq!(rule.path.as_deref(), Some("tests/**"));
+        assert_eq!(rule.identifier.as_deref(), Some("deprecated_usage"));
+    }
+
+    #[test]
+    fn parses_multiple_diagnostics_ignore_rules_with_partial_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"
+[[diagnostics.ignore]]
+path = "vendor/**"
+
+[[diagnostics.ignore]]
+identifier = "unused_variable"
+"#,
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.diagnostics.ignore.len(), 2);
+        assert_eq!(
+            config.diagnostics.ignore[0].path.as_deref(),
+            Some("vendor/**")
+        );
+        assert!(config.diagnostics.ignore[0].message.is_none());
+        assert!(config.diagnostics.ignore[0].identifier.is_none());
+        assert_eq!(
+            config.diagnostics.ignore[1].identifier.as_deref(),
+            Some("unused_variable")
+        );
+        assert!(config.diagnostics.ignore[1].path.is_none());
     }
 
     #[test]
@@ -764,6 +868,13 @@ unresolved-member-access = true
 extra-arguments = true
 report-magic-properties = true
 
+[[diagnostics.ignore]]
+path = "tests/**"
+
+[[diagnostics.ignore]]
+identifier = "deprecated_usage"
+message = "^Call to deprecated function some_legacy_helper\\(\\)"
+
 [indexing]
 strategy = "self"
 
@@ -794,6 +905,15 @@ analyze-timeout = 45000
         assert!(config.diagnostics.unresolved_member_access_enabled());
         assert!(config.diagnostics.extra_arguments_enabled());
         assert!(config.diagnostics.report_magic_properties_enabled());
+        assert_eq!(config.diagnostics.ignore.len(), 2);
+        assert_eq!(
+            config.diagnostics.ignore[0].path.as_deref(),
+            Some("tests/**")
+        );
+        assert_eq!(
+            config.diagnostics.ignore[1].identifier.as_deref(),
+            Some("deprecated_usage")
+        );
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(
