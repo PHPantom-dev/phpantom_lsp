@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783793921607,
+  "lastUpdate": 1783795389661,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13361,6 +13361,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 62.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "12a707e6efe7dba7ba67bf8b44c5adee93c28d25",
+          "message": "Integer literals rejected by refined-int pseudo-types",
+          "timestamp": "2026-07-11T20:31:23+02:00",
+          "tree_id": "cc8fd302d85d20f507059e919d6034a891c26243",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/12a707e6efe7dba7ba67bf8b44c5adee93c28d25"
+        },
+        "date": 1783795387674,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.4,
             "unit": "MiB"
           }
         ]
