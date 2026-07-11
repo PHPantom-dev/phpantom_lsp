@@ -9039,29 +9039,38 @@ fn process_condition_assignment<'b>(
         process_condition_assignment(inner.expression, scope, ctx);
         return;
     }
-    // Assignment inside a binary comparison:
-    //   `if (($x = expr()) !== null)` or `if (null !== ($x = expr()))`
+    // Negated (or otherwise unary-prefixed) conditions:
+    //   `if (!$x = expr()) { return; }` — PHP parses this as
+    //   `!($x = expr())`.  Recurse into the operand.
+    if let Expression::UnaryPrefix(prefix) = condition {
+        process_condition_assignment(prefix.operand, scope, ctx);
+        return;
+    }
+    // Assignment inside a binary comparison or logical chain:
+    //   `if (($x = expr()) !== null)`, `if (null !== ($x = expr()))`,
+    //   `while (($x = next()) && $x->valid())`.  Recurse into both
+    //   operands so the assignment on either side is seen.
     if let Expression::Binary(bin) = condition {
-        // Check LHS directly: `($x = expr()) !== null`
-        if let Expression::Assignment(_) = bin.lhs {
-            process_condition_assignment(bin.lhs, scope, ctx);
-            return;
-        }
-        if let Expression::Parenthesized(p) = bin.lhs
-            && let Expression::Assignment(_) = p.expression
-        {
-            process_condition_assignment(p.expression, scope, ctx);
-            return;
-        }
-        // Check RHS: `null !== ($x = expr())`
-        if let Expression::Assignment(_) = bin.rhs {
-            process_condition_assignment(bin.rhs, scope, ctx);
-            return;
-        }
-        if let Expression::Parenthesized(p) = bin.rhs
-            && let Expression::Assignment(_) = p.expression
-        {
-            process_condition_assignment(p.expression, scope, ctx);
+        process_condition_assignment(bin.lhs, scope, ctx);
+        process_condition_assignment(bin.rhs, scope, ctx);
+        return;
+    }
+    // Assignment wrapped in a call argument:
+    //   `while (is_object($token = $tokenizer->next()))`.  Recurse
+    //   into each argument value so the assignment is registered.
+    if let Expression::Call(call) = condition {
+        let arg_list = match call {
+            Call::Function(fc) => &fc.argument_list,
+            Call::Method(mc) => &mc.argument_list,
+            Call::NullSafeMethod(mc) => &mc.argument_list,
+            Call::StaticMethod(sc) => &sc.argument_list,
+        };
+        for arg in arg_list.arguments.iter() {
+            let arg_expr = match arg {
+                Argument::Positional(a) => a.value,
+                Argument::Named(a) => a.value,
+            };
+            process_condition_assignment(arg_expr, scope, ctx);
         }
     }
 }

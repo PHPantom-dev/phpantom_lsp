@@ -751,6 +751,31 @@ class LoopCarriedAssignmentDemo
 }
 
 
+// ── Assignment Inside a Condition ───────────────────────────────────────────
+// A variable assigned in an `if`/`while` condition is a definition site,
+// including the bare negated guard and the call-wrapped form.
+
+class ConditionAssignmentDemo
+{
+    /** @return ?Pen */
+    public function maybePen(): ?Pen { return rand(0, 1) ? new Pen() : null; }
+
+    public function demo(): void
+    {
+        // Bare negated guard: PHP parses this as `!($pen = $this->maybePen())`.
+        if (!$pen = $this->maybePen()) {
+            return;
+        }
+        $pen->write();                            // Pen (assignment seen through `!`)
+
+        // Assignment wrapped in a call argument.
+        while (is_object($next = $this->maybePen())) {
+            $next->write();                       // Pen (assignment seen inside is_object())
+        }
+    }
+}
+
+
 // ── Null Coalesce (`??`) Refinement ─────────────────────────────────────────
 
 class NullCoalesceDemo

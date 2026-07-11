@@ -15,38 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B47. Assignment inside a condition leaves the variable unresolved
-
-**Severity: Medium-High (~40+ errors: pdepend `$token` loops, luxplus) · Reproduced**
-
-Assignments embedded in `if`/`while` conditions do not register
-as definition sites:
-
-```php
-if (!$item = $this->getCartItemForProduct($productId)) {
-    return;
-}
-$item->getQty();            // unresolved
-
-while (is_object($token = $tokenizer->next())) {
-    $actual[] = $token->type;   // unresolved (~29 errors in pdepend)
-}
-```
-
-Both the bare negated form (`!$x = expr`) and the
-wrapped-in-a-call form (`is_object($x = expr)`) fail
-(luxplus-website
-`app/Features/Carts/Services/ShoppingCartItemService.php:62`,
-pdepend `tests/php/PDepend/Bugs/ParserBug124Test.php:74`).
-As a bonus the guard should also narrow (falsy check /
-`is_object`), but the primary bug is that the assignment is not
-seen at all.
-
-**Fix:** the forward walker must treat assignment expressions in
-condition position (including nested inside call arguments and
-unary `!`) as def sites, then apply the surrounding guard's
-narrowing.
-
 ## B48. Error-suppression prefix breaks RHS resolution
 
 **Severity: Medium · Reproduced**

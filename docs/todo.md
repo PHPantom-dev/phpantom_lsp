@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| B47 | [Assignment inside a condition leaves the variable unresolved](todo/bugs.md#b47-assignment-inside-a-condition-leaves-the-variable-unresolved)                  | Medium-High | Medium      |
 | B60 | [Template binding from closure returns through facade `@method`](todo/bugs.md#b60-template-binding-from-closure-return-types-through-facade-method-tags)       | Medium-High | Medium      |
 | L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
 | B48 | [Error-suppression prefix breaks RHS resolution](todo/bugs.md#b48-error-suppression-prefix-breaks-rhs-resolution)                                              | Medium      | Low         |

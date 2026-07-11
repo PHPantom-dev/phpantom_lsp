@@ -340,3 +340,72 @@ function testWhileConditionAssign(): void {
         "Expected no unknown_member diagnostics for while condition assignment in binary comparison, got: {diags:#?}"
     );
 }
+
+/// Bare negated assignment guard: `if (!$item = expr()) { return; }`
+/// PHP parses this as `!($item = expr())`.  The assignment must register
+/// as a def site so `$item` is resolved in the code that follows.
+#[test]
+fn no_unknown_member_for_negated_condition_assignment() {
+    let backend = create_test_backend();
+    let uri = "file:///negated_condition_assign.php";
+    let text = r#"<?php
+
+class CartItem {
+    public function getQty(): int {
+        return 0;
+    }
+}
+
+class CartService {
+    public function find(int $id): ?CartItem {
+        return new CartItem();
+    }
+
+    public function run(int $productId): void {
+        if (!$item = $this->find($productId)) {
+            return;
+        }
+        $item->getQty();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for negated condition assignment, got: {diags:#?}"
+    );
+}
+
+/// Assignment wrapped in a call argument:
+/// `while (is_object($token = $tokenizer->next()))`.  The assignment must
+/// register as a def site so `$token` is resolved inside the loop body.
+#[test]
+fn no_unknown_member_for_call_wrapped_condition_assignment() {
+    let backend = create_test_backend();
+    let uri = "file:///call_wrapped_condition_assign.php";
+    let text = r#"<?php
+
+class Token {
+    public string $type;
+}
+
+class Tokenizer {
+    public function next(): ?Token {
+        return new Token();
+    }
+}
+
+function testCallWrappedAssign(): void {
+    $tokenizer = new Tokenizer();
+    $actual = [];
+    while (is_object($token = $tokenizer->next())) {
+        $actual[] = $token->type;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for call-wrapped condition assignment, got: {diags:#?}"
+    );
+}
