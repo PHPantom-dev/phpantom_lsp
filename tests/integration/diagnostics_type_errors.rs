@@ -5525,3 +5525,119 @@ function test(Fac $f): void
         type_error_messages(&diags)
     );
 }
+
+// ─── class-string<T>|T union binds T to the class, not the class-string ─────
+
+#[test]
+fn variadic_class_string_or_instance_union_binds_inner_class() {
+    // The Mockery pattern: `mock(...$args)` declares
+    // `@param array<class-string<TMock>|TMock|...> $args`. Passing
+    // `Foo::class` must bind TMock to Foo (matching the
+    // `class-string<TMock>` alternative), not to `class-string<Foo>`,
+    // so the returned mock satisfies a parameter typed `Foo`.
+    let php = r#"<?php
+interface LegacyMockInterface {}
+interface MockInterface {}
+interface Connector {}
+
+class MockFactory
+{
+    /**
+     * @template TMock of object
+     *
+     * @param array<class-string<TMock>|TMock|Closure(LegacyMockInterface&MockInterface&TMock):LegacyMockInterface&MockInterface&TMock|array<TMock>> $args
+     *
+     * @return LegacyMockInterface&MockInterface&TMock
+     */
+    public static function mock(...$args) {}
+}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    $mock = MockFactory::mock(Connector::class);
+    takes($mock);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "TMock must bind to Connector, not class-string<Connector>: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn variadic_class_string_or_instance_union_binds_instance_directly() {
+    // Same union hint, but passing an object instance instead of a
+    // `::class` constant must bind TMock directly to the instance type.
+    let php = r#"<?php
+interface LegacyMockInterface {}
+interface MockInterface {}
+interface Connector {}
+class RealConnector implements Connector {}
+
+class MockFactory
+{
+    /**
+     * @template TMock of object
+     *
+     * @param array<class-string<TMock>|TMock|array<TMock>> $args
+     *
+     * @return LegacyMockInterface&MockInterface&TMock
+     */
+    public static function mock(...$args) {}
+}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    $mock = MockFactory::mock(new RealConnector());
+    takes($mock);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "TMock must bind to RealConnector when given an instance: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn unwrapped_class_string_or_instance_union_binds_inner_class() {
+    // The container pattern without an array wrapper:
+    // `@param class-string<T>|T $abstract` with `Foo::class` must bind
+    // T to Foo, not to class-string<Foo>.
+    let php = r#"<?php
+interface Connector {}
+
+class Container
+{
+    /**
+     * @template T of object
+     *
+     * @param class-string<T>|T $abstract
+     *
+     * @return T
+     */
+    public static function make($abstract) {}
+}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    $instance = Container::make(Connector::class);
+    takes($instance);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "T must bind to Connector, not class-string<Connector>: {:?}",
+        type_error_messages(&diags)
+    );
+}

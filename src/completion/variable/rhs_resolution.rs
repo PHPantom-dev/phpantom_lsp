@@ -1400,29 +1400,54 @@ fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBindingMode {
         PhpType::Nullable(inner) => classify_from_php_type(tpl_name, inner),
         PhpType::Union(members) => {
             let mut fallback: Option<TemplateBindingMode> = None;
+            let mut has_direct = false;
+            let mut has_class_string_inner = false;
             for member in members {
                 if member.is_null() {
                     continue;
                 }
-                // If the template name appears directly as a union
-                // member, prefer Direct immediately.  Direct always
-                // works regardless of what the argument is, while
-                // CallableReturnType only works when the argument is
-                // a closure.  This handles the common Laravel
-                // `(Closure($this): T)|T|null` pattern in `when()`.
                 if member.is_named(tpl_name) {
-                    return TemplateBindingMode::Direct;
+                    has_direct = true;
+                    continue;
                 }
                 let result = classify_from_php_type(tpl_name, member);
+                if matches!(result, TemplateBindingMode::ClassStringInner) {
+                    has_class_string_inner = true;
+                }
                 if !matches!(result, TemplateBindingMode::Direct) && fallback.is_none() {
                     fallback = Some(result);
                 }
+            }
+            // `class-string<T>|T` — the argument may be a class name or
+            // an instance.  ClassStringInner binding handles both: it
+            // unwraps `class-string<Foo>` to `Foo` and binds instance
+            // types directly, whereas Direct would keep the class-string
+            // wrapper on a `Foo::class` argument.
+            if has_direct && has_class_string_inner {
+                return TemplateBindingMode::ClassStringInner;
+            }
+            // If the template name appears directly as a union member,
+            // prefer Direct.  Direct always works regardless of what
+            // the argument is, while CallableReturnType only works when
+            // the argument is a closure.  This handles the common
+            // Laravel `(Closure($this): T)|T|null` pattern in `when()`.
+            if has_direct {
+                return TemplateBindingMode::Direct;
             }
             fallback.unwrap_or(TemplateBindingMode::Direct)
         }
         PhpType::Array(inner) => {
             if inner.as_ref().is_named(tpl_name) {
                 return TemplateBindingMode::ArrayElement;
+            }
+            // `(class-string<T>|T)[]` — detect a class-string<T>
+            // alternative in the element type the same way it is
+            // detected when it appears unwrapped.
+            if matches!(
+                classify_from_php_type(tpl_name, inner),
+                TemplateBindingMode::ClassStringInner
+            ) {
+                return TemplateBindingMode::ClassStringInner;
             }
             TemplateBindingMode::Direct
         }
@@ -1438,8 +1463,22 @@ fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBindingMode {
                 wrapper_name.to_ascii_lowercase().as_str(),
                 "array" | "list" | "non-empty-array" | "non-empty-list"
             );
-            if is_array_like && args.len() == 1 && args[0].is_named(tpl_name) {
-                return TemplateBindingMode::ArrayElement;
+            if is_array_like && args.len() == 1 {
+                if args[0].is_named(tpl_name) {
+                    return TemplateBindingMode::ArrayElement;
+                }
+                // `array<class-string<T>|T|...>` (the shape of variadic
+                // parameter hints, e.g. Mockery's `mock(...$args)`) —
+                // detect a class-string<T> alternative nested in the
+                // element type the same way it is detected unwrapped,
+                // so a `Foo::class` argument binds T to Foo rather
+                // than to class-string<Foo>.
+                if matches!(
+                    classify_from_php_type(tpl_name, &args[0]),
+                    TemplateBindingMode::ClassStringInner
+                ) {
+                    return TemplateBindingMode::ClassStringInner;
+                }
             }
             for (i, arg) in args.iter().enumerate() {
                 if arg.is_named(tpl_name) {
@@ -4682,6 +4721,31 @@ mod tests {
         let ty = PhpType::parse("callable(int): T|null");
         let mode = classify_template_binding("T", Some(&ty));
         assert!(matches!(mode, TemplateBindingMode::CallableReturnType));
+    }
+
+    #[test]
+    fn classify_class_string_or_direct_union() {
+        // `class-string<T>|T` — a class name or an instance may be
+        // passed; ClassStringInner binding handles both.
+        let ty = PhpType::parse("class-string<T>|T");
+        let mode = classify_template_binding("T", Some(&ty));
+        assert!(matches!(mode, TemplateBindingMode::ClassStringInner));
+    }
+
+    #[test]
+    fn classify_class_string_union_nested_in_array_element() {
+        // The variadic-parameter shape: `array<class-string<T>|T|array<T>>`.
+        let ty = PhpType::parse("array<class-string<T>|T|array<T>>");
+        let mode = classify_template_binding("T", Some(&ty));
+        assert!(matches!(mode, TemplateBindingMode::ClassStringInner));
+    }
+
+    #[test]
+    fn classify_closure_or_direct_union_stays_direct() {
+        // The Laravel `when()` pattern must keep preferring Direct.
+        let ty = PhpType::parse("(Closure(int): T)|T|null");
+        let mode = classify_template_binding("T", Some(&ty));
+        assert!(matches!(mode, TemplateBindingMode::Direct));
     }
 
     #[test]

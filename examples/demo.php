@@ -649,6 +649,13 @@ class MethodTemplateDemo
         // Nested generic return: @return Box<T> with class-string<T> param
         $boxed = $locator->wrap(Pen::class);
         $boxed->unwrap()->write();                        // Box<T>::unwrap() → Pen
+
+        // A `class-string<T>|T` union parameter (the Mockery::mock()
+        // shape, here nested in a variadic array hint) binds T to the
+        // named class itself, so a `::class` argument and an instance
+        // argument both resolve to a Pen instance.
+        $locator->build(Pen::class)->write();             // class-string<T>|T with Pen::class → Pen
+        $locator->build(new Pen())->write();              // class-string<T>|T with instance → Pen
     }
 }
 
@@ -5025,6 +5032,18 @@ class ServiceLocator
     {
         return [new $id()];
     }
+
+    /**
+     * @template T of object
+     * @param array<class-string<T>|T|array<T>> ...$args
+     * @return T
+     */
+    public function build(mixed ...$args): object
+    {
+        $first = $args[0];
+
+        return is_string($first) ? new $first() : $first;
+    }
 }
 
 class Factory
@@ -5703,6 +5722,11 @@ function runDemoAssertions(): void
         $group = $locator->getAll($penClass);
         assert($group[0] instanceof $penClass, 'getAll() must return an instance of each class in the union');
     }
+
+    // A class-string<T>|T union parameter accepts a class name or an
+    // instance and returns an instance either way.
+    assert($locator->build(Pen::class) instanceof Pen, 'build(Pen::class) must return a Pen instance');
+    assert($locator->build(new Pen()) instanceof Pen, 'build(new Pen()) must return a Pen instance');
 
     $createdPen = Factory::create(Pen::class);
     assert($createdPen instanceof Pen, 'Factory::create(Pen::class) must return Pen');
