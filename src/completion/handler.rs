@@ -359,7 +359,6 @@ impl Backend {
             let string_ctx =
                 crate::completion::comment_position::classify_string_context(&content, position);
             use crate::completion::comment_position::StringContext;
-
             // ── Array shape key completion ───────────────────────────
             // Runs before `InStringLiteral` suppression because in
             // normal code `$arr['` puts the scanner inside a
@@ -369,6 +368,24 @@ impl Backend {
             // access in PHP (only `"{$arr['key']}"` does).
             if !matches!(string_ctx, StringContext::SimpleInterpolation)
                 && let Some(response) = self.try_array_shape_completion(&content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
+            // ── Laravel string key completion (route/config/view/trans) ──
+            // Inside `route('|')`, `config('|')`, `view('|')`, `__('|')`,
+            // etc., offer matching key names from the project.
+            // NB: `is_laravel` is extracted to a `let` so the read lock
+            // on `resolved_class_cache` is dropped before calling
+            // `try_laravel_string_key_completion`, which may trigger
+            // `ensure_workspace_indexed` → `update_ast` → write lock.
+            let is_laravel = self.resolved_class_cache.read().is_laravel();
+            if is_laravel
+                && matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                )
+                && let Some(response) = self.try_laravel_string_key_completion(&content, position)
             {
                 return Ok(Some(response));
             }

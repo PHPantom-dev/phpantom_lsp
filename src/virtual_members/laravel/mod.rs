@@ -98,7 +98,8 @@ pub(crate) use aliases::LaravelAliases;
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
-    find_all_config_references, resolve_config_key_declaration,
+    collect_laravel_config_declarations, find_all_config_references,
+    laravel_config_prefix_from_uri, resolve_config_key_declaration,
     resolve_config_key_definition_fallback,
 };
 pub(crate) use env_vars::resolve_env_definition;
@@ -107,6 +108,8 @@ pub(crate) use macros::{
     inject_macros, parse_installed_providers, parse_provider_class_list,
     parse_provider_referenced_classes,
 };
+pub(crate) use route_names::enumerate_all_route_names;
+pub(crate) use trans_keys::collect_trans_declarations;
 
 /// Unified go-to-definition entry point for all Laravel string-key spans.
 ///

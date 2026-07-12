@@ -80,6 +80,9 @@ struct ExtractionCtx<'a> {
     /// Stack of block-end offsets for each conditional nesting level.
     /// The top of the stack is the end of the innermost conditional block.
     cond_block_end_stack: Vec<u32>,
+    /// Whether the file imports from `Illuminate\Container\Attributes\`
+    /// (checked once lazily, cached for all attribute inspections).
+    has_laravel_container_attrs: Option<bool>,
 }
 
 // ─── Keyword helper ─────────────────────────────────────────────────────────
@@ -151,6 +154,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         untyped_closure_sites: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
+        has_laravel_container_attrs: None,
     };
 
     for stmt in program.statements.iter() {
@@ -1046,6 +1050,23 @@ fn extract_from_attribute_lists<'a>(
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
                     );
+                }
+
+                // Laravel container attributes: #[Config('key')],
+                // #[Database('conn')], #[Cache('store')], etc. →
+                // emit a LaravelStringKey::Config span so hover,
+                // go-to-definition, and diagnostics work on the key.
+                //
+                // FQN attributes match directly. Short names require
+                // the file to import from the Illuminate namespace;
+                // that check is cached once per file to avoid repeated
+                // linear scans.
+                if let Some(kind) = resolve_laravel_container_attr(
+                    class_name,
+                    &mut ctx.has_laravel_container_attrs,
+                    ctx.content,
+                ) {
+                    try_emit_laravel_string_span(kind, arg_list, ctx.content, &mut ctx.spans);
                 }
             }
         }
@@ -1956,38 +1977,32 @@ fn extract_from_expression<'a>(
                                 is_definition: false,
                             },
                         });
-                        if name_clean.eq_ignore_ascii_case("config") {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Config,
-                                &func_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        if name_clean.eq_ignore_ascii_case("view")
+                        // Detect Laravel helper calls and emit a
+                        // LaravelStringKey span for the first string arg.
+                        // Uses if-else to short-circuit (most function calls
+                        // won't match) and avoids to_ascii_lowercase() heap
+                        // allocations.
+                        let laravel_kind = if name_clean.eq_ignore_ascii_case("config") {
+                            Some(crate::symbol_map::LaravelStringKind::Config)
+                        } else if name_clean.eq_ignore_ascii_case("view")
                             || name_clean.eq_ignore_ascii_case("blade_view_directive")
                         {
+                            Some(crate::symbol_map::LaravelStringKind::View)
+                        } else if name_clean.eq_ignore_ascii_case("route")
+                            || name_clean.eq_ignore_ascii_case("to_route")
+                        {
+                            Some(crate::symbol_map::LaravelStringKind::Route)
+                        } else if name_clean.eq_ignore_ascii_case("__")
+                            || name_clean.eq_ignore_ascii_case("trans")
+                            || name_clean.eq_ignore_ascii_case("trans_choice")
+                        {
+                            Some(crate::symbol_map::LaravelStringKind::Trans)
+                        } else {
+                            None
+                        };
+                        if let Some(kind) = laravel_kind {
                             try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::View,
-                                &func_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        if name_clean.eq_ignore_ascii_case("route") {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Route,
-                                &func_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        if matches!(
-                            name_clean.to_ascii_lowercase().as_str(),
-                            "__" | "trans" | "trans_choice"
-                        ) {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Trans,
+                                kind,
                                 &func_call.argument_list,
                                 ctx.content,
                                 &mut ctx.spans,
@@ -3446,6 +3461,52 @@ fn is_assert_instanceof(expr: &Expression<'_>) -> bool {
         }
     }
     false
+}
+
+/// Check whether an attribute class name refers to a Laravel container
+/// attribute (`Config`, `Database`, `Cache`, `Log`, `Storage`, `Auth`,
+/// `Authenticated`).  Returns the corresponding [`LaravelStringKind`] if
+/// so — always `Config` since all container attributes resolve to config
+/// sub-keys.
+///
+/// FQN names (containing `\`) are matched directly against
+/// `Illuminate\Container\Attributes\*`.  Short names require the file to
+/// import from that namespace; the result of that check is cached in
+/// `import_cache` to avoid repeated linear scans of the file content.
+const LARAVEL_CONTAINER_ATTR_NS: &str = "Illuminate\\Container\\Attributes\\";
+const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
+    "Config",
+    "Database",
+    "DB",
+    "Cache",
+    "Log",
+    "Storage",
+    "Auth",
+    "Authenticated",
+];
+
+fn resolve_laravel_container_attr(
+    class_name: &str,
+    import_cache: &mut Option<bool>,
+    content: &str,
+) -> Option<crate::symbol_map::LaravelStringKind> {
+    if class_name.contains('\\') {
+        let stripped = class_name.strip_prefix(LARAVEL_CONTAINER_ATTR_NS)?;
+        if LARAVEL_CONTAINER_ATTR_NAMES.contains(&stripped) {
+            return Some(crate::symbol_map::LaravelStringKind::Config);
+        }
+        return None;
+    }
+    if !LARAVEL_CONTAINER_ATTR_NAMES.contains(&class_name) {
+        return None;
+    }
+    let has_import = *import_cache
+        .get_or_insert_with(|| content.contains("use Illuminate\\Container\\Attributes\\"));
+    if has_import {
+        Some(crate::symbol_map::LaravelStringKind::Config)
+    } else {
+        None
+    }
 }
 
 /// If the first argument of `argument_list` is a non-empty, non-interpolated

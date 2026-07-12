@@ -233,6 +233,31 @@ pub use virtual_members::resolve_class_fully;
 ///   `collect_deprecated_diagnostics`, `collect_unused_import_diagnostics`,
 ///   `collect_unknown_class_diagnostics`,
 ///   `collect_unknown_member_diagnostics` (includes unresolved-member-access logic)
+#[derive(Default)]
+pub(crate) struct LaravelStringKeyCache {
+    pub route_names: Option<Vec<String>>,
+    pub config_keys: Option<Vec<String>>,
+    pub view_names: Option<Vec<String>>,
+    pub trans_keys: Option<Vec<String>>,
+}
+
+impl LaravelStringKeyCache {
+    fn invalidate_for_uri(&mut self, uri: &str) {
+        if uri.contains("/routes/") {
+            self.route_names = None;
+        }
+        if uri.contains("/config/") {
+            self.config_keys = None;
+        }
+        if uri.contains("/resources/views/") {
+            self.view_names = None;
+        }
+        if uri.contains("/lang/") || uri.contains("/resources/lang/") {
+            self.trans_keys = None;
+        }
+    }
+}
+
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -503,6 +528,11 @@ pub struct Backend {
     ///
     /// [`build_laravel_date_class`]: crate::Backend::build_laravel_date_class
     pub(crate) laravel_date_seed_uris: Arc<RwLock<std::collections::HashSet<String>>>,
+    /// Cached Laravel string key enumerations (route names, config keys,
+    /// view names, translation keys).  `None` = not yet computed.
+    /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
+    /// or `lang/` is updated.
+    pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
     /// Per-target member completion cache.
     ///
     /// Typing `$model->wh...` triggers a completion request for each
@@ -926,6 +956,7 @@ impl Backend {
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1023,6 +1054,7 @@ impl Backend {
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1627,6 +1659,7 @@ impl Backend {
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_date_class: Arc::clone(&self.laravel_date_class),
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
+            laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),
