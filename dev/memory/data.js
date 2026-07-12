@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783813632432,
+  "lastUpdate": 1783815028123,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13565,6 +13565,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3ac3a0583f0357ee3b814c37c5cdaa1661a01583",
+          "message": "Passing `null` to an implicitly-nullable parameter is no longer flagged",
+          "timestamp": "2026-07-12T01:57:55+02:00",
+          "tree_id": "2ee6a7f649da177ef11573aac35933f8cea342ec",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3ac3a0583f0357ee3b814c37c5cdaa1661a01583"
+        },
+        "date": 1783815026956,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.5,
             "unit": "MiB"
           }
         ]
