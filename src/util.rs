@@ -920,16 +920,39 @@ pub(crate) fn is_subtype_of(
     ancestor_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> bool {
+    // Every name handled by this function — the ancestor plus each
+    // `interfaces`/`parent_class` entry pulled from a loaded class — is a
+    // canonical FQN, not a user-typed reference.  A backslash-free name
+    // (e.g. `Iterator`, `Traversable`, `Exception`) is therefore a
+    // root-namespace class and must resolve in the global namespace.
+    //
+    // The raw `class_loader` applies the consuming file's use-map to
+    // unqualified names.  That is correct for user-typed references but
+    // wrong here: when a calling file has `use App\Iterator;`, loading the
+    // global `\Iterator` interface node inside an SPL class's hierarchy
+    // would return `App\Iterator` and break the walk (so subtype checks
+    // against `Iterator`/`Traversable` spuriously fail).  Route
+    // backslash-free names through the `__fqn__\` bypass, which skips the
+    // use-map and falls back to a global short-name lookup.  The
+    // `.or_else` preserves the raw loader for genuine short names that
+    // have no global class (they resolve via namespace context as before).
+    let load_fqn = |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+        if name.contains('\\') {
+            class_loader(name)
+        } else {
+            class_loader(&format!("__fqn__\\{name}")).or_else(|| class_loader(name))
+        }
+    };
+
     // Resolve the ancestor to its FQN so that all comparisons below are
     // FQN-vs-FQN.  When `ancestor_name` is already a FQN (contains `\`)
     // we use it directly.  When it is a short name we try to load it
-    // through the class_loader — which consults the use-map, namespace,
-    // and stubs — and use the loaded class's FQN.  For root-namespace
-    // classes (e.g. `RuntimeException`) the FQN equals the short name,
-    // so the fallback to `ancestor_name` is correct.
+    // through `load_fqn` and use the loaded class's FQN.  For
+    // root-namespace classes (e.g. `RuntimeException`) the FQN equals the
+    // short name, so the fallback to `ancestor_name` is correct.
     let ancestor_fqn: String = if ancestor_name.contains('\\') {
         ancestor_name.to_string()
-    } else if let Some(loaded) = class_loader(ancestor_name) {
+    } else if let Some(loaded) = load_fqn(ancestor_name) {
         loaded.fqn().to_string()
     } else {
         // Cannot resolve — keep the original name.  For root-namespace
@@ -955,7 +978,7 @@ pub(crate) fn is_subtype_of(
             return true;
         }
         // Load the interface and check its parents (interface extends).
-        if let Some(iface_info) = class_loader(&iface_name) {
+        if let Some(iface_info) = load_fqn(&iface_name) {
             // Interface parents are stored in both `parent_class`
             // (first parent for single-extends compat) and
             // `interfaces` (all parents for multi-extends).
@@ -986,11 +1009,11 @@ pub(crate) fn is_subtype_of(
             return true;
         }
         // Load the parent to check its interfaces (transitively)
-        // and continue the class chain.
-        if let Some(parent_info) = class_loader(name) {
-            // Check parent's interfaces before cycle detection so that
-            // even when the class_loader's use-map shadows a global class
-            // name (returning the wrong class), we still examine interfaces.
+        // and continue the class chain.  `load_fqn` resolves
+        // root-namespace names globally, so the use-map can no longer
+        // shadow a global parent (e.g. a same-file `use App\Exception;`
+        // does not hijack a stub class's global `\Exception` parent).
+        if let Some(parent_info) = load_fqn(name) {
             let mut p_iface_queue: Vec<String> = parent_info
                 .interfaces
                 .iter()
@@ -1002,7 +1025,7 @@ pub(crate) fn is_subtype_of(
                 if iface_name == ancestor {
                     return true;
                 }
-                if let Some(iface_info) = class_loader(&iface_name) {
+                if let Some(iface_info) = load_fqn(&iface_name) {
                     for pi in &iface_info.interfaces {
                         if p_visited.insert(pi.to_string()) {
                             p_iface_queue.push(pi.to_string());
@@ -1015,55 +1038,9 @@ pub(crate) fn is_subtype_of(
                     }
                 }
             }
-            // Cycle detection: if the loaded class's FQN was already
-            // visited, the class_loader's use-map may have shadowed a
-            // global class name with a same-file import (e.g.
-            // `use App\Exceptions\Exception;` makes class_loader("Exception")
-            // return App\Exceptions\Exception instead of global \Exception).
-            // Try bypassing the use-map by passing a namespace-qualified
-            // synthetic name that triggers the class_loader's short-name
-            // fallback path.
+            // Cycle detection: stop if we have already visited this
+            // parent's FQN (a malformed or self-referential hierarchy).
             if !visited_parents.insert(parent_info.fqn().to_string()) {
-                // The name is a root-namespace FQN being shadowed by the
-                // use-map.  Try the class_loader with a synthetic qualified
-                // name — this skips the use-map check (which only fires for
-                // unqualified names) and falls through to the short-name
-                // fallback that calls find_or_load_class(short_name).
-                if !name.contains('\\') {
-                    let synthetic = format!("__fqn__\\{}", name);
-                    if let Some(real_parent) = class_loader(&synthetic) {
-                        // Successfully bypassed the use-map cycle.
-                        // Check this parent's interfaces for the ancestor.
-                        let mut rp_iface_queue: Vec<String> = real_parent
-                            .interfaces
-                            .iter()
-                            .map(|a| a.to_string())
-                            .collect();
-                        let mut rp_visited: std::collections::HashSet<String> =
-                            rp_iface_queue.iter().cloned().collect();
-                        while let Some(iface_name) = rp_iface_queue.pop() {
-                            if iface_name == ancestor {
-                                return true;
-                            }
-                            if let Some(iface_info) = class_loader(&iface_name) {
-                                for pi in &iface_info.interfaces {
-                                    if rp_visited.insert(pi.to_string()) {
-                                        rp_iface_queue.push(pi.to_string());
-                                    }
-                                }
-                                if let Some(ref pc) = iface_info.parent_class
-                                    && rp_visited.insert(pc.to_string())
-                                {
-                                    rp_iface_queue.push(pc.to_string());
-                                }
-                            }
-                        }
-                        // Continue walking from the real parent
-                        visited_parents.insert(real_parent.fqn().to_string());
-                        current_parent = real_parent.parent_class.map(|a| a.to_string());
-                        continue;
-                    }
-                }
                 break;
             }
             current_parent = parent_info.parent_class.map(|a| a.to_string());
@@ -2565,6 +2542,64 @@ mod tests {
         let classes = [exc, cls.clone()];
         let loader = loader_from(&classes);
         assert!(is_subtype_of(&cls, "RuntimeException", &loader));
+    }
+
+    // ── is_subtype_of: global name shadowed by consuming file's use-map ─
+
+    #[test]
+    fn subtype_of_global_interface_not_broken_by_shadowing_use_import() {
+        // A project class shares the short name of a global interface
+        // (`Iterator`).  The consuming file imports the project class
+        // (`use App\Input\Iterator;`), so its use-map maps the unqualified
+        // name `Iterator` to `App\Input\Iterator`.  Subtype checks against
+        // the global `\Iterator` / `\Traversable` — reached while walking a
+        // stub class's hierarchy — must still succeed.
+        let traversable = make_class("Traversable", None, None, &[]);
+        let iterator = make_class("Iterator", None, None, &["Traversable"]);
+        let recursive_iterator = make_class("RecursiveIterator", None, None, &["Iterator"]);
+        let rec_dir_iterator = make_class(
+            "RecursiveDirectoryIterator",
+            None,
+            None,
+            &["RecursiveIterator"],
+        );
+        // The shadowing project class (imported into the consuming file).
+        let app_iterator = make_class("Iterator", Some("App\\Input"), None, &[]);
+
+        let classes = [
+            traversable,
+            iterator,
+            recursive_iterator,
+            rec_dir_iterator.clone(),
+            app_iterator.clone(),
+        ];
+
+        // A loader that mirrors `class_loader_with`: an unqualified name in
+        // the use-map resolves to the imported class first; the `__fqn__\`
+        // bypass skips the use-map and resolves the global short name.
+        let loader = move |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+            let stripped = name.strip_prefix('\\').unwrap_or(name);
+            if !stripped.contains('\\') && stripped == "Iterator" {
+                // use-map shadow: unqualified `Iterator` → App\Input\Iterator
+                return Some(app_iterator.clone());
+            }
+            if let Some(cls) = classes.iter().find(|c| c.fqn() == stripped).cloned() {
+                return Some(cls);
+            }
+            if stripped.contains('\\') {
+                let short = crate::util::short_name(stripped);
+                return classes.iter().find(|c| c.fqn() == short).cloned();
+            }
+            None
+        };
+
+        // Without the fix, the intermediate global `Iterator` node resolves
+        // to `App\Input\Iterator`, so the walk never reaches `Traversable`
+        // and the ancestor `Iterator` itself mis-resolves.
+        assert!(is_subtype_of(&rec_dir_iterator, "Iterator", &loader));
+        assert!(is_subtype_of(&rec_dir_iterator, "Traversable", &loader));
+        // A genuinely unrelated global class is still rejected.
+        assert!(!is_subtype_of(&rec_dir_iterator, "Countable", &loader));
     }
 
     // ── run_command_with_timeout ────────────────────────────────────

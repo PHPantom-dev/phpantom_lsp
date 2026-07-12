@@ -15,25 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B59. Project class sharing a global interface name breaks subtype checks
-
-**Severity: Low (5 errors, pdepend-specific) · Not reproduced in isolation — needs investigation**
-
-pdepend defines `PDepend\Input\Iterator`. In `src/Engine.php:736`
-passing a `RecursiveIteratorIterator` to a param typed
-`Iterator<int, SplFileInfo>` (and a `RecursiveDirectoryIterator`
-to `Traversable`) reports `type_mismatch_argument`, even though
-both implement the global interfaces. The same calls pass in an
-isolated fixture with full stubs, so the suspected trigger is the
-project-local `Iterator` class shadowing the global `\Iterator`
-during the subtype walk in that file's namespace context.
-
-**Fix:** investigate name resolution inside
-`is_subtype_of`/hierarchy walking when a project class collides
-with a global stub interface; hierarchy names originating from
-stubs must resolve in the global namespace, not the consuming
-file's.
-
 ## B60. Template binding from closure return types through facade `@method` tags
 
 **Severity: Medium-High (suspected driver of many Luxplus unresolved errors) · Root cause unconfirmed**
