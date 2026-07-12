@@ -295,6 +295,132 @@ impl Backend {
         self.collect_deprecated_diagnostics(uri_str, content, out);
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
         self.collect_invalid_class_kind_diagnostics(uri_str, content, out);
+        let is_laravel = self.resolved_class_cache.read().is_laravel();
+        if is_laravel {
+            self.collect_invalid_laravel_string_key_diagnostics(uri_str, content, out);
+        }
+    }
+
+    /// Emit a warning for each `LaravelStringKey` span whose key does
+    /// not resolve to any declaration (typo in route name, config key,
+    /// view name, or translation key).
+    fn collect_invalid_laravel_string_key_diagnostics(
+        &self,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        use crate::symbol_map::{LaravelStringKind, SymbolKind};
+        use std::collections::HashSet;
+
+        // Extract the LaravelStringKey spans we need and determine which
+        // kinds are present, then DROP the read lock before calling
+        // enumeration functions.  Those functions call
+        // `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
+        // `parse_files_parallel()` → `update_ast()` which acquires a
+        // WRITE lock on `symbol_maps`.  Holding a read lock here while
+        // that write is attempted would deadlock.
+        let mut has_route = false;
+        let mut has_config = false;
+        let mut has_view = false;
+        let mut has_trans = false;
+        let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
+            let maps = self.symbol_maps.read();
+            let Some(symbol_map) = maps.get(uri) else {
+                return;
+            };
+            symbol_map
+                .spans
+                .iter()
+                .filter_map(|span| {
+                    if let SymbolKind::LaravelStringKey { kind, key } = &span.kind {
+                        match kind {
+                            LaravelStringKind::Route => has_route = true,
+                            LaravelStringKind::Config => has_config = true,
+                            LaravelStringKind::View => has_view = true,
+                            LaravelStringKind::Trans => has_trans = true,
+                        }
+                        Some((kind.clone(), key.clone(), span.start, span.end))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+            // `maps` read lock is dropped here.
+        };
+
+        if !has_route && !has_config && !has_view && !has_trans {
+            return;
+        }
+
+        // Enumerate valid keys once per kind (lazy), using the cached
+        // enumerations.  Safe to call now that the `symbol_maps` read
+        // lock has been released.
+        let route_keys: HashSet<String> = if has_route {
+            self.cached_route_names().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let config_keys: HashSet<String> = if has_config {
+            self.cached_config_keys().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let view_keys: HashSet<String> = if has_view {
+            self.cached_view_names().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let trans_keys: HashSet<String> = if has_trans {
+            self.cached_trans_keys().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+
+        for (kind, key, start, end) in &key_spans {
+            let (valid, label, code) = match kind {
+                LaravelStringKind::Route => {
+                    (route_keys.contains(key), "route", "invalid_laravel_route")
+                }
+                LaravelStringKind::Config => {
+                    // Config keys may be partial prefixes (e.g. `config('app')`)
+                    // which are valid even without a direct match.
+                    let valid = config_keys.contains(key)
+                        || config_keys
+                            .iter()
+                            .any(|k| k.starts_with(&format!("{}.", key)));
+                    (valid, "config key", "invalid_laravel_config")
+                }
+                LaravelStringKind::View => {
+                    (view_keys.contains(key), "view", "invalid_laravel_view")
+                }
+                LaravelStringKind::Trans => {
+                    // When no translation files are found at all, skip trans
+                    // diagnostics entirely.  This avoids false positives in
+                    // non-Laravel projects (WordPress, GetText) that also use
+                    // `__()` or `trans()` as function names.
+                    if trans_keys.is_empty() {
+                        continue;
+                    }
+                    let valid = trans_keys.contains(key)
+                        || trans_keys
+                            .iter()
+                            .any(|k| k.starts_with(&format!("{}.", key)));
+                    (valid, "translation key", "invalid_laravel_trans")
+                }
+            };
+            if !valid
+                && let Some(range) =
+                    offset_range_to_lsp_range(content, *start as usize, *end as usize)
+            {
+                out.push(helpers::make_diagnostic(
+                    range,
+                    DiagnosticSeverity::WARNING,
+                    code,
+                    format!("Unknown {}: '{}'", label, key),
+                ));
+            }
+        }
     }
 
     /// Collect all type mismatch diagnostics: argument types, return
@@ -3077,5 +3203,69 @@ mod tests {
             !backend.diag_last_full.lock().contains_key(uri),
             "pull must not compute diagnostics inline on the request path"
         );
+    }
+
+    /// Regression test: `collect_invalid_laravel_string_key_diagnostics`
+    /// must not hold a `symbol_maps` read lock while calling enumeration
+    /// functions that reach `ensure_workspace_indexed()` →
+    /// `parse_files_parallel()` → `update_ast()` → `symbol_maps.write()`.
+    ///
+    /// Before the fix, this deadlocked because the read lock was held
+    /// for the entire function body.  The fix extracts the needed spans
+    /// into an owned `Vec` and drops the lock before enumerating keys.
+    ///
+    /// To trigger the deadlock path, we create a workspace with an
+    /// unindexed PHP file so `ensure_workspace_indexed` must parse it
+    /// (acquiring a write lock).  A 5-second timeout catches the
+    /// deadlock as a test failure instead of an infinite hang.
+    #[test]
+    fn laravel_string_key_diagnostics_no_deadlock() {
+        // Set up a temp workspace with an unindexed PHP file so that
+        // ensure_workspace_indexed() will call parse_files_parallel()
+        // which needs a write lock on symbol_maps.
+        let tmp = std::env::temp_dir().join("phpantom_deadlock_test");
+        let _ = std::fs::create_dir_all(&tmp);
+        let unindexed_file = tmp.join("Unindexed.php");
+        std::fs::write(&unindexed_file, "<?php\nclass Unindexed {}\n").unwrap();
+
+        let backend = crate::Backend::new_test_with_workspace(tmp.clone(), vec![]);
+
+        // Register the unindexed file in fqn_uri_index so
+        // ensure_workspace_indexed Phase 1 will try to parse it.
+        let unindexed_uri = format!("file://{}", unindexed_file.to_str().unwrap());
+        backend
+            .fqn_uri_index
+            .write()
+            .insert("Unindexed".to_string(), unindexed_uri);
+
+        // Parse a file with Laravel string key spans.
+        let uri = "file:///app/Http/test.php";
+        let php = "<?php\nconfig('app.name');\nroute('home');\n";
+        backend.update_ast(uri, php);
+
+        // Run the diagnostics in a thread with a timeout so a deadlock
+        // is caught as a failure rather than an infinite hang.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let backend = std::sync::Arc::new(backend);
+        let bc = std::sync::Arc::clone(&backend);
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            bc.collect_slow_diagnostics(uri, php, &mut out);
+            let _ = tx.send(out);
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(_diags) => { /* success — no deadlock */ }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!(
+                    "collect_slow_diagnostics deadlocked: symbol_maps read lock \
+                     was likely held while enumeration functions tried to write"
+                );
+            }
+            Err(e) => panic!("collect_slow_diagnostics failed: {:?}", e),
+        }
+
+        // Clean up.
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

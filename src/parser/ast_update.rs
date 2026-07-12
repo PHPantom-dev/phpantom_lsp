@@ -80,6 +80,10 @@ impl Backend {
             content.to_string()
         };
 
+        self.laravel_string_key_cache
+            .write()
+            .invalidate_for_uri(uri);
+
         // The mago-syntax parser contains `unreachable!()` and `.expect()`
         // calls that can panic on malformed PHP (e.g. partially-written
         // heredocs/nowdocs, which are common while editing).  Wrap the

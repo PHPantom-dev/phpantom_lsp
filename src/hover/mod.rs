@@ -865,12 +865,95 @@ impl Backend {
                 }
             }
 
-            SymbolKind::LaravelStringKey { .. }
-            | SymbolKind::LaravelMacroString { .. }
+            SymbolKind::LaravelStringKey { kind, key } => self.hover_laravel_string_key(kind, key),
+
+            SymbolKind::LaravelMacroString { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
             | SymbolKind::Comment => None,
         }
+    }
+
+    /// Build hover content for a Laravel string key (route name, config
+    /// key, view name, or translation key).
+    fn hover_laravel_string_key(
+        &self,
+        kind: &crate::symbol_map::LaravelStringKind,
+        key: &str,
+    ) -> Option<Hover> {
+        use crate::symbol_map::LaravelStringKind;
+
+        let (label, detail) = match kind {
+            LaravelStringKind::Route => {
+                // Try to resolve the route to show where it's defined.
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/routes/")
+                        .next()
+                        .map(|p| format!("routes/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("Defined in `{}`", short_path)
+                } else {
+                    "Route name".to_string()
+                };
+                ("Route", detail)
+            }
+            LaravelStringKind::Config => {
+                // Try to resolve the config key to show its value.
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/config/")
+                        .next()
+                        .map(|p| format!("config/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("Defined in `{}`", short_path)
+                } else {
+                    "Config key".to_string()
+                };
+                ("Config", detail)
+            }
+            LaravelStringKind::View => {
+                // Show the resolved file path.
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/resources/views/")
+                        .next()
+                        .map(|p| format!("resources/views/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("`{}`", short_path)
+                } else {
+                    "View template".to_string()
+                };
+                ("View", detail)
+            }
+            LaravelStringKind::Trans => {
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/lang/")
+                        .next()
+                        .map(|p| format!("lang/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("Defined in `{}`", short_path)
+                } else {
+                    "Translation key".to_string()
+                };
+                ("Trans", detail)
+            }
+        };
+
+        Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))
     }
 
     /// Look up a global constant by name, returning its value if found.
