@@ -1482,6 +1482,28 @@ class DestructuringShapeDemo
 
     /** @return array{pen: Pen, pencil: Pencil, count: int} */
     public function getToolKit(): array { return []; }
+
+    public function inferredTuples(): void
+    {
+        // Inferred (unannotated) nested array literals keep their positional
+        // arity, so the foreach element is a fixed tuple and integer-literal
+        // indexing resolves each position.
+        $rows = [[new Pen(), new Pencil()]];
+        foreach ($rows as $row) {
+            $row[0]->write();             // Pen (nested tuple index 0)
+            $row[1]->sketch();            // Pencil (nested tuple index 1)
+        }
+
+        // A heterogeneous tuple indexed at a position that only some arms
+        // have, combined with a `?? Class::class` fallback, keeps the value
+        // a class-string instead of widening to plain string.
+        $specs = [['pen', Pen::class], ['pencil']];
+        foreach ($specs as $spec) {
+            $toolClass = $spec[1] ?? Pencil::class;   // class-string<Pen>|class-string<Pencil>
+            $tool = new $toolClass();
+            $tool->label();               // Pen|Pencil created from the class-string
+        }
+    }
 }
 
 
@@ -5545,6 +5567,23 @@ function runDemoAssertions(): void
 
     $easel = $canvas->easel;
     assert($easel instanceof Easel, 'Canvas::$easel must be Easel');
+
+    // ── Inferred nested tuple literals ──────────────────────────────────
+    $rows = [[new Pen(), new Pencil()]];
+    foreach ($rows as $row) {
+        assert($row[0] instanceof Pen, 'nested tuple index 0 must be Pen');
+        assert($row[1] instanceof Pencil, 'nested tuple index 1 must be Pencil');
+    }
+
+    // Indexing a position only some arms have, with a `?? Class::class`
+    // fallback, stays a class-string that instantiates Pen|Pencil.
+    $specs = [['pen', Pen::class], ['pencil']];
+    foreach ($specs as $spec) {
+        $toolClass = $spec[1] ?? Pencil::class;
+        assert(class_exists($toolClass), 'index + ?? fallback must yield a class-string');
+        $tool = new $toolClass();
+        assert($tool instanceof Pen || $tool instanceof Pencil, 'class-string must instantiate Pen|Pencil');
+    }
 
     // ── Fluent Model chains (static return) ─────────────────────────────
     $userObj = new User('Bob', 'bob@example.com');

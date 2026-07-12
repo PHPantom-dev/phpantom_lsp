@@ -3905,7 +3905,7 @@ async fn test_array_shape_inferred_from_literal_with_various_types() {
             assert_eq!(find("active"), "active: bool");
             assert_eq!(find("deleted"), "deleted: null");
             assert_eq!(find("user"), "user: User");
-            assert_eq!(find("tags"), "tags: list<string>");
+            assert_eq!(find("tags"), "tags: array{string, string}");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }

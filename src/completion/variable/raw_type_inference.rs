@@ -23,9 +23,18 @@ use crate::types::ResolvedType;
 pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
+    nested: bool,
 ) -> Option<PhpType> {
+    // Maximum number of positional entries to record as a tuple-style
+    // shape. Beyond this the array is almost certainly a homogeneous
+    // collection rather than a fixed-arity tuple, so it is widened to
+    // `list<T>` to avoid unbounded shape growth.
+    const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
+
     let mut types: Vec<PhpType> = Vec::new();
+    let mut positional: Vec<PhpType> = Vec::new();
     let mut has_string_keys = false;
+    let mut saw_spread = false;
     let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
 
     for elem in elements {
@@ -41,7 +50,13 @@ pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
                 });
             }
             ArrayElement::Value(v) => {
-                if let Some(t) = infer_element_type(v.value, ctx)
+                let resolved = infer_element_type(v.value, ctx);
+                // A positional shape must keep one entry per element to
+                // preserve arity, so an unresolvable element becomes
+                // `mixed`. The `list<T>` fallback keeps its original
+                // behaviour of ignoring unresolvable elements.
+                positional.push(resolved.clone().unwrap_or_else(PhpType::mixed));
+                if let Some(t) = resolved
                     && !types.contains(&t)
                 {
                     types.push(t);
@@ -49,6 +64,7 @@ pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
             }
             ArrayElement::Variadic(v) => {
                 // Spread: `...$other` — try to resolve iterable element type.
+                saw_spread = true;
                 if let Some(raw) = super::foreach_resolution::resolve_expression_type(v.value, ctx)
                     && let Some(elem) = raw.extract_value_type(true).cloned()
                     && !types.contains(&elem)
@@ -66,6 +82,35 @@ pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
 
     if types.is_empty() {
         return None;
+    }
+
+    // Nested value-only literal with a fixed set of elements: record it
+    // as a positional (tuple-style) array shape so that integer-literal
+    // indexing (`$pair[1]`) resolves the element at that position and
+    // out-of-bounds indices are known to be absent. A spread element or
+    // an over-long literal makes the arity indeterminate, so those widen
+    // to `list<T>` instead.
+    //
+    // A top-level literal (one assigned or returned directly) is
+    // generalized to `list<T>` because that is what most consumers
+    // expect for a freshly constructed array (return-type inference,
+    // push tracking via `$arr[] = …`, and hover). Nested literals keep
+    // their precise arity because they are typically fixed tuples read
+    // back by position.
+    if nested
+        && !saw_spread
+        && !positional.is_empty()
+        && positional.len() <= MAX_POSITIONAL_SHAPE_LEN
+    {
+        let entries = positional
+            .into_iter()
+            .map(|value_type| crate::php_type::ShapeEntry {
+                key: None,
+                value_type,
+                optional: false,
+            })
+            .collect();
+        return Some(PhpType::ArrayShape(entries));
     }
 
     let elem_type = if types.len() == 1 {
@@ -107,10 +152,12 @@ fn infer_element_type<'b>(
         Expression::Literal(Literal::True(_) | Literal::False(_)) => Some(PhpType::bool()),
         Expression::Literal(Literal::Null(_)) => Some(PhpType::null()),
         // ── Nested array literals ──
-        Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)
+        Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
             .or_else(|| Some(PhpType::array())),
-        Expression::LegacyArray(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)
-            .or_else(|| Some(PhpType::array())),
+        Expression::LegacyArray(arr) => {
+            infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
+                .or_else(|| Some(PhpType::array()))
+        }
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {

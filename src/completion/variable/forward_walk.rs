@@ -6764,11 +6764,12 @@ fn bind_foreach_value<'b>(
     if let Expression::Variable(Variable::Direct(dv)) = value_expr {
         let var_name = bytes_to_str(dv.name).to_string();
         if let Some(it) = iter_type {
-            // Strategy 1: extract from the type's own generic parameters.
-            let value_php_type = it.extract_value_type(false);
+            // Strategy 1: extract from the type's own generic parameters
+            // (or, for tuple-style shapes, the union of positional values).
+            let value_php_type = it.iterable_element_type();
             if let Some(vt) = value_php_type {
                 let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
-                    vt,
+                    &vt,
                     &ctx.current_class.name,
                     ctx.all_classes,
                     ctx.class_loader,
@@ -6874,9 +6875,10 @@ fn bind_foreach_value<'b>(
         // destructured variable's type from that element type using shape
         // keys or positional indices.
         let element_type: Option<PhpType> = iter_type.as_ref().and_then(|it| {
-            // Try direct value type extraction first.
-            if let Some(vt) = it.extract_value_type(false) {
-                return Some(vt.clone());
+            // Try direct value type extraction first (handles tuple-style
+            // shapes by unioning their positional value types).
+            if let Some(vt) = it.iterable_element_type() {
+                return Some(vt);
             }
             // Try class-based iterable element extraction.
             if let Some(et) = resolve_iterable_element_via_class(it, ctx)

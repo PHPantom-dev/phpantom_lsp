@@ -12143,3 +12143,93 @@ fn hover_virtual_method_template_from_unannotated_closure_body() {
         "virtual @method template should bind from arrow body, got: {arrow}"
     );
 }
+
+/// `Foo::class` resolves to `class-string<Foo>`, not a plain `string`,
+/// so the class identity survives assignments, array elements, and
+/// `class-string<object>` parameters.
+#[test]
+fn hover_class_constant_resolves_to_class_string() {
+    let backend = create_test_backend();
+    let uri = "file:///classconst.php";
+    let content = concat!(
+        "<?php\n",
+        "class Widget {}\n",
+        "function demo(): void {\n",
+        "    $cls = Widget::class;\n",
+        "    $cls;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 4, 6).expect("hover $cls");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string<Widget>"),
+        "Widget::class should resolve to class-string<Widget>, got: {text}"
+    );
+}
+
+/// A heterogeneous array literal used as a fixed tuple resolves its
+/// foreach element to a union of positional shapes. Indexing a position
+/// that only exists on one arm, combined with a `??` class-string
+/// fallback, keeps the value a `class-string` rather than widening to
+/// `string`.
+#[test]
+fn hover_foreach_heterogeneous_tuple_index_with_null_coalesce() {
+    let backend = create_test_backend();
+    let uri = "file:///tuple_coalesce.php";
+    let content = concat!(
+        "<?php\n",
+        "class ScalarType {}\n",
+        "class ArrayType {}\n",
+        "function demo(): void {\n",
+        "    $items = [['int', '$id'], ['array', '$list', ArrayType::class]];\n",
+        "    foreach ($items as $expected) {\n",
+        "        $cls = $expected[2] ?? ScalarType::class;\n",
+        "        $cls;\n",
+        "    }\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $cls");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string<ArrayType>") && text.contains("class-string<ScalarType>"),
+        "index + ?? fallback should keep both class-strings, got: {text}"
+    );
+    assert!(
+        !text.contains("= string") && !text.contains("|string"),
+        "value must not widen to plain string, got: {text}"
+    );
+}
+
+/// A nested array literal keeps its precise positional (tuple) shape so
+/// that integer-literal indexing resolves the element at that position,
+/// while a top-level literal generalizes to `list<T>`.
+#[test]
+fn hover_nested_array_literal_keeps_positional_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///nested_shape.php";
+    let content = concat!(
+        "<?php\n",
+        "class Pen { public function write(): void {} }\n",
+        "class Pencil { public function sketch(): void {} }\n",
+        "function demo(): void {\n",
+        "    $rows = [[new Pen(), new Pencil()]];\n",
+        "    foreach ($rows as $row) {\n",
+        "        $row;\n",
+        "    }\n",
+        "}\n",
+    );
+    // Top-level `$rows` generalizes to a list of the nested tuple shape.
+    let h_rows = hover_at(&backend, uri, content, 4, 6).expect("hover $rows");
+    let rows = hover_text(&h_rows);
+    assert!(
+        rows.contains("list<") && rows.contains("array{Pen, Pencil}"),
+        "top-level literal should be list of the nested tuple shape, got: {rows}"
+    );
+    // The foreach element is the nested tuple shape itself.
+    let h_row = hover_at(&backend, uri, content, 6, 9).expect("hover $row");
+    let row = hover_text(&h_row);
+    assert!(
+        row.contains("array{Pen, Pencil}"),
+        "foreach element should be the positional tuple shape, got: {row}"
+    );
+}

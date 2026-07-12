@@ -264,15 +264,21 @@ fn resolve_rhs_expression_inner<'b>(
         }
         // ── Array literals ──────────────────────────────────────────
         Expression::Array(arr) => {
-            let pt =
-                super::raw_type_inference::infer_array_literal_raw_type(arr.elements.iter(), ctx)
-                    .unwrap_or_else(PhpType::array);
+            let pt = super::raw_type_inference::infer_array_literal_raw_type(
+                arr.elements.iter(),
+                ctx,
+                false,
+            )
+            .unwrap_or_else(PhpType::array);
             vec![ResolvedType::from_type_string(pt)]
         }
         Expression::LegacyArray(arr) => {
-            let pt =
-                super::raw_type_inference::infer_array_literal_raw_type(arr.elements.iter(), ctx)
-                    .unwrap_or_else(PhpType::array);
+            let pt = super::raw_type_inference::infer_array_literal_raw_type(
+                arr.elements.iter(),
+                ctx,
+                false,
+            )
+            .unwrap_or_else(PhpType::array);
             vec![ResolvedType::from_type_string(pt)]
         }
         Expression::Instantiation(inst) => resolve_rhs_instantiation(inst, ctx),
@@ -3878,6 +3884,17 @@ fn resolve_rhs_property_access(
                 }
                 _ => None,
             };
+
+            // The magic `::class` constant yields the fully-qualified name
+            // of the class as a `class-string<T>`. Resolving it to a plain
+            // `string` would discard the class identity, so downstream
+            // consumers (array element inference, `??` fallbacks, and
+            // `class-string<object>` parameters) keep the concrete class.
+            if const_name.as_deref() == Some("class") {
+                return vec![ResolvedType::from_type_string(PhpType::ClassString(Some(
+                    Box::new(PhpType::Named(resolved_name.to_string())),
+                )))];
+            }
 
             if let Some(const_name) = const_name {
                 // Search local classes first.  If the constant is not

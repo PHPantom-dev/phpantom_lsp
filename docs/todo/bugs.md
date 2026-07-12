@@ -15,28 +15,4 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B61. Indexed access with `??` on a heterogeneous array element widens to `string`
-
-**Severity: Low (~2 errors in pdepend tests) · Reproduced**
-
-```php
-$items = [['int', '$id'], ['array', '$list', ArrayType::class]];
-foreach ($items as $expected) {
-    $expectedTypeClass = $expected[2] ?? ScalarType::class;
-    assertInstanceOf($expectedTypeClass, null); // "expects class-string<object>, got string"
-}
-```
-
-The foreach element `$expected` from a heterogeneous array literal
-is not inferred as a union of positional shapes, so `$expected[2]`
-widens to `string` instead of the `class-string` it actually holds.
-The `?? ScalarType::class` fallback (itself a `class-string`) is
-then lost in the union and the value is passed to a
-`class-string<T>` parameter as a plain `string`
-(pdepend `tests/.../PHPParserVersion81Test.php:1187`, `:1476`).
-Related to positional-shape indexing, but the trigger here is the
-foreach element type plus the null-coalesce.
-
-**Fix:** infer positional array-shape unions for foreach elements
-of heterogeneous array literals so int-literal indexing and `??`
-preserve the element's `class-string` type.
+No outstanding items.

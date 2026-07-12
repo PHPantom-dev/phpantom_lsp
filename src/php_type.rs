@@ -1457,6 +1457,35 @@ impl PhpType {
         self.extract_value_type(false)
     }
 
+    /// Return the element (value) type produced by iterating this type,
+    /// as an owned type.
+    ///
+    /// Unlike [`extract_value_type`](Self::extract_value_type), this also
+    /// handles array/object shapes: iterating a tuple-style `array{A, B}`
+    /// yields `A|B`. For all other types it delegates to
+    /// `extract_value_type(false)`, so generic collections (`list<User>`,
+    /// `array<int, Order>`) behave exactly as before.
+    pub fn iterable_element_type(&self) -> Option<PhpType> {
+        match self {
+            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+                let mut values: Vec<PhpType> = Vec::new();
+                for entry in entries {
+                    if !values.contains(&entry.value_type) {
+                        values.push(entry.value_type.clone());
+                    }
+                }
+                match values.len() {
+                    0 => None,
+                    1 => Some(values.into_iter().next().unwrap()),
+                    _ => Some(PhpType::Union(values)),
+                }
+            }
+            PhpType::Nullable(inner) => inner.iterable_element_type(),
+            PhpType::Union(members) => members.iter().find_map(|m| m.iterable_element_type()),
+            _ => self.extract_value_type(false).cloned(),
+        }
+    }
+
     /// Look up the value type for a specific key in an array shape.
     ///
     /// Given a parsed `array{name: string, user: User}` and key `"user"`,
@@ -5722,6 +5751,37 @@ mod tests {
         let ty = PhpType::parse("list<User>");
         let val = ty.extract_value_type(true).unwrap();
         assert_eq!(*val, PhpType::Named("User".to_owned()));
+    }
+
+    #[test]
+    fn iterable_element_type_positional_shape_unions_values() {
+        // Iterating a heterogeneous tuple yields the union of its
+        // positional value types.
+        let ty = PhpType::parse("array{int, string}");
+        let elem = ty.iterable_element_type().unwrap();
+        assert_eq!(
+            elem,
+            PhpType::Union(vec![PhpType::int(), PhpType::string()])
+        );
+    }
+
+    #[test]
+    fn iterable_element_type_homogeneous_shape_collapses() {
+        // A shape whose entries share a type iterates to that single type,
+        // not a redundant union.
+        let ty = PhpType::parse("array{User, User}");
+        let elem = ty.iterable_element_type().unwrap();
+        assert_eq!(elem, PhpType::Named("User".to_owned()));
+    }
+
+    #[test]
+    fn iterable_element_type_delegates_for_generics() {
+        // Non-shape iterables behave exactly like extract_value_type(false).
+        let ty = PhpType::parse("list<User>");
+        assert_eq!(
+            ty.iterable_element_type().unwrap(),
+            PhpType::Named("User".to_owned())
+        );
     }
 
     #[test]
