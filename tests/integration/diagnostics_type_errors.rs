@@ -1621,6 +1621,88 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_union_of_class_strings_bound_by_template() {
+    // Regression: `$className` iterated over a class-constant array is a
+    // union of `class-string`s.  Passing it to a `@template T of Bound`
+    // parameter typed `class-string<T>` must bind `T` to the union of the
+    // inner classes (checking each against the bound), not fall back to the
+    // declared bound.  When the bound is a short name imported from another
+    // namespace, that fallback produces a false positive because the short
+    // bound name cannot be resolved to its FQN during the hierarchy walk.
+    use crate::common::create_psr4_workspace;
+
+    let files = vec![
+        (
+            "src/Models/Models.php",
+            r#"<?php
+namespace App\Models;
+
+abstract class AbstractEntity {}
+abstract class AbstractRenderable extends AbstractEntity {}
+class Page extends AbstractRenderable {}
+class CustomPage extends AbstractEntity {}
+"#,
+        ),
+        (
+            "src/Services/OrmService.php",
+            r#"<?php
+namespace App\Services;
+
+use App\Models\AbstractEntity;
+
+class OrmService {
+    /**
+     * @template T of AbstractEntity
+     * @param class-string<T> $class
+     * @return T[]
+     */
+    public function getByQuery(string $class, string $query): array { return []; }
+}
+"#,
+        ),
+        (
+            "src/Http/ExplorerController.php",
+            r#"<?php
+namespace App\Http;
+
+use App\Models\CustomPage;
+use App\Models\Page;
+use App\Services\OrmService;
+
+class ExplorerController {
+    public function run(OrmService $orm): void {
+        foreach ([Page::class, CustomPage::class] as $className) {
+            $rows = $orm->getByQuery($className, 'SELECT 1');
+        }
+    }
+}
+"#,
+        ),
+    ];
+
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    // Index every file up front, mirroring the CLI's eager scan so the
+    // call target and its `@template` docblock are available.
+    for (rel_path, php) in &files {
+        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        backend.update_ast(&file_uri, php);
+    }
+    let uri = format!(
+        "file://{}/src/Http/ExplorerController.php",
+        dir.path().display()
+    );
+    let content = files[2].1;
+    let mut diags = Vec::new();
+    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag a union of class-strings satisfying a template bound, got: {}",
+        type_error_messages(&diags).join(", ")
+    );
+}
+
+#[test]
 fn no_diagnostic_for_string_literal_class_name_expect_exception() {
     let php = r#"<?php
 class TestCase {

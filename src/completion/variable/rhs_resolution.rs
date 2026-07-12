@@ -1973,17 +1973,46 @@ pub(crate) fn class_string_inner_binding(
         return Some(PhpType::Named(fqn));
     }
 
-    match Backend::resolve_arg_text_to_type(arg_text, ctx)? {
-        PhpType::ClassString(Some(inner)) => Some(*inner),
+    class_string_inner_from_type(&Backend::resolve_arg_text_to_type(arg_text, ctx)?)
+}
+
+/// Unwrap the class layer bound to `T` in `class-string<T>` from an
+/// already-resolved argument [`PhpType`].
+///
+/// A union of class-strings (e.g. from a `foreach` over a class-constant
+/// array) binds `T` to the union of the inner classes, so each member is
+/// checked against `T`'s bound individually and the concrete union is kept
+/// for the return type rather than collapsing to the declared bound.
+fn class_string_inner_from_type(ty: &PhpType) -> Option<PhpType> {
+    match ty {
+        PhpType::ClassString(Some(inner)) => Some(inner.as_ref().clone()),
         PhpType::ClassString(None) => Some(PhpType::Named("object".to_string())),
         // A class name binds directly; a scalar keyword (`string`, `int`,
         // …) is not a class, so it must not bind `T` — otherwise a plain
         // `string` argument would produce `class-string<string>`.
         PhpType::Named(name) => {
-            if crate::php_type::is_builtin_non_class_type(&name) {
+            if crate::php_type::is_builtin_non_class_type(name) {
                 None
             } else {
-                Some(PhpType::Named(name))
+                Some(PhpType::Named(name.clone()))
+            }
+        }
+        // A union of class-strings binds `T` to the union of the inner
+        // classes.  Every member must yield a class; if any member is not
+        // a class-string the whole binding is abandoned so `T` falls back
+        // to its declared bound.
+        PhpType::Union(members) => {
+            let mut parts: Vec<PhpType> = Vec::with_capacity(members.len());
+            for member in members {
+                let inner = class_string_inner_from_type(member)?;
+                if !parts.contains(&inner) {
+                    parts.push(inner);
+                }
+            }
+            match parts.len() {
+                0 => None,
+                1 => Some(parts.into_iter().next().unwrap()),
+                _ => Some(PhpType::Union(parts)),
             }
         }
         _ => None,

@@ -609,6 +609,16 @@ class MethodTemplateDemo
         $locator = new ServiceLocator();
         $locator->get(Pen::class)->write();               // class-string<T> → T
 
+        // A union of class-strings (iterating a class-constant array) binds
+        // the bounded template `T of Pen` to the union of the concrete
+        // classes, so `@return T[]` resolves to (Pen|Marker)[] instead of
+        // collapsing to the bound Pen[]. Marker extends Pen, so both satisfy
+        // the bound.
+        foreach ([Pen::class, Marker::class] as $penClass) {
+            $group = $locator->getAll($penClass);
+            $group[0]->write();                           // Pen|Marker from union class-string bind
+        }
+
         Factory::create(Pen::class)->write();             // static @template
         resolve(Marker::class)->highlight();              // function @template
 
@@ -5005,6 +5015,16 @@ class ServiceLocator
     {
         return new Box(new $id());
     }
+
+    /**
+     * @template T of Pen
+     * @param class-string<T> $id
+     * @return T[]
+     */
+    public function getAll(string $id): array
+    {
+        return [new $id()];
+    }
 }
 
 class Factory
@@ -5676,6 +5696,13 @@ function runDemoAssertions(): void
     $locator = new ServiceLocator();
     $locatedPen = $locator->get(Pen::class);
     assert($locatedPen instanceof Pen, 'ServiceLocator::get(Pen::class) must return Pen');
+
+    // A union of class-strings binds the bounded template to the union of
+    // concrete classes; each member's stub returns an instance of itself.
+    foreach ([Pen::class, Marker::class] as $penClass) {
+        $group = $locator->getAll($penClass);
+        assert($group[0] instanceof $penClass, 'getAll() must return an instance of each class in the union');
+    }
 
     $createdPen = Factory::create(Pen::class);
     assert($createdPen instanceof Pen, 'Factory::create(Pen::class) must return Pen');
