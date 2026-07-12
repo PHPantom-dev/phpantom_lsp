@@ -349,3 +349,84 @@ class Parser {
         "Expected no unknown_member diagnostics, got: {diags:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Assert narrowing on $this inside a top-level closure propagates to
+// assignment RHS resolution (Pest test pattern).
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn assert_instanceof_this_in_top_level_closure_propagates_to_assignment_rhs() {
+    let backend = create_test_backend();
+
+    let collection_uri = "file:///Collection.php";
+    let collection_text = r#"<?php
+class Collection {
+    /** @return mixed */
+    public function firstOrFail() {
+        return null;
+    }
+}
+"#;
+    backend.update_ast(collection_uri, collection_text);
+
+    let test_case_uri = "file:///TestCase.php";
+    let test_case_text = r#"<?php
+class TestCase {
+    public function createProductCollection(int $count): Collection {
+        return new Collection();
+    }
+}
+"#;
+    backend.update_ast(test_case_uri, test_case_text);
+
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    // Top-level Pest-style closure: `$this` is unbound and only narrowed
+    // via `assert($this instanceof TestCase)`.
+    let uri = "file:///PestTest.php";
+    let text = r#"<?php
+function it(string $name, callable $closure): void {}
+
+it('does a thing', function (): void {
+    assert($this instanceof TestCase);
+    $products = $this->createProductCollection(5);
+    $first = $products->firstOrFail();
+});
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    // Filter to unknown_member and unresolved_member_access diagnostics
+    let relevant_diags: Vec<_> = diags
+        .into_iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(
+                    c,
+                    tower_lsp::lsp_types::NumberOrString::String(s)
+                        if s == "unresolved_member_access" || s == "unknown_member"
+                )
+            })
+        })
+        .collect();
+
+    // The `assert($this instanceof TestCase)` narrows `$this` to `TestCase`,
+    // so `$this->createProductCollection(5)` returns `Collection`, and
+    // `$products->firstOrFail()` resolves.  No member should be unknown or
+    // unresolved.
+    assert!(
+        relevant_diags.is_empty(),
+        "Expected no unknown/unresolved member diagnostics after assert($this instanceof TestCase) in top-level closure, got: {:?}",
+        relevant_diags
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}

@@ -469,6 +469,21 @@ fn resolve_target_classes_expr_inner_impl(
             {
                 return vec![ResolvedType::from_class(override_cls)];
             }
+
+            // Consult the forward-walk scope for a narrowed or seeded
+            // `$this` type.  This covers two cases the lexical
+            // `current_class` fallback cannot:
+            //   - `assert($this instanceof X)` inside a top-level closure
+            //     (e.g. a Pest test) where there is no enclosing class,
+            //     so `current_class` is `None`.
+            //   - `instanceof` narrowing of `$this` to a subclass inside
+            //     a regular method body.
+            // When the scope yields nothing, fall back to the lexical
+            // `current_class` below.
+            if let Some(this_types) = resolve_this_from_scope(ctx) {
+                return this_types;
+            }
+
             current_class
                 .map(|cc| ResolvedType::from_class(cc.clone()))
                 .into_iter()
@@ -1224,6 +1239,42 @@ fn check_unresolvable_class_name(
     } else {
         None
     }
+}
+
+/// Resolve `$this` from the forward-walk scope when it carries a
+/// narrowed or seeded type.
+///
+/// `$this` is normally resolved from the lexical `current_class`, but a
+/// closure body may have a `$this` type that the enclosing class cannot
+/// supply:
+///
+///   - `assert($this instanceof X)` inside a top-level closure (Pest
+///     tests) seeds `$this` in the forward-walk scope even though there
+///     is no lexical class.
+///   - `instanceof` narrowing refines `$this` to a subclass.
+///
+/// This consults the injected `scope_var_resolver` first (used while the
+/// forward walker resolves an assignment RHS), then the diagnostic scope
+/// snapshot cache (used by the member-verification path after the scope
+/// has been built).  Returns `None` when neither yields a type so the
+/// caller falls back to `current_class`.
+fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
+    use crate::completion::variable::forward_walk;
+
+    if let Some(scope_resolver) = ctx.scope_var_resolver {
+        let from_scope = scope_resolver("$this");
+        return (!from_scope.is_empty()).then_some(from_scope);
+    }
+
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && let Some(from_scope) = forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
+        && !from_scope.is_empty()
+    {
+        return Some(from_scope);
+    }
+
+    None
 }
 
 /// Shared variable-resolution logic extracted from the former

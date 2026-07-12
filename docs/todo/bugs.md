@@ -19,38 +19,6 @@ Laravel-specific gaps found in the same sweep are filed in
 `docs/todo/laravel.md` (L20–L23). The closure literal-return
 shape gap is filed as T31 in `docs/todo/type-inference.md`.
 
-## B65. `$this` method-call results don't type assignments inside Pest closures
-
-**Severity: High (~70 errors, luxplus-website) · Probed in-project**
-
-In a top-level Pest test closure:
-
-```php
-it('does a thing', function (): void {
-    assert($this instanceof TestCase);
-    $products = $this->createProductCollection(5);
-    $first = $products->firstOrFail();   // "type of '$products' could not be resolved"
-});
-```
-
-Member *verification* on `$this` works (no diagnostic on
-`$this->createProductCollection(...)` itself), but the call's
-return type does not propagate into the assignment, so every
-variable derived from a `$this->method()` call inside the closure
-is unresolved and cascades through the whole test
-(luxplus-website `tests/Browser/SalesCampaignGroupTest.php` 55
-errors, `tests/Browser/PurchaseTest.php` 10,
-`tests/Feature/View/Components/Checkout/ReorderDeliveryTest.php` 6).
-A locally assigned variable of the same class works, so the gap is
-specifically the typed-`$this` (via `assert($this instanceof X)`)
-feeding assignment RHS resolution in closure scope. In
-`PurchaseTest.php` `$this` is lost entirely (not narrowed by the
-`assert()` at all) — verify both facets while fixing.
-
-**Fix:** make the narrowed `$this` type available to
-`resolve_rhs_expression` inside closure bodies, the same way it is
-already available to the member-verification path.
-
 ## B66. Type-guard narrowing lost on compound conditions and non-variable subjects
 
 **Severity: High (~39 errors: bladestan 28, luxplus-website 6, pdepend 5) · Confirmed with fixture**
