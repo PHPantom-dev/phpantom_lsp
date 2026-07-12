@@ -675,6 +675,9 @@ fn resolve_target_classes_expr_inner_impl(
                             BracketSegment::StringKey(s) => {
                                 k.push_str(&format!("[\"{}\"]", s));
                             }
+                            BracketSegment::IntKey(n) => {
+                                k.push_str(&format!("[{}]", n));
+                            }
                             BracketSegment::ElementAccess => {
                                 k.push_str("[]");
                             }
@@ -699,6 +702,9 @@ fn resolve_target_classes_expr_inner_impl(
                         match seg {
                             BracketSegment::StringKey(s) => {
                                 k.push_str(&format!("[\"{}\"]", s));
+                            }
+                            BracketSegment::IntKey(n) => {
+                                k.push_str(&format!("[{}]", n));
                             }
                             BracketSegment::ElementAccess => {
                                 k.push_str("[]");

@@ -1765,7 +1765,7 @@ fn resolve_rhs_array_access<'b>(
     for seg in &segments {
         // Try pure-type extraction first (array shapes, generics).
         let extracted = match seg {
-            ArrayBracketSegment::StringKey(key) => current
+            ArrayBracketSegment::StringKey(key) | ArrayBracketSegment::IntKey(key) => current
                 .shape_value_type(key)
                 .cloned()
                 .or_else(|| current.extract_element_type().cloned()),
@@ -1843,26 +1843,38 @@ fn resolve_rhs_array_access<'b>(
 enum ArrayBracketSegment {
     /// A string-key access, e.g. `['items']`.
     StringKey(String),
-    /// A numeric or variable index access, e.g. `[0]` or `[$i]`.
+    /// An integer-literal index access, e.g. `[0]` or `[2]`. Carries the
+    /// decimal string form so it can address positional shape entries
+    /// (`array{Foo, Bar}`) as well as explicit numeric keys.
+    IntKey(String),
+    /// A variable or otherwise non-literal index access, e.g. `[$i]`.
     ElementAccess,
 }
 
-/// Classify an array index expression as either a string key or generic
-/// element access.
+/// Classify an array index expression as a string key, integer-literal
+/// index, or generic element access.
 fn classify_array_index(index: &Expression<'_>) -> ArrayBracketSegment {
-    if let Expression::Literal(Literal::String(s)) = index {
-        let key = s
-            .value
-            .map(|v| bytes_to_str(v).to_string())
-            .unwrap_or_else(|| {
-                let raw_str = bytes_to_str(s.raw);
-                crate::util::unquote_php_string(raw_str)
-                    .unwrap_or(raw_str)
-                    .to_string()
-            });
-        ArrayBracketSegment::StringKey(key)
-    } else {
-        ArrayBracketSegment::ElementAccess
+    match index {
+        Expression::Literal(Literal::String(s)) => {
+            let key = s
+                .value
+                .map(|v| bytes_to_str(v).to_string())
+                .unwrap_or_else(|| {
+                    let raw_str = bytes_to_str(s.raw);
+                    crate::util::unquote_php_string(raw_str)
+                        .unwrap_or(raw_str)
+                        .to_string()
+                });
+            ArrayBracketSegment::StringKey(key)
+        }
+        // An integer literal index (`$pair[0]`) addresses either an explicit
+        // numeric shape key or a positional tuple entry. Use the parsed value
+        // so hex/octal/binary literals map to their decimal index form.
+        Expression::Literal(Literal::Integer(i)) => match i.value {
+            Some(value) => ArrayBracketSegment::IntKey(value.to_string()),
+            None => ArrayBracketSegment::ElementAccess,
+        },
+        _ => ArrayBracketSegment::ElementAccess,
     }
 }
 

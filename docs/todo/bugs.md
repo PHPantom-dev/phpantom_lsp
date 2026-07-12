@@ -15,24 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B58. Indexing a positional array shape does not resolve the element type
-
-**Severity: Low-Medium (~10 errors in pdepend tests) · Confirmed from output**
-
-```php
-/** @var array{ASTSwitchLabel, ASTThrowStatement} $pair */
-$pair = $entries[2]->getChildren();
-$pair[0]->getImage();   // "type of '$pair[]' could not be resolved"
-```
-
-Keyed shapes (`array{a: Foo}`) resolve via string keys, but
-positional tuple shapes indexed with int literals (`$pair[0]`,
-`$pair[1]`) do not
-(pdepend `tests/.../PHP81/MatchExpressionTest.php:144`).
-
-**Fix:** map int-literal index access onto positional shape
-entries in the array-access resolution path.
-
 ## B59. Project class sharing a global interface name breaks subtype checks
 
 **Severity: Low (5 errors, pdepend-specific) · Not reproduced in isolation — needs investigation**
@@ -91,8 +73,8 @@ The `?? ScalarType::class` fallback (itself a `class-string`) is
 then lost in the union and the value is passed to a
 `class-string<T>` parameter as a plain `string`
 (pdepend `tests/.../PHPParserVersion81Test.php:1187`, `:1476`).
-Related to positional-shape indexing (see B58) but the trigger here
-is the foreach element type plus the null-coalesce.
+Related to positional-shape indexing, but the trigger here is the
+foreach element type plus the null-coalesce.
 
 **Fix:** infer positional array-shape unions for foreach elements
 of heterogeneous array literals so int-literal indexing and `??`

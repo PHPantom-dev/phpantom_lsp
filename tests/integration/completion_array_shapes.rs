@@ -624,6 +624,77 @@ async fn test_array_shape_value_type_inline_var() {
 }
 
 #[tokio::test]
+async fn test_positional_shape_int_index_resolves_element() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_positional_index.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Address {\n",
+        "    public string $city;\n",
+        "    public function format(): string {}\n",
+        "}\n",
+        "class Phone {\n",
+        "    public function dial(): void {}\n",
+        "}\n",
+        "/** @var array{Address, Phone} $pair */\n",
+        "$pair = getPair();\n",
+        "$pair[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$pair[0]->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for int-indexed positional shape"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"format"),
+                "Should suggest Address::format() for $pair[0], got {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"dial"),
+                "Should not suggest Phone::dial() for $pair[0], got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
 async fn test_array_shape_value_type_scalar_no_completion() {
     let backend = create_test_backend();
 

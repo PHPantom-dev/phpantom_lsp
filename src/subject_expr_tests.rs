@@ -403,7 +403,7 @@ fn parse_variable_element_access() {
         SubjectExpr::parse("$list[0]"),
         SubjectExpr::ArrayAccess {
             base: Box::new(SubjectExpr::Variable("$list".to_string())),
-            segments: vec![BracketSegment::ElementAccess],
+            segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }
@@ -416,7 +416,7 @@ fn parse_variable_chained_bracket_access() {
             base: Box::new(SubjectExpr::Variable("$response".to_string())),
             segments: vec![
                 BracketSegment::StringKey("items".to_string()),
-                BracketSegment::ElementAccess,
+                BracketSegment::IntKey("0".to_string()),
             ],
         }
     );
@@ -441,7 +441,7 @@ fn parse_inline_array_literal() {
         SubjectExpr::parse("[Customer::first()][0]"),
         SubjectExpr::InlineArray {
             elements: vec!["Customer::first()".to_string()],
-            index_segments: vec![BracketSegment::ElementAccess],
+            index_segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }
@@ -452,7 +452,7 @@ fn parse_inline_array_literal_multiple_elements() {
         SubjectExpr::parse("[$a, $b][0]"),
         SubjectExpr::InlineArray {
             elements: vec!["$a".to_string(), "$b".to_string()],
-            index_segments: vec![BracketSegment::ElementAccess],
+            index_segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }
@@ -558,11 +558,12 @@ fn round_trip_chained_method_calls() {
 
 #[test]
 fn round_trip_array_access() {
-    // Numeric index `[0]` is parsed as `ElementAccess` and
-    // round-trips to `[]` (the index value is not preserved).
+    // Numeric index `[0]` is parsed as `IntKey` and round-trips
+    // preserving the index value so positional shape entries can be
+    // addressed downstream.
     assert_eq!(
         SubjectExpr::parse("$response['items'][0]").to_subject_text(),
-        "$response['items'][]"
+        "$response['items'][0]"
     );
 }
 

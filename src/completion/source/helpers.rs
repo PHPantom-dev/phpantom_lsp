@@ -777,7 +777,7 @@ fn walk_array_segments_and_resolve(
     for seg in segments {
         // Try pure-type extraction first (array shapes, generics).
         let extracted = match seg {
-            BracketSegment::StringKey(key) => current
+            BracketSegment::StringKey(key) | BracketSegment::IntKey(key) => current
                 .shape_value_type(key)
                 .or_else(|| current.extract_value_type(true))
                 .cloned(),

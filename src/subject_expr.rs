@@ -124,8 +124,27 @@ pub enum SubjectExpr {
 pub enum BracketSegment {
     /// A string-key access, e.g. `['items']`.
     StringKey(String),
-    /// A numeric or variable index access, e.g. `[0]` or `[$i]` or `[]`.
+    /// An integer-literal index access, e.g. `[0]` or `[2]`. Carries the
+    /// decimal string form so it can address positional shape entries
+    /// (`array{Foo, Bar}`) as well as explicit numeric keys.
+    IntKey(String),
+    /// A variable or otherwise non-literal index access, e.g. `[$i]` or `[]`.
     ElementAccess,
+}
+
+/// Classify the text inside a `[…]` bracket into a [`BracketSegment`].
+///
+/// Quoted strings become [`BracketSegment::StringKey`]; bare integer
+/// literals become [`BracketSegment::IntKey`]; everything else (variables,
+/// expressions, empty `[]`) becomes [`BracketSegment::ElementAccess`].
+fn classify_bracket_inner(inner: &str) -> BracketSegment {
+    if let Some(key) = crate::util::unquote_php_string(inner) {
+        BracketSegment::StringKey(key.to_string())
+    } else if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) {
+        BracketSegment::IntKey(inner.to_string())
+    } else {
+        BracketSegment::ElementAccess
+    }
 }
 
 impl SubjectExpr {
@@ -314,6 +333,9 @@ impl SubjectExpr {
                         BracketSegment::StringKey(k) => {
                             s.push_str(&format!("['{}']", k));
                         }
+                        BracketSegment::IntKey(n) => {
+                            s.push_str(&format!("[{}]", n));
+                        }
                         BracketSegment::ElementAccess => {
                             s.push_str("[]");
                         }
@@ -330,6 +352,9 @@ impl SubjectExpr {
                     match seg {
                         BracketSegment::StringKey(k) => {
                             s.push_str(&format!("['{}']", k));
+                        }
+                        BracketSegment::IntKey(n) => {
+                            s.push_str(&format!("[{}]", n));
                         }
                         BracketSegment::ElementAccess => {
                             s.push_str("[]");
@@ -633,11 +658,7 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
         let close = rest.find(']')?;
         let inner = rest[1..close].trim();
 
-        if let Some(key) = crate::util::unquote_php_string(inner) {
-            segments.push(BracketSegment::StringKey(key.to_string()));
-        } else {
-            segments.push(BracketSegment::ElementAccess);
-        }
+        segments.push(classify_bracket_inner(inner));
 
         rest = &rest[close + 1..];
     }
@@ -699,11 +720,7 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
                     None => break,
                 };
                 let inner = rest[1..close].trim();
-                if let Some(key) = crate::util::unquote_php_string(inner) {
-                    new_segments.push(BracketSegment::StringKey(key.to_string()));
-                } else {
-                    new_segments.push(BracketSegment::ElementAccess);
-                }
+                new_segments.push(classify_bracket_inner(inner));
                 rest = &rest[close + 1..];
             }
             if !new_segments.is_empty() {
@@ -762,11 +779,7 @@ fn parse_call_array_access(subject: &str) -> Option<SubjectExpr> {
     while rest.starts_with('[') {
         let close = rest.find(']')?;
         let inner = rest[1..close].trim();
-        if let Some(key) = crate::util::unquote_php_string(inner) {
-            segments.push(BracketSegment::StringKey(key.to_string()));
-        } else {
-            segments.push(BracketSegment::ElementAccess);
-        }
+        segments.push(classify_bracket_inner(inner));
         rest = &rest[close + 1..];
     }
 
@@ -805,19 +818,7 @@ fn parse_inline_array(subject: &str) -> Option<SubjectExpr> {
     while rest.starts_with('[') {
         let close = rest.find(']')?;
         let idx_inner = rest[1..close].trim();
-        if let Some(key) = idx_inner
-            .strip_prefix('\'')
-            .and_then(|s| s.strip_suffix('\''))
-            .or_else(|| {
-                idx_inner
-                    .strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
-            })
-        {
-            index_segments.push(BracketSegment::StringKey(key.to_string()));
-        } else {
-            index_segments.push(BracketSegment::ElementAccess);
-        }
+        index_segments.push(classify_bracket_inner(idx_inner));
         rest = &rest[close + 1..];
     }
 

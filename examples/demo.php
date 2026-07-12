@@ -1460,6 +1460,10 @@ class DestructuringShapeDemo
         $first->write();                  // Pen (positional index 0)
         $second->sketch();                // Pencil (positional index 1)
 
+        // Positional shape indexed directly with an integer literal
+        $pair[0]->write();                 // Pen (positional index 0)
+        $pair[1]->sketch();                // Pencil (positional index 1)
+
         // list() syntax
         /** @var array{recipe: Recipe, servings: int} $meal */
         $meal = getUnknownValue();
