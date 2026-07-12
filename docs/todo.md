@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| B60 | [Template binding from closure returns through facade `@method`](todo/bugs.md#b60-template-binding-from-closure-return-types-through-facade-method-tags)       | Medium-High | Medium      |
 | L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
 | L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |
 | B61 | [Indexed access with `??` on a heterogeneous array element widens to `string`](todo/bugs.md#b61-indexed-access-with--on-a-heterogeneous-array-element-widens-to-string) | Low         | Low-Medium  |

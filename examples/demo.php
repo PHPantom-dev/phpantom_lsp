@@ -667,6 +667,15 @@ class ClosureReturnTemplateDemo
         // Chained call: reduce() result used directly without intermediate variable.
         // The template inference must survive the symbol-map subject text serialization.
         $pencils->reduce(fn(Pen $carry, Pencil $item): Pen => $carry, new Pen('starter'))->write();
+
+        // @template T bound from a `@param \Closure(): T` callback, where the
+        // closure has NO return-type annotation. The return type is inferred
+        // from the closure body (like Laravel's Cache::remember).
+        $cache = new ScaffoldingClosureCache();
+        $cache->remember('pen', fn() => new Pen('cached'))->write();   // arrow body → Pen
+        $cache->remember('marker', function () {
+            return new Marker('cached');
+        })->highlight();                                                // block-closure return → Marker
     }
 }
 
@@ -4314,6 +4323,25 @@ class ScaffoldingReducible
     }
 }
 
+/**
+ * Cache-like helper whose `@template T` is bound from the callback's
+ * return type. Mirrors Laravel's `Cache::remember()` so an unannotated
+ * `fn() => new Pen()` callback resolves the result to `Pen`.
+ */
+class ScaffoldingClosureCache
+{
+    /**
+     * @template T
+     *
+     * @param \Closure(): T $callback
+     * @return T
+     */
+    public function remember(string $key, \Closure $callback): mixed
+    {
+        return $callback();
+    }
+}
+
 class ScaffoldingPipeline
 {
     /**
@@ -5634,6 +5662,15 @@ function runDemoAssertions(): void
     // Chained call: reduce() result used directly without intermediate variable.
     $chainedWrite = $reducible->reduce(fn(Pen $carry, Pencil $item): Pen => $carry, new Pen('starter'))->write();
     assert(is_string($chainedWrite), 'reduce()->write() chained must return string (Pen::write() return type)');
+
+    // ── ScaffoldingClosureCache::remember() — unannotated closure body ──
+    $cache = new ScaffoldingClosureCache();
+    $cachedPen = $cache->remember('pen', fn() => new Pen('cached'));
+    assert($cachedPen instanceof Pen, 'remember(fn() => new Pen()) must return Pen (T from arrow body)');
+    $cachedMarker = $cache->remember('marker', function () {
+        return new Marker('cached');
+    });
+    assert($cachedMarker instanceof Marker, 'remember(function () { return new Marker(); }) must return Marker (T from closure body)');
 
     // ── ScaffoldingEventBus::listen() — closure param type binding ──────
     $bus = new ScaffoldingEventBus();

@@ -13,6 +13,7 @@ use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\View;
@@ -256,5 +257,24 @@ class Demo
         config('app.name');
         Config::get('database.default');
         Config::set('app.timezone', 'UTC');
+    }
+
+
+    // ── Cache::remember() — closure return type binding ─────────────────
+
+    public function cacheRemember(): void
+    {
+        // Cache::remember()'s TCacheValue is bound from the callback's
+        // return type, even when the closure has no return annotation.
+        $author = Cache::remember('author', 3600, fn () => BlogAuthor::firstOrFail());
+        $author->name;                    // → BlogAuthor property (not mixed)
+
+        $post = Cache::remember('post', 3600, function () {
+            return new BlogPost();
+        });
+        $post->author;                    // → BlogPost relationship (block closure body)
+
+        $forever = Cache::rememberForever('count', fn () => BlogAuthor::count());
+        $forever + 1;                     // → int
     }
 }

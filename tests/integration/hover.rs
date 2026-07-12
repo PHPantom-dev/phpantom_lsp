@@ -12071,3 +12071,75 @@ new Gadget();
         "transitive dependency hover should show the orange transitive badge, got: {transitive_hover}"
     );
 }
+
+// ─── Closure body return-type → template binding ────────────────────────────
+//
+// A method/function template that is bound from a closure's return type
+// (`@param \Closure(): T $cb` + `@return T`) must resolve even when the
+// closure argument has no explicit `: ReturnType` annotation — the return
+// type is inferred from the closure's body expression.
+
+/// `@return T` bound from `@param \Closure(): T` resolves through an
+/// unannotated arrow-function body (`fn() => new Order()`), not just an
+/// annotated closure.
+#[test]
+fn hover_function_template_from_unannotated_closure_body() {
+    let backend = create_test_backend();
+    let uri = "file:///closurebody.php";
+    let content = concat!(
+        "<?php\n",
+        "class Order {}\n",
+        "/**\n",
+        " * @template T\n",
+        " * @param \\Closure(): T $cb\n",
+        " * @return T\n",
+        " */\n",
+        "function myRemember(\\Closure $cb) {}\n",
+        "\n",
+        "$annotated = myRemember(fn(): Order => makeOrder());\n",
+        "$arrow = myRemember(fn() => new Order());\n",
+        "$block = myRemember(function () { return new Order(); });\n",
+    );
+    let h_annotated = hover_at(&backend, uri, content, 9, 2).expect("hover $annotated");
+    let annotated = hover_text(&h_annotated);
+    assert!(
+        annotated.contains("$annotated = Order"),
+        "annotated closure should bind T = Order, got: {annotated}"
+    );
+    let h_arrow = hover_at(&backend, uri, content, 10, 2).expect("hover $arrow");
+    let arrow = hover_text(&h_arrow);
+    assert!(
+        arrow.contains("$arrow = Order"),
+        "unannotated arrow body should bind T = Order, got: {arrow}"
+    );
+    let h_block = hover_at(&backend, uri, content, 11, 2).expect("hover $block");
+    let block = hover_text(&h_block);
+    assert!(
+        block.contains("$block = Order"),
+        "closure `return` body should bind T = Order, got: {block}"
+    );
+}
+
+/// The same binding works through a virtual `@method` tag (facade style),
+/// where the method-level template appears in the tag's inline `<T>`.
+#[test]
+fn hover_virtual_method_template_from_unannotated_closure_body() {
+    let backend = create_test_backend();
+    let uri = "file:///facademethod.php";
+    let content = concat!(
+        "<?php\n",
+        "class Order {}\n",
+        "/**\n",
+        " * @method static T remember<T>(string $key, \\Closure(): T $cb)\n",
+        " */\n",
+        "class Cache {}\n",
+        "\n",
+        "$arrow = Cache::remember('k', fn() => new Order());\n",
+    );
+    let h_arrow = hover_at(&backend, uri, content, 7, 2).expect("hover $arrow");
+    let arrow = hover_text(&h_arrow);
+    assert!(
+        arrow.contains("$arrow = Order"),
+        "virtual @method template should bind from arrow body, got: {arrow}"
+    );
+}

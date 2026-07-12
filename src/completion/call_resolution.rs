@@ -1511,10 +1511,10 @@ impl Backend {
                                     }
                                 }
                                 TemplateBindingMode::CallableReturnType => {
-                                    // Fall back to yield inference for generator closures.
+                                    // Infer from annotation, generator yields,
+                                    // or the unannotated closure's body.
                                     let ret_type =
-                                        crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
-                                            .or_else(|| crate::completion::source::helpers::infer_generator_type_from_closure_yields(arg_text));
+                                        Backend::infer_closure_return_type(arg_text, ctx);
                                     if let Some(ret_type) = ret_type {
                                         crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
                                     }
@@ -2365,16 +2365,10 @@ impl Backend {
                     }
                 }
                 TemplateBindingMode::CallableReturnType => {
-                    // `@param callable(...): T $cb` — extract the closure's
-                    // return type annotation from the argument text.
-                    // Fall back to yield inference for generator closures.
-                    let ret_type =
-                        super::source::helpers::extract_closure_return_type_from_text(arg_text)
-                            .or_else(|| {
-                                super::source::helpers::infer_generator_type_from_closure_yields(
-                                    arg_text,
-                                )
-                            });
+                    // `@param callable(...): T $cb` — infer the closure's
+                    // return type from its annotation, generator yields, or
+                    // (for unannotated closures) its resolved body expression.
+                    let ret_type = Self::infer_closure_return_type(arg_text, ctx);
                     if let Some(ret_type) = ret_type {
                         crate::completion::variable::rhs_resolution::insert_or_union(
                             &mut subs,
@@ -2502,10 +2496,7 @@ impl Backend {
         let trimmed = arg_text.trim();
 
         // Infer the closure's effective return type.
-        let closure_ret = if let Some(ret) =
-            super::source::helpers::extract_closure_return_type_from_text(arg_text).or_else(|| {
-                super::source::helpers::infer_generator_type_from_closure_yields(arg_text)
-            }) {
+        let closure_ret = if let Some(ret) = Self::infer_closure_return_type(arg_text, ctx) {
             ret
         } else {
             // Variable/chain argument like `$closure`: resolve the argument
@@ -2665,6 +2656,30 @@ impl Backend {
         }
 
         None
+    }
+
+    /// Infer a closure/arrow-function argument's effective return type.
+    ///
+    /// Three sources are tried in turn: an explicit `: ReturnType`
+    /// annotation, generator `yield` inference, and finally the body
+    /// expression resolved through the shared type resolver (an arrow
+    /// `fn() => EXPR`, or the first `return EXPR;` of a full closure body).
+    /// The body-resolution fallback lets template params bind from
+    /// unannotated closures like `Cache::remember($k, $ttl, fn() => new
+    /// Order())`.
+    ///
+    /// Returns `None` when the text is not a closure literal or nothing can
+    /// be inferred.
+    pub(crate) fn infer_closure_return_type(
+        arg_text: &str,
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        super::source::helpers::extract_closure_return_type_from_text(arg_text)
+            .or_else(|| super::source::helpers::infer_generator_type_from_closure_yields(arg_text))
+            .or_else(|| {
+                super::source::helpers::extract_closure_body_expr_text(arg_text)
+                    .and_then(|body| Self::resolve_arg_text_to_type(body, ctx))
+            })
     }
 }
 

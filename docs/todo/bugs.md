@@ -15,26 +15,6 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-## B60. Template binding from closure return types through facade `@method` tags
-
-**Severity: Medium-High (suspected driver of many Luxplus unresolved errors) · Root cause unconfirmed**
-
-`$linkCampaign = Cache::remember($key, 3600, fn() => LinkCampaignRepository::getByCampaignId(...));`
-leaves `$linkCampaign` unresolved
-(luxplus-website `app/Features/Products/Services/Products/DiscountService.php:42`).
-`Cache::remember` is `@method static TCacheValue
-remember(string $key, ..., Closure(): TCacheValue $callback)` —
-binding `TCacheValue` from the closure's return type at the call
-site does not happen through the facade's virtual `@method` path.
-Closure-return template binding works in some paths (generator
-closures, per the changelog), so scope this to which call shapes
-miss it (facade static + virtual method at minimum) and fix the
-shared binding path.
-
-**Fix:** confirm with a minimal facade fixture, then bind
-method-level templates from closure literal return types in the
-same place existing `@method` template inference runs.
-
 ## B61. Indexed access with `??` on a heterogeneous array element widens to `string`
 
 **Severity: Low (~2 errors in pdepend tests) · Reproduced**

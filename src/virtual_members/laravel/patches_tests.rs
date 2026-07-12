@@ -6,7 +6,9 @@ use crate::test_fixtures::make_class;
 use crate::types::MethodInfo;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
-use super::{CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN, apply_laravel_patches};
+use super::{
+    CACHE_FACADE_FQN, CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN, apply_laravel_patches,
+};
 
 /// Create a method with a parsed `PhpType` return type.
 ///
@@ -693,4 +695,87 @@ fn fqn_in_return_type_is_not_treated_as_template() {
         return_type.to_string(),
         "FQN types should not trigger the template heuristic"
     );
+}
+
+// ─── Cache facade generics restoration ──────────────────────────────────────
+
+/// Build the `Cache` facade's generated `remember` shape: a `mixed`
+/// return with a `$ttl` closure and the value-producing `$callback`.
+fn make_cache_remember() -> MethodInfo {
+    MethodInfo {
+        return_type: Some(PhpType::mixed()),
+        parameters: vec![
+            crate::test_fixtures::make_param("$key", Some("string"), true),
+            crate::test_fixtures::make_param("$ttl", Some("\\Closure|int|null"), true),
+            crate::test_fixtures::make_param("$callback", Some("\\Closure"), true),
+        ],
+        ..MethodInfo::virtual_method("remember", None)
+    }
+}
+
+#[test]
+fn cache_facade_remember_gets_template() {
+    let mut class = make_class(CACHE_FACADE_FQN);
+    class.methods = vec![Arc::new(make_cache_remember())].into();
+
+    apply_laravel_patches(&mut class, CACHE_FACADE_FQN);
+
+    let method = class.methods.iter().next().unwrap();
+    assert_eq!(
+        method.return_type.as_ref().unwrap().to_string(),
+        "TCacheValue",
+        "return type should be the restored template"
+    );
+    assert_eq!(
+        method.template_params,
+        vec![atom("TCacheValue")],
+        "the method-level template should be added"
+    );
+    assert_eq!(
+        method.template_bindings,
+        vec![(atom("TCacheValue"), atom("$callback"))],
+        "TCacheValue should bind from the $callback closure"
+    );
+    // The callback param is retyped as a closure returning the template.
+    let callback = method
+        .parameters
+        .iter()
+        .find(|p| p.name.as_str() == "$callback")
+        .unwrap();
+    assert!(
+        callback
+            .type_hint
+            .as_ref()
+            .unwrap()
+            .to_string()
+            .contains("TCacheValue"),
+        "the callback should return TCacheValue, got: {:?}",
+        callback.type_hint
+    );
+}
+
+#[test]
+fn cache_facade_non_callback_method_untouched() {
+    let mut class = make_class(CACHE_FACADE_FQN);
+    // `get` returns `mixed` but has no `$callback` closure.
+    class.methods = vec![Arc::new(MethodInfo {
+        return_type: Some(PhpType::mixed()),
+        parameters: vec![crate::test_fixtures::make_param(
+            "$key",
+            Some("string"),
+            true,
+        )],
+        ..MethodInfo::virtual_method("get", None)
+    })]
+    .into();
+
+    apply_laravel_patches(&mut class, CACHE_FACADE_FQN);
+
+    let method = class.methods.iter().next().unwrap();
+    assert_eq!(
+        method.return_type.as_ref().unwrap().to_string(),
+        "mixed",
+        "methods without a $callback closure should be left as-is"
+    );
+    assert!(method.template_params.is_empty());
 }

@@ -63,6 +63,9 @@ const CONDITIONABLE_FQN: &str = "Illuminate\\Support\\Traits\\Conditionable";
 /// FQN of the `DB` facade from `illuminate/support`.
 const DB_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\DB";
 
+/// FQN of the `Cache` facade from `illuminate/support`.
+const CACHE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Cache";
+
 /// FQN of the base `Connection` class from `illuminate/database`.
 const DB_CONNECTION_FQN: &str = "Illuminate\\Database\\Connection";
 
@@ -88,6 +91,10 @@ pub fn apply_laravel_patches(class: &mut ClassInfo, fqn: &str) {
 
     if fqn == DB_FACADE_FQN || fqn == DB_CONNECTION_FQN {
         patch_db_select_return_types(class);
+    }
+
+    if fqn == CACHE_FACADE_FQN {
+        patch_cache_facade_generics(class);
     }
 }
 
@@ -232,6 +239,73 @@ fn patch_db_select_return_types(class: &mut ClassInfo) {
             }
             _ => {}
         }
+    }
+}
+
+/// Restore the `@template TCacheValue` generics that Laravel strips from
+/// the `Cache` facade's `@method` tags.
+///
+/// The facade's generated docblock declares closure-caching methods like
+/// `remember()` as `@method static mixed remember(…, \Closure $callback)`,
+/// erasing the `@template TCacheValue` / `\Closure(): TCacheValue` /
+/// `@return TCacheValue` that the underlying `Illuminate\Cache\Repository`
+/// method carries.  This patch re-types the callback parameter and adds
+/// the method-level template so `Cache::remember($k, $ttl, fn() => new
+/// Foo())` resolves to the closure's return type instead of `mixed`.
+///
+/// Binding is keyed on the parameter named `$callback`, which is the
+/// value-producing closure across all of these methods (the `$ttl`
+/// parameter of `remember()` also accepts a `\Closure`, so matching by
+/// name rather than by type is required).
+fn patch_cache_facade_generics(class: &mut ClassInfo) {
+    use crate::atom::atom;
+
+    const TEMPLATE: &str = "TCacheValue";
+    // Methods whose `$callback` closure produces the cached value.
+    const CALLBACK_METHODS: &[&str] = &[
+        "remember",
+        "rememberForever",
+        "sear",
+        "flexible",
+        "withoutOverlapping",
+    ];
+
+    let callback_hint = PhpType::parse("Closure(): TCacheValue");
+    let template_return = PhpType::Named(TEMPLATE.to_owned());
+
+    for method in class.methods.make_mut().iter_mut() {
+        if !CALLBACK_METHODS.contains(&method.name.as_str()) {
+            continue;
+        }
+        // Only patch the generated `mixed` form; leave a hand-written
+        // override with a real return type untouched.
+        if !method.return_type.as_ref().is_some_and(|rt| rt.is_mixed()) {
+            continue;
+        }
+        // Locate the value-producing closure parameter by name.
+        let callback_name = match method
+            .parameters
+            .iter()
+            .find(|p| p.name.as_str() == "$callback")
+        {
+            Some(param) => param.name,
+            None => continue,
+        };
+
+        let method = Arc::make_mut(method);
+        // Re-type the callback as `Closure(): TCacheValue` so the template
+        // binder classifies it as a callable-return binding.
+        for param in method.parameters.iter_mut() {
+            if param.name == callback_name {
+                param.type_hint = Some(callback_hint.clone());
+                param.native_type_hint = Some(callback_hint.clone());
+                break;
+            }
+        }
+        method.template_params = vec![atom(TEMPLATE)];
+        method.template_param_bounds = Default::default();
+        method.template_bindings = vec![(atom(TEMPLATE), callback_name)];
+        method.return_type = Some(template_return.clone());
     }
 }
 

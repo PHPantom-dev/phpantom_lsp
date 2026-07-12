@@ -1253,12 +1253,10 @@ fn build_constructor_template_subs(
                 }
             }
             TemplateBindingMode::CallableReturnType => {
-                // `@param callable(...): T $cb` — extract the closure's
-                // return type annotation from the argument text.
-                // Fall back to yield inference for generator closures.
-                let ret_type = crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
-                    .or_else(|| crate::completion::source::helpers::infer_generator_type_from_closure_yields(arg_text));
-                if let Some(ret_type) = ret_type {
+                // `@param callable(...): T $cb` — infer the closure's return
+                // type from its annotation, generator yields, or (for
+                // unannotated closures) its resolved body expression.
+                if let Some(ret_type) = Backend::infer_closure_return_type(arg_text, rctx) {
                     subs.insert(tpl_name.to_string(), ret_type);
                 }
             }
@@ -2051,12 +2049,10 @@ pub(crate) fn build_function_template_subs(
                 }
             }
             TemplateBindingMode::CallableReturnType => {
-                // `@param callable(...): T $cb` — extract the closure's
-                // return type annotation from the argument text.
-                // Fall back to yield inference for generator closures.
-                let ret_type = crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
-                    .or_else(|| crate::completion::source::helpers::infer_generator_type_from_closure_yields(arg_text));
-                if let Some(ret_type) = ret_type {
+                // `@param callable(...): T $cb` — infer the closure's return
+                // type from its annotation, generator yields, or (for
+                // unannotated closures) its resolved body expression.
+                if let Some(ret_type) = Backend::infer_closure_return_type(arg_text, rctx) {
                     insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
                 }
             }

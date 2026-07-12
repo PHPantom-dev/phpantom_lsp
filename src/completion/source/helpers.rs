@@ -429,6 +429,143 @@ pub(in crate::completion) fn infer_generator_type_from_closure_yields(
     ))
 }
 
+/// Extract the body expression *text* of a closure or arrow function that
+/// carries no explicit return-type annotation, so the caller can resolve
+/// it through the shared type resolver.
+///
+/// - Arrow function `fn(...) => EXPR` → returns `EXPR`.
+/// - Closure `function(...) { …; return EXPR; … }` → returns the first
+///   top-level `return` expression, skipping `return`s inside nested
+///   closures.
+///
+/// This is a best-effort fallback used only when there is no
+/// `: ReturnType` annotation and no `yield` (both handled by
+/// [`extract_closure_return_type_from_text`] and
+/// [`infer_generator_type_from_closure_yields`]).  Returns `None` when the
+/// text is not a closure/arrow function or no returnable expression is
+/// found.
+pub(in crate::completion) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+
+    let is_arrow = trimmed.starts_with("fn")
+        && trimmed
+            .get(2..3)
+            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
+    let is_closure = trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+
+    if !is_arrow && !is_closure {
+        return None;
+    }
+
+    // Find the parameter list's closing `)` by matching depth.
+    let paren_open = trimmed.find('(')?;
+    let mut depth = 0i32;
+    let mut paren_close = None;
+    for (i, c) in trimmed[paren_open..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    paren_close = Some(paren_open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let paren_close = paren_close?;
+
+    if is_arrow {
+        // The body is the single expression after the `=>` arrow.  The
+        // first `=>` past the parameter list is the arrow operator (a
+        // `=>` belonging to the body itself sits inside brackets/parens).
+        let after = &trimmed[paren_close + 1..];
+        let arrow = after.find("=>")?;
+        let body = after[arrow + 2..]
+            .trim()
+            .trim_end_matches([';', ','])
+            .trim();
+        if body.is_empty() { None } else { Some(body) }
+    } else {
+        // The first top-level `return EXPR;` inside the closure body.
+        let body_start = trimmed.find('{')?;
+        find_first_return_expr(&trimmed[body_start + 1..])
+    }
+}
+
+/// Find the first `return EXPR` at the closure body's own brace depth,
+/// skipping `return`s inside nested `function` closures.  Returns the
+/// expression text without the trailing `;`.
+fn find_first_return_expr(body: &str) -> Option<&str> {
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut depth = 0i32;
+    // When inside a nested `function` closure, holds the brace depth at
+    // which it was declared; `return`s are ignored until we return there.
+    let mut nested_fn_base: Option<i32> = None;
+    let mut i = 0;
+
+    while i < len {
+        let c = bytes[i];
+        match c {
+            b'{' => depth += 1,
+            b'}' => {
+                if depth == 0 {
+                    break; // end of closure body
+                }
+                depth -= 1;
+                if nested_fn_base.is_some_and(|base| depth <= base) {
+                    nested_fn_base = None;
+                }
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'\'' | b'"' => {
+                let quote = c;
+                i += 1;
+                while i < len && bytes[i] != quote {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b'f' if nested_fn_base.is_none()
+                && body[i..].starts_with("function")
+                && bytes
+                    .get(i + 8)
+                    .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_') =>
+            {
+                nested_fn_base = Some(depth);
+            }
+            b'r' if nested_fn_base.is_none()
+                && body[i..].starts_with("return")
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
+                && i + 6 < len
+                && !bytes[i + 6].is_ascii_alphanumeric()
+                && bytes[i + 6] != b'_' =>
+            {
+                let after_return = body[i + 6..].trim_start();
+                let semi = find_statement_end(after_return)?;
+                let expr = after_return[..semi].trim();
+                return if expr.is_empty() { None } else { Some(expr) };
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Find the end of a statement (`;` or `}`) at brace/paren depth 0.
 fn find_statement_end(s: &str) -> Option<usize> {
     let mut depth = 0i32;
@@ -1089,6 +1226,57 @@ mod tests {
             infer_generator_type_from_closure_yields("function () { return 1; }"),
             None
         );
+    }
+
+    // ─── extract_closure_body_expr_text ─────────────────────────────────
+
+    #[test]
+    fn arrow_body_expr_extracted() {
+        assert_eq!(
+            extract_closure_body_expr_text("fn() => new Order()"),
+            Some("new Order()")
+        );
+    }
+
+    #[test]
+    fn arrow_body_with_params_extracted() {
+        assert_eq!(
+            extract_closure_body_expr_text("fn($x, $y) => foo($x, $y)"),
+            Some("foo($x, $y)")
+        );
+    }
+
+    #[test]
+    fn arrow_body_with_nested_arrow_takes_first_arrow() {
+        // The first `=>` past the parameter list is the outer arrow.
+        assert_eq!(
+            extract_closure_body_expr_text("fn() => fn() => 5"),
+            Some("fn() => 5")
+        );
+    }
+
+    #[test]
+    fn closure_return_expr_extracted() {
+        assert_eq!(
+            extract_closure_body_expr_text("function () { return new Order(); }"),
+            Some("new Order()")
+        );
+    }
+
+    #[test]
+    fn closure_return_skips_nested_closure_return() {
+        assert_eq!(
+            extract_closure_body_expr_text(
+                "function () { $f = function () { return 1; }; return new Order(); }"
+            ),
+            Some("new Order()")
+        );
+    }
+
+    #[test]
+    fn body_expr_none_for_non_closure() {
+        assert_eq!(extract_closure_body_expr_text("$foo->bar()"), None);
+        assert_eq!(extract_closure_body_expr_text("new Order()"), None);
     }
 
     /// A nested closure with no inner braces used to make the scan hit its
