@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783823266138,
+  "lastUpdate": 1783824185441,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13633,6 +13633,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2e2bef9c59fc36e405b00447522c82a16ef5a596",
+          "message": "A project class sharing a global interface's short name no longer breaks\nsubtype checks",
+          "timestamp": "2026-07-12T04:30:34+02:00",
+          "tree_id": "bfe9f22c9289863fb3613be5b629fe741893a8c6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2e2bef9c59fc36e405b00447522c82a16ef5a596"
+        },
+        "date": 1783824183788,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64,
             "unit": "MiB"
           }
         ]
