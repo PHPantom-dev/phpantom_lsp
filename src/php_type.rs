@@ -2717,6 +2717,18 @@ impl PhpType {
             return self.is_subtype_of(&as_union);
         }
 
+        // ── array-key normalisation ─────────────────────────────────
+        // `array-key` is exactly `int|string`. Expanding it here lets a
+        // subject typed `array-key` satisfy an `int|string` supertype
+        // (the union-supertype check below only tries each member in
+        // isolation, and `array-key` is a subtype of neither `int` nor
+        // `string` alone). Reflexive `array-key <: array-key` is already
+        // handled above, so this only fires against structural supertypes.
+        if self.is_array_key() {
+            let as_union = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            return as_union.is_subtype_of(supertype);
+        }
+
         // ── Union subtype: every member must be a subtype ───────────
         if let PhpType::Union(members) = self {
             return members.iter().all(|m| m.is_subtype_of(supertype));
@@ -7042,6 +7054,30 @@ mod tests {
         #[test]
         fn string_is_subtype_of_array_key() {
             assert!(PhpType::string().is_subtype_of(&PhpType::Named("array-key".into())));
+        }
+
+        #[test]
+        fn array_key_is_subtype_of_int_string_union() {
+            let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            assert!(PhpType::Named("array-key".into()).is_subtype_of(&int_or_string));
+        }
+
+        #[test]
+        fn int_string_union_is_subtype_of_array_key() {
+            let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            assert!(int_or_string.is_subtype_of(&PhpType::Named("array-key".into())));
+        }
+
+        #[test]
+        fn array_key_is_subtype_of_scalar() {
+            assert!(
+                PhpType::Named("array-key".into()).is_subtype_of(&PhpType::Named("scalar".into()))
+            );
+        }
+
+        #[test]
+        fn array_key_is_not_subtype_of_int_alone() {
+            assert!(!PhpType::Named("array-key".into()).is_subtype_of(&PhpType::int()));
         }
 
         #[test]

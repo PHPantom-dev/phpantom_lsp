@@ -424,12 +424,3 @@ PDepend\Source\AST\ASTWhileStatement"
 call site (`parseForStatement`), so a template substitution map is
 being cached per function rather than per call. Not reproduced in
 isolation yet — audit the substitution cache keying first.
-
-## B85. `array-key` not accepted where `int|string` is expected
-
-**Severity: Low (1 error, luxplus-website) · Confirmed from output**
-
-"Argument 1 ($value) expects int|string, got array-key"
-(luxplus-website `app/View/Components/Footer/Flags.php:48`).
-`array-key` *is* `int|string`; the subtype table must treat them
-as equivalent in both directions.
