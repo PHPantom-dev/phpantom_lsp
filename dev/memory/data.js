@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783939898123,
+  "lastUpdate": 1783941053578,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14041,6 +14041,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7f5f0cc7db67815e603a00891776b9aeb229bd80",
+          "message": "Indexing an object implementing `ArrayAccess` resolves through\n`offsetGet`",
+          "timestamp": "2026-07-13T12:58:30+02:00",
+          "tree_id": "449c1d7fbaac4a22737667117db526c8178fd6f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7f5f0cc7db67815e603a00891776b9aeb229bd80"
+        },
+        "date": 1783941051684,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.2,
             "unit": "MiB"
           }
         ]
