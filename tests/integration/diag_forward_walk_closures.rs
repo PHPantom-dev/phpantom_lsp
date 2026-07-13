@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, create_test_backend_with_full_stubs};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -428,5 +428,51 @@ it('does a thing', function (): void {
             .iter()
             .map(|d| &d.message)
             .collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Self-referencing reassignment: RHS use resolves against pre-assignment scope
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When a variable is reassigned and the RHS references the same variable
+/// after an arrow function / closure literal, the reference must resolve
+/// against the pre-assignment type, not the reassigned result type.
+///
+/// Regression test: `$variables` starts as `array`, gets reassigned to
+/// `implode()`'s `string` result.  The `$variables` passed to
+/// `array_map()` sits *after* the arrow function in source, and used to
+/// pick up the post-assignment `string` type from the scope snapshot the
+/// closure walk recorded after the arrow body, producing a false
+/// "expects array, got string" diagnostic.
+#[test]
+fn self_referencing_reassignment_uses_pre_assignment_scope() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///self_ref_reassign.php";
+    let text = r#"<?php
+function render(array $variables): string {
+    $variables = implode(', ', array_map(fn (string $v): string => "\${$v}", $variables));
+    return $variables;
+}
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let type_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.message.clone())
+        .collect();
+
+    assert!(
+        type_errors.is_empty(),
+        "Expected no argument type mismatch: the $variables passed to array_map() \
+         should resolve to its pre-assignment `array` type, got: {type_errors:?}"
     );
 }

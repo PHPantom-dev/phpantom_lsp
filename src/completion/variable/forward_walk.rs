@@ -304,6 +304,15 @@ fn walk_body_for_diagnostics<'b>(
         // variable types that were established by prior statements.
         record_scope_snapshot(stmt.span().start.offset, scope);
 
+        // Snapshot the pre-statement scope for the closure walk below.
+        // Closures and other references inside this statement's own
+        // expression evaluate *before* the statement's assignment takes
+        // effect, so they must see the pre-assignment types.  E.g. in
+        // `$x = f(fn() => ..., $x)` the trailing `$x` argument must
+        // resolve to `$x`'s type before the reassignment, not `f()`'s
+        // result.
+        let pre_stmt_scope = scope.clone();
+
         process_statement(stmt, scope, ctx);
 
         // Walk closure and arrow function bodies found in this
@@ -314,7 +323,7 @@ fn walk_body_for_diagnostics<'b>(
         // their parameter types added on top.  The body is fully
         // walked so that scope snapshots are recorded for every
         // statement inside the closure/arrow function.
-        walk_closures_in_statement(stmt, scope, ctx);
+        walk_closures_in_statement(stmt, &pre_stmt_scope, ctx);
 
         // Also record at the statement's end offset, which covers
         // member accesses that appear after the last statement in
@@ -1632,8 +1641,9 @@ fn walk_top_level_statements<'a, 'b: 'a>(
             // must be analyzed the same way as top-level functions.
             Statement::If(if_stmt) => {
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
                 walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
             }
@@ -1643,8 +1653,9 @@ fn walk_top_level_statements<'a, 'b: 'a>(
             // unresolved.
             _ => {
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
             }
         }
@@ -2216,6 +2227,17 @@ pub(crate) fn walk_body_forward<'b>(
         let cursor_inside_stmt = ctx.cursor_offset >= stmt_span.start.offset
             && ctx.cursor_offset <= stmt_span.end.offset;
 
+        // Snapshot the pre-statement scope for the closure walk below.
+        // References inside this statement's own expression (including
+        // closure/arrow bodies) evaluate before the statement's
+        // assignment takes effect, so they must see the pre-assignment
+        // types rather than the reassigned result.
+        let pre_stmt_scope = if record_snapshots {
+            Some(scope.clone())
+        } else {
+            None
+        };
+
         if record_snapshots {
             record_scope_snapshot(stmt_span.start.offset, scope);
         }
@@ -2264,7 +2286,8 @@ pub(crate) fn walk_body_forward<'b>(
         // the scope reflects narrowing and bindings from the enclosing
         // block.
         if record_snapshots {
-            walk_closures_in_statement(stmt, scope, ctx);
+            let closure_scope = pre_stmt_scope.as_ref().unwrap_or(scope);
+            walk_closures_in_statement(stmt, closure_scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
     }

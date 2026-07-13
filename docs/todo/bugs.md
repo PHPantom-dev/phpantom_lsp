@@ -433,18 +433,3 @@ isolation yet — audit the substitution cache keying first.
 (luxplus-website `app/View/Components/Footer/Flags.php:48`).
 `array-key` *is* `int|string`; the subtype table must treat them
 as equivalent in both directions.
-
-## B86. Self-referencing reassignment resolves the RHS use to the post-assignment type
-
-**Severity: Low (1 error, bladestan) · Confirmed with fixture**
-
-```php
-/** @param array<string> $variables */
-$variables = implode(', ', array_map(fn (string $v): string => "\${$v}", $variables));
-// "Argument 2 ($array) expects array, got string" — the $variables
-// inside array_map() resolved to implode()'s string result
-```
-
-Uses of a variable inside the RHS of its own reassignment must
-resolve against the pre-assignment scope
-(bladestan `src/ValueObject/AbstractInlinedElement.php:43`).
