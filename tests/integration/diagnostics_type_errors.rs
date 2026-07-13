@@ -5843,3 +5843,79 @@ class Helper
         "Expected Alpha/Beta mismatch, got: {msgs:?}"
     );
 }
+
+#[test]
+fn no_diagnostic_for_imported_type_alias_param_with_two_leading_spaces() {
+    // A method typed `@param CountParams $query`, where `CountParams` is
+    // declared via `@phpstan-type` on another class and pulled in with
+    // `@phpstan-import-type`, must not be treated as a class reference.
+    // The import tag is written with two spaces after the asterisk — the
+    // style found in real vendor code — which previously caused the tag
+    // to be dropped, leaving the alias to be namespace-resolved as a
+    // class and flagged against the passed array shape.
+    use crate::common::create_psr4_workspace;
+
+    let files = vec![
+        (
+            "src/Types.php",
+            r#"<?php
+namespace App;
+
+/**
+ * @phpstan-type CountParams array{
+ *     index: string,
+ *     body?: array<mixed>,
+ * }
+ */
+class ElasticsearchTypes {}
+"#,
+        ),
+        (
+            "src/Service.php",
+            r#"<?php
+namespace App;
+
+/**
+ *  @phpstan-import-type CountParams from ElasticsearchTypes
+ */
+class Service {
+    /**
+     * @param CountParams $query
+     */
+    public function count(array $query = []): int { return 0; }
+}
+"#,
+        ),
+        (
+            "src/Caller.php",
+            r#"<?php
+namespace App;
+
+class Caller {
+    public function run(Service $service): void {
+        $service->count([
+            'index' => 'foo',
+            'body' => ['x' => 1],
+        ]);
+    }
+}
+"#,
+        ),
+    ];
+
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    for (rel_path, php) in &files {
+        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        backend.update_ast(&file_uri, php);
+    }
+    let uri = format!("file://{}/src/Caller.php", dir.path().display());
+    let content = files[2].1;
+    let mut diags = Vec::new();
+    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    assert!(
+        !has_type_error(&diags),
+        "Imported type alias parameter must not be treated as a class, got: {}",
+        type_error_messages(&diags).join(", ")
+    );
+}

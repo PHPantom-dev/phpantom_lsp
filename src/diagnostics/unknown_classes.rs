@@ -818,6 +818,54 @@ class Panel {}
         );
     }
 
+    #[test]
+    fn no_diagnostic_for_imported_type_alias_with_two_leading_spaces() {
+        // The `@phpstan-import-type` tag is written with two spaces after
+        // the asterisk (the style found in real vendor code).  The tag
+        // must still register the alias so the `@param` reference to it is
+        // not flagged as an unknown class.
+        let backend = Backend::new_test();
+
+        let dep_uri = "file:///dep.php";
+        let dep_content = concat!(
+            "<?php\n",
+            "namespace Lib;\n",
+            "\n",
+            "/**\n",
+            " * @phpstan-type Score int<0, 100>\n",
+            " */\n",
+            "class Scoring {}\n",
+        );
+        backend.update_ast(dep_uri, dep_content);
+        {
+            let mut idx = backend.fqn_uri_index.write();
+            idx.insert("Lib\\Scoring".to_string(), dep_uri.to_string());
+        }
+
+        let uri = "file:///test.php";
+        let content = concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "\n",
+            "use Lib\\Scoring;\n",
+            "\n",
+            "/**\n",
+            " *  @phpstan-import-type Score from Scoring\n",
+            " */\n",
+            "class Consumer {\n",
+            "    /** @param Score $score */\n",
+            "    public function setScore(int $score): void {}\n",
+            "}\n",
+        );
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            !diags.iter().any(|d| d.message.contains("Score")),
+            "should not flag two-space @phpstan-import-type alias Score, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // ── Attribute suppression ───────────────────────────────────────
 
     #[test]

@@ -290,16 +290,3 @@ A plain `object` return works (property access is not flagged);
 adding nullability makes the whole type unresolvable. The
 null-stripping step discards `object` instead of keeping it
 (luxplus-site-manager `app/Services/EnvoyerService.php:19,47`).
-
-## B80. `@phpstan-type` / `@phpstan-import-type` aliases treated as class names
-
-**Severity: Low-Medium (2 errors, luxplus-backoffice) · Confirmed from source**
-
-A vendor method typed `@param CountParams $query` (where
-`CountParams` is declared via `@phpstan-type` on another class and
-pulled in with `@phpstan-import-type`) is compared as if
-`CountParams` were a class, producing "expects
-rajmundtoth0\AuditDriver\Services\CountParams, got array{...}"
-(luxplus-backoffice `app/Services/Audit/AuditService.php:44,59`).
-Resolve local and imported type aliases during docblock type
-parsing.
