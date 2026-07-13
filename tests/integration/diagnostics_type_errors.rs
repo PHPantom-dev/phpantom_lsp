@@ -1716,6 +1716,39 @@ class ExplorerController {
 }
 
 #[test]
+fn no_diagnostic_for_class_string_union_param_bound_by_template() {
+    // A variable declared `class-string<A|B>` passed to a `class-string<T>`
+    // template parameter must bind `T` to the whole union `A|B`, not truncate
+    // it to the first member.  Truncation produced a bogus "expects
+    // class-string<A>, got A|B" mismatch.
+    let php = r#"<?php
+class FunctionNode {}
+class MethodNode {}
+
+class Builder {
+    /**
+     * @template T of object
+     * @param class-string<T> $className
+     * @return T
+     */
+    public function build(string $className): object { return new $className(); }
+}
+
+/** @param class-string<FunctionNode|MethodNode> $mockBuilder */
+function demo(Builder $b, string $mockBuilder): void
+{
+    $b->build($mockBuilder);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag class-string<A|B> passed to class-string<T>, got: {}",
+        type_error_messages(&diags).join(", ")
+    );
+}
+
+#[test]
 fn no_diagnostic_for_string_literal_class_name_expect_exception() {
     let php = r#"<?php
 class TestCase {

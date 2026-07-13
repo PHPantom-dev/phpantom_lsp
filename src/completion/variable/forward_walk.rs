@@ -2803,6 +2803,7 @@ pub(super) fn resolve_param_type(
     // type `class-string` doesn't resolve to a class.  Unwrap the
     // inner type and resolve it so that `$class::KEY` finds
     // static members on `Foo`.
+    let mut resolved_from_class_string_inner = false;
     if resolved_from_effective.is_empty()
         && let Some(ref eff) = effective_type
         && let Some(inner) = eff.unwrap_class_string_inner()
@@ -2815,6 +2816,7 @@ pub(super) fn resolve_param_type(
         );
         if !inner_resolved.is_empty() {
             resolved_from_effective = inner_resolved;
+            resolved_from_class_string_inner = true;
         }
     }
 
@@ -2868,6 +2870,22 @@ pub(super) fn resolve_param_type(
             )
         })
     };
+
+    // Preserve the `class-string<...>` wrapper on the resolved value
+    // type.  When `class-string<A|B>` unwraps to multiple classes,
+    // `from_classes_with_hint` rebuilds the union from bare class names,
+    // which drops the wrapper and makes the value look like an instance
+    // of the class rather than a class-string naming it.  Re-wrap each
+    // class member so the value keeps its class-string type (matching the
+    // single-class case, which already carries `class-string<Foo>`).
+    if resolved_from_class_string_inner && param_results.len() > 1 {
+        for rt in &mut param_results {
+            if let Some(ci) = rt.class_info.as_ref() {
+                let inner = PhpType::Named(ci.fqn().to_string());
+                rt.type_string = PhpType::ClassString(Some(Box::new(inner)));
+            }
+        }
+    }
 
     // Variadic parameter wrapping.
     if is_variadic && !param_results.is_empty() {

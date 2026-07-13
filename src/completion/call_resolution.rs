@@ -2915,13 +2915,18 @@ impl Backend {
 /// handles all expression patterns (variables, property chains,
 /// method calls, static accesses, etc.) and preserves scalar types
 /// through the `type_string` field of [`ResolvedType`].
+///
+/// When the expression resolves to multiple types (e.g. a variable
+/// declared `class-string<A|B>`), all of them are joined into a union
+/// so template binding sees the full type rather than only the first
+/// member.
 fn resolve_expression_to_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let results =
         super::resolver::resolve_target_classes(text, crate::types::AccessKind::Arrow, ctx);
-    if let Some(first) = results.first() {
-        return Some(first.type_string.clone());
+    if results.is_empty() {
+        return None;
     }
-    None
+    Some(crate::types::ResolvedType::types_joined(&results))
 }
 
 /// Resolve a `ClassName::Member` expression to a type.

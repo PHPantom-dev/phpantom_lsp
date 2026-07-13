@@ -345,22 +345,3 @@ it (`$reference->getImage()` fails afterwards even though
 `tests/php/PDepend/Source/AST/ASTInstanceOfExpressionTest.php:204`).
 Narrow to `object` (PHPStan's behaviour) intersected with the
 prior type.
-
-## B83. `class-string<A|B>` argument vs `class-string<T>` parameter reports a bogus mismatch
-
-**Severity: Low (1 error, phpmd) · Confirmed with fixture**
-
-```php
-/** @param class-string<FunctionNode|MethodNode> $mockBuilder */
-function demo(Builder $b, string $mockBuilder): void
-{
-    $b->build($mockBuilder);
-    // "Argument 1 ($className) expects class-string<FunctionNode>,
-    //  got FunctionNode|MethodNode"
-}
-```
-
-Binding `class-string<A|B>` against `class-string<T>` truncates
-the union to its first member on the "expects" side and strips the
-`class-string` wrapper on the "got" side; the call is actually
-well-typed (phpmd `tests/php/PHPMD/AbstractTestCase.php:556`).
