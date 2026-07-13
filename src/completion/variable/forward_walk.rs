@@ -5536,6 +5536,12 @@ fn process_assert_narrowing<'b>(
         }
     }
 
+    // Seed property/array-access subject keys that appear as arguments
+    // to the assert call (e.g. `assertInstanceOf(X::class, $view->component)`
+    // or a `@phpstan-assert` helper called on `$arg->value`) so the
+    // narrowing loop below can find and narrow them.
+    seed_assert_arg_subject_keys(expr, scope, ctx);
+
     // Apply assert narrowing to each variable in scope.
     let scope_snapshot = scope.locals.clone();
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
@@ -9218,6 +9224,45 @@ fn seed_synthetic_key_if_needed(key: &str, scope: &mut ScopeState, ctx: &Forward
             if !key_results.is_empty() {
                 scope.set(key, key_results);
             }
+        }
+    }
+}
+
+/// Seed property/array-access subject keys that appear as arguments to a
+/// call expression into the scope.
+///
+/// Used for assertion narrowing on non-variable subjects, e.g.
+/// `assertInstanceOf(X::class, $view->component)` or a `@phpstan-assert`
+/// helper invoked on `$arg->value`.  Each argument that resolves to a
+/// compound subject key (property path or array access) is seeded with
+/// its current type so the assertion narrowing loop can narrow it.
+fn seed_assert_arg_subject_keys(
+    expr: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Call(call) = expr else {
+        return;
+    };
+    let argument_list = match call {
+        Call::Function(fc) => &fc.argument_list,
+        Call::Method(mc) => &mc.argument_list,
+        Call::NullSafeMethod(mc) => &mc.argument_list,
+        Call::StaticMethod(sc) => &sc.argument_list,
+    };
+    for arg in argument_list.arguments.iter() {
+        let arg_expr = match arg {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        };
+        if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
+            && (key.contains("->") || key.contains("[\""))
+        {
+            seed_synthetic_key_if_needed(&key, scope, ctx);
         }
     }
 }

@@ -3228,6 +3228,16 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                     let inner = crate::util::unquote_php_string(raw_str).unwrap_or(raw_str);
                     format!("['{}']", inner)
                 }
+                // Preserve integer-literal indices so downstream
+                // narrowing can address a specific element (e.g.
+                // `$stmts[0]` after `if (! $stmts[0] instanceof Foo)`).
+                Expression::Literal(Literal::Integer(i)) => {
+                    let n = i
+                        .value
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| bytes_to_str(i.raw).to_string());
+                    format!("[{}]", n)
+                }
                 _ => "[]".to_string(),
             };
             format!("{}{}", base, bracket)

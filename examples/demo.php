@@ -238,6 +238,46 @@ class TypeNarrowingDemo
 }
 
 
+// ── Compound & Non-Variable-Subject Narrowing ──────────────────────────────
+// instanceof / assert narrowing survives compound && / || conditions and
+// applies to property, array-indexed, and inline-assignment subjects, not
+// just a single negated variable guard.
+
+class CompoundNarrowingDemo
+{
+    public function demo(SpecimenHolder $holder): void
+    {
+        // && chain: a later conjunct (and the body) see the narrowing
+        // established by the first conjunct.
+        if ($holder->item instanceof Rock && $holder->item->crush() === 'smash!') {
+            $holder->item->crush();               // property narrowed to Rock
+        }
+
+        // Heterogeneous || guard clause: De Morgan narrows the property
+        // subject after the early return.
+        if (!$holder instanceof SpecimenHolder || !$holder->item instanceof Rock) {
+            return;
+        }
+        $holder->item->crush();                   // property narrowed to Rock
+
+        // Inline assignment in the condition narrows the assigned variable.
+        if (($picked = $holder->maybe()) instanceof Banana) {
+            $picked->peel();                      // inline-assigned var narrowed
+        }
+    }
+
+    /** @param array<Rock|Banana> $items */
+    public function indexed(array $items): void
+    {
+        // Integer-indexed subject narrowed by a guard clause.
+        if (!$items[0] instanceof Rock) {
+            return;
+        }
+        $items[0]->crush();                       // element narrowed to Rock
+    }
+}
+
+
 // ── Type Guard Narrowing (is_array, is_object, …) ──────────────────────────
 
 class TypeGuardNarrowingDemo
@@ -5139,6 +5179,21 @@ class Banana
 {
     public function peel(): string { return 'yum!'; }
     public function weigh(): float { return 0.2; }
+}
+
+class SpecimenHolder
+{
+    public Rock|Banana $item;
+
+    public function __construct()
+    {
+        $this->item = new Rock();
+    }
+
+    public function maybe(): Rock|Banana|null
+    {
+        return null;
+    }
 }
 
 // ─── Ambiguous Variable Support Classes ─────────────────────────────────────

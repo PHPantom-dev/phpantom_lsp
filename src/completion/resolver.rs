@@ -649,6 +649,19 @@ fn resolve_target_classes_expr_inner_impl(
 
         // ── Property chain ──────────────────────────────────────
         SubjectExpr::PropertyChain { base, property } => {
+            // ── Forward-walker scope narrowing ──────────────────
+            // The forward walker computes narrowing for compound
+            // conditions that the property-narrowing re-walk below
+            // cannot express: inline `&&` where a later conjunct uses
+            // an earlier one's narrowing, `||` guard clauses whose
+            // De Morgan expansion narrows several distinct subjects,
+            // and array-indexed subjects.  When it has already
+            // narrowed this exact property path, trust it.
+            let full_path = subject_scope_key(expr);
+            if let Some(narrowed) = lookup_scope_for_subject(&full_path, ctx) {
+                return narrowed;
+            }
+
             let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
             let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
             for cls in &base_arcs {
@@ -688,7 +701,6 @@ fn resolve_target_classes_expr_inner_impl(
                         &dummy_class
                     }
                 };
-                let full_path = format!("{}->{}", base.to_subject_text(), property);
                 apply_property_narrowing(&full_path, effective_class, ctx, &mut arc_results);
             }
 
@@ -700,56 +712,26 @@ fn resolve_target_classes_expr_inner_impl(
 
         // ── Array access on variable or call expression ─────────
         SubjectExpr::ArrayAccess { base, segments } => {
-            // Check if the scope has a narrowed type for this array
-            // access (e.g. `$row['page']` narrowed via `instanceof`).
-            if let Some(scope_resolver) = ctx.scope_var_resolver {
-                // Build the scope key with double-quote format used by
-                // `expr_to_subject_key` (e.g. `$row["page"]`).
-                let scope_key = {
-                    let mut k = base.to_subject_text();
-                    for seg in segments {
-                        match seg {
-                            BracketSegment::StringKey(s) => {
-                                k.push_str(&format!("[\"{}\"]", s));
-                            }
-                            BracketSegment::IntKey(n) => {
-                                k.push_str(&format!("[{}]", n));
-                            }
-                            BracketSegment::ElementAccess => {
-                                k.push_str("[]");
-                            }
-                        }
-                    }
-                    k
-                };
-                let from_scope = scope_resolver(&scope_key);
-                if !from_scope.is_empty() {
-                    return from_scope;
-                }
+            // Build the scope key using the canonical double-quote
+            // format that the forward walker's `expr_to_subject_key`
+            // produces (e.g. `$row["page"]`, `$stmts["0"]`).  Integer
+            // indices are stringified because PHP normalises them, so
+            // `$a[0]` and `$a["0"]` narrow the same subject.
+            let scope_key = subject_scope_key(expr);
+
+            // Check if the forward-walker scope has a narrowed type for
+            // this array access (e.g. `$row['page']` narrowed via
+            // `instanceof`, or `$stmts[0]` after a guard clause).
+            if let Some(narrowed) = lookup_scope_for_subject(&scope_key, ctx) {
+                return narrowed;
             }
+
             // When no scope resolver is available (top-level completion),
             // try resolving the full array access key through the forward
             // walker.  This picks up instanceof narrowing on array elements
             // (e.g. `$row['page'] instanceof Page` narrows `$row["page"]`).
             if ctx.scope_var_resolver.is_none() && matches!(base.as_ref(), SubjectExpr::Variable(_))
             {
-                let scope_key = {
-                    let mut k = base.to_subject_text();
-                    for seg in segments {
-                        match seg {
-                            BracketSegment::StringKey(s) => {
-                                k.push_str(&format!("[\"{}\"]", s));
-                            }
-                            BracketSegment::IntKey(n) => {
-                                k.push_str(&format!("[{}]", n));
-                            }
-                            BracketSegment::ElementAccess => {
-                                k.push_str("[]");
-                            }
-                        }
-                    }
-                    k
-                };
                 let dummy_class;
                 let effective_class = match current_class {
                     Some(cc) => cc,
@@ -1575,6 +1557,78 @@ pub(in crate::completion) fn resolve_static_owner_class(
 /// [`super::types::narrowing`] already support property paths via
 /// [`super::types::narrowing::expr_to_subject_key`], so no changes
 /// to those functions are required.
+/// Consult the forward-walker scope for a narrowed type for a compound
+/// subject key (property path like `$a->b->c` or array access like
+/// `$a["k"]`).
+///
+/// The forward walker seeds and narrows these keys while walking the
+/// enclosing method, capturing narrowing shapes the property-narrowing
+/// re-walk in [`apply_property_narrowing`] cannot express (compound
+/// `&&`/`||` conditions with mixed subjects, guard clauses whose De
+/// Morgan expansion narrows several distinct subjects, etc.).
+///
+/// Returns `Some(types)` only when the scope holds a non-empty narrowed
+/// type for `key`; the caller then trusts it and skips the re-walk.
+/// Returns `None` when no scope is active or the key was never seeded,
+/// so the caller falls back to normal resolution.
+/// Build the canonical forward-walker scope key for a subject
+/// expression (e.g. `$row["page"]`, `$stmts["0"]`, `$args["0"]->value`).
+///
+/// Mirrors the format that `expr_to_subject_key` produces on the AST
+/// side: property paths join with `->`, array keys use double quotes,
+/// and integer indices are stringified so `$a[0]` and `$a["0"]` map to
+/// the same key (matching PHP's integer/string key coercion).  Any
+/// subject shape the forward walker does not key on falls back to
+/// `to_subject_text`.
+fn subject_scope_key(expr: &SubjectExpr) -> String {
+    match expr {
+        SubjectExpr::PropertyChain { base, property } => {
+            format!("{}->{}", subject_scope_key(base), property)
+        }
+        SubjectExpr::ArrayAccess { base, segments } => {
+            let mut k = subject_scope_key(base);
+            for seg in segments {
+                match seg {
+                    BracketSegment::StringKey(s) => k.push_str(&format!("[\"{}\"]", s)),
+                    BracketSegment::IntKey(n) => k.push_str(&format!("[\"{}\"]", n)),
+                    BracketSegment::ElementAccess => k.push_str("[]"),
+                }
+            }
+            k
+        }
+        _ => expr.to_subject_text(),
+    }
+}
+
+fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
+    use crate::completion::variable::forward_walk;
+
+    // During diagnostic passes the forward walker records scope
+    // snapshots for the whole method; these are the authority.  Skip
+    // while the snapshots are still being built (the walker is the
+    // authority then and re-entry would be incomplete).
+    // A snapshot exists but this key was never seeded → fall through to
+    // normal resolution rather than short-circuiting to empty.
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && let Some(types) = forward_walk::lookup_diagnostic_scope(key, ctx.cursor_offset)
+        && !types.is_empty()
+    {
+        return Some(types);
+    }
+
+    // Interactive (completion / hover) forward walk carries a live
+    // scope resolver.
+    if let Some(resolver) = ctx.scope_var_resolver {
+        let types = resolver(key);
+        if !types.is_empty() {
+            return Some(types);
+        }
+    }
+
+    None
+}
+
 pub(crate) fn apply_property_narrowing(
     property_path: &str,
     current_class: &ClassInfo,

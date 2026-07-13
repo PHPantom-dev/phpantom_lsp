@@ -22,51 +22,6 @@ diagnostics per the declared-types philosophy there. The closure
 literal-return shape gap is filed as T31 in
 `docs/todo/type-inference.md`.
 
-## B66. Type-guard narrowing lost on compound conditions and non-variable subjects
-
-**Severity: High (~39 errors: bladestan 28, luxplus-website 6, pdepend 5) · Confirmed with fixture**
-
-`instanceof` (and `assert*`) narrowing only survives the simplest
-shape: a single negated variable/property guard with early return.
-It is lost when:
-
-1. The check is one conjunct of an `&&` chain and the narrowed
-   expression is used in later conjuncts or the body:
-   `$node->expr instanceof Assign && $node->expr->var instanceof Variable && ...`
-2. The guard is an `||` of a variable check and a property check:
-   `if (! $arg instanceof Arg || ! $arg->value instanceof String_) return;`
-3. The subject contains an array index anywhere: `$stmts[0]`,
-   `$args[0]->value`, `$constants['C']` — indexed subjects are
-   never narrowed, even in the simple negated-guard form
-   (bladestan `src/PhpParser/ArrayStringToArrayConverter.php:53`,
-   pdepend `tests/.../PHP82/FetchPropertiesOfEnumsInConstExpressionsTest.php:79`).
-4. The subject is an inline assignment:
-   `if (($node = $this->getReturnType()) instanceof ASTClassOrInterfaceReference) { $node->getType(); }`
-   (pdepend `src/Source/AST/AbstractASTCallable.php:255`).
-5. The narrowing comes from `assertInstanceOf(X::class, $view->component)`
-   on a property or indexed subject — later accesses to the same
-   expression are not narrowed (luxplus-website
-   `tests/Feature/Tracking/Google/*EventTest.php`, 6 errors).
-
-Everything downstream (foreach element types, `end()` results,
-reassigned variables) cascades into `unresolved_member_access` /
-`scalar_member_access`. Minimal repro (all three fail, while the
-single negated variable guard works):
-
-```php
-return $arg->value instanceof StringExpr && $arg->value->value === 'x';
-
-if (! $stmts[0] instanceof StringExpr) { return; }
-takeString($stmts[0]->value);
-
-if (! $arg instanceof Arg || ! $arg->value instanceof StringExpr) { return; }
-takeString($arg->value->value);
-```
-
-This is the concrete false-positive backlog behind the T20
-narrowing reconciliation engine (`docs/todo/type-inference.md`);
-fixing it structurally is preferred over adding one-off cases.
-
 ## B67. Positional array-shape indexing does not resolve the element type
 
 **Severity: Medium-High (~20 errors, pdepend) · Confirmed with fixture**
@@ -375,8 +330,8 @@ Assorted guard forms that PHPStan reconciles and we do not:
    within the original (`numeric-string`)
    (luxplus-backoffice `app/Domain/UpdateFromSheet/Services/ProductPriceSheetService.php:378`).
 
-Same structural home as B66 / T20 — prefer fixing these in the
-reconciliation layer over one-off patches.
+Same structural home as the T20 reconciliation engine — prefer
+fixing these in the reconciliation layer over one-off patches.
 
 ## B82. `assertInstanceOf` with a variable class argument destroys the subject's type
 

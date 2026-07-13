@@ -115,33 +115,50 @@ pub(in crate::completion) fn expr_to_subject_key(expr: &Expression<'_>) -> Optio
             let key = array_access_key_as_string(aa)?;
             Some(format!("{}[\"{}\"]", base, key))
         }
+        // See through parentheses so `($x instanceof Foo)` and grouped
+        // subjects resolve to the same key as the bare form.
+        Expression::Parenthesized(inner) => expr_to_subject_key(inner.expression),
+        // Inline assignment as a subject: `($node = expr()) instanceof Foo`
+        // narrows the assigned variable, so key on the assignment target.
+        Expression::Assignment(assign) => expr_to_subject_key(assign.lhs),
         _ => None,
     }
 }
 
-/// Extract a string-literal key from an array access expression.
+/// Extract a literal key from an array access expression.
 ///
-/// Returns the unquoted key string for `$a["test"]` or `$a['test']`,
-/// and `None` for non-literal keys like `$a[$i]`.
+/// Returns the key string for `$a["test"]`, `$a['test']`, and `$a[0]`
+/// (integer indices are stringified, matching PHP's integer/string key
+/// coercion so `$a[0]` and `$a["0"]` narrow the same subject).  Returns
+/// `None` for non-literal keys like `$a[$i]`.
 pub(in crate::completion) fn array_access_key_as_string(
     aa: &mago_syntax::ast::ArrayAccess<'_>,
 ) -> Option<String> {
     use mago_syntax::ast::Literal;
-    if let Expression::Literal(Literal::String(s)) = aa.index {
-        // `value` is the unquoted content; fall back to stripping quotes
-        // from `raw`.
-        let key = s
-            .value
-            .map(|v| bytes_to_str(v).to_string())
-            .unwrap_or_else(|| {
-                let raw_str = bytes_to_str(s.raw);
-                crate::util::unquote_php_string(raw_str)
-                    .unwrap_or(raw_str)
-                    .to_string()
-            });
-        Some(key)
-    } else {
-        None
+    match aa.index {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the unquoted content; fall back to stripping
+            // quotes from `raw`.
+            let key = s
+                .value
+                .map(|v| bytes_to_str(v).to_string())
+                .unwrap_or_else(|| {
+                    let raw_str = bytes_to_str(s.raw);
+                    crate::util::unquote_php_string(raw_str)
+                        .unwrap_or(raw_str)
+                        .to_string()
+                });
+            Some(key)
+        }
+        Expression::Literal(Literal::Integer(i)) => {
+            // PHP normalises integer-like keys, so `$a[0]` narrows the
+            // same subject as `$a["0"]`.  Prefer the parsed value; fall
+            // back to the raw token when it overflowed.
+            i.value
+                .map(|v| v.to_string())
+                .or_else(|| Some(bytes_to_str(i.raw).to_string()))
+        }
+        _ => None,
     }
 }
 
@@ -1008,10 +1025,12 @@ pub(in crate::completion) fn unwrap_condition_negation<'b>(
 }
 
 /// Given a function's argument list and a parameter name (with `$`
-/// prefix), find the variable name passed at that parameter's position.
+/// prefix), find the subject key passed at that parameter's position.
 ///
-/// Returns `Some("$varName")` if the argument at the matching position
-/// is a simple direct variable.
+/// Returns the subject key for a direct variable (`$var`), a property
+/// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
+/// assertion narrowing applies to non-variable subjects, not just plain
+/// variables.
 pub(in crate::completion) fn find_assertion_arg_variable(
     argument_list: &ArgumentList<'_>,
     param_name: &str,
@@ -1027,11 +1046,7 @@ pub(in crate::completion) fn find_assertion_arg_variable(
         Argument::Named(named) => named.value,
     };
 
-    // The argument must be a simple variable
-    match arg_expr {
-        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
-        _ => None,
-    }
+    expr_to_subject_key(arg_expr)
 }
 
 /// If `expr` is `assert($var instanceof ClassName)` (or the negated
@@ -1296,6 +1311,43 @@ pub(in crate::completion) fn apply_guard_clause_narrowing(
         return;
     }
 
+    // ── Heterogeneous OR guard clause ───────────────────────────────
+    // `if (!$a instanceof A || !$a->b instanceof B) { return; }`
+    // De Morgan: after the guard every disjunct's negation holds, so
+    // each disjunct narrows its own subject.  Apply the guard-inverse
+    // for whichever disjunct is an instanceof on the current subject
+    // (`ctx.var_name`).  This complements the same-subject compound OR
+    // handler above, which returns early when it matches.
+    {
+        let operands = collect_or_operands(if_stmt.condition);
+        if operands.len() > 1 {
+            let mut narrowed = false;
+            for operand in &operands {
+                if let Some(mut extraction) =
+                    try_extract_instanceof_with_negation(operand, ctx.var_name)
+                {
+                    resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
+                    // Positive disjunct → excluded after the guard;
+                    // negated disjunct → included after the guard.
+                    if extraction.negated {
+                        apply_instanceof_inclusion(
+                            &extraction.class_type,
+                            extraction.exact,
+                            ctx,
+                            results,
+                        );
+                    } else {
+                        apply_instanceof_exclusion(&extraction.class_type, ctx, results);
+                    }
+                    narrowed = true;
+                }
+            }
+            if narrowed {
+                return;
+            }
+        }
+    }
+
     // ── instanceof / is_a / get_class / ::class narrowing ──
     // The then-body exits, so subsequent code is the "else" — apply
     // the inverse of the condition.
@@ -1350,6 +1402,32 @@ pub(in crate::completion) fn apply_guard_clause_narrowing(
 }
 
 // ── Compound instanceof helpers ─────────────────────────────────
+
+/// Flatten a `||` / `or` chain into its leaf operands.
+///
+/// Parenthesised sub-chains are unwrapped; a non-`||` expression yields a
+/// single-element vec.  Used by the guard-clause narrowing to apply the
+/// De Morgan inverse to each disjunct's own subject.
+fn collect_or_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    fn walk<'b>(expr: &'b Expression<'b>, out: &mut Vec<&'b Expression<'b>>) {
+        match expr {
+            Expression::Parenthesized(inner) => walk(inner.expression, out),
+            Expression::Binary(bin)
+                if matches!(
+                    bin.operator,
+                    BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+                ) =>
+            {
+                walk(bin.lhs, out);
+                walk(bin.rhs, out);
+            }
+            _ => out.push(expr),
+        }
+    }
+    let mut out = Vec::new();
+    walk(expr, &mut out);
+    out
+}
 
 /// Extract all instanceof class names from a compound `||` condition.
 ///
