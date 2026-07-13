@@ -49,6 +49,19 @@
 //!    `mixed` but actually returns `stdClass|null`.  The patch
 //!    overrides these return types so that downstream property access
 //!    on query results resolves correctly.
+//!
+//! 6. **Eloquent Builder paginator element types.**
+//!    `paginate()`, `simplePaginate()`, and `cursorPaginate()` declare
+//!    an unparameterised paginator return type, so iterating the result
+//!    yields no element type.  The patch parameterises them with
+//!    `<int, TModel>` so `foreach (Model::paginate() as $row)` resolves
+//!    `$row` to the concrete model.
+//!
+//! 7. **`Storage::fake()` / `persistentFake()` return types.**
+//!    Both declare the `Filesystem` contract but always build a
+//!    concrete `FilesystemAdapter`.  The patch corrects the return type
+//!    so that adapter-only assertion helpers (`assertExists()`,
+//!    `assertMissing()`, …) resolve on the faked disk.
 
 use std::sync::Arc;
 
@@ -66,8 +79,19 @@ const DB_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\DB";
 /// FQN of the `Cache` facade from `illuminate/support`.
 const CACHE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Cache";
 
+/// FQN of the `Storage` facade from `illuminate/support`.
+const STORAGE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Storage";
+
 /// FQN of the base `Connection` class from `illuminate/database`.
 const DB_CONNECTION_FQN: &str = "Illuminate\\Database\\Connection";
+
+/// FQN of the `Filesystem` contract that `Storage::fake()` declares but
+/// never actually returns.
+const FILESYSTEM_CONTRACT_FQN: &str = "Illuminate\\Contracts\\Filesystem\\Filesystem";
+
+/// FQN of the concrete `FilesystemAdapter` that `Storage::fake()` and
+/// `Storage::persistentFake()` always construct at runtime.
+const FILESYSTEM_ADAPTER_FQN: &str = "Illuminate\\Filesystem\\FilesystemAdapter";
 
 /// Apply all registered Laravel class patches to a fully-resolved class.
 ///
@@ -85,6 +109,7 @@ pub fn apply_laravel_patches(class: &mut ClassInfo, fqn: &str) {
         patch_eloquent_builder_call_return_type(class);
         // Builder uses Conditionable, so patch when/unless too.
         patch_conditionable_when_unless(class);
+        patch_eloquent_builder_paginate_element_type(class);
     } else if fqn == CONDITIONABLE_FQN || class_uses_conditionable(class) {
         patch_conditionable_when_unless(class);
     }
@@ -95,6 +120,10 @@ pub fn apply_laravel_patches(class: &mut ClassInfo, fqn: &str) {
 
     if fqn == CACHE_FACADE_FQN {
         patch_cache_facade_generics(class);
+    }
+
+    if fqn == STORAGE_FACADE_FQN {
+        patch_storage_fake_return_types(class);
     }
 }
 
@@ -306,6 +335,75 @@ fn patch_cache_facade_generics(class: &mut ClassInfo) {
         method.template_param_bounds = Default::default();
         method.template_bindings = vec![(atom(TEMPLATE), callback_name)];
         method.return_type = Some(template_return.clone());
+    }
+}
+
+/// Parameterise the `paginate()`, `simplePaginate()`, and
+/// `cursorPaginate()` return types on the Eloquent Builder with the
+/// element type `<int, TModel>`.
+///
+/// The framework declares these methods as returning an unparameterised
+/// paginator (`\Illuminate\Pagination\LengthAwarePaginator`,
+/// `\Illuminate\Contracts\Pagination\Paginator`, and
+/// `\Illuminate\Contracts\Pagination\CursorPaginator`), so
+/// `foreach (Model::paginate() as $row)` has no declared element type.
+/// Every paginator class and contract carries `@template TKey` /
+/// `@template TValue` and exposes its values via
+/// `IteratorAggregate<TKey, TValue>`, so binding `TValue` to the
+/// Builder's `TModel` recovers the element type.  `TModel` is
+/// substituted to the concrete model during Builder resolution, exactly
+/// as it is for `get()`'s `Collection<int, TModel>` return type.
+fn patch_eloquent_builder_paginate_element_type(class: &mut ClassInfo) {
+    for method in class.methods.make_mut().iter_mut() {
+        if !matches!(
+            method.name.as_str(),
+            "paginate" | "simplePaginate" | "cursorPaginate"
+        ) {
+            continue;
+        }
+        // Only patch the bare, unparameterised paginator declaration.  A
+        // hand-written override that already carries generics (a
+        // `PhpType::Generic`) is left untouched.
+        let paginator_name = match method.return_type.as_ref() {
+            Some(PhpType::Named(name)) if name.contains("Paginator") => name.clone(),
+            _ => continue,
+        };
+        let element_type = PhpType::Generic(
+            paginator_name,
+            vec![PhpType::int(), PhpType::Named("TModel".to_owned())],
+        );
+        Arc::make_mut(method).return_type = Some(element_type);
+    }
+}
+
+/// Correct `Storage::fake()` and `Storage::persistentFake()` return
+/// types from the `Filesystem` contract to the concrete
+/// `Illuminate\Filesystem\FilesystemAdapter`.
+///
+/// Both methods declare `@return \Illuminate\Contracts\Filesystem\Filesystem`
+/// but their bodies unconditionally build a `FilesystemAdapter` via
+/// `createLocalDriver()`.  Assertion helpers like `assertExists()` and
+/// `assertMissing()` live only on the concrete adapter, so the idiomatic
+/// `$disk = Storage::fake(); $disk->assertExists(...)` pattern needs the
+/// precise return type to resolve.  This is a declared-type correction
+/// (the runtime type is always the adapter), not container-binding
+/// resolution.
+fn patch_storage_fake_return_types(class: &mut ClassInfo) {
+    let adapter = PhpType::Named(FILESYSTEM_ADAPTER_FQN.to_owned());
+    for method in class.methods.make_mut().iter_mut() {
+        if method.name != "fake" && method.name != "persistentFake" {
+            continue;
+        }
+        // Only correct the honestly-declared contract return.  Leave a
+        // hand-written override with a different type untouched.
+        let returns_contract = method
+            .return_type
+            .as_ref()
+            .and_then(|rt| rt.class_name())
+            .is_some_and(|n| n.trim_start_matches('\\') == FILESYSTEM_CONTRACT_FQN);
+        if returns_contract {
+            Arc::make_mut(method).return_type = Some(adapter.clone());
+        }
     }
 }
 

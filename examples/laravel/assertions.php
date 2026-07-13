@@ -168,6 +168,58 @@ check(
     is_subclass_of(\App\Models\Customer::class, \Illuminate\Contracts\Auth\Authenticatable::class)
 );
 
+// ─── Paginator element types ─────────────────────────────────────────────────
+
+// paginate()/simplePaginate()/cursorPaginate() exist on the Eloquent Builder
+// and the paginators they build are iterable, so a foreach over the result
+// yields the model instances. The analyzer parameterises the return with
+// <int, TModel> to recover the element type.
+foreach (['paginate', 'simplePaginate', 'cursorPaginate'] as $m) {
+    check(
+        "Builder::$m() exists",
+        method_exists(\Illuminate\Database\Eloquent\Builder::class, $m)
+    );
+}
+check(
+    'LengthAwarePaginator is iterable (IteratorAggregate)',
+    is_subclass_of(\Illuminate\Pagination\LengthAwarePaginator::class, \IteratorAggregate::class)
+);
+check(
+    'Paginator is iterable (IteratorAggregate)',
+    is_subclass_of(\Illuminate\Pagination\Paginator::class, \IteratorAggregate::class)
+);
+check(
+    'CursorPaginator is iterable (IteratorAggregate)',
+    is_subclass_of(\Illuminate\Pagination\CursorPaginator::class, \IteratorAggregate::class)
+);
+
+// ─── Storage::fake() concrete adapter ────────────────────────────────────────
+
+// fake() declares the Filesystem contract but always constructs a concrete
+// FilesystemAdapter, which is where the test assertion helpers live. The
+// analyzer corrects the return type to the adapter so these resolve.
+check(
+    'FilesystemAdapter implements the Filesystem contract',
+    is_subclass_of(
+        \Illuminate\Filesystem\FilesystemAdapter::class,
+        \Illuminate\Contracts\Filesystem\Filesystem::class
+    )
+);
+check(
+    'FilesystemAdapter::assertExists() exists',
+    method_exists(\Illuminate\Filesystem\FilesystemAdapter::class, 'assertExists')
+);
+check(
+    'FilesystemAdapter::assertMissing() exists',
+    method_exists(\Illuminate\Filesystem\FilesystemAdapter::class, 'assertMissing')
+);
+// The contract deliberately lacks the assertion helpers — this is why the
+// precise adapter return type matters.
+check(
+    'Filesystem contract does NOT declare assertExists()',
+    !method_exists(\Illuminate\Contracts\Filesystem\Filesystem::class, 'assertExists')
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

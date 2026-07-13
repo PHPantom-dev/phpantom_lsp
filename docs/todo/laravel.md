@@ -18,7 +18,7 @@ within the same impact tier.
 
 | Item | Reason |
 |------|--------|
-| Container string aliases | Requires booting the application. Use `::class` references instead. |
+| Container string aliases from package/provider bindings | Names registered by arbitrary service providers (e.g. `'sentry'`) require scanning provider code. Intended diagnostic; use `::class` references. Names in the framework's own `registerCoreContainerAliases()` and the app's alias config are in scope via parsing. |
 | Facade `getFacadeAccessor()` with string aliases | Requires booting the application. `@method static` tags provide a workable fallback. |
 | Blade templates | Separate project. See `blade.md` for the implementation plan. |
 | Model column types from DB/migrations | Unreasonable complexity. Require `@property` annotations (via ide-helper or hand-written). |
@@ -26,7 +26,7 @@ within the same impact tier.
 | Application provider scanning | Low-value, high-complexity. |
 | Macro discovery (`Macroable` trait) | Requires booting the application to inspect runtime `$macros` static property. `@method` tags provide a workable fallback. |
 | Facade → concrete resolution via booting | Requires booting (`getFacadeRoot()`). When `getFacadeAccessor()` returns a `::class` reference, static resolution is possible without booting. See "Facade completion" section below. |
-| Contract → concrete resolution via app-defined bindings | A service provider's `bind()`/`singleton()` calls require scanning arbitrary provider code, which stays out of scope. The *core* framework contracts have a fixed static default (see L20) and are in scope. |
+| Contract → concrete resolution | Fully out of scope, including core framework contracts. Calling a concrete-only method on a contract-typed value is unsound per the declared types — the diagnostic is intended, exactly as `fn (A $a) => $a->bMethod()` is not a false positive just because `B extends A` at every call site. Where the *framework's own* docblock is needlessly wide, fix the docblock upstream or via stub patches. |
 | Manager → driver resolution | Requires instantiating the manager at runtime. |
 
 ---
@@ -35,6 +35,16 @@ within the same impact tier.
 
 - **No application booting.** We never boot a Laravel application to
   resolve types.
+- **Declared types are the contract.** A diagnostic is a false
+  positive only if the code is correct *per the declared types* of
+  what it calls. Code that works because of runtime container state
+  (contract-typed values whose binding happens to be a specific
+  concrete, string aliases from arbitrary providers) is flagged
+  intentionally; the remedy is an assert, a narrower type in the
+  code, or an upstream docblock fix — never a resolver assumption
+  baked into PHPantom. When we do read framework/project facts, we
+  *parse* the installed source and bail gracefully if the shape is
+  unrecognized; we never ship version-specific baked-in lists.
 - **No SQL/migration parsing.** Model column types are not inferred from
   database schemas or migration files.
 - **Larastan-style hints preferred.** We expect relationship methods to be
@@ -656,99 +666,42 @@ choosing not to ship.
 
 ---
 
-#### L20. Core contract → concrete forwarding via the framework's static alias map
+#### L21. Container string aliases by parsing the framework's own alias declarations
 
-**Impact: High (~55 errors) · Effort: Medium**
+**Impact: Low-Medium (~3 errors) · Effort: Medium**
 
-Methods called on `Illuminate\Contracts\*` interfaces that only
-exist on the concrete implementation: `Filesystem::assertExists` /
-`assertMissing` / `download` (38 errors, luxplus-backoffice
-`Storage::fake()` tests), `View\Factory::getFinder` /
-`getShared` / `callComposer` (9, bladestan),
-`Console\Kernel::registerCommand`, `Session::now`,
-`Auth\Factory::logout`/`id`, `Foundation\Application::routesAreCached`
-(luxplus-backoffice/website). Larastan forwards contract methods to
-the container binding at runtime; the same mapping for *core*
-services is available statically from
-`Illuminate\Foundation\Application::registerCoreContainerAliases()`
-in the framework source — a fixed contract-interface →
-concrete-class table. Ship that static map (framework-version
-tolerant), leave app-defined bindings out of scope.
+String → `::class` resolution only, sourced by *parsing the
+installed framework source* — never a version-specific list baked
+into PHPantom. If Laravel changes the shape to something we don't
+recognize, we bail and the name stays unresolved (intended
+degradation, no guessing):
 
-**Design note (verified against `references/framework`):** the
-`Filesystem` case is safe by construction, not just by convention —
-`Storage::fake()` does not swap in a special test-only class. It
-calls `createLocalDriver()`, which returns the same
-`Illuminate\Filesystem\FilesystemAdapter` used in production (just
-pointed at a temp directory), and `assertExists`/`assertMissing` are
-regular methods on that one class. `FilesystemAdapter` is also the
-contract's only concrete implementor in the framework, so there is
-no test/production divergence risk here, unlike a container-binding
-lookup that can return a mock in one context and a real service in
-another.
+1. **Core container aliases** — parse the literal
+   `'alias' => [Concrete::class, Contract::class, ...]` array out of
+   `Illuminate\Foundation\Application::registerCoreContainerAliases()`
+   in the project's own `vendor/laravel/framework`. Resolves
+   `resolve('blade.compiler')` → `Illuminate\View\Compilers\BladeCompiler`
+   (1 error, bladestan `src/Laravel/View/BladeCompilerFactory.php:18`).
+   Use only the concrete class from each entry (string → class);
+   this is *not* license to forward contract-typed values to
+   concretes (see the out-of-scope table).
+2. **Global facade alias classes** — parse the project's
+   `config/app.php` `'aliases'` value. The modern shape is
+   `Facade::defaultAliases()->merge([...])`; `defaultAliases()` is
+   itself a literal collection in the vendor `Facade.php`, parseable
+   the same way. Resolves the bare `\App` class in
+   non-namespaced helpers (1 error, luxplus-website
+   `app/Http/helpers.php:85`). The existing static config-value
+   reader (`src/virtual_members/laravel/config_values.rs`, built for
+   `config/auth.php`) does not yet handle a
+   `X::staticMethod()->merge([<array>])` chain — `classify_value`
+   only special-cases `env()` — so that recognizer is new work.
 
-That said, the static alias table is still a *compiled-in default*,
-not a project-declared fact like `config/auth.php` — a service
-provider's `bind()`/`singleton()` can override it, and this task
-already (correctly) leaves that scanning out of scope. Rather than
-silently trusting the table, use `find_implementors` (built for
-L22/L22b, `src/definition/implementation.rs`) to check whether the
-*project* defines any additional concrete implementor of the same
-contract. If it does, that is a signal of a possible custom binding
-— widen the result (union) or fall back to the bare contract instead
-of assuming the framework default still applies. This mirrors the
-auth resolver's "raise the floor, don't invent certainty" rule (see
-`src/virtual_members/laravel/auth.rs`) rather than repeating
-Larastan's runtime container resolution.
-
-**Reusable wiring pattern:** the single-injection-point patch built
-for L22 — intercepting at `Backend::find_or_load_class_typed`
-(`src/resolution.rs`), gated on the class's short name, rewriting
-the loaded `ClassInfo` before it is cached — is the right shape for
-this task too. It covers every consumer (completion, hover,
-diagnostics, the forward walker) with no context threading, unlike
-`ResolutionCtx`/`VarResolutionCtx`, which have no `Backend` handle on
-the forward-walk path. Watch for the same re-entry hazard: if
-resolving the concrete class transitively re-loads the interface
-being patched, memoize with a `None` seed before computing (see
-`resolve_auth_user_type` in `auth.rs`) rather than a thread-local
-guard.
-
-#### L21. Container string aliases from the same static map
-
-**Impact: Medium (~10 errors) · Effort: Low (on top of L20)**
-
-`resolve('blade.compiler')` (bladestan), `app()->make('sentry')`
-(luxplus-backoffice, 5 errors + cascades), and the global `App`
-alias class (luxplus-website `app/Http/helpers.php:85`). Core
-aliases ('blade.compiler', 'events', 'files', ...) come from the
-same `registerCoreContainerAliases()` table as L20; the root facade
-aliases (`\App`, `\Route`, ...) are a static list in
-`config/app.php` / `Illuminate\Support\Facades`. Package aliases
-like 'sentry' would additionally need service-provider `bind()` /
-`singleton()` scanning — that half can stay out of scope; the core
-table alone clears the bladestan error and the `App` unknown-class.
-
-**Design note:** the root facade aliases live in the *project's own*
-`config/app.php` (`'aliases' => Facade::defaultAliases()->merge([...])`,
-verified in `references/framework/config/app.php`), which makes this
-half a project-config read rather than a framework-source read —
-directly reusable on top of this session's static config-value
-reader (`src/virtual_members/laravel/config_values.rs`, built for
-L22's `config/auth.php`). That reader does not yet handle a
-method-chain expression like `X::staticMethod()->merge([...])`;
-`classify_value` currently only special-cases the `env()` function
-call. Recognizing `Facade::defaultAliases()->merge([<array>])` (base
-list + the project's literal merge array) is new work, not covered
-by the existing `env()` handling. The *core* alias table
-(`registerCoreContainerAliases()`) is a separate, framework-source
-read and belongs with L20, not this config reader.
-
-Related, not alias-dependent: `app()->make($repository)` /
-`app($repoClass)` where the variable is typed `class-string<T>`
-should resolve to `T` through the existing generic `make()`
-handling (2 errors, luxplus-backoffice
-`app/Jobs/SalesInfo/UpdateSalesInfoLocalJob.php:37`).
+**Stays out of scope:** names registered by package or app service
+providers (`app()->make('sentry')`, 5 errors + cascades,
+luxplus-backoffice) — resolving them means scanning arbitrary
+provider code. Those diagnostics are intended; the code fix is
+`app()->make(HubInterface::class)` or the package's facade.
 
 #### L22b. Guard-argument-aware auth user model
 
@@ -773,3 +726,11 @@ remaining work is wiring that call-site through the shared resolution
 pipeline (which today has no `Backend` handle on the forward-walk
 `VarResolutionCtx` path).
 
+The 2026-07 re-run (after the base L22 fix) still shows ~13
+`user()` sites unresolved that look like coverage gaps of the base
+fix rather than guard arguments: `$this->user()` inside `FormRequest`
+subclasses (9, luxplus-backoffice `app/Http/Requests/**` `authorize()`
+methods) and `$request->user()` / `$this->request->user()` on
+request *properties* (4, luxplus-website `app/Exceptions/Handler.php:74`,
+`app/View/Components/Search/SearchField.php:21`). Verify these
+shapes reach the intercept while doing this task.

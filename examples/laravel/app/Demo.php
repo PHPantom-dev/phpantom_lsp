@@ -17,6 +17,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 
 class Demo
@@ -110,6 +111,17 @@ class Demo
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
+
+        // Paginators carry the model element type through foreach
+        foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
+            $author->profile->getBio();       // → BlogAuthor
+        }
+        foreach (BlogAuthor::simplePaginate() as $author) {
+            $author->posts();                 // → BlogAuthor
+        }
+        foreach (BlogAuthor::cursorPaginate() as $author) {
+            $author->ofGenre('fiction');      // → BlogAuthor
+        }
     }
 
 
@@ -307,5 +319,16 @@ class Demo
         $proxy->headBaker;                // relationship HasOne  → Baker
         $proxy->apricot;                  // $casts 'boolean'     → bool
         $proxy->topping('choc');          // scope method         → Builder
+    }
+
+
+    // ── Storage::fake() resolves to the concrete adapter ────────────────
+
+    public function storageFake(): void
+    {
+        // fake() declares the Filesystem contract but always builds a
+        // FilesystemAdapter, so the adapter-only assertion helpers resolve.
+        Storage::fake('avatars')->assertExists('me.png');
+        Storage::persistentFake('logs')->assertMissing('old.log');
     }
 }

@@ -15,9 +15,12 @@ errors the bug accounts for across the sample projects and are
 approximate — fixing an upstream bug often clears cascading
 errors attributed to other buckets.
 
-Laravel-specific gaps found in the same sweep are filed in
-`docs/todo/laravel.md` (L20–L23). The closure literal-return
-shape gap is filed as T31 in `docs/todo/type-inference.md`.
+Laravel-specific items from the same sweep are in
+`docs/todo/laravel.md` (L21 alias parsing, L22b auth guard
+coverage); ~50 further errors were reclassified as intended
+diagnostics per the declared-types philosophy there. The closure
+literal-return shape gap is filed as T31 in
+`docs/todo/type-inference.md`.
 
 ## B66. Type-guard narrowing lost on compound conditions and non-variable subjects
 
@@ -83,7 +86,7 @@ B58 — either the fix regressed or it never covered the
 
 ## B68. Foreach over an Iterator subclass ignores the inherited generic value type
 
-**Severity: Medium-High (~17 errors: pdepend 5, luxplus-backoffice ~12) · Confirmed from output**
+**Severity: Medium (~5 errors, pdepend) · Confirmed from output**
 
 ```php
 /** @extends FilterIterator<int, SplFileInfo, \Iterator<int, SplFileInfo>> */
@@ -100,10 +103,15 @@ iterator parameters (or the `current()` return type as fallback).
 Instead the element is typed as the iterator class itself, or not
 at all. Also fails for direct SPL iteration
 (`foreach (new DirectoryIterator(...) as $file)`, pdepend
-`tests/php/PDepend/ParserRegressionTest.php:80`) and for Laravel
-paginators (`foreach (ProductGroup::paginate(25) as $productGroup)`,
-luxplus-backoffice `app/Http/Controllers/ProductgroupController.php:24`,
-`app/Http/Controllers/AdminOrdersController.php:110`).
+`tests/php/PDepend/ParserRegressionTest.php:80`).
+
+Note: the ~12 luxplus-backoffice paginator errors
+(`foreach (ProductGroup::paginate(25) as $productGroup)`) initially
+filed here were *not* this bug — they were a framework docblock gap
+(`Builder::paginate()` declared an unparameterized
+`LengthAwarePaginator`), now corrected so the paginators resolve
+their element type through `IteratorAggregate`. This bug is only
+the SPL / direct-iteration case above.
 
 ## B69. Indexing a call result inline breaks the rest of the chain
 
@@ -159,6 +167,14 @@ callback parameter shares its name with an outer variable, the
 parameter silently borrows the *outer* variable's type instead of
 failing (masking the gap and producing wrong types). Closure
 parameters must shadow outer variables unconditionally.
+
+A third facet of the same call-site gap: `app()->make($repository)`
+where `$repository` is a foreach element of a literal
+`[Foo::class, Bar::class, ...]` array — the declared
+`class-string<T>` union never binds `make()`'s template, so the
+chained call is unresolved (2 errors, luxplus-backoffice
+`app/Jobs/SalesInfo/UpdateSalesInfoLocalJob.php:37`). All facts are
+declared; only the argument-shape special-casing is in the way.
 
 ## B71. Mockery mock intersection types lost in collections and arguments
 

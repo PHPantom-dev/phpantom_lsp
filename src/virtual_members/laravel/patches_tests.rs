@@ -7,7 +7,8 @@ use crate::types::MethodInfo;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
 use super::{
-    CACHE_FACADE_FQN, CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN, apply_laravel_patches,
+    CACHE_FACADE_FQN, CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN, STORAGE_FACADE_FQN,
+    apply_laravel_patches,
 };
 
 /// Create a method with a parsed `PhpType` return type.
@@ -751,6 +752,164 @@ fn cache_facade_remember_gets_template() {
             .contains("TCacheValue"),
         "the callback should return TCacheValue, got: {:?}",
         callback.type_hint
+    );
+}
+
+// ─── Eloquent Builder paginate element type patch ───────────────────────────
+
+#[test]
+fn builder_paginate_gets_parameterised() {
+    let mut class = make_class(ELOQUENT_BUILDER_FQN);
+    class.methods = vec![
+        Arc::new(make_method_typed(
+            "paginate",
+            Some(PhpType::Named(
+                "Illuminate\\Pagination\\LengthAwarePaginator".to_string(),
+            )),
+        )),
+        Arc::new(make_method_typed(
+            "simplePaginate",
+            Some(PhpType::Named(
+                "Illuminate\\Contracts\\Pagination\\Paginator".to_string(),
+            )),
+        )),
+        Arc::new(make_method_typed(
+            "cursorPaginate",
+            Some(PhpType::Named(
+                "Illuminate\\Contracts\\Pagination\\CursorPaginator".to_string(),
+            )),
+        )),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, ELOQUENT_BUILDER_FQN);
+
+    let methods: Vec<_> = class.methods.iter().collect();
+    assert_eq!(
+        methods[0].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Pagination\\LengthAwarePaginator<int, TModel>",
+    );
+    assert_eq!(
+        methods[1].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Contracts\\Pagination\\Paginator<int, TModel>",
+    );
+    assert_eq!(
+        methods[2].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Contracts\\Pagination\\CursorPaginator<int, TModel>",
+    );
+}
+
+#[test]
+fn builder_paginate_already_generic_is_not_patched() {
+    let mut class = make_class(ELOQUENT_BUILDER_FQN);
+    let original = PhpType::Generic(
+        "Illuminate\\Pagination\\LengthAwarePaginator".to_string(),
+        vec![
+            PhpType::int(),
+            PhpType::Named("App\\Models\\User".to_string()),
+        ],
+    );
+    class.methods = vec![Arc::new(make_method_typed(
+        "paginate",
+        Some(original.clone()),
+    ))]
+    .into();
+
+    apply_laravel_patches(&mut class, ELOQUENT_BUILDER_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        original.to_string(),
+        "an already-parameterised paginator should be left untouched",
+    );
+}
+
+// ─── Storage fake return type patch ─────────────────────────────────────────
+
+#[test]
+fn storage_fake_contract_becomes_adapter() {
+    let mut class = make_class(STORAGE_FACADE_FQN);
+    class.methods = vec![
+        Arc::new(make_method_typed(
+            "fake",
+            Some(PhpType::Named(
+                "Illuminate\\Contracts\\Filesystem\\Filesystem".to_string(),
+            )),
+        )),
+        Arc::new(make_method_typed(
+            "persistentFake",
+            Some(PhpType::Named(
+                "\\Illuminate\\Contracts\\Filesystem\\Filesystem".to_string(),
+            )),
+        )),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
+
+    let methods: Vec<_> = class.methods.iter().collect();
+    assert_eq!(
+        methods[0].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Filesystem\\FilesystemAdapter",
+    );
+    assert_eq!(
+        methods[1].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Filesystem\\FilesystemAdapter",
+        "a leading-backslash contract FQN should also be corrected",
+    );
+}
+
+#[test]
+fn storage_fake_non_contract_return_is_not_patched() {
+    let mut class = make_class(STORAGE_FACADE_FQN);
+    let original = PhpType::Named("Illuminate\\Filesystem\\FilesystemAdapter".to_string());
+    class.methods = vec![Arc::new(make_method_typed("fake", Some(original.clone())))].into();
+
+    apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        original.to_string(),
+        "a return type that is already the adapter should be left untouched",
+    );
+}
+
+#[test]
+fn storage_other_method_is_not_patched() {
+    let mut class = make_class(STORAGE_FACADE_FQN);
+    let original = PhpType::Named("Illuminate\\Contracts\\Filesystem\\Filesystem".to_string());
+    class.methods = vec![Arc::new(make_method_typed("disk", Some(original.clone())))].into();
+
+    apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        original.to_string(),
+        "disk() honestly returns the contract and must not be patched",
     );
 }
 

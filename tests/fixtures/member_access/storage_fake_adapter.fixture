@@ -1,0 +1,37 @@
+// test: Storage::fake() resolves to the concrete FilesystemAdapter
+// feature: completion
+// The facade declares fake() as returning the Filesystem contract, but its
+// body always builds a FilesystemAdapter. The Laravel patch corrects the
+// return type so adapter-only assertion helpers resolve on the faked disk.
+// expect: assertExists(
+---
+=== src/Storage.php ===
+<?php
+namespace Illuminate\Support\Facades;
+class Storage {
+    /** @return \Illuminate\Contracts\Filesystem\Filesystem */
+    public static function fake($disk = null, array $config = []) {}
+}
+=== src/Filesystem.php ===
+<?php
+namespace Illuminate\Contracts\Filesystem;
+interface Filesystem {
+    public function get(string $path): ?string;
+}
+=== src/FilesystemAdapter.php ===
+<?php
+namespace Illuminate\Filesystem;
+class FilesystemAdapter implements \Illuminate\Contracts\Filesystem\Filesystem {
+    public function get(string $path): ?string {}
+    public function assertExists(string $path): self {}
+}
+=== src/Test.php ===
+<?php
+namespace App;
+use Illuminate\Support\Facades\Storage;
+class Test {
+    public function run(): void
+    {
+        Storage::fake()-><>
+    }
+}

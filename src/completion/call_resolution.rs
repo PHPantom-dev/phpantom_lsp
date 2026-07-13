@@ -1104,39 +1104,44 @@ impl Backend {
                 };
 
                 if let Some(ref owner) = owner_class {
+                    // Fully resolve the owner so post-resolution patches
+                    // (e.g. Laravel facade return-type corrections) and
+                    // inherited / interface-merged members are visible.
+                    // The static path otherwise reads the raw parsed class,
+                    // whose own real methods shadow the patched versions
+                    // that only exist on the merged class.  The call is
+                    // cached, so it doesn't duplicate work.
+                    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                        owner,
+                        ctx.class_loader,
+                        ctx.resolved_class_cache,
+                    );
+
                     // Capture return type hint for static method calls.
-                    // The resolve_class_fully call is cached, so this
-                    // doesn't duplicate work.
-                    if let Some(ref mut hint_out) = return_type_hint_out {
-                        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                            owner,
-                            ctx.class_loader,
-                            ctx.resolved_class_cache,
-                        );
-                        if let Some(m) = merged.get_method_ci(method_name)
-                            && let Some(ref ret) = m.return_type
-                        {
-                            // Resolve self/static/parent keywords to
-                            // concrete class names (mirrors instance path).
-                            let resolved_hint = if ret.is_parent_ref() {
-                                owner
-                                    .parent_class
-                                    .as_ref()
-                                    .map(|p| PhpType::Named(p.to_string()))
-                                    .unwrap_or_else(|| ret.clone())
-                            } else if ret.is_self_like() {
-                                PhpType::Named(owner.fqn().to_string())
-                            } else {
-                                ret.clone()
-                            };
-                            **hint_out = Some(resolved_hint);
-                        }
+                    if let Some(ref mut hint_out) = return_type_hint_out
+                        && let Some(m) = merged.get_method_ci(method_name)
+                        && let Some(ref ret) = m.return_type
+                    {
+                        // Resolve self/static/parent keywords to
+                        // concrete class names (mirrors instance path).
+                        let resolved_hint = if ret.is_parent_ref() {
+                            merged
+                                .parent_class
+                                .as_ref()
+                                .map(|p| PhpType::Named(p.to_string()))
+                                .unwrap_or_else(|| ret.clone())
+                        } else if ret.is_self_like() {
+                            PhpType::Named(merged.fqn().to_string())
+                        } else {
+                            ret.clone()
+                        };
+                        **hint_out = Some(resolved_hint);
                     }
 
                     let split_args = split_text_args(text_args);
                     let arg_refs = split_args.to_vec();
                     let template_subs =
-                        Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
+                        Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
                     let var_resolver = build_var_resolver(ctx);
                     let mr_ctx = MethodReturnCtx {
                         all_classes: ctx.all_classes,
@@ -1148,7 +1153,7 @@ impl Backend {
                         is_static: true,
                     };
                     return Self::resolve_method_return_types_with_args(
-                        owner,
+                        &merged,
                         method_name,
                         text_args,
                         &mr_ctx,
