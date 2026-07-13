@@ -409,18 +409,3 @@ Binding `class-string<A|B>` against `class-string<T>` truncates
 the union to its first member on the "expects" side and strips the
 `class-string` wrapper on the "got" side; the call is actually
 well-typed (phpmd `tests/php/PHPMD/AbstractTestCase.php:556`).
-
-## B84. Template bindings leak across call sites
-
-**Severity: Low (1 error, pdepend) · Hypothesis from output**
-
-`parseWhileStatement()` passing an `ASTWhileStatement` into
-`setNodePositionsAndReturn(parseStatementBody($stmt))`
-(both `@template T` identity helpers) reports "Argument 1 ($node)
-expects PDepend\Source\AST\ASTForStatement, got
-PDepend\Source\AST\ASTWhileStatement"
-(`src/Source/Language/PHP/AbstractPHPParser.php:4463`). The
-`ASTForStatement` binding can only have come from a *different*
-call site (`parseForStatement`), so a template substitution map is
-being cached per function rather than per call. Not reproduced in
-isolation yet — audit the substitution cache keying first.

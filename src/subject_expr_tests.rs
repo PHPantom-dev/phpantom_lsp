@@ -1011,3 +1011,59 @@ fn parse_this_prop_bracket_arrow_bracket() {
         other => panic!("Expected PropertyChain, got: {other:?}"),
     }
 }
+
+// ── Local variable collection (cache-key scope discrimination) ────────
+
+#[test]
+fn collect_local_vars_from_arg() {
+    // `$this->parse($stmt)` — the receiver is class-relative but the
+    // argument is a local variable, so its type governs the result.
+    let parsed = SubjectExpr::parse("$this->parse($stmt)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert_eq!(vars, vec!["$stmt".to_string()]);
+    assert!(parsed.references_local_variable());
+}
+
+#[test]
+fn collect_local_vars_ignores_this() {
+    // `$this->foo($this->bar)` references only `$this`, which is
+    // class-relative, not a local variable.
+    let parsed = SubjectExpr::parse("$this->foo($this->bar)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert!(vars.is_empty(), "expected no local vars, got: {vars:?}");
+    assert!(!parsed.references_local_variable());
+}
+
+#[test]
+fn collect_local_vars_from_receiver_and_args() {
+    // `$q->where($col, $val)` — receiver and both arguments are locals.
+    let parsed = SubjectExpr::parse("$q->where($col, $val)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    vars.sort();
+    assert_eq!(
+        vars,
+        vec!["$col".to_string(), "$q".to_string(), "$val".to_string()]
+    );
+}
+
+#[test]
+fn collect_local_vars_none_for_static_call() {
+    // `Foo::make(Bar::class)` — no local variables at all.
+    let parsed = SubjectExpr::parse("Foo::make(Bar::class)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert!(vars.is_empty(), "expected no local vars, got: {vars:?}");
+    assert!(!parsed.references_local_variable());
+}
+
+#[test]
+fn collect_local_vars_nested_call_args() {
+    // `$this->outer($this->inner($stmt))` — nested call argument variable.
+    let parsed = SubjectExpr::parse("$this->outer($this->inner($stmt))");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert_eq!(vars, vec!["$stmt".to_string()]);
+}

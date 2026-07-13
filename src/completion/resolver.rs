@@ -390,7 +390,29 @@ pub(crate) fn resolve_target_classes_expr(
         _ => false,
     };
     if is_cacheable_chain {
-        let cache_key = expr.to_subject_text();
+        // A chain that references a local variable (as receiver or as a call
+        // argument) can resolve to different types at call sites where the
+        // variable holds a different type — e.g. `$this->parse($stmt)` where
+        // `$stmt` is a different subtype in two methods, or a `@template T`
+        // method binding `@return T` from a variable argument.  Keying by the
+        // subject text alone would leak the result across sites, so mix in a
+        // discriminator built from those variables' resolved types: sites
+        // where the variables share a type still share the cache entry (so
+        // the common case stays fast), while differently-typed sites get
+        // distinct entries.  When the variables can't be resolved cheaply
+        // (no active scope), fall back to a per-site key so nothing leaks.
+        // Chains with no local variables keep the shared text-only key.
+        let cache_key = {
+            let mut vars = Vec::new();
+            expr.collect_local_variables(&mut vars);
+            if vars.is_empty() {
+                expr.to_subject_text()
+            } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
+                format!("{}{}", expr.to_subject_text(), disc)
+            } else {
+                format!("{}@{}", expr.to_subject_text(), ctx.cursor_offset)
+            }
+        };
         let cached = CHAIN_CACHE.with(|cell| {
             let borrow = cell.borrow();
             borrow.as_ref().and_then(|map| map.get(&cache_key).cloned())
@@ -1275,6 +1297,55 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
     }
 
     None
+}
+
+/// Builds a cache-key discriminator from the resolved types of the local
+/// variables an expression references, so that two textually identical
+/// chains resolve from separate cache entries when their variables hold
+/// different types.
+///
+/// Returns `None` when variable types cannot be resolved cheaply (no
+/// forward-walk scope resolver and no active diagnostic scope snapshot);
+/// the caller then falls back to a per-site key.  Variables that resolve
+/// to nothing contribute an empty type: an unresolvable receiver yields an
+/// empty chain result regardless, so sharing those entries is safe.
+fn scope_type_discriminator(vars: &[String], ctx: &ResolutionCtx<'_>) -> Option<String> {
+    use crate::completion::variable::forward_walk;
+
+    let scope_active =
+        forward_walk::is_diagnostic_scope_active() && !forward_walk::is_building_scopes();
+    if ctx.scope_var_resolver.is_none() && !scope_active {
+        return None;
+    }
+
+    let mut names: Vec<&String> = vars.iter().collect();
+    names.sort();
+    names.dedup();
+
+    let mut disc = String::new();
+    for name in names {
+        let resolved: Vec<ResolvedType> = if let Some(scope_resolver) = ctx.scope_var_resolver {
+            scope_resolver(name)
+        } else {
+            forward_walk::lookup_diagnostic_scope(name, ctx.cursor_offset).unwrap_or_default()
+        };
+
+        let mut parts: Vec<String> = resolved
+            .iter()
+            .map(|rt| match &rt.class_info {
+                Some(ci) => ci.fqn().to_string(),
+                None => rt.type_string.to_string(),
+            })
+            .collect();
+        parts.sort();
+        parts.dedup();
+
+        disc.push('|');
+        disc.push_str(name);
+        disc.push('=');
+        disc.push_str(&parts.join("&"));
+    }
+    Some(disc)
 }
 
 /// Shared variable-resolution logic extracted from the former

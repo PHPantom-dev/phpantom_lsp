@@ -375,6 +375,54 @@ impl SubjectExpr {
         )
     }
 
+    /// Collects the names of genuine local variables (`$var`, but not
+    /// `$this`) referenced anywhere in this expression — both as receivers
+    /// (`$stmt->foo()`) and as call arguments (`$this->parse($stmt)`).
+    /// Names are appended to `out` (with their leading `$`), possibly with
+    /// duplicates.
+    ///
+    /// A local variable's type comes from assignments visible at the cursor,
+    /// so the same expression text can resolve to different types at
+    /// different call sites depending on what those variables hold.  Any
+    /// cache keyed by the subject text alone must therefore mix in a
+    /// discriminator built from these variables' resolved types.  `$this`,
+    /// `self`, `static`, and `parent` are class-relative rather than local,
+    /// so they are not collected.
+    pub fn collect_local_variables(&self, out: &mut Vec<String>) {
+        match self {
+            SubjectExpr::Variable(name) => out.push(name.clone()),
+            SubjectExpr::PropertyChain { base, .. }
+            | SubjectExpr::MethodCall { base, .. }
+            | SubjectExpr::ArrayAccess { base, .. } => base.collect_local_variables(out),
+            SubjectExpr::CallExpr { callee, args_text } => {
+                callee.collect_local_variables(out);
+                collect_text_local_variables(args_text, out);
+            }
+            SubjectExpr::InlineArray { elements, .. } => {
+                for elem in elements {
+                    collect_text_local_variables(elem, out);
+                }
+            }
+            SubjectExpr::This
+            | SubjectExpr::SelfKw
+            | SubjectExpr::StaticKw
+            | SubjectExpr::Parent
+            | SubjectExpr::StaticMethodCall { .. }
+            | SubjectExpr::StaticAccess { .. }
+            | SubjectExpr::NewExpr { .. }
+            | SubjectExpr::ClassName(_)
+            | SubjectExpr::FunctionCall(_) => {}
+        }
+    }
+
+    /// Returns `true` if this expression references any genuine local
+    /// variable (see [`collect_local_variables`](Self::collect_local_variables)).
+    pub fn references_local_variable(&self) -> bool {
+        let mut vars = Vec::new();
+        self.collect_local_variables(&mut vars);
+        !vars.is_empty()
+    }
+
     /// Parse the callee portion of a call expression (everything before
     /// the opening `(`).
     ///
@@ -387,6 +435,30 @@ impl SubjectExpr {
 }
 
 // ─── SubjectExpr parsing helpers ────────────────────────────────────────────
+
+/// Appends the names of genuine local variables (`$name`, but not `$this`)
+/// found in a raw argument/element text to `out`, each with its leading
+/// `$`.  Used to gather the variables an expression's resolution depends
+/// on so a cache key can be made scope-aware.
+fn collect_text_local_variables(text: &str, out: &mut Vec<String>) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+            if end > start && !text[start..end].eq_ignore_ascii_case("this") {
+                out.push(text[i..end].to_string());
+            }
+            i = end.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+}
 
 /// Parse the callee portion of a call expression (everything before the
 /// opening `(`).

@@ -33,6 +33,19 @@ fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
     out
 }
 
+/// Collect diagnostics through the full slow-diagnostic pipeline so that
+/// the chain resolution cache is active (as it is during real analysis
+/// and LSP requests).  Needed for tests that exercise cross-call-site
+/// caching behaviour.
+fn collect_slow(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+    out
+}
+
 fn has_type_error(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
         d.code.as_ref().is_some_and(
@@ -5639,5 +5652,114 @@ function test(): void
         !has_type_error(&diags),
         "T must bind to Connector, not class-string<Connector>: {:?}",
         type_error_messages(&diags)
+    );
+}
+
+// ─── Template bindings must not leak across call sites ───────────────────────
+
+#[test]
+fn template_binding_does_not_leak_across_call_sites() {
+    // Two methods each pass a differently-typed local variable (both named
+    // `$stmt`) through a pair of `@template T` identity helpers.  The chain
+    // resolution cache keys call chains by subject text, so without a scope
+    // discriminator the binding `T => ForNode` from the first method would
+    // leak into the second, wrongly flagging the second call's argument.
+    let php = r#"<?php
+class Node {}
+class Stmt extends Node {}
+class ForNode extends Stmt {}
+class WhileNode extends Stmt {}
+
+class Parser
+{
+    /**
+     * @template T of Node
+     * @param T $node
+     * @return T
+     */
+    protected function setPositions(Node $node): Node
+    {
+        return $node;
+    }
+
+    /**
+     * @template T of Stmt
+     * @param T $stmt
+     * @return T
+     */
+    private function parseBody(Stmt $stmt): Stmt
+    {
+        return $stmt;
+    }
+
+    private function parseFor(): ForNode
+    {
+        $stmt = new ForNode();
+        return $this->setPositions($this->parseBody($stmt));
+    }
+
+    private function parseWhile(): WhileNode
+    {
+        $stmt = new WhileNode();
+        return $this->setPositions($this->parseBody($stmt));
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    assert!(
+        !has_type_error(&diags),
+        "Template bindings leaked across call sites: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn per_site_binding_still_flags_real_mismatch() {
+    // Same identity-helper call text at two sites with differently-typed
+    // `$node`.  The first site is well-typed; the second passes the wrong
+    // type onward.  The per-site cache discriminator must keep the second
+    // site's binding distinct so the real mismatch is still reported (and
+    // not masked by sharing the first site's clean result).
+    let php = r#"<?php
+class Alpha {}
+class Beta {}
+
+function needsAlpha(Alpha $a): void {}
+
+class Helper
+{
+    /**
+     * @template T
+     * @param T $node
+     * @return T
+     */
+    public function identity($node)
+    {
+        return $node;
+    }
+
+    public function ok(): void
+    {
+        $node = new Alpha();
+        needsAlpha($this->identity($node));
+    }
+
+    public function bad(): void
+    {
+        $node = new Beta();
+        needsAlpha($this->identity($node));
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected exactly one mismatch (the Beta site), got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("Alpha") && msgs[0].contains("Beta"),
+        "Expected Alpha/Beta mismatch, got: {msgs:?}"
     );
 }
