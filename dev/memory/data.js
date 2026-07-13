@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783942070580,
+  "lastUpdate": 1783945877910,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14143,6 +14143,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9a8838a6c13fb47b46d572102879049e06e63df1",
+          "message": "A generic helper call no longer borrows a type from an unrelated call\nsite",
+          "timestamp": "2026-07-13T14:18:52+02:00",
+          "tree_id": "6afa6e6d15eac619a228000eb1fd9f9686a76283",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9a8838a6c13fb47b46d572102879049e06e63df1"
+        },
+        "date": 1783945876620,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 53.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 63.8,
             "unit": "MiB"
           }
         ]
