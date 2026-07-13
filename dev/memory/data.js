@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783938076325,
+  "lastUpdate": 1783939107095,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13973,6 +13973,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "27d4ef3198fbfe0635d091de0f4207cbaf6c2f9b",
+          "message": "Add support for `@see Class#method` docblock references",
+          "timestamp": "2026-07-13T12:25:37+02:00",
+          "tree_id": "1267d3f47f930cd605aa25bfe4f8b48fb8663178",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/27d4ef3198fbfe0635d091de0f4207cbaf6c2f9b"
+        },
+        "date": 1783939105153,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.3,
             "unit": "MiB"
           }
         ]
