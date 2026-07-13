@@ -666,43 +666,6 @@ choosing not to ship.
 
 ---
 
-#### L21. Container string aliases by parsing the framework's own alias declarations
-
-**Impact: Low-Medium (~3 errors) · Effort: Medium**
-
-String → `::class` resolution only, sourced by *parsing the
-installed framework source* — never a version-specific list baked
-into PHPantom. If Laravel changes the shape to something we don't
-recognize, we bail and the name stays unresolved (intended
-degradation, no guessing):
-
-1. **Core container aliases** — parse the literal
-   `'alias' => [Concrete::class, Contract::class, ...]` array out of
-   `Illuminate\Foundation\Application::registerCoreContainerAliases()`
-   in the project's own `vendor/laravel/framework`. Resolves
-   `resolve('blade.compiler')` → `Illuminate\View\Compilers\BladeCompiler`
-   (1 error, bladestan `src/Laravel/View/BladeCompilerFactory.php:18`).
-   Use only the concrete class from each entry (string → class);
-   this is *not* license to forward contract-typed values to
-   concretes (see the out-of-scope table).
-2. **Global facade alias classes** — parse the project's
-   `config/app.php` `'aliases'` value. The modern shape is
-   `Facade::defaultAliases()->merge([...])`; `defaultAliases()` is
-   itself a literal collection in the vendor `Facade.php`, parseable
-   the same way. Resolves the bare `\App` class in
-   non-namespaced helpers (1 error, luxplus-website
-   `app/Http/helpers.php:85`). The existing static config-value
-   reader (`src/virtual_members/laravel/config_values.rs`, built for
-   `config/auth.php`) does not yet handle a
-   `X::staticMethod()->merge([<array>])` chain — `classify_value`
-   only special-cases `env()` — so that recognizer is new work.
-
-**Stays out of scope:** names registered by package or app service
-providers (`app()->make('sentry')`, 5 errors + cascades,
-luxplus-backoffice) — resolving them means scanning arbitrary
-provider code. Those diagnostics are intended; the code fix is
-`app()->make(HubInterface::class)` or the package's facade.
-
 #### L22b. Guard-argument-aware auth user model
 
 **Impact: Low-Medium · Effort: Medium**

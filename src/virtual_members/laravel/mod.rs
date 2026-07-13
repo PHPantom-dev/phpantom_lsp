@@ -76,6 +76,7 @@
 //!   (for `User::whereName('Alice')`).
 
 mod accessors;
+mod aliases;
 mod auth;
 mod builder;
 mod casts;
@@ -92,6 +93,7 @@ mod trans_keys;
 mod view_names;
 mod where_property;
 
+pub(crate) use aliases::LaravelAliases;
 pub(crate) use auth::patch_auth_user_class;
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{

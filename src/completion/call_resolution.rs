@@ -1166,6 +1166,21 @@ impl Backend {
             SubjectExpr::FunctionCall(func_name) => {
                 let func_name = func_name.as_str();
 
+                // ── Laravel container string binding ────────────────
+                // `app('blade.compiler')` / `resolve('cache')` bind a plain
+                // string to a concrete class.  The class-string form
+                // (`app(User::class)`) is handled by the conditional return
+                // type below; only a literal string binding is intercepted
+                // here, resolved via the framework's own alias table.
+                let normalized_func = func_name.trim_start_matches('\\');
+                if matches!(normalized_func, "app" | "resolve")
+                    && let Some(binding) = Self::extract_first_arg_text(text_args)
+                    && let Some(name) = crate::util::unquote_php_string(&binding)
+                    && let Some(cls) = (ctx.class_loader)(name)
+                {
+                    return vec![cls];
+                }
+
                 // Check for array element/preserving functions first.
                 let is_array_element_func = ARRAY_ELEMENT_FUNCS
                     .iter()

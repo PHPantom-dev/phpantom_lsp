@@ -47,6 +47,7 @@ mod completion_guard_clauses;
 mod completion_in_array_narrowing;
 mod completion_inheritance;
 mod completion_laravel;
+mod completion_laravel_aliases;
 mod completion_laravel_auth;
 mod completion_magic_methods;
 mod completion_match_expression;

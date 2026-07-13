@@ -482,6 +482,7 @@ impl LanguageServer for Backend {
         // the now-complete index rebuild every merge correctly.
         self.resolved_class_cache.write().clear();
         self.auth_user_type_cache.write().clear();
+        *self.laravel_aliases.write() = None;
 
         // Mark initialization as complete so that diagnostic workers
         // and pull handlers know the project is fully indexed.
@@ -2379,6 +2380,7 @@ impl Backend {
             self.class_not_found_cache.write().clear();
             self.resolved_class_cache.write().clear();
             self.auth_user_type_cache.write().clear();
+            *self.laravel_aliases.write() = None;
             self.member_completion_cache.lock().clear();
         }
 

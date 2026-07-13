@@ -438,6 +438,16 @@ pub struct Backend {
     /// whenever files are re-parsed, so edits to `config/auth.php` take
     /// effect without a restart.
     pub(crate) auth_user_type_cache: Arc<RwLock<HashMap<String, Option<crate::php_type::PhpType>>>>,
+    /// Memoized Laravel alias tables, parsed from the installed framework
+    /// source (`registerCoreContainerAliases()`, `Facade::defaultAliases()`)
+    /// and the project's `config/app.php`.
+    ///
+    /// `None` means "not yet computed"; an inner empty map means "computed and
+    /// this project has no such aliases" (e.g. a non-Laravel project). Cleared
+    /// whenever files are re-parsed so edits to `config/app.php` take effect
+    /// without a restart.
+    pub(crate) laravel_aliases:
+        Arc<RwLock<Option<Arc<virtual_members::laravel::LaravelAliases>>>>,
     /// Per-target member completion cache.
     ///
     /// Typing `$model->wh...` triggers a completion request for each
@@ -853,6 +863,7 @@ impl Backend {
             stub_constant_index: RwLock::new(stubs::build_stub_constant_index()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
+            laravel_aliases: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -942,6 +953,7 @@ impl Backend {
             stub_constant_index: RwLock::new(HashMap::new()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
+            laravel_aliases: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1506,6 +1518,7 @@ impl Backend {
             stub_index: RwLock::new(self.stub_index.read().clone()),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
+            laravel_aliases: Arc::clone(&self.laravel_aliases),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),

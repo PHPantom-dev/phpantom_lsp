@@ -79,7 +79,16 @@ impl Backend {
         // Defensively strip nullable prefix (`?Foo` → `Foo`) and generic
         // parameters (`Collection<int, User>` → `Collection`) so that
         // callers don't need to normalise before lookup.
-        self.find_or_load_class_typed(&PhpType::parse(class_name))
+        if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(class_name)) {
+            return Some(cls);
+        }
+        // Fall back to Laravel's own alias tables (container string aliases and
+        // global facade class aliases), parsed from the installed framework
+        // source.  Only reached when every ordinary phase has missed, so a
+        // real project class of the same name always wins, and non-class
+        // strings like `blade.compiler` still resolve to their bound concrete
+        // class.
+        self.resolve_laravel_alias(class_name)
     }
 
     /// Like [`find_or_load_class`], but accepts a pre-parsed `PhpType`,

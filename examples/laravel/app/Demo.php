@@ -331,4 +331,21 @@ class Demo
         Storage::fake('avatars')->assertExists('me.png');
         Storage::persistentFake('logs')->assertMissing('old.log');
     }
+
+
+    // ── Container string aliases & global facades ───────────────────────
+
+    public function containerAliases(): void
+    {
+        // Laravel binds these string keys to concrete classes in the
+        // container.  PHPantom reads the framework's own alias table
+        // (`Application::registerCoreContainerAliases()`), so the concrete
+        // class resolves instead of `mixed`.
+        resolve('blade.compiler')->compileString('<x-foo />');  // → BladeCompiler
+        app('cache')->store();                                  // → CacheManager
+
+        // A bare global facade alias resolves without an explicit import,
+        // from the framework's own `Facade::defaultAliases()` table.
+        \App::environment('production');                        // → App facade
+    }
 }
