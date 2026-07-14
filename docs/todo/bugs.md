@@ -201,23 +201,3 @@ though it was assigned `new stdClass()` two lines up
 Track property assignments on `stdClass` values (PHPStan models
 this exactly), or at minimum resolve `stdClass` property reads to
 `stdClass`-typed values assigned in the same scope.
-
-## B75. `[Foo::class, 'name']` array literals are validated as callables
-
-**Severity: Medium (~5 errors, pdepend) · Confirmed from source**
-
-A two-element array literal whose first element is a class constant
-or object and whose second is a string literal is checked as a
-static/instance callable even when it is plain data:
-
-```php
-return [
-    [Chart::class, 'svg'],   // "Method 'svg' not found on class '...Chart'"
-    [$namespacePrefix, 'match'],  // "Cannot access method 'match' on type 'string'"
-];
-```
-
-(pdepend `tests/php/PDepend/Bugs/PHPDependBug13405179Test.php:97-100`,
-`tests/.../PHP81/MatchExpressionTest.php:81`.) Only treat such an
-array as a callable when it flows into a callable-typed context
-(callable parameter, `is_callable`, invocation).

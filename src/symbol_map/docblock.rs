@@ -1474,6 +1474,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                     is_static: true,
                     is_method_call: false,
                     is_docblock_reference: true,
+                    is_array_callable: false,
                 },
             });
         }
@@ -1508,6 +1509,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 is_static: false,
                 is_method_call: false,
                 is_docblock_reference: true,
+                is_array_callable: false,
             },
         });
     } else {

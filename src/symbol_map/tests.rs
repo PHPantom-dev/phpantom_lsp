@@ -4034,3 +4034,40 @@ fn array_callable_ignores_non_identifier_method_string() {
         "non-identifier string must not emit a member-access span"
     );
 }
+
+#[test]
+fn array_callable_span_is_marked_as_array_callable() {
+    // A `[Class::class, 'method']` span carries the `is_array_callable`
+    // flag so diagnostics can distinguish it from a real `::`/`->` access.
+    let php = "<?php\nRoute::get('/', [IndexPageController::class, 'indexPage']);\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("indexPage']").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method string");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            is_array_callable, ..
+        } => assert!(
+            *is_array_callable,
+            "array-callable span should set is_array_callable"
+        ),
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}
+
+#[test]
+fn real_member_access_is_not_marked_as_array_callable() {
+    // A genuine `->method()` access must not carry the array-callable flag.
+    let php = "<?php\n$obj->doThing();\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("doThing").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method name");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            is_array_callable, ..
+        } => assert!(
+            !*is_array_callable,
+            "real member access should not set is_array_callable"
+        ),
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}

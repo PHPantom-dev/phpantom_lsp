@@ -1161,6 +1161,7 @@ fn extract_from_trait_alias_adaptation<'a>(
                     is_static: true,
                     is_method_call: true,
                     is_docblock_reference: false,
+                    is_array_callable: false,
                 },
             });
         }
@@ -1178,6 +1179,7 @@ fn extract_from_trait_alias_adaptation<'a>(
                     is_static: true,
                     is_method_call: true,
                     is_docblock_reference: false,
+                    is_array_callable: false,
                 },
             });
         }
@@ -1197,6 +1199,7 @@ fn extract_from_trait_alias_adaptation<'a>(
                 is_static: true,
                 is_method_call: true,
                 is_docblock_reference: false,
+                is_array_callable: false,
             },
         });
     }
@@ -1231,6 +1234,7 @@ fn extract_from_trait_precedence_adaptation<'a>(
             is_static: true,
             is_method_call: true,
             is_docblock_reference: false,
+            is_array_callable: false,
         },
     });
 
@@ -2024,6 +2028,7 @@ fn extract_from_expression<'a>(
                             is_static: false,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                     // Laravel: if this is a ->group() call, check for
@@ -2077,6 +2082,7 @@ fn extract_from_expression<'a>(
                             is_static: false,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                 }
@@ -2104,6 +2110,7 @@ fn extract_from_expression<'a>(
                             is_static: true,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                     let clean_subject = strip_fqn_prefix(&subject_text);
@@ -2168,6 +2175,7 @@ fn extract_from_expression<'a>(
                                     is_static: false,
                                     is_method_call: false,
                                     is_docblock_reference: false,
+                                    is_array_callable: false,
                                 },
                             });
                         }
@@ -2196,6 +2204,7 @@ fn extract_from_expression<'a>(
                                     is_static: false,
                                     is_method_call: false,
                                     is_docblock_reference: false,
+                                    is_array_callable: false,
                                 },
                             });
                         }
@@ -2226,6 +2235,7 @@ fn extract_from_expression<'a>(
                                 is_static: true,
                                 is_method_call: false,
                                 is_docblock_reference: false,
+                                is_array_callable: false,
                             },
                         });
                     }
@@ -2248,6 +2258,7 @@ fn extract_from_expression<'a>(
                                     is_static: true,
                                     is_method_call: false,
                                     is_docblock_reference: false,
+                                    is_array_callable: false,
                                 },
                             });
                         }
@@ -2742,6 +2753,7 @@ fn extract_from_expression<'a>(
                             is_static: false,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                 }
@@ -2760,6 +2772,7 @@ fn extract_from_expression<'a>(
                             is_static: true,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                 }
@@ -3543,6 +3556,7 @@ fn try_emit_array_callable_span(
             is_static,
             is_method_call: true,
             is_docblock_reference: false,
+            is_array_callable: true,
         },
     });
 }
@@ -3839,6 +3853,7 @@ fn laravel_route_scan_expr(
                     is_static: true,
                     is_method_call: true,
                     is_docblock_reference: false,
+                    is_array_callable: false,
                 },
             });
         }

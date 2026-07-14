@@ -5459,3 +5459,54 @@ fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
          global stub, which has no `accept()`, got: {diags:?}"
     );
 }
+
+// ─── Array callables are data, not member accesses ──────────────────────────
+
+/// A `[Class::class, 'method']` pair nested in a returned array is plain
+/// data (a `list<list<string>>`), not a callable, so its second element
+/// must not be validated as a static method.
+#[test]
+fn array_of_class_string_pairs_is_not_validated_as_callables() {
+    let backend = create_test_backend();
+    let uri = "file:///pairs.php";
+    let text = concat!(
+        "<?php\n",
+        "class Chart {}\n",
+        "class Report {}\n",
+        "class Registry {\n",
+        "    public function names(): array {\n",
+        "        return [\n",
+        "            [Chart::class, 'svg'],\n",
+        "            [Report::class, 'xml'],\n",
+        "        ];\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "data pairs like [Chart::class, 'svg'] must not be validated as method calls, got: {diags:?}"
+    );
+}
+
+/// A `[$var, 'method']` pair passed as the data argument of `array_filter`
+/// (whose first parameter is the array, not the callback) must not be
+/// validated as an instance method call on the variable.
+#[test]
+fn array_data_argument_to_builtin_is_not_validated_as_callable() {
+    let backend = create_test_backend();
+    let uri = "file:///data_arg.php";
+    let text = concat!(
+        "<?php\n",
+        "function build(string $prefix): array {\n",
+        "    return array_filter([$prefix, 'match']);\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a data array passed to array_filter must not be validated as a method call, got: {diags:?}"
+    );
+}

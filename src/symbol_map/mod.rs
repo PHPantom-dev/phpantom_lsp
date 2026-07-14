@@ -145,6 +145,16 @@ pub(crate) enum SymbolKind {
         /// Diagnostics skip these because the subject is a class name,
         /// not a runtime expression.
         is_docblock_reference: bool,
+        /// `true` when this span was synthesised from a two-element
+        /// `[Class::class, 'method']` / `[$obj, 'method']` array literal
+        /// rather than a real `->`/`::` access.  These spans are a
+        /// best-effort navigation aid: without type-flow analysis we
+        /// cannot tell a callable array from a plain data pair (e.g.
+        /// `return [[Foo::class, 'name'], ...]`), so diagnostics skip
+        /// them to avoid false "method not found" errors.  Navigation,
+        /// hover, and semantic tokens still use them because they only
+        /// surface information when the member actually resolves.
+        is_array_callable: bool,
     },
 
     /// A `$variable` token (usage or definition site).

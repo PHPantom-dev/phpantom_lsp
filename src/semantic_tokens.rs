@@ -286,6 +286,7 @@ impl Backend {
                     is_method_call,
                     subject_text,
                     is_docblock_reference,
+                    is_array_callable: _,
                 } => {
                     let tt = if *is_method_call {
                         TT_METHOD

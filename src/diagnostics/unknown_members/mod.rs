@@ -303,13 +303,30 @@ impl Backend {
                         is_static,
                         is_method_call,
                         is_docblock_reference,
-                    } => (
-                        subject_text,
-                        member_name,
-                        *is_static,
-                        *is_method_call,
-                        *is_docblock_reference,
-                    ),
+                        is_array_callable,
+                    } => {
+                        // A `[Class::class, 'method']` / `[$obj, 'method']`
+                        // array literal is only a callable when it flows into
+                        // a callable-typed context (a callable parameter,
+                        // `is_callable`, or a direct invocation).  Without
+                        // type-flow analysis we cannot tell such an array
+                        // apart from a plain data pair like
+                        // `return [[Foo::class, 'name'], ...]`, so we do not
+                        // validate its second element as a method.  The span
+                        // still drives navigation, hover, and semantic tokens,
+                        // which only surface information when the member
+                        // actually resolves.
+                        if *is_array_callable {
+                            continue;
+                        }
+                        (
+                            subject_text,
+                            member_name,
+                            *is_static,
+                            *is_method_call,
+                            *is_docblock_reference,
+                        )
+                    }
                     _ => continue,
                 };
 
