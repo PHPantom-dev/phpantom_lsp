@@ -146,18 +146,3 @@ and chained expectation calls report "Method 'with' not found on
 class 'Mockery\LegacyMockInterface'"
 (`tests/Feature/Storage/*`, `$storageMock` / `$storageResultMock`
 cascades). Fix the intersection propagation, not the diagnostic.
-
-## B72. String-literal class names keep their source escape sequences
-
-**Severity: Medium (~9 errors, pdepend) · Confirmed with fixture**
-
-```php
-$expr = $n->getFirstChildOfType('Fixture9\\ASTExpression');
-// "subject type 'Fixture9\\ASTExpression' could not be resolved"
-```
-
-A single-quoted `'Foo\\Bar'` means `Foo\Bar` at runtime, but the
-raw source text (with the doubled backslash) is used as the
-class-string value, so the class lookup fails. Unescape string
-literals before using them as type/class names — this affects
-every `class-string` parameter fed by a string literal.

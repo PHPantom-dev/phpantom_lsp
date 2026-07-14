@@ -655,6 +655,11 @@ class MethodTemplateDemo
         $locator = new ServiceLocator();
         $locator->get(Pen::class)->write();               // class-string<T> → T
 
+        // A class-string passed as a single-quoted string literal: the
+        // source `\\` is a namespace-separator escape, so `'Demo\\Pen'`
+        // names the class `Demo\Pen` and T resolves to Pen.
+        $locator->get('Demo\\Pen')->write();              // string-literal class-string → Pen
+
         // A union of class-strings (iterating a class-constant array) binds
         // the bounded template `T of Pen` to the union of the concrete
         // classes, so `@return T[]` resolves to (Pen|Marker)[] instead of
@@ -5894,6 +5899,10 @@ function runDemoAssertions(): void
     $locator = new ServiceLocator();
     $locatedPen = $locator->get(Pen::class);
     assert($locatedPen instanceof Pen, 'ServiceLocator::get(Pen::class) must return Pen');
+
+    // A single-quoted class-string literal names the class after the source
+    // `\\` escape is collapsed to a single namespace separator.
+    assert($locator->get('Demo\\Pen') instanceof Pen, "ServiceLocator::get('Demo\\\\Pen') must return Pen");
 
     // A union of class-strings binds the bounded template to the union of
     // concrete classes; each member's stub returns an instance of itself.

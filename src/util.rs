@@ -571,6 +571,49 @@ pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
         .or_else(|| raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
 }
 
+/// Strip the surrounding quotes from a PHP string literal and unescape its
+/// body, returning the runtime string value.
+///
+/// This matters when the literal names a class: `'Foo\\Bar'` is the class
+/// `Foo\Bar` at runtime, so the doubled backslash in the source text must be
+/// collapsed before the value is used as a type/class name. Backslash escapes
+/// are resolved in a single left-to-right pass (sequential `replace` calls are
+/// order-dependent and mis-handle adjacent escapes). In a single-quoted string
+/// only `\\` and `\'` are special; in a double-quoted string only `\\` and
+/// `\"` are recognised here (other backslash sequences are kept literal, which
+/// is sufficient for class names). Returns `None` when `raw` is not a quoted
+/// string literal.
+pub(crate) fn unescape_php_string_literal(raw: &str) -> Option<String> {
+    let (body, double_quoted) =
+        if let Some(b) = raw.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
+            (b, false)
+        } else if let Some(b) = raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+            (b, true)
+        } else {
+            return None;
+        };
+
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('\'') if !double_quoted => out.push('\''),
+                Some('"') if double_quoted => out.push('"'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
 /// Build a fully-qualified name from a short name and an optional namespace.
 ///
 /// `("Foo", Some("App\\Models"))` → `"App\\Models\\Foo"`,
@@ -2365,6 +2408,42 @@ pub fn run_command_with_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unescape_string_literal_collapses_namespace_separators() {
+        // Single-quoted `'Foo\\Bar'` names the class `Foo\Bar` at runtime.
+        assert_eq!(
+            unescape_php_string_literal(r"'Foo\\Bar'").as_deref(),
+            Some(r"Foo\Bar")
+        );
+        // Double-quoted spelling collapses the same way.
+        assert_eq!(
+            unescape_php_string_literal(r#""App\\Models\\User""#).as_deref(),
+            Some(r"App\Models\User")
+        );
+    }
+
+    #[test]
+    fn unescape_string_literal_handles_quote_and_lone_backslash() {
+        // `\'` produces a literal quote inside a single-quoted string.
+        assert_eq!(
+            unescape_php_string_literal(r"'a\'b'").as_deref(),
+            Some("a'b")
+        );
+        // A lone backslash before a non-special char stays literal.
+        assert_eq!(
+            unescape_php_string_literal(r"'a\nb'").as_deref(),
+            Some(r"a\nb")
+        );
+        // An empty string literal unescapes to an empty string.
+        assert_eq!(unescape_php_string_literal("''").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn unescape_string_literal_rejects_unquoted_input() {
+        assert_eq!(unescape_php_string_literal("bare"), None);
+        assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
 
     #[test]
     fn line_index_matches_offset_to_position() {

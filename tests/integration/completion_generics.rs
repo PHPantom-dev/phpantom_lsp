@@ -2334,6 +2334,90 @@ async fn test_method_template_cross_file_resolves() {
     }
 }
 
+/// Integration test: a `class-string<T>` bound from a single-quoted string
+/// literal unescapes the source `\\` before resolving the class.
+///
+/// `$sl->get('App\\Payment')` names the runtime class `App\Payment`; the
+/// doubled backslash is a source-level escape, not part of the name. Before
+/// unescaping, `T` bound to the literal `App\\Payment` spelling and no class
+/// lookup matched, so the result had no members.
+#[tokio::test]
+async fn test_method_template_string_literal_unescapes_namespace() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Payment.php",
+            "<?php\nnamespace App;\nclass Payment {\n    public function charge(): void {}\n    public function refund(): void {}\n}\n",
+        )],
+    );
+
+    let uri = Url::parse("file:///method_template_string_literal.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "\n",                                               // 1
+        "class ServiceLocator {\n",                         // 2
+        "    /**\n",                                        // 3
+        "     * @template T\n",                             // 4
+        "     * @param class-string<T> $id\n",              // 5
+        "     * @return T\n",                               // 6
+        "     */\n",                                        // 7
+        "    public function get(string $id): object {}\n", // 8
+        "}\n",                                              // 9
+        "\n",                                               // 10
+        "function test(ServiceLocator $sl) {\n",            // 11
+        "    $sl->get('App\\\\Payment')->\n",               // 12
+        "}\n",                                              // 13
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 30,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"charge"),
+                "Should unescape 'App\\\\Payment' to App\\Payment and show 'charge', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"refund"),
+                "Should unescape 'App\\\\Payment' to App\\Payment and show 'refund', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// Integration test: method-level @template with a different param name.
 /// Uses `$entityClass` instead of `$class`.
 #[tokio::test]

@@ -1435,8 +1435,8 @@ impl Backend {
                 let normalized_func = func_name.trim_start_matches('\\');
                 if matches!(normalized_func, "app" | "resolve")
                     && let Some(binding) = Self::extract_first_arg_text(text_args)
-                    && let Some(name) = crate::util::unquote_php_string(&binding)
-                    && let Some(cls) = (ctx.class_loader)(name)
+                    && let Some(name) = crate::util::unescape_php_string_literal(binding.trim())
+                    && let Some(cls) = (ctx.class_loader)(&name)
                 {
                     return vec![cls];
                 }

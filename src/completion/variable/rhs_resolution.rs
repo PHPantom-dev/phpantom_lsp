@@ -1992,13 +1992,12 @@ pub(crate) fn class_string_inner_binding(
     // A quoted string literal naming a class binds to that class.  This is
     // checked against the raw argument text because `resolve_arg_text_to_type`
     // collapses every string literal to the bare `string` type, discarding
-    // the content that names the class.
+    // the content that names the class.  The literal is unescaped first so a
+    // source-level `'Foo\\Bar'` binds to the runtime class `Foo\Bar` rather
+    // than the doubled-backslash spelling, which no class lookup would match.
     let trimmed = arg_text.trim();
-    if trimmed.len() >= 2
-        && ((trimmed.starts_with('\'') && trimmed.ends_with('\''))
-            || (trimmed.starts_with('"') && trimmed.ends_with('"')))
-    {
-        let content = trimmed[1..trimmed.len() - 1].trim();
+    if let Some(unescaped) = crate::util::unescape_php_string_literal(trimmed) {
+        let content = unescaped.trim();
         // Only treat the literal as a class name when its content is a
         // valid class identifier; otherwise it doesn't name a class and
         // must not bind `T`.
