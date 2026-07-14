@@ -724,7 +724,11 @@ fn resolve_rhs_instantiation(
     if let Some(ref name) = class_name {
         let fqn = match name.as_str() {
             "self" | "static" => ctx.current_class.name.to_string(),
-            other => crate::util::resolve_name_via_loader(other, ctx.class_loader),
+            other => crate::util::resolve_source_class_name(
+                other,
+                ctx.current_class.file_namespace.as_deref(),
+                ctx.class_loader,
+            ),
         };
         let parsed_name = PhpType::Named(fqn);
         let classes = crate::completion::type_resolution::type_hint_to_classes_typed(

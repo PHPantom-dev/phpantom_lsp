@@ -1038,6 +1038,15 @@ impl Backend {
             SubjectExpr::NewExpr { class_name } => {
                 let resolved_class_name =
                     Self::resolve_class_name_keyword(class_name, rctx.current_class);
+                // For a plain (non-keyword) name, resolve it as a
+                // source-level reference so a same-namespace class wins
+                // over a global stub of the same short name.
+                let resolved_class_name = if resolved_class_name == *class_name {
+                    let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
+                    crate::util::resolve_source_class_name(class_name, ns, &class_loader)
+                } else {
+                    resolved_class_name
+                };
                 Self::resolve_constructor_callable(
                     &resolved_class_name,
                     &class_loader,
@@ -1648,9 +1657,15 @@ impl Backend {
             // substitution so that chained method calls like
             // `(new C("foo"))->get()` propagate generics correctly.
             SubjectExpr::NewExpr { class_name } => {
+                // `new X` is a source-level reference: an unqualified name
+                // resolves against the current namespace before the global
+                // scope, so a same-namespace class wins over a global stub
+                // of the same short name.
+                let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+                let fqn = crate::util::resolve_source_class_name(class_name, ns, ctx.class_loader);
                 let cls_arc = find_class_by_name(ctx.all_classes, class_name)
                     .map(Arc::clone)
-                    .or_else(|| (ctx.class_loader)(class_name));
+                    .or_else(|| (ctx.class_loader)(&fqn));
                 let cls_arc = match cls_arc {
                     Some(c) => c,
                     None => return vec![],

@@ -1,8 +1,14 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_exception_stubs,
+    create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
+    create_test_backend_with_exception_stubs,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
+
+/// A minimal global SPL `Iterator` stub: it deliberately does NOT declare
+/// `accept()`, so any diagnostic flagging `accept` proves the instance was
+/// wrongly resolved to the global stub instead of the project class.
+static ITERATOR_STUB: &str = "<?php\ninterface Iterator { public function next(): void; }\n";
 
 // ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
 
@@ -5398,5 +5404,58 @@ class AbstractNode {
         diags.iter().any(|d| d.message.contains("missingMethod")),
         "A missing method on the narrowed type must still be flagged, got: {:?}",
         diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Same-namespace class wins over a global stub of the same short name
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `new Iterator()` inside `namespace App\Input` must resolve to the
+/// project's `App\Input\Iterator`, not the global SPL `\Iterator` stub, so
+/// members declared on the project class are recognised.  PHP resolves an
+/// unqualified class reference against the current namespace before falling
+/// back to the global scope.
+#[test]
+fn new_same_namespace_class_wins_over_global_stub() {
+    let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
+    let project_iterator = "<?php\nnamespace App\\Input;\nclass Iterator {\n    public function accept(): bool { return true; }\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/Input/Iterator.php", project_iterator)],
+        &[("Iterator", ITERATOR_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace App\\Input;\nclass Consumer {\n    public function run(): void {\n        $it = new Iterator();\n        $it->accept();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("accept")),
+        "`new Iterator()` must resolve to the same-namespace App\\Input\\Iterator, \
+         so `accept()` is a known method, got: {diags:?}"
+    );
+}
+
+/// The guard against regressing global resolution: when a namespace has no
+/// class of the given short name, `new Iterator()` must still resolve to the
+/// global SPL stub, so a member the stub does not declare is flagged.
+#[test]
+fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
+
+    // No project `App\Other\Iterator` exists, so the global stub is correct.
+    let (backend, _dir) =
+        create_psr4_workspace_with_stubs(composer_json, &[], &[("Iterator", ITERATOR_STUB)]);
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace App\\Other;\nclass Consumer {\n    public function run(): void {\n        $it = new Iterator();\n        $it->accept();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("accept")),
+        "`new Iterator()` with no same-namespace class must resolve to the \
+         global stub, which has no `accept()`, got: {diags:?}"
     );
 }

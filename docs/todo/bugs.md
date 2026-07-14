@@ -221,17 +221,3 @@ return [
 `tests/.../PHP81/MatchExpressionTest.php:81`.) Only treat such an
 array as a callable when it flows into a callable-typed context
 (callable parameter, `is_callable`, invocation).
-
-## B76. Same-namespace class loses to a global stub class of the same name
-
-**Severity: Medium (~5 errors, pdepend) · Confirmed from output**
-
-In `namespace PDepend\Input`, `new Iterator(...)` must resolve to
-`PDepend\Input\Iterator`, but PHPantom resolves it to the global
-SPL `Iterator` interface, so every member on the instance is
-unknown ("Method 'accept' not found on class 'Iterator'",
-`tests/php/PDepend/Input/IteratorTest.php:127,144,161`, plus the
-foreach cascades at lines 102 and 179). The subtype-check variant
-of this was fixed previously ("a project class sharing a global
-interface's short name"); the `new X()` resolution path still
-prefers the stub.

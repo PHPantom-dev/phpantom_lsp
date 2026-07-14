@@ -620,7 +620,13 @@ fn resolve_target_classes_expr_inner_impl(
             if let Some(cls) = find_class_by_name(all_classes, class_name) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            class_loader(class_name)
+            // `new X` is a source-level reference: PHP resolves an
+            // unqualified name against the current namespace before the
+            // global scope, so a same-namespace class must win over a
+            // global stub of the same short name.
+            let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+            let fqn = crate::util::resolve_source_class_name(class_name, ns, class_loader);
+            class_loader(&fqn)
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()

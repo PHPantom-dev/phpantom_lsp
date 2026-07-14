@@ -87,6 +87,54 @@ pub(crate) fn resolve_name_via_loader(
         .unwrap_or_else(|| name.to_string())
 }
 
+/// Resolve a source-level (user-typed) class reference to its FQN,
+/// preferring a class in the current namespace over a global class of the
+/// same short name.
+///
+/// PHP resolves an unqualified class reference (as written in `new Foo()`
+/// or a type hint) against the current namespace before falling back to
+/// the global scope, so `new Iterator()` inside `namespace App` means
+/// `App\Iterator` when that class exists, not the global SPL `\Iterator`.
+///
+/// The plain [`resolve_name_via_loader`] delegates to the class loader,
+/// which is deliberately global-first for already-canonicalised names
+/// (parent/interface FQNs, where a backslash-free name signals an
+/// intentional global reference).  This helper corrects that for raw
+/// source references: when the loader lands on a global class, it re-checks
+/// the namespace-qualified form and prefers a genuine same-namespace class.
+///
+/// An explicit `use` import still wins: it resolves to a namespaced or
+/// aliased class whose FQN differs from the bare name, which this helper
+/// leaves untouched.
+pub(crate) fn resolve_source_class_name(
+    name: &str,
+    namespace: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> String {
+    let resolved = class_loader(name);
+    // Only an unqualified name inside a namespace can be shadowed by a
+    // global stub of the same short name.
+    if !name.contains('\\')
+        && let Some(ns) = namespace
+    {
+        // The loader landed on a global class (or found nothing); an
+        // explicit import would have resolved to a namespaced/aliased
+        // class whose FQN carries a namespace.
+        let landed_on_global = resolved.as_ref().is_none_or(|c| c.file_namespace.is_none());
+        if landed_on_global {
+            let ns_qualified = format!("{ns}\\{name}");
+            if let Some(local) = class_loader(&ns_qualified)
+                && local.fqn().eq_ignore_ascii_case(&ns_qualified)
+            {
+                return local.fqn().to_string();
+            }
+        }
+    }
+    resolved
+        .map(|cls| cls.fqn().to_string())
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Resolve all class names inside a [`PhpType`] to their fully-qualified
 /// forms using the class loader.  Scalar/keyword types are left untouched.
 ///

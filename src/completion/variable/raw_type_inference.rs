@@ -162,7 +162,11 @@ fn infer_element_type<'b>(
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_name_via_loader(&name, ctx.class_loader);
+                let fqn = crate::util::resolve_source_class_name(
+                    &name,
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                );
                 Some(PhpType::Named(fqn))
             }
             Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
