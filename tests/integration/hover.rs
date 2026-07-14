@@ -12384,3 +12384,42 @@ fn hover_nested_array_literal_keeps_positional_shape() {
         "foreach element should be the positional tuple shape, got: {row}"
     );
 }
+
+/// `@template T of Token[]` used as a pass-through (`@param T $tokens` /
+/// `@return T`) is an identity generic: `T` binds to whatever array-like
+/// type the caller passes in.  Hovering on a member accessed through
+/// `end($tokens)->` (an array-element function applied to the
+/// template-typed parameter) should resolve through the declared bound
+/// rather than leaving `T` unresolved.
+#[test]
+fn hover_template_array_bound_identity_generic_resolves_inside_body() {
+    let backend = create_test_backend();
+    let uri = "file:///template_array_bound_identity.php";
+    let content = concat!(
+        "<?php\n",                                                              // 0
+        "class Token {\n",                                                      // 1
+        "    public int $type = 0;\n",                                          // 2
+        "}\n",                                                                  // 3
+        "\n",                                                                   // 4
+        "class Foo {\n",                                                        // 5
+        "    /**\n",                                                            // 6
+        "     * @template T of Token[]\n",                                      // 7
+        "     * @param T $tokens\n",                                            // 8
+        "     * @return T\n",                                                   // 9
+        "     */\n",                                                            // 10
+        "    private function stripTrailingComments(array $tokens): array {\n", // 11
+        "        while ($tokens && end($tokens)->type) {\n",                    // 12
+        "            array_pop($tokens);\n",                                    // 13
+        "        }\n",                                                          // 14
+        "        return $tokens;\n",                                            // 15
+        "    }\n",                                                              // 16
+        "}\n",                                                                  // 17
+    );
+    // Hover on `type` in `end($tokens)->type` at line 12.
+    let hover = hover_at(&backend, uri, content, 12, 42).expect("hover ->type");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "Should resolve T to its bound (Token[]) and show Token::$type as int, got: {text}"
+    );
+}

@@ -3189,7 +3189,27 @@ impl Backend {
             )
             .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
             {
-                return Some(raw);
+                // A bare identifier that isn't a known keyword type and
+                // doesn't resolve to a loadable class is most likely an
+                // unbound method-level `@template` parameter (e.g.
+                // `@template T of Token[]` used as `@param T $tokens`).
+                // The raw scan above is a text-only lookup that doesn't
+                // apply template-bound substitution, so trusting it here
+                // would leave the caller with an unresolvable `T` instead
+                // of the array-of-`Token` type the forward walker would
+                // produce.  Fall through to the unified pipeline below,
+                // which resolves the variable through the forward walker
+                // and substitutes template params with their bounds.
+                let looks_like_unbound_template = match &raw {
+                    PhpType::Named(name) => {
+                        !crate::php_type::is_keyword_type(name)
+                            && (ctx.class_loader)(name).is_none()
+                    }
+                    _ => false,
+                };
+                if !looks_like_unbound_template {
+                    return Some(raw);
+                }
             }
             // Fall back to the unified variable resolution pipeline.
             let default_class = ClassInfo::default();

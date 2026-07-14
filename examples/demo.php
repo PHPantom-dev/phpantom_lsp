@@ -702,6 +702,10 @@ class MethodTemplateDemo
         // argument both resolve to a Pen instance.
         $locator->build(Pen::class)->write();             // class-string<T>|T with Pen::class → Pen
         $locator->build(new Pen())->write();              // class-string<T>|T with instance → Pen
+
+        // An identity generic whose *constraint* is an array type: T is
+        // never bound from an argument here, only from its declared bound.
+        $mapper->peekLast([new Pen()]);
     }
 }
 
@@ -4624,6 +4628,23 @@ class ObjectMapper
     {
         return $item;
     }
+
+    /**
+     * An identity generic whose *constraint* is an array type: `T` is
+     * never bound from an argument at a call site, only from its
+     * declared bound.  Inside the method body, `$pens` (typed `T`)
+     * must resolve to that bound so array-element functions like
+     * `end()` can find the element's class.
+     *
+     * @template T of Pen[]
+     * @param T $pens
+     * @return T
+     */
+    public function peekLast(array $pens): array
+    {
+        end($pens)->write();      // T resolves to its bound (Pen[]) inside the body
+        return $pens;
+    }
 }
 
 
@@ -5907,6 +5928,11 @@ function runDemoAssertions(): void
     // returned value is the fully-qualified class name string.
     $penClass = $mapper->identity(Pen::class);
     assert($penClass === Pen::class, 'identity(Pen::class) must return the class-string Pen::class');
+
+    // An identity generic bound to an array type (`@template T of Pen[]`)
+    // must still return the array unchanged.
+    $peeked = $mapper->peekLast([new Pen('blue')]);
+    assert(end($peeked) instanceof Pen, 'peekLast() must return its argument unchanged');
 
     // ── ScaffoldingReducible::reduce() — closure return type binding ────
     /** @var ScaffoldingReducible<Pencil> $reducible */

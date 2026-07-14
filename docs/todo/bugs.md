@@ -161,23 +161,3 @@ raw source text (with the doubled backslash) is used as the
 class-string value, so the class lookup fails. Unescape string
 literals before using them as type/class names — this affects
 every `class-string` parameter fed by a string literal.
-
-## B73. `@template T of <array type>` identity generics are not bound
-
-**Severity: Medium (~9 errors, pdepend) · Confirmed from source**
-
-```php
-/**
- * @template T of Token[]
- * @param T $tokens
- * @return T
- */
-private function stripTrailingComments(array $tokens): array { ... }
-```
-
-A template whose *constraint* is an array type (`Token[]`,
-`list<ASTNode>`) used as a pass-through (`@param T` / `@return T`)
-never binds, so the return value is unresolved
-(pdepend `src/Source/Language/PHP/AbstractPHPParser.php`
-`reduceUnaryExpression` / `stripTrailingComments` call sites:
-`$expressions[]`, `end($tokens)->type`).
