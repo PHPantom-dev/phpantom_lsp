@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784134455938,
+  "lastUpdate": 1784134551035,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14925,6 +14925,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b1063ffd2d0d950eb8079bcbc004563e45d127af",
+          "message": "Laravel macros registered in your code are recognized as real methods",
+          "timestamp": "2026-07-15T18:43:14+02:00",
+          "tree_id": "1d2cbb77639d6c5b073a19147455b6890206f8e2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b1063ffd2d0d950eb8079bcbc004563e45d127af"
+        },
+        "date": 1784134548926,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.2,
             "unit": "MiB"
           }
         ]
