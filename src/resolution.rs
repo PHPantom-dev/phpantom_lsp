@@ -1022,6 +1022,41 @@ impl Backend {
         move |name: &str| self.resolve_function_name(name, use_map, namespace)
     }
 
+    /// Check whether `cursor_offset` is inside a closure whose
+    /// enclosing call site declares `@param-closure-this`, and if so
+    /// return the overridden class.
+    ///
+    /// This is a convenience wrapper that builds the [`ResolutionCtx`]
+    /// and calls [`find_closure_this_override`] so that callers (hover,
+    /// go-to-definition, go-to-type-definition) don't need to duplicate
+    /// that boilerplate.
+    pub(crate) fn resolve_closure_this_override(
+        &self,
+        uri: &str,
+        content: &str,
+        cursor_offset: u32,
+    ) -> Option<ClassInfo> {
+        use crate::completion::resolver::ResolutionCtx;
+        use crate::util::find_class_at_offset;
+
+        let ctx = self.file_context_at(uri, cursor_offset);
+        let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
+        let class_loader = self.class_loader(&ctx);
+        let function_loader = self.function_loader(&ctx);
+        let rctx = ResolutionCtx {
+            current_class,
+            all_classes: &ctx.classes,
+            content,
+            cursor_offset,
+            class_loader: &class_loader,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: Some(&function_loader),
+            scope_var_resolver: None,
+            is_in_static_method: false,
+        };
+        crate::completion::variable::closure_resolution::find_closure_this_override(&rctx)
+    }
+
     /// Return a constant-value-loader closure.
     ///
     /// The returned closure looks up a global constant name and returns

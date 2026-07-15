@@ -781,9 +781,12 @@ impl Backend {
                 let is_this = *ssp_kind == SelfStaticParentKind::This;
 
                 let resolved = match ssp_kind {
-                    SelfStaticParentKind::Self_
-                    | SelfStaticParentKind::Static
-                    | SelfStaticParentKind::This => current_class.cloned(),
+                    SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => {
+                        current_class.cloned()
+                    }
+                    SelfStaticParentKind::This => self
+                        .resolve_closure_this_override(uri, content, cursor_offset)
+                        .or_else(|| current_class.cloned()),
                     SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
                         .and_then(|parent_name| {
