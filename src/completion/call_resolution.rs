@@ -2074,8 +2074,19 @@ impl Backend {
             "__call"
         };
 
-        // First check the class itself
-        if let Some(method) = class_info.get_method(method_name) {
+        // First check the class itself. Skip this fast path when the
+        // declared return type is self-like: a Laravel/Mockery patch may
+        // rewrite a bare `self`/`static`/`$this` return to a different
+        // concrete type (e.g. `Mockery\LegacyMockInterface::shouldHaveReceived()`
+        // really returns `Mockery\VerificationDirector`), and patches are
+        // only applied during the merged resolution below. Trusting the
+        // raw declaration here would bypass the patch entirely.
+        if let Some(method) = class_info.get_method(method_name)
+            && !method
+                .return_type
+                .as_ref()
+                .is_some_and(PhpType::is_self_like)
+        {
             let result = resolve_method(method);
             if !result.is_empty() {
                 return result;

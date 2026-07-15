@@ -174,25 +174,82 @@ missed. Walk the method-name expression of method / null-safe-method /
 static-method calls when collecting variable reads (luxplus-backoffice
 `tests/Feature/Products/Tariffs/TariffsTest.php:73`).
 
-## B74. Mockery `shouldHaveReceived()` / `shouldReceive()` chains break on the imprecise `@return self`
+## B74. `App::make()` / `App::makeWith()` (facade form) does not resolve container bindings
 
-**Severity: Low (~2 errors, luxplus-backoffice) · Confirmed from output**
+**Severity: Medium (~8 errors, luxplus-website) · Confirmed with fixture**
 
 ```php
-$service->shouldHaveReceived('store')->with([10, 20], [])->once();
+use Illuminate\Support\Facades\App;
+
+app()->make(EventRepository::class)->getActiveEvents($country);       // resolves
+App::make(EventRepository::class)->getActiveEvents($country);         // "could not be resolved"
+App::makeWith(PageService::class, ['page' => $page]);                 // "could not be resolved"
 ```
 
-Mockery's `LegacyMockInterface::shouldHaveReceived()` is annotated
-`@return self`, but at runtime it returns a
-`Mockery\VerificationDirector` (and `shouldReceive()` returns
-`Mockery\Expectation`). Because the analyzer honours the declared
-`self`, the chained `->with()` resolves against the mock interface
-instead of the director/expectation and reports "Method 'with' not
-found on class 'Mockery\LegacyMockInterface'" (luxplus-backoffice
-`tests/Unit/ProductCacheService/DispatchProductCacheBatchSyncJobTest.php:24,36`).
-Correct the return types of the verification/expectation entry-point
-methods (patch Mockery's interfaces the way the Laravel testing
-helpers are patched) so expectation chains resolve. This is distinct
-from the mock-intersection propagation: even with a correct
-intersection, the declared `self` return sends the chain to the wrong
-class.
+The `app()->make(X::class)` helper-function form resolves the concrete
+class and lets member access on the result type-check normally. The
+equivalent `Illuminate\Support\Facades\App::make(X::class)` /
+`App::makeWith(X::class, [...])` facade-static-call form does not —
+member access chained directly off the facade call is unresolved, even
+though `App` is just a thin static proxy to the same container `make()`
+call. Route facade-form container resolution through the same shortcut
+that already handles the helper-function form (luxplus-website
+`app/Http/Controllers/PagesController.php`,
+`app/Http/Controllers/LinkCampaignsController.php`,
+`app/View/Components/ProductDiscovery/ProductDiscoveryModal.php`,
+fixed in the test project by switching to `app()->make()` pending this
+fix; see `analyze-triage.md`).
+
+## B75. Eloquent relation property access is case-sensitive, unlike the underlying PHP method call
+
+**Severity: Low (~2 errors, luxplus-website) · Confirmed with fixture**
+
+```php
+class Order extends Model
+{
+    public function orderProducts(): HasMany { /* ... */ }
+}
+
+$order->orderProducts;   // resolves
+$order->orderproducts;   // "could not be resolved"
+```
+
+PHP method names are case-insensitive, so Eloquent's `__get()` magic
+accessor correctly calls `orderProducts()` regardless of the case used
+at the call site, and the relation resolves at runtime either way.
+PHPantom's Laravel relation-property resolution only matches the exact
+declared case, so a differently-cased (but functionally identical)
+property access is reported as unresolved. Match relation properties
+case-insensitively, the same way direct method calls already are
+(luxplus-website
+`app/Http/Resources/OrderDetailedResource.php:146-147`, via
+`Order::orderProducts()` accessed as `$order->orderproducts`).
+
+## B76. `$this` inside an anonymous class body resolves to the enclosing method's class instead of the anonymous class
+
+**Severity: Low (~1 error, luxplus-website) · Confirmed with fixture**
+
+```php
+class Test
+{
+    public function make(): object
+    {
+        return new class (5) {
+            public function __construct(private readonly int $value) {}
+
+            public function get(): int
+            {
+                return $this->value;   // "Property 'value' not found on class 'Test'"
+            }
+        };
+    }
+}
+```
+
+Inside an anonymous class's own methods, `$this` must resolve to the
+anonymous class, not to whatever class contains the `new class { ... }`
+expression. The resolver appears to keep the enclosing method's class
+as the current `$this` type when it descends into the anonymous
+class's method bodies instead of switching context (luxplus-website
+`tests/Feature/Web/LinkCampaignsControllerTest.php:347`, a mocked
+service defined as an anonymous class inside a test helper method).

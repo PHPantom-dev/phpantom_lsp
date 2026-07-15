@@ -5510,3 +5510,52 @@ fn array_data_argument_to_builtin_is_not_validated_as_callable() {
         "a data array passed to array_filter must not be validated as a method call, got: {diags:?}"
     );
 }
+
+// ─── Mockery verification chains resolve through the real return type ──────
+
+/// `Mockery\LegacyMockInterface::shouldHaveReceived()` is declared
+/// `@return self`, but the concrete mock always builds a
+/// `Mockery\VerificationDirector`. Honouring the declared `self` sends
+/// the chained `->with()` call back to the mock interface (which has no
+/// `with()`), producing a false-positive unknown-member diagnostic.
+#[test]
+fn mockery_should_have_received_chain_resolves_to_verification_director() {
+    let backend = create_test_backend();
+    let uri = "file:///mockery_verification.php";
+    let text = r#"<?php
+namespace Mockery {
+    interface LegacyMockInterface {
+        /** @return self */
+        public function shouldHaveReceived($method, $args = null);
+    }
+    interface MockInterface extends LegacyMockInterface {}
+    class VerificationDirector {
+        public function with(...$args): self { return $this; }
+        public function once(): self { return $this; }
+    }
+}
+namespace App {
+    class ProductCacheService {}
+
+    class TestBase {
+        /**
+         * @param string $abstract
+         * @return \Mockery\MockInterface
+         */
+        protected function mock($abstract) {}
+    }
+
+    class ExampleTest extends TestBase {
+        public function test(): void {
+            $service = $this->mock(ProductCacheService::class);
+            $service->shouldHaveReceived('store')->with([10, 20], [])->once();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("with")),
+        "shouldHaveReceived()->with(...) must resolve through VerificationDirector, got: {diags:?}"
+    );
+}

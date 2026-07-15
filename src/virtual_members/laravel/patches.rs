@@ -74,6 +74,18 @@
 //!    `with()`, …).  This is dispatched unconditionally because the
 //!    helpers are inherited into every test class rather than living on
 //!    a fixed FQN.
+//!
+//! 9. **`Mockery\LegacyMockInterface::shouldHaveReceived()` /
+//!    `shouldHaveBeenCalled()` return types.**  Both are declared
+//!    `@return self`, but Mockery's concrete `Mock` implementation
+//!    always builds a `Mockery\VerificationDirector` (or, for
+//!    `shouldHaveReceived()` called with no method name, a
+//!    `Mockery\HigherOrderMessage` to support the fluent
+//!    `shouldHaveReceived()->methodName()` shorthand). Honouring the
+//!    declared `self` sends chained calls like `->with()` back to the
+//!    mock interface, which does not declare `with()`, breaking
+//!    verification chains such as
+//!    `$mock->shouldHaveReceived('store')->with(...)->once()`.
 
 use std::sync::Arc;
 
@@ -108,6 +120,20 @@ const FILESYSTEM_ADAPTER_FQN: &str = "Illuminate\\Filesystem\\FilesystemAdapter"
 /// FQN of the Mockery mock contract that Laravel's testing helpers
 /// (`mock()`, `partialMock()`, `spy()`) declare as their return type.
 const MOCK_INTERFACE_FQN: &str = "Mockery\\MockInterface";
+
+/// FQN of the Mockery interface that declares the mock's verification
+/// entry-point methods (`shouldHaveReceived()`, `shouldHaveBeenCalled()`).
+const LEGACY_MOCK_INTERFACE_FQN: &str = "Mockery\\LegacyMockInterface";
+
+/// FQN of the object Mockery's `Mock::shouldHaveReceived()` /
+/// `shouldHaveBeenCalled()` construct to carry the verification chain
+/// (`->with()`, `->once()`, …).
+const VERIFICATION_DIRECTOR_FQN: &str = "Mockery\\VerificationDirector";
+
+/// FQN of the shorthand chain-starter `Mock::shouldHaveReceived()`
+/// returns when called with no method name, supporting
+/// `shouldHaveReceived()->methodName()`.
+const HIGHER_ORDER_MESSAGE_FQN: &str = "Mockery\\HigherOrderMessage";
 
 /// Apply all registered Laravel class patches to a fully-resolved class.
 ///
@@ -149,6 +175,10 @@ pub fn apply_laravel_patches(class: &mut ClassInfo, fqn: &str) {
     // whose signature matches the framework helper, so it is a cheap
     // no-op for classes that do not carry them.
     patch_testcase_mock_return_types(class);
+
+    if fqn == LEGACY_MOCK_INTERFACE_FQN || class_extends_legacy_mock_interface(class) {
+        patch_mockery_verification_return_types(class);
+    }
 }
 
 /// Override `__call` and `__callStatic` return types on Eloquent Builder
@@ -516,6 +546,57 @@ fn patch_testcase_mock_return_types(class: &mut ClassInfo) {
     }
 }
 
+/// Correct `shouldHaveReceived()` and `shouldHaveBeenCalled()` return
+/// types from the declared `self` to the object Mockery's concrete
+/// `Mock` implementation actually builds.
+///
+/// Both are annotated `@return self` on `LegacyMockInterface`, but
+/// `shouldHaveReceived()` always constructs a `VerificationDirector`
+/// (or, when called with no method name, a `HigherOrderMessage` for the
+/// `shouldHaveReceived()->methodName()` shorthand), and
+/// `shouldHaveBeenCalled()` always delegates to `shouldHaveReceived()`
+/// with a method name, so it always yields a `VerificationDirector`.
+/// Honouring the declared `self` sends chained calls like `->with()`
+/// back to the mock interface, which does not declare `with()`,
+/// breaking verification chains.
+///
+/// By the time this patch runs on an implementing interface (e.g.
+/// `MockInterface`), the base inheritance merge has already replaced
+/// the bare `self` with the *declaring* class name
+/// (`Mockery\LegacyMockInterface`) — see the "declaring class, not the
+/// inheriting child" rule in `resolve_class_with_inheritance`. So a
+/// method is still eligible for the fix whether its return type is the
+/// literal `self` keyword (patching `LegacyMockInterface` directly) or
+/// the already-resolved `Mockery\LegacyMockInterface` name (patching an
+/// implementing interface/class).
+fn patch_mockery_verification_return_types(class: &mut ClassInfo) {
+    let director = PhpType::Named(VERIFICATION_DIRECTOR_FQN.to_owned());
+    let higher_order_message = PhpType::Named(HIGHER_ORDER_MESSAGE_FQN.to_owned());
+
+    for method in class.methods.make_mut().iter_mut() {
+        let new_return = match method.name.as_str() {
+            "shouldHaveReceived" => {
+                PhpType::Union(vec![director.clone(), higher_order_message.clone()])
+            }
+            "shouldHaveBeenCalled" => director.clone(),
+            _ => continue,
+        };
+        // Only correct the honestly-declared `self` form (literal or
+        // already resolved to the declaring interface). A hand-written
+        // override with a different type is left untouched.
+        let is_unpatched_self = method.return_type.as_ref().is_some_and(|rt| {
+            rt.is_self_ref()
+                || rt
+                    .class_name()
+                    .is_some_and(|n| n.trim_start_matches('\\') == LEGACY_MOCK_INTERFACE_FQN)
+        });
+        if !is_unpatched_self {
+            continue;
+        }
+        Arc::make_mut(method).return_type = Some(new_return);
+    }
+}
+
 /// Check whether a class uses the `Conditionable` trait (directly or
 /// through its trait list / parent chain markers).
 ///
@@ -527,6 +608,21 @@ fn class_uses_conditionable(class: &ClassInfo) -> bool {
         .used_traits
         .iter()
         .any(|t| t == CONDITIONABLE_FQN || t == "Conditionable" || t.ends_with("\\Conditionable"))
+}
+
+/// Check whether an interface extends (or a class implements)
+/// `Mockery\LegacyMockInterface`, directly or transitively.
+///
+/// `MockInterface extends LegacyMockInterface` merges the verification
+/// methods into `MockInterface`'s own resolved class before this patch
+/// runs, so the patch must also fire when resolving `MockInterface`
+/// itself, not just when resolving `LegacyMockInterface` directly.
+fn class_extends_legacy_mock_interface(class: &ClassInfo) -> bool {
+    class.interfaces.iter().any(|i| {
+        i == LEGACY_MOCK_INTERFACE_FQN
+            || i == "LegacyMockInterface"
+            || i.ends_with("\\LegacyMockInterface")
+    })
 }
 
 #[cfg(test)]

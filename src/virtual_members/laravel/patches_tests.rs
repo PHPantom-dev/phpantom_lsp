@@ -7,8 +7,8 @@ use crate::types::MethodInfo;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
 use super::{
-    CACHE_FACADE_FQN, CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN, STORAGE_FACADE_FQN,
-    apply_laravel_patches,
+    CACHE_FACADE_FQN, CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN,
+    LEGACY_MOCK_INTERFACE_FQN, STORAGE_FACADE_FQN, apply_laravel_patches,
 };
 
 /// Create a method with a parsed `PhpType` return type.
@@ -1035,4 +1035,107 @@ fn testing_mock_helper_with_concrete_return_is_untouched() {
         "a method that already returns the intersection is left as-is"
     );
     assert!(method.template_params.is_empty());
+}
+
+// ─── Mockery verification return types ─────────────────────────────────────
+
+#[test]
+fn mockery_verification_methods_lose_the_self_return() {
+    let mut class = make_class(LEGACY_MOCK_INTERFACE_FQN);
+    class.methods = vec![
+        Arc::new(make_method_typed(
+            "shouldHaveReceived",
+            Some(PhpType::self_()),
+        )),
+        Arc::new(make_method_typed(
+            "shouldHaveBeenCalled",
+            Some(PhpType::self_()),
+        )),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, LEGACY_MOCK_INTERFACE_FQN);
+
+    let should_have_received = class
+        .methods
+        .iter()
+        .find(|m| m.name == "shouldHaveReceived")
+        .unwrap();
+    assert_eq!(
+        should_have_received
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "Mockery\\VerificationDirector|Mockery\\HigherOrderMessage",
+        "shouldHaveReceived() should resolve to the director/higher-order-message union"
+    );
+
+    let should_have_been_called = class
+        .methods
+        .iter()
+        .find(|m| m.name == "shouldHaveBeenCalled")
+        .unwrap();
+    assert_eq!(
+        should_have_been_called
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "Mockery\\VerificationDirector",
+        "shouldHaveBeenCalled() should resolve to the director"
+    );
+}
+
+#[test]
+fn mockery_verification_method_with_concrete_return_is_untouched() {
+    let mut class = make_class(LEGACY_MOCK_INTERFACE_FQN);
+    let concrete = PhpType::Named("Mockery\\VerificationDirector".to_string());
+    class.methods = vec![Arc::new(make_method_typed(
+        "shouldHaveReceived",
+        Some(concrete.clone()),
+    ))]
+    .into();
+
+    apply_laravel_patches(&mut class, LEGACY_MOCK_INTERFACE_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        concrete.to_string(),
+        "a method that already returns a concrete type is left as-is"
+    );
+}
+
+#[test]
+fn mockery_verification_patch_only_applies_to_legacy_mock_interface() {
+    let mut class = make_class("App\\Services\\Pipeline");
+    class.methods = vec![Arc::new(make_method_typed(
+        "shouldHaveReceived",
+        Some(PhpType::self_()),
+    ))]
+    .into();
+
+    apply_laravel_patches(&mut class, "App\\Services\\Pipeline");
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "self",
+        "an unrelated class's shouldHaveReceived() must not be rewritten"
+    );
 }
