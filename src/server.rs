@@ -488,6 +488,14 @@ impl LanguageServer for Backend {
         self.auth_user_type_cache.write().clear();
         *self.laravel_aliases.write() = None;
 
+        // Scan project source for Laravel macro registrations so macro
+        // methods appear in completion, hover, and signature help.  Runs
+        // after the cache clear above so injected macros are never shadowed
+        // by a stale merge.
+        if self.resolved_class_cache.read().is_laravel() {
+            self.build_laravel_macro_index();
+        }
+
         // Mark initialization as complete so that diagnostic workers
         // and pull handlers know the project is fully indexed.
         self.init_complete
@@ -1870,6 +1878,93 @@ impl Backend {
         }
 
         warmed
+    }
+
+    /// Build the Laravel macro index by scanning the project's own source
+    /// directories for `Target::macro('name', closure)` registrations.
+    ///
+    /// Only project (PSR-4 source) files are scanned; vendor-registered
+    /// macros keep resolving through the concrete class's `__call`.  Called
+    /// once after indexing for Laravel projects.  Files are byte-prefiltered
+    /// for `macro(` so only candidates are parsed.
+    fn build_laravel_macro_index(&self) {
+        let php_version = Some(*self.php_version.lock());
+        let vendor = self.vendor_dir_paths.lock().clone();
+
+        // Distinct PSR-4 source base directories (project code only).
+        let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+        for mapping in self.psr4_mappings.read().iter() {
+            let dir = std::path::PathBuf::from(&mapping.base_path);
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+
+        let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
+        for dir in dirs {
+            if !dir.is_dir() {
+                continue;
+            }
+            for file in crate::util::collect_php_files(&dir, &vendor) {
+                let Ok(bytes) = std::fs::read(&file) else {
+                    continue;
+                };
+                if memchr::memmem::find(&bytes, b"macro(").is_none() {
+                    continue;
+                }
+                let Ok(content) = String::from_utf8(bytes) else {
+                    continue;
+                };
+                let regs = crate::virtual_members::laravel::extract_macro_registrations(
+                    &content,
+                    php_version,
+                );
+                if !regs.is_empty() {
+                    index.set_file(crate::util::path_to_uri(&file), regs);
+                }
+            }
+        }
+        index.rebuild();
+        let has_macros = !index.is_empty();
+        *self.laravel_macros.write() = index;
+        self.laravel_has_macros
+            .store(has_macros, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Re-scan a single file's macro registrations after an edit, keeping the
+    /// index and the resolved-class cache coherent.
+    ///
+    /// A cheap no-op unless the file currently contributes macros or its new
+    /// content contains a `macro(` call.  Only runs for Laravel projects.
+    pub(crate) fn refresh_laravel_macros(&self, uri: &str, content: &str) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
+        let had = self.laravel_macros.read().has_uri(uri);
+        let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
+        if !had && !has_token {
+            return;
+        }
+
+        let php_version = Some(*self.php_version.lock());
+        let regs =
+            crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
+
+        let targets = {
+            let mut index = self.laravel_macros.write();
+            index.set_file(uri.to_string(), regs);
+            index.rebuild();
+            self.laravel_has_macros
+                .store(!index.is_empty(), std::sync::atomic::Ordering::Relaxed);
+            index.target_fqns()
+        };
+
+        // Evict every class a macro attaches to so the next resolution picks
+        // up the change instead of a stale cached merge.
+        let mut cache = self.resolved_class_cache.write();
+        for fqn in targets {
+            crate::virtual_members::evict_fqn(&mut cache, &fqn);
+        }
     }
 
     /// Initialize a single-project workspace (root `composer.json` exists).

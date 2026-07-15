@@ -363,6 +363,17 @@ class Demo
     }
 
 
+    // ── Macro methods registered in a service provider ─────────────────
+
+    public function collectionMacro(Collection $items): float
+    {
+        // `sumField` is registered via Collection::macro(...) in
+        // DemoServiceProvider::boot(). PHPantom scans that registration, so
+        // the macro autocompletes and resolves to the closure's return type.
+        return $items->sumField('price');   // → float
+    }
+
+
     // ── Contract type-hints resolve through the concrete class ──────────
 
     public function viewContract(\Illuminate\Contracts\View\View $view): void

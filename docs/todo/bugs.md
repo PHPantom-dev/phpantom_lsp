@@ -315,51 +315,50 @@ fixtures once the actual code path is confirmed. Likely affects every
 Laravel project's `FormRequest`/`Notification`/other `Request`
 subclasses that call `$this->user()`, not just this one.
 
-## B75. Laravel's `Macroable::macro()` registrations lack real signatures
+## B75. Vendor- and facade-registered `Macroable::macro()` are not surfaced
 
-**Severity: Low (signature quality only; the false positives are resolved) · The contract → concrete binding that killed the confirmed diagnostics has shipped; what remains is precise macro signatures, which is nice-to-have.**
+**Severity: Low (the confirmed false positives are resolved; this is completeness of macro recognition). Two prior deliverables have shipped: the contract → concrete binding (`contract_concrete_mixin` in `patches.rs`) that suppresses the diagnostic on contract-typed values, and a static scan of *project* source for `Target::macro('name', closure)` registrations that surfaces those macros as real methods (name, parameters, return type) for completion, hover, and member resolution (`virtual_members/laravel/macros.rs`). Two gaps remain.**
 
-```php
-// vendor/livewire/livewire/src/Features/SupportPageComponents/SupportPageComponents.php
-View::macro('extends', function ($view, $params = []) { ... });
+**Gap 1: vendor-registered macros are not scanned.** The project macro
+scan only walks the app's own PSR-4 source directories, so macros
+registered by packages (Livewire, Inertia, Spatie, etc.) in their own
+service providers do not get real signatures. They still resolve
+through the concrete class's `__call` (so no false positive), but they
+do not autocomplete or show a signature. Extending coverage means
+discovering vendor service-provider files — the precise, bounded
+source is each installed package's `extra.laravel.providers` in
+`vendor/composer/installed.json` plus the app's `bootstrap/providers.php`
+/ `config/app.php` providers — and running the same
+`extract_macro_registrations` over them. Prefer this over a blind
+full-vendor re-read (thousands of files) since providers are where
+`::macro()` calls live.
 
-// app/View/Components/Manufacturers/ListManufacturers.php
-$view = view('components.manufacturers.list-manufacturers', [...]);
-$view->extends('layouts.default');   // resolves via the concrete's __call
-```
+**Gap 2: facade-registered macros attach to the wrong subject.**
+A macro registered through a facade (`View::macro('extends', ...)`)
+lands, at runtime, on the facade's *root* class (e.g. the view
+factory), not on instances returned elsewhere. The current scan
+attaches the macro to the written target FQN (the facade class), which
+is correct for static facade calls (`View::extends()`) but does not
+help an instance call like `$view->extends()` on a value typed as the
+view *contract*. Fully modelling this needs facade-accessor →
+container-binding resolution and is inherently ambiguous (the same
+macro name can be registered on unrelated roots). Until then these
+calls keep the `__call` fallback (diagnostic already suppressed via
+Gap-0's contract binding).
 
-Laravel's `Illuminate\Support\Traits\Macroable` trait lets any class
-that uses it register new methods at runtime via
-`SomeClass::macro('name', $closure)`, typically from a service
-provider's `boot()` or a package's bootstrap code.
+**Gap 3: go-to-definition on a macro call returns nothing.** Completion
+and signature help work on a recognized macro (the synthesized method
+carries the closure's parameters and return type), but go-to-definition
+returns `None`. The definition resolver locates a method by scanning the
+*declaring class's* file, whereas a macro is declared at the
+`::macro('name', ...)` call site in a different (provider) file. Making
+navigation jump there needs the synthesized method to carry its own
+source location (file URI + name offset) and the definition resolver to
+honour it, rather than falling back to the declaring-class file. This is
+a per-method source-location override on `MethodInfo`, so it is filed
+separately rather than bolted onto the scan.
 
-The confirmed false positives (`extends` not found on the
-`Illuminate\Contracts\View\View` contract) are now resolved: core
-contracts are bound to their default concrete class as a mixin (see
-`contract_concrete_mixin` in `virtual_members/laravel/patches.rs`), so
-the concrete's `Macroable`-provided `__call` merges into the contract
-and `diagnostics/unknown_members` suppresses the diagnostic. Add more
-contract → concrete entries to that map as triage surfaces them.
-
-**Remaining (larger, do when demand shows): best-effort static macro
-scan for real signatures.** At index time, byte-prefilter project +
-vendor for the substring `::macro(` (same technique as
-`classmap_scanner`) and parse only matching files. Handle only the
-literal pattern `Target::macro('name', function (...) {...})` /
-`Target::macro('name', fn (...) => ...)` where `Target` resolves via
-use statements to a class using `Macroable`, or to a facade whose
-root class is statically determinable (facade docblock `@see` tag, or
-the alias table in `virtual_members/laravel/aliases.rs`). Extract the
-closure's parameter/return types (native + docblock), and inject a
-virtual method onto the target's `ClassInfo` with `$this` bound to
-the target (per `Macroable::__call`'s `Closure::bind`). Out of scope:
-`Macroable::mixin()`, variable/computed targets, and string/array
-callables — those keep falling through to `__call` (which is the
-current, gracefully-degraded behaviour). Results are computed once at
-index time and cached; per-request cost is a map lookup, so LSP
-latency is unaffected. The value over the current `__call` fallback is
-signature quality: real parameter/return types on hover, signature
-help, and macro names in completion, instead of `__call`'s `mixed`.
-If two registrations target the same class and name, first wins
-(runtime is last-wins, but collisions are vanishingly rare and either
-choice is defensible).
+Out of scope throughout: `Macroable::mixin()`, variable/computed
+targets, and string/array callables. When two registrations target the
+same class and name, first wins (runtime is last-wins, but collisions
+are vanishingly rare and either choice is defensible).

@@ -96,16 +96,33 @@ impl Backend {
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
         let base = ty.base_name()?;
-        let loaded = self.find_or_load_class_inner(base)?;
+        let mut loaded = self.find_or_load_class_inner(base)?;
         // Refine the auth entry points' `user()` return type to the configured
         // model.  Gated on the cheap stored short name so the hot loader path
         // is untouched for every other class.
         if matches!(loaded.name.as_str(), "Guard" | "Request") {
-            return Some(crate::virtual_members::laravel::patch_auth_user_class(
-                self, loaded,
-            ));
+            loaded = crate::virtual_members::laravel::patch_auth_user_class(self, loaded);
         }
+        // Add any Laravel macros registered on this class.  Gated on a cheap
+        // atomic so the hot loader path is untouched when no macros exist.
+        loaded = self.inject_laravel_macros(loaded);
         Some(loaded)
+    }
+
+    /// Add Laravel macro methods registered on `class` (by FQN).
+    ///
+    /// A no-op unless the project registered at least one
+    /// `Target::macro('name', closure)` on this class.  See
+    /// [`laravel_macros`](crate::Backend::laravel_macros).
+    fn inject_laravel_macros(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        if !self
+            .laravel_has_macros
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return class;
+        }
+        let index = self.laravel_macros.read();
+        crate::virtual_members::laravel::inject_macros(&index, class)
     }
 
     /// Shared implementation used by [`find_or_load_class`].

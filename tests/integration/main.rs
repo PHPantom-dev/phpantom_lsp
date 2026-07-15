@@ -111,6 +111,7 @@ mod implementation;
 mod inlay_hints;
 mod laravel_contract_concrete;
 mod laravel_custom_builder;
+mod laravel_macros;
 mod laravel_references;
 mod laravel_route_controller;
 mod linked_editing;

@@ -447,6 +447,18 @@ pub struct Backend {
     /// whenever files are re-parsed so edits to `config/app.php` take effect
     /// without a restart.
     pub(crate) laravel_aliases: Arc<RwLock<Option<Arc<virtual_members::laravel::LaravelAliases>>>>,
+    /// Laravel `Target::macro('name', closure)` registrations discovered from
+    /// project source, keyed by the FQN of the class each macro attaches to.
+    ///
+    /// Built during `initialized` for Laravel projects and refreshed when a
+    /// contributing file changes.  Consulted when a class is loaded so that
+    /// macro methods appear in completion, hover, and signature help.  Empty
+    /// for non-Laravel projects.
+    pub(crate) laravel_macros: Arc<RwLock<virtual_members::laravel::LaravelMacroIndex>>,
+    /// Fast gate for [`laravel_macros`](Self::laravel_macros): `true` only
+    /// when the index holds at least one macro, so the hot class-load path
+    /// skips the lock entirely for the common (no-macro) case.
+    pub(crate) laravel_has_macros: Arc<std::sync::atomic::AtomicBool>,
     /// Per-target member completion cache.
     ///
     /// Typing `$model->wh...` triggers a completion request for each
@@ -863,6 +875,10 @@ impl Backend {
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             laravel_aliases: Arc::new(RwLock::new(None)),
+            laravel_macros: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelMacroIndex::default(),
+            )),
+            laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -953,6 +969,10 @@ impl Backend {
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             laravel_aliases: Arc::new(RwLock::new(None)),
+            laravel_macros: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelMacroIndex::default(),
+            )),
+            laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1518,6 +1538,8 @@ impl Backend {
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
             laravel_aliases: Arc::clone(&self.laravel_aliases),
+            laravel_macros: Arc::clone(&self.laravel_macros),
+            laravel_has_macros: Arc::clone(&self.laravel_has_macros),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),
