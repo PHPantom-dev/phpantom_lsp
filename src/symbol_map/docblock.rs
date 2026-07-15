@@ -372,6 +372,47 @@ pub(super) fn extract_param_var_spans(docblock: &str, base_offset: u32) -> Vec<(
         }
     }
 
+    // Also scan @return / @phpstan-return / @psalm-return tags for
+    // parameter references in conditional return types, e.g.
+    //   @return ($strict is true ? Result : ($fallback is true ? Result : ?Result))
+    // The `$strict` and `$fallback` tokens must be renamed together with
+    // the function parameters.
+    for tag in &info.tags {
+        let is_return = matches!(
+            tag.kind,
+            TagKind::Return | TagKind::PhpstanReturn | TagKind::PsalmReturn
+        );
+        if !is_return {
+            continue;
+        }
+
+        let desc_file_start = tag.description_span.start.offset;
+        let desc_in_doc_start = (desc_file_start - base_offset) as usize;
+        let desc_in_doc_end =
+            ((tag.description_span.end.offset - base_offset) as usize).min(docblock.len());
+        let raw_desc = &docblock[desc_in_doc_start..desc_in_doc_end];
+
+        // Find all `($varName` patterns — these are conditional type
+        // subjects.  Conditionals can be nested, so scan the entire
+        // description.
+        let bytes = raw_desc.as_bytes();
+        for i in 0..raw_desc.len().saturating_sub(1) {
+            if bytes[i] == b'(' && bytes[i + 1] == b'$' {
+                let dollar_pos = i + 1;
+                let rest = &raw_desc[dollar_pos..];
+                let name_end = rest[1..]
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .map(|j| j + 1)
+                    .unwrap_or(rest.len());
+                if name_end > 1 {
+                    let name = rest[1..name_end].to_string();
+                    let file_offset = desc_file_start + dollar_pos as u32;
+                    results.push((name, file_offset));
+                }
+            }
+        }
+    }
+
     results
 }
 

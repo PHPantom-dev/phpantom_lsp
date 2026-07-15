@@ -2807,6 +2807,154 @@ async fn rename_parameter_multiple_docblock_params() {
 }
 
 #[tokio::test]
+async fn rename_parameter_includes_conditional_return_type() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @param bool $strict\n",
+        " * @return ($strict is true ? Result : ?Result)\n",
+        " */\n",
+        "function findUser(bool $strict = true): ?Result {\n",
+        "    if ($strict) {\n",
+        "        throw new \\Exception('not found');\n",
+        "    }\n",
+        "    return null;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on `$strict` in the parameter list (line 5, col 23).
+    let edit = rename(&backend, &uri, 5, 23, "$mustExist").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for parameter rename with conditional return"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("@param bool $mustExist"),
+        "Docblock @param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("($mustExist is true"),
+        "Conditional return type param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("bool $mustExist ="),
+        "Parameter not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("if ($mustExist)"),
+        "Body usage not renamed: {}",
+        result
+    );
+    assert!(
+        !result.contains("$strict"),
+        "Old variable name still present: {}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_parameter_includes_nested_conditional_return_type() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @return ($strict is true ? Result : ($fallback is true ? Result : ?Result))\n",
+        " */\n",
+        "function findUser(bool $strict = true, bool $fallback = false): ?Result {\n",
+        "    return null;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename $fallback (line 4, col 45).
+    let edit = rename(&backend, &uri, 4, 45, "$useFallback").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for nested conditional return rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("($useFallback is true"),
+        "Nested conditional return type param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("bool $useFallback ="),
+        "Parameter not renamed: {}",
+        result
+    );
+    // $strict should remain untouched.
+    assert!(
+        result.contains("($strict is true"),
+        "$strict was wrongly renamed: {}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_parameter_conditional_return_from_body_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @param bool $strict\n",
+        " * @return ($strict is true ? Result : ?Result)\n",
+        " */\n",
+        "function findUser(bool $strict = true): ?Result {\n",
+        "    if ($strict) {\n",
+        "        throw new \\Exception('not found');\n",
+        "    }\n",
+        "    return null;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on `$strict` in the function body (line 6, col 8).
+    let edit = rename(&backend, &uri, 6, 8, "$mustExist").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for rename from body with conditional return"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("@param bool $mustExist"),
+        "Docblock @param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("($mustExist is true"),
+        "Conditional return type param not renamed from body: {}",
+        result
+    );
+    assert!(
+        !result.contains("$strict"),
+        "Old variable name still present: {}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn rename_arrow_function_parameter() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test.php").unwrap();
