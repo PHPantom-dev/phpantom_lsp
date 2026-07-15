@@ -12455,3 +12455,105 @@ class Test
         "$this->value must resolve to the anon class's int property, got: {text}"
     );
 }
+
+// ─── @param-closure-this hover ──────────────────────────────────────────────
+
+/// When hovering on `$this` inside a closure whose enclosing call site
+/// declares `@param-closure-this Route $callback`, hover should show
+/// `$this = Route` (the overridden type), not the lexically enclosing class.
+#[test]
+fn hover_param_closure_this_overrides_lexical_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test/closure_this_hover.php";
+    let content = r#"<?php
+class Route {
+    public function middleware(string $m): self { return $this; }
+}
+class Router {
+    /**
+     * @param-closure-this Route $callback
+     */
+    public function group(\Closure $callback): void {}
+}
+class AppRoutes {
+    public function register(): void {
+        $router = new Router();
+        $router->group(function () {
+            $this->middleware('auth');
+        });
+    }
+}
+"#;
+    // `$this` is at line 14, col 12 (inside the closure body).
+    let hover = hover_at(&backend, uri, content, 14, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Route"),
+        "$this should resolve to Route via @param-closure-this, got: {text}"
+    );
+    assert!(
+        !text.contains("AppRoutes"),
+        "$this should NOT resolve to the lexical class AppRoutes, got: {text}"
+    );
+}
+
+/// When hovering on `$this` inside a closure without `@param-closure-this`,
+/// it should still resolve to the lexically enclosing class as usual.
+#[test]
+fn hover_this_without_closure_this_tag_falls_back_to_lexical_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test/closure_this_hover_fallback.php";
+    let content = r#"<?php
+class Router {
+    public function group(\Closure $callback): void {}
+}
+class AppRoutes {
+    public function register(): void {
+        $router = new Router();
+        $router->group(function () {
+            $this;
+        });
+    }
+}
+"#;
+    // `$this` is at line 8, col 12.
+    let hover = hover_at(&backend, uri, content, 8, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("AppRoutes"),
+        "$this should fall back to lexical class AppRoutes, got: {text}"
+    );
+}
+
+/// Hover on `$this` inside a closure passed to a standalone function
+/// with `@param-closure-this` should resolve to the declared type.
+#[test]
+fn hover_param_closure_this_standalone_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test/closure_this_hover_fn.php";
+    let content = r#"<?php
+class Config {
+    public function get(string $key): mixed { return null; }
+}
+
+/**
+ * @param-closure-this Config $callback
+ */
+function configure(\Closure $callback): void {}
+
+class App {
+    public function boot(): void {
+        configure(function () {
+            $this->get('key');
+        });
+    }
+}
+"#;
+    // `$this` is at line 13, col 12.
+    let hover = hover_at(&backend, uri, content, 13, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Config"),
+        "$this should resolve to Config via @param-closure-this, got: {text}"
+    );
+}
