@@ -224,32 +224,3 @@ case-insensitively, the same way direct method calls already are
 (luxplus-website
 `app/Http/Resources/OrderDetailedResource.php:146-147`, via
 `Order::orderProducts()` accessed as `$order->orderproducts`).
-
-## B76. `$this` inside an anonymous class body resolves to the enclosing method's class instead of the anonymous class
-
-**Severity: Low (~1 error, luxplus-website) · Confirmed with fixture**
-
-```php
-class Test
-{
-    public function make(): object
-    {
-        return new class (5) {
-            public function __construct(private readonly int $value) {}
-
-            public function get(): int
-            {
-                return $this->value;   // "Property 'value' not found on class 'Test'"
-            }
-        };
-    }
-}
-```
-
-Inside an anonymous class's own methods, `$this` must resolve to the
-anonymous class, not to whatever class contains the `new class { ... }`
-expression. The resolver appears to keep the enclosing method's class
-as the current `$this` type when it descends into the anonymous
-class's method bodies instead of switching context (luxplus-website
-`tests/Feature/Web/LinkCampaignsControllerTest.php:347`, a mocked
-service defined as an anonymous class inside a test helper method).

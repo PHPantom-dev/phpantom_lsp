@@ -12423,3 +12423,35 @@ fn hover_template_array_bound_identity_generic_resolves_inside_body() {
         "Should resolve T to its bound (Token[]) and show Token::$type as int, got: {text}"
     );
 }
+
+/// Hovering `$this->value` inside an anonymous class's own method resolves
+/// the property against the anonymous class, not the enclosing method's
+/// class.
+#[test]
+fn hover_this_property_in_anonymous_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Test
+{
+    public function make(): object
+    {
+        return new class (5) {
+            public function __construct(private readonly int $value) {}
+
+            public function get(): int
+            {
+                return $this->value;
+            }
+        };
+    }
+}
+"#;
+    // Hover on `value` in `$this->value` (line 10, the `v` of value).
+    let hover = hover_at(&backend, uri, content, 10, 30).expect("expected hover on $this->value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "$this->value must resolve to the anon class's int property, got: {text}"
+    );
+}

@@ -606,6 +606,22 @@ fn walk_closures_in_expr<'b>(
                 walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
             }
         }
+        Expression::AnonymousClass(anon) => {
+            // Constructor arguments evaluate in the outer scope (with the
+            // outer `$this`), so scan them for closures there.
+            if let Some(ref args) = anon.argument_list {
+                walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+            }
+            // The anonymous class's own method bodies have their own
+            // `$this` (the anonymous class), so walk them separately.
+            walk_anonymous_class_member_bodies(anon, ctx);
+
+            // Restore the outer scope immediately after the anonymous
+            // class body so that code following it in the same expression
+            // (e.g. a sibling call argument `f(new class {...}, $this->x)`)
+            // sees the outer `$this`, not the anonymous class's.
+            record_scope_snapshot(anon.right_brace.end.offset + 1, outer_scope);
+        }
         Expression::Yield(y) => match y {
             Yield::Value(yv) => {
                 if let Some(val) = &yv.value {
@@ -1774,6 +1790,32 @@ fn analyze_function_body<'b>(
         top_level_scope: None,
     };
 
+    seed_and_walk_function_body(
+        parameters,
+        body_statements,
+        fn_span_start,
+        method_name,
+        is_static,
+        &ctx,
+    );
+}
+
+/// Seed a fresh scope for a function/method body and walk it for
+/// diagnostic scope snapshots.
+///
+/// Shared by [`analyze_function_body`] (top-level functions and class
+/// methods) and [`walk_anonymous_class_member_bodies`] (methods declared
+/// inside an anonymous class expression).  Both need the same seeding:
+/// `$this` for non-static methods, parameter types, and superglobals.
+/// The only difference is the `current_class` carried by `ctx`.
+fn seed_and_walk_function_body<'b>(
+    parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
+    body_statements: impl Iterator<Item = &'b Statement<'b>>,
+    fn_span_start: u32,
+    method_name: Option<&str>,
+    is_static: bool,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     let mut scope = ScopeState::new();
 
     // Seed `$this` for non-static class methods so that expressions
@@ -1781,14 +1823,14 @@ fn analyze_function_body<'b>(
     // resolve from the scope instead of falling through to the backward
     // scanner.
     if !is_static {
-        seed_this(&mut scope, current_class);
+        seed_this(&mut scope, ctx.current_class);
     }
 
     // Seed scope with parameter types.
     // Detect whether this method has a #[Scope] attribute by scanning
     // the source text around the method span for `#[Scope]`.
     let has_scope_attr = method_name
-        .map(|_| detect_scope_attribute_from_source(diag_ctx.content, fn_span_start as usize))
+        .map(|_| detect_scope_attribute_from_source(ctx.content, fn_span_start as usize))
         .unwrap_or(false);
     seed_params(
         &mut scope,
@@ -1796,7 +1838,7 @@ fn analyze_function_body<'b>(
         fn_span_start,
         method_name,
         has_scope_attr,
-        &ctx,
+        ctx,
     );
 
     // Seed superglobals so that accesses like `$_SERVER['key']` don't
@@ -1808,7 +1850,59 @@ fn analyze_function_body<'b>(
     record_scope_snapshot(fn_span_start, &scope);
 
     // Walk the entire body, recording snapshots at each statement.
-    walk_body_for_diagnostics(body_statements, &mut scope, &ctx);
+    walk_body_for_diagnostics(body_statements, &mut scope, ctx);
+}
+
+/// Walk the method bodies of an anonymous class expression, seeding
+/// `$this` to the anonymous class itself.
+///
+/// Without this, the forward walker records `$this` snapshots for the
+/// lexically enclosing method (whose `$this` is the outer class) and
+/// those snapshots leak into the anonymous class's method bodies, since
+/// they sit at higher offsets with no intervening re-seed.  Member
+/// accesses like `$this->prop` inside the anonymous class would then
+/// resolve against the outer class and be flagged as unknown.
+fn walk_anonymous_class_member_bodies<'b>(anon: &'b AnonymousClass<'b>, ctx: &ForwardWalkCtx<'_>) {
+    use mago_syntax::ast::class_like::member::ClassLikeMember;
+    use mago_syntax::ast::class_like::method::MethodBody;
+
+    // The parser extracts anonymous classes as `ClassInfo` with the
+    // synthetic name `__anonymous@<left_brace_offset>`.  Look it up so
+    // the walk sees the anonymous class's real members instead of the
+    // enclosing class.
+    let anon_name = format!("__anonymous@{}", anon.left_brace.start.offset);
+    let Some(anon_class) = ctx.all_classes.iter().find(|c| *c.name == anon_name) else {
+        return;
+    };
+
+    let anon_ctx = ForwardWalkCtx {
+        current_class: anon_class.as_ref(),
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: ctx.cursor_offset,
+        class_loader: ctx.class_loader,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: None,
+        top_level_scope: None,
+    };
+
+    for member in anon.members.iter() {
+        if let ClassLikeMember::Method(method) = member
+            && let MethodBody::Concrete(block) = &method.body
+        {
+            let method_name = bytes_to_str(method.name.value).to_string();
+            let is_static = method.modifiers.contains_static();
+            seed_and_walk_function_body(
+                method.parameter_list.parameters.iter(),
+                block.statements.iter(),
+                method.span().start.offset,
+                Some(&method_name),
+                is_static,
+                &anon_ctx,
+            );
+        }
+    }
 }
 
 /// Find the innermost class whose body span contains `offset`.

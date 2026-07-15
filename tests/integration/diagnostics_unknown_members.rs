@@ -5559,3 +5559,94 @@ namespace App {
         "shouldHaveReceived()->with(...) must resolve through VerificationDirector, got: {diags:?}"
     );
 }
+
+#[test]
+fn this_in_anonymous_class_resolves_to_anon_not_outer() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Test
+{
+    public function make(): object
+    {
+        return new class (5) {
+            public function __construct(private readonly int $value) {}
+
+            public function get(): int
+            {
+                return $this->value;
+            }
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("value")),
+        "$this->value inside the anonymous class must resolve to the anon class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn this_method_call_in_anonymous_class_resolves_to_anon() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // `$this->helper()` inside the anonymous class must resolve against
+    // the anonymous class, and a member missing on the anonymous class
+    // (but present on the outer class) must still be flagged.
+    let text = r#"<?php
+class Outer
+{
+    public function outerOnly(): void {}
+
+    public function make(): object
+    {
+        return new class {
+            public function helper(): int { return 1; }
+
+            public function run(): void
+            {
+                $this->helper();
+                $this->outerOnly();
+            }
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("helper")),
+        "$this->helper() must resolve on the anonymous class, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("outerOnly")),
+        "$this->outerOnly() (defined only on Outer) must be flagged inside the anon class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn this_after_anonymous_class_still_resolves_to_outer() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // After the anonymous class body, `$this` must return to the outer
+    // class so its own members still resolve.
+    let text = r#"<?php
+class Outer
+{
+    public function outerProp(): void {}
+
+    public function make(): void
+    {
+        $x = new class {
+            public function inner(): void {}
+        };
+        $this->outerProp();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("outerProp")),
+        "$this->outerProp() after the anon class must resolve on Outer, got: {diags:?}"
+    );
+}
