@@ -250,9 +250,39 @@ This creates a `.phpantom.toml` in the current directory. Currently supported se
 #   "self"    - always self-scan, ignore Composer classmap
 #   "none"    - no proactive scanning, Composer classmap only
 # strategy = "composer"
+
+[formatting]
+# Explicit path to an external formatter: always use this tool and skip
+# require-dev auto-detection. Set to "" to disable that tool entirely.
+# pint = "/usr/local/bin/pint"
+# php-cs-fixer = "/usr/local/bin/php-cs-fixer"
+# phpcbf = "/usr/local/bin/phpcbf"
+
+# Timeout for external formatters, in milliseconds (default: 10000).
+# timeout = 10000
 ```
 
 The file is optional. When absent, all settings use their defaults. New settings will be added as features land. Unknown keys are silently ignored, so the file is forward-compatible.
+
+### Code Formatting
+
+PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the box, so `textDocument/formatting` requests are answered without any setup. The formatter is chosen per project in this order:
+
+1. **Explicit config wins.** A tool path set under `[formatting]` in `.phpantom.toml` (`pint`, `php-cs-fixer`, or `phpcbf`) is always used. Setting a tool to `""` disables it.
+2. **Composer `require-dev` wins over the built-in formatter.** If `composer.json` lists `laravel/pint`, `friendsofphp/php-cs-fixer`, or `squizlabs/php_codesniffer` in `require-dev`, PHPantom resolves the binary through Composer's bin-dir and runs it as a subprocess. These tools discover their own project config (`pint.json`, `.php-cs-fixer.php`, `.phpcs.xml`, etc.) as they normally would.
+3. **Otherwise, the built-in formatter is used.**
+
+The built-in formatter defaults to the PER-CS 2.0 style. If a `mago.toml` is present at the workspace root, its `[formatter]` table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:
+
+```toml
+# mago.toml
+[formatter]
+preset = "psr-12"
+print-width = 100
+use-tabs = false
+```
+
+For the full list of `[formatter]` options (presets, brace placement, blank-line handling, casing, and the rest), refer to the upstream Mago documentation: [Formatter configuration reference](https://mago.carthage.software/latest/en/tools/formatter/configuration-reference).
 
 ### Indexing Strategy
 

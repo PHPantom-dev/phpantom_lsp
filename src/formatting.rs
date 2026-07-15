@@ -17,7 +17,7 @@
 //!    `require-dev`, resolve the binary via Composer's bin-dir and run
 //!    it as a subprocess.
 //! 3. **Otherwise, use mago-formatter.**  No subprocess, no temp files,
-//!    no external dependencies.  Uses PER-CS 2.0 defaults.
+//!    no external dependencies.  Uses PER-CS 2.0 defaults or if present `mago.toml`.
 //!
 //! ## Configuration (`.phpantom.toml`)
 //!
@@ -53,6 +53,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use serde::Deserialize;
 use tempfile::NamedTempFile;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
@@ -80,8 +81,8 @@ pub(crate) struct ResolvedTool {
 pub(crate) enum FormattingStrategy {
     /// Run one or more external tools in sequence.
     External(Vec<ResolvedTool>),
-    /// Use the built-in mago-formatter.
-    BuiltIn,
+    /// Use the built-in mago-formatter with optional `mago.toml`
+    BuiltIn(Option<PathBuf>),
     /// Formatting is explicitly disabled.
     Disabled,
 }
@@ -182,7 +183,10 @@ pub(crate) fn resolve_strategy(
     }
 
     // No external tools configured or detected — use built-in.
-    FormattingStrategy::BuiltIn
+    let config_path = workspace_root
+        .filter(|root| crate::mago::has_mago_config(root))
+        .map(|root| root.join("mago.toml"));
+    FormattingStrategy::BuiltIn(config_path)
 }
 
 /// Resolve a tool binary from the Composer bin directory.
@@ -208,13 +212,13 @@ fn resolve_from_bin_dir(
 /// Format PHP source code using the built-in mago-formatter.
 ///
 /// Returns the formatted source string, or an error if parsing fails.
-/// Uses PER-CS 2.0 style defaults.
+/// The caller supplies the effective formatter settings.
 fn format_with_mago(
     content: &str,
     php_version: mago_php_version::PHPVersion,
+    settings: mago_formatter::settings::FormatSettings,
 ) -> Result<String, String> {
     let arena = bumpalo::Bump::new();
-    let settings = mago_formatter::settings::FormatSettings::default();
     let formatter = mago_formatter::Formatter::new(&arena, php_version, settings);
 
     let formatted = formatter
@@ -225,6 +229,38 @@ fn format_with_mago(
         .map_err(|e| format!("Built-in formatter failed to parse PHP: {}", e))?;
 
     Ok(bytes_to_str(formatted).to_string())
+}
+
+#[derive(Deserialize)]
+struct MagoToml {
+    formatter: Option<MagoFormatterToml>,
+}
+
+#[derive(Deserialize)]
+struct MagoFormatterToml {
+    preset: Option<mago_formatter::presets::FormatterPreset>,
+    #[serde(flatten)]
+    settings: mago_formatter::settings::RawFormatSettings,
+}
+
+/// Load the `[formatter]` table from a workspace `mago.toml`.
+///
+/// `RawFormatSettings` is Mago's own deserialization type, so settings added
+/// by the embedded formatter are accepted without duplicating its schema.
+fn load_mago_format_settings(
+    config_path: &Path,
+) -> Result<mago_formatter::settings::FormatSettings, String> {
+    let source = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("Failed to read {}: {}", config_path.display(), e))?;
+    let config: MagoToml = toml::from_str(&source)
+        .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;
+
+    let Some(formatter) = config.formatter else {
+        return Ok(mago_formatter::settings::FormatSettings::default());
+    };
+
+    let base = formatter.preset.unwrap_or_default().settings();
+    Ok(formatter.settings.merge_with(base))
 }
 
 /// Convert a project [`PhpVersion`](crate::types::PhpVersion) into the
@@ -282,9 +318,13 @@ pub(crate) fn execute_strategy(
                 Ok(Some(edits))
             }
         }
-        FormattingStrategy::BuiltIn => {
+        FormattingStrategy::BuiltIn(config_path) => {
             let mago_version = to_mago_php_version(php_version);
-            let formatted = format_with_mago(content, mago_version)?;
+            let settings = match config_path {
+                Some(config_path) => load_mago_format_settings(config_path)?,
+                None => mago_formatter::settings::FormatSettings::default(),
+            };
+            let formatted = format_with_mago(content, mago_version, settings)?;
             let edits = compute_edits(content, &formatted);
             if edits.is_empty() {
                 Ok(None)
@@ -657,7 +697,70 @@ mod tests {
     fn strategy_default_config_no_composer_is_builtin() {
         let config = FormattingConfig::default();
         let strategy = resolve_strategy(None, &config, None, None);
-        assert!(matches!(strategy, FormattingStrategy::BuiltIn));
+        assert!(matches!(strategy, FormattingStrategy::BuiltIn(None)));
+    }
+
+    #[test]
+    fn strategy_builtin_carries_mago_config_when_composer_tools_uninstalled() {
+        // laravel/pint is declared in require-dev but its binary is not
+        // present in the tempdir's vendor/bin, so the strategy falls back
+        // to the built-in formatter — which then picks up the mago.toml.
+        let dir = tempfile::tempdir().unwrap();
+        let config = FormattingConfig::default();
+        let composer: crate::composer::ComposerPackage =
+            serde_json::from_value(serde_json::json!({
+                "require-dev": { "laravel/pint": "^1.0" }
+            }))
+            .unwrap();
+        std::fs::write(
+            dir.path().join("mago.toml"),
+            "[formatter]\npreset = \"psr-12\"\n",
+        )
+        .unwrap();
+        let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+
+        match strategy {
+            FormattingStrategy::BuiltIn(path) => {
+                assert_eq!(path.unwrap(), dir.path().join("mago.toml"))
+            }
+            other => panic!("Expected BuiltIn with mago.toml, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mago_toml_settings_are_loaded_for_embedded_formatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("mago.toml");
+        std::fs::write(
+            &config_path,
+            "[formatter]\npreset = \"psr-12\"\nprint-width = 80\nuse-tabs = true\n",
+        )
+        .unwrap();
+
+        let settings = load_mago_format_settings(&config_path).unwrap();
+        assert_eq!(settings.print_width, 80);
+        assert!(settings.use_tabs);
+    }
+
+    #[test]
+    fn malformed_mago_toml_returns_error_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("mago.toml");
+        std::fs::write(&config_path, "this is = not [valid toml").unwrap();
+
+        let result = load_mago_format_settings(&config_path);
+        assert!(result.is_err());
+
+        // A malformed config must surface as a formatting error, never a panic.
+        let content = "<?php\necho   'hello' ;  \n";
+        let result = execute_strategy(
+            &FormattingStrategy::BuiltIn(Some(config_path)),
+            content,
+            &PathBuf::from("/tmp/test.php"),
+            &FormattingConfig::default(),
+            crate::types::PhpVersion::default(),
+        );
+        assert!(result.is_err());
     }
 
     #[test]
@@ -834,7 +937,7 @@ mod tests {
         let config = FormattingConfig::default();
         let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
         assert!(
-            matches!(strategy, FormattingStrategy::BuiltIn),
+            matches!(strategy, FormattingStrategy::BuiltIn(None)),
             "Expected BuiltIn when binary is missing, got {:?}",
             strategy,
         );
@@ -947,7 +1050,7 @@ mod tests {
         );
         // php-cs-fixer is in vendor/bin but NOT in custom-bin.
         assert!(
-            matches!(strategy, FormattingStrategy::BuiltIn),
+            matches!(strategy, FormattingStrategy::BuiltIn(None)),
             "Expected BuiltIn when custom bin dir doesn't have the tool, got {:?}",
             strategy,
         );
@@ -965,7 +1068,7 @@ mod tests {
             .unwrap();
         let config = FormattingConfig::default();
         let strategy = resolve_strategy(None, &config, Some(&composer), None);
-        assert!(matches!(strategy, FormattingStrategy::BuiltIn));
+        assert!(matches!(strategy, FormattingStrategy::BuiltIn(None)));
     }
 
     // ── format_with_mago ────────────────────────────────────────────
@@ -973,7 +1076,11 @@ mod tests {
     #[test]
     fn mago_formats_simple_php() {
         let input = "<?php\necho   'hello' ;  \n";
-        let result = format_with_mago(input, mago_php_version::PHPVersion::PHP84);
+        let result = format_with_mago(
+            input,
+            mago_php_version::PHPVersion::PHP84,
+            mago_formatter::settings::FormatSettings::default(),
+        );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
         let formatted = result.unwrap();
         // The formatter should produce valid PHP with normalized spacing.
@@ -984,7 +1091,11 @@ mod tests {
     #[test]
     fn mago_returns_error_for_unparseable_php() {
         let input = "<?php\nfunction { broken syntax";
-        let result = format_with_mago(input, mago_php_version::PHPVersion::PHP84);
+        let result = format_with_mago(
+            input,
+            mago_php_version::PHPVersion::PHP84,
+            mago_formatter::settings::FormatSettings::default(),
+        );
         assert!(result.is_err());
     }
 
@@ -992,7 +1103,11 @@ mod tests {
     fn mago_preserves_already_formatted() {
         // A well-formatted snippet should round-trip cleanly.
         let input = "<?php\n\necho 'hello';\n";
-        let result = format_with_mago(input, mago_php_version::PHPVersion::PHP84);
+        let result = format_with_mago(
+            input,
+            mago_php_version::PHPVersion::PHP84,
+            mago_formatter::settings::FormatSettings::default(),
+        );
         assert!(result.is_ok());
         let formatted = result.unwrap();
         assert_eq!(formatted, input);
@@ -1001,7 +1116,11 @@ mod tests {
     #[test]
     fn mago_reformats_messy_class() {
         let input = "<?php\n\nnamespace Demo;\nclass User\n{ public function foo(): string\n{\n    return \"1a11a\";}\n}\n";
-        let result = format_with_mago(input, mago_php_version::PHPVersion::PHP84);
+        let result = format_with_mago(
+            input,
+            mago_php_version::PHPVersion::PHP84,
+            mago_formatter::settings::FormatSettings::default(),
+        );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
         let formatted = result.unwrap();
         assert_ne!(
@@ -1059,7 +1178,7 @@ mod tests {
         let file_path = PathBuf::from("/tmp/test.php");
 
         let result = execute_strategy(
-            &FormattingStrategy::BuiltIn,
+            &FormattingStrategy::BuiltIn(None),
             content,
             &file_path,
             &config,
@@ -1078,7 +1197,7 @@ mod tests {
         let file_path = PathBuf::from("/tmp/sandbox.php");
 
         let result = execute_strategy(
-            &FormattingStrategy::BuiltIn,
+            &FormattingStrategy::BuiltIn(None),
             content,
             &file_path,
             &config,
