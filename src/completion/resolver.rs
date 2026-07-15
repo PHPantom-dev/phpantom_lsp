@@ -361,11 +361,14 @@ pub(crate) fn resolve_target_classes_expr(
     // due to reassignment or narrowing.
     //
     // PropertyChain expressions rooted in a variable (e.g. `$this->pet`,
-    // `$obj->prop`) are also excluded because instanceof narrowing can
-    // change the resolved type at different positions within the same
-    // method body.  For example, `$this->pet` may resolve to `Dog`
-    // inside `if ($this->pet instanceof Dog)` but to `Cat` after
-    // `if (!$this->pet instanceof Cat) { return; }`.
+    // `$obj->prop`, `$args[0]->value`, `$this->a->b`) are also excluded
+    // because instanceof narrowing can change the resolved type at
+    // different positions within the same method body.  For example,
+    // `$this->pet` may resolve to `Dog` inside `if ($this->pet
+    // instanceof Dog)` but to `Cat` after `if (!$this->pet instanceof
+    // Cat) { return; }`.  The root test is transitive: a chain rooted in
+    // a variable through array accesses or nested property chains
+    // (`$args[0]->value`) is just as narrowable as a direct one.
     //
     // Call expressions and static accesses are safe to cache because
     // their return types are deterministic (method signatures don't
@@ -375,18 +378,12 @@ pub(crate) fn resolve_target_classes_expr(
         | SubjectExpr::MethodCall { .. }
         | SubjectExpr::StaticMethodCall { .. }
         | SubjectExpr::StaticAccess { .. } => true,
-        // PropertyChain is only cacheable when the base is NOT a
-        // bare variable — e.g. `$this->method()->prop` (CallExpr
-        // base) is safe, but `$this->pet` (This/Variable base) is
-        // subject to narrowing.
-        SubjectExpr::PropertyChain { base, .. } => !matches!(
-            base.as_ref(),
-            SubjectExpr::This
-                | SubjectExpr::SelfKw
-                | SubjectExpr::StaticKw
-                | SubjectExpr::Parent
-                | SubjectExpr::Variable(_)
-        ),
+        // PropertyChain is only cacheable when its base does NOT root
+        // in a variable — e.g. `$this->method()->prop` (rooted in a
+        // call) is safe, but `$this->pet`, `$args[0]->value`, and
+        // `$this->a->b` (rooted in `$this`/a variable) are subject to
+        // narrowing.
+        SubjectExpr::PropertyChain { base, .. } => !base_roots_in_variable(base),
         _ => false,
     };
     if is_cacheable_chain {
@@ -1593,6 +1590,30 @@ pub(in crate::completion) fn resolve_static_owner_class(
 /// type for `key`; the caller then trusts it and skips the re-walk.
 /// Returns `None` when no scope is active or the key was never seeded,
 /// so the caller falls back to normal resolution.
+/// Whether a subject expression transitively roots in a variable
+/// (`$var`, `$this`, `self`, `static`, or `parent`), possibly through
+/// array accesses or nested property chains.
+///
+/// Such expressions are subject to `instanceof`/`assert` narrowing that
+/// changes their resolved type at different positions in the same method
+/// body (e.g. `$args[0]->value instanceof Foo` in one `if` branch vs.
+/// `instanceof Bar` in the following `elseif`).  Their resolution must
+/// therefore never be cached by subject text alone.  Expressions rooted
+/// in a call (`$this->make()->prop`) resolve deterministically and stay
+/// cacheable.
+fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
+    match expr {
+        SubjectExpr::This
+        | SubjectExpr::SelfKw
+        | SubjectExpr::StaticKw
+        | SubjectExpr::Parent
+        | SubjectExpr::Variable(_) => true,
+        SubjectExpr::PropertyChain { base, .. } => base_roots_in_variable(base),
+        SubjectExpr::ArrayAccess { base, .. } => base_roots_in_variable(base),
+        _ => false,
+    }
+}
+
 /// Build the canonical forward-walker scope key for a subject
 /// expression (e.g. `$row["page"]`, `$stmts["0"]`, `$args["0"]->value`).
 ///

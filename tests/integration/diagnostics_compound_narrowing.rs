@@ -37,7 +37,10 @@ interface Expr {}
 class StringExpr implements Expr {
     public string $value = '';
 }
-class OtherExpr implements Expr {}
+class OtherExpr implements Expr {
+    /** @var list<mixed> */
+    public array $items = [];
+}
 class Arg {
     public Expr $value;
 }
@@ -248,5 +251,42 @@ class C {{
             .any(|d| d.message.contains("value") && d.message.contains("OtherExpr")),
         "Accessing `->value` on the narrowed `OtherExpr` should be \
          flagged, got: {diags:?}"
+    );
+}
+
+/// `if`/`elseif` chain where each branch narrows the same property-path
+/// subject to a different type via a compound `&&` condition.  The
+/// `elseif` branch's own `instanceof` must win: the preceding `if`
+/// branch's narrowing must not leak into it.  Regression test: the chain
+/// resolution cache keyed `$args[0]->value` by subject text plus the base
+/// variable's type (identical at both branches), so the first branch's
+/// `StringExpr` narrowing was reused inside the `elseif`, flagging
+/// `->items` as missing on `StringExpr`.
+#[test]
+fn elseif_property_path_uses_own_branch_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_prop_path.php";
+    let text = format!(
+        "{SCAFFOLD}
+class C {{
+    /** @param Arg[] $args */
+    public function m(array $args): void {{
+        if (count($args) === 2 && $args[0]->value instanceof StringExpr) {{
+            takeString($args[0]->value->value);
+        }} elseif (count($args) === 1 && $args[0]->value instanceof OtherExpr) {{
+            foreach ($args[0]->value->items as $item) {{
+                unset($item);
+            }}
+        }}
+    }}
+}}
+"
+    );
+    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    assert!(
+        diags.is_empty(),
+        "Inside the `elseif`, `$args[0]->value` should narrow to \
+         `OtherExpr` (which has `items`), not carry the `if` branch's \
+         `StringExpr` narrowing, got: {diags:?}"
     );
 }
