@@ -25,7 +25,7 @@ use crate::completion::resolver::VarResolutionCtx;
 /// `Option<PhpType>`.  Returns `None` when the unified pipeline
 /// produces no results or an empty type string.
 pub(crate) fn resolve_expression_type<'b>(
-    expr: &'b mago_syntax::ast::Expression<'b>,
+    expr: &'b mago_syntax::cst::Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let resolved = super::rhs_resolution::resolve_rhs_expression(expr, ctx);

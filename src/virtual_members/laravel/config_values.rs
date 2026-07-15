@@ -21,9 +21,9 @@
 
 use std::collections::HashMap;
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -173,7 +173,7 @@ impl ConfigNode {
 /// pattern, mirroring [`config_keys`](super::config_keys)'s declaration
 /// walker.
 pub(crate) fn parse_config_tree(content: &str) -> Option<ConfigNode> {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 

@@ -4,7 +4,7 @@
 /// definitions and `define('NAME', value)` constant declarations from
 /// the PHP AST.
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, atom_bytes, bytes_to_str};

@@ -279,9 +279,9 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
 
 // ─── Shared PHP AST walker ───────────────────────────────────────────────────
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 /// Parse `content` as PHP and call `visitor` for every expression node
 /// (pre-order, depth-first).  Used by navigation modules to find specific
@@ -294,7 +294,7 @@ pub(crate) fn walk_all_php_expressions(
     content: &str,
     visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
 ) {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     for stmt in program.statements.iter() {

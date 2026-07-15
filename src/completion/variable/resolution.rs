@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str, last_segment};
 use crate::docblock;
@@ -844,7 +844,7 @@ fn find_anonymous_class_containing_cursor<'a>(
 
     /// Walk a list of call arguments.
     fn walk_args<'a>(
-        arguments: &'a mago_syntax::ast::sequence::TokenSeparatedSequence<'a, Argument<'a>>,
+        arguments: &'a mago_syntax::cst::sequence::TokenSeparatedSequence<'a, Argument<'a>>,
         cursor: u32,
     ) -> Option<&'a AnonymousClass<'a>> {
         for arg in arguments.iter() {

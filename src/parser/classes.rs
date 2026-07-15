@@ -4,15 +4,15 @@ use crate::php_type::PhpType;
 use crate::types::TypeAliasDef;
 use crate::util::strip_fqn_prefix;
 use mago_span::HasSpan;
-use mago_syntax::ast::attribute::AttributeList;
-use mago_syntax::ast::class_like::enum_case::EnumCaseItem;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::method::{Method, MethodBody};
-use mago_syntax::ast::class_like::property::{Property, PropertyItem};
-use mago_syntax::ast::class_like::trait_use::{
+use mago_syntax::cst::attribute::AttributeList;
+use mago_syntax::cst::class_like::enum_case::EnumCaseItem;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::method::{Method, MethodBody};
+use mago_syntax::cst::class_like::property::{Property, PropertyItem};
+use mago_syntax::cst::class_like::trait_use::{
     TraitUseAdaptation, TraitUseMethodReference, TraitUseSpecification,
 };
-use mago_syntax::ast::sequence::Sequence;
+use mago_syntax::cst::sequence::Sequence;
 
 /// Check whether a method has the `#[Scope]` attribute (Laravel 11+).
 ///
@@ -143,7 +143,7 @@ fn parse_attribute_target_flags(text: &str) -> u8 {
 /// given synthetic names of the form `__anonymous@<offset>` so that
 /// [`find_class_at_offset`](crate::util::find_class_at_offset) can resolve
 /// `$this` inside their bodies.
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str, last_segment};
@@ -2737,7 +2737,7 @@ impl Backend {
                                         };
                                     let alias =
                                         alias_adapt.alias.as_ref().map(|a| atom_bytes(a.value));
-                                    let visibility = alias_adapt.visibility.as_ref().map(|m| {
+                                    let visibility = alias_adapt.modifier.as_ref().map(|m| {
                                         if m.is_private() {
                                             Visibility::Private
                                         } else if m.is_protected() {

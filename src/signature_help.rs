@@ -319,7 +319,7 @@ impl From<crate::types::ResolvedCallableTarget> for ResolvedCallable {
 // ─── First-class callable target extraction (AST-based) ────────────────────
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 /// Walk statements looking for the last assignment to `var_name` (with
 /// `$` prefix) before `cursor_offset` where the RHS is a
@@ -370,8 +370,8 @@ fn collect_fcc_targets(
         Statement::Block(block) => walk!(block.statements.iter()),
         Statement::Namespace(ns) => walk!(ns.statements().iter()),
         Statement::Class(cls) => {
-            use mago_syntax::ast::class_like::member::ClassLikeMember;
-            use mago_syntax::ast::class_like::method::MethodBody;
+            use mago_syntax::cst::class_like::member::ClassLikeMember;
+            use mago_syntax::cst::class_like::method::MethodBody;
             for member in cls.members.iter() {
                 if let ClassLikeMember::Method(method) = member
                     && let MethodBody::Concrete(block) = &method.body
@@ -385,8 +385,8 @@ fn collect_fcc_targets(
             }
         }
         Statement::Trait(t) => {
-            use mago_syntax::ast::class_like::member::ClassLikeMember;
-            use mago_syntax::ast::class_like::method::MethodBody;
+            use mago_syntax::cst::class_like::member::ClassLikeMember;
+            use mago_syntax::cst::class_like::method::MethodBody;
             for member in t.members.iter() {
                 if let ClassLikeMember::Method(method) = member
                     && let MethodBody::Concrete(block) = &method.body

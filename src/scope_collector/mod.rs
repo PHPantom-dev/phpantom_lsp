@@ -38,7 +38,7 @@
 mod tests;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 
@@ -1270,7 +1270,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
         // ── Anonymous class ──
         Expression::AnonymousClass(anon) => {
             if let Some(ref args) = anon.argument_list {
-                walk_arguments(args, collector);
+                walk_partial_arguments(args, collector);
             }
             // Skip members — anonymous class body is a separate scope.
         }
@@ -1447,6 +1447,15 @@ fn walk_assignment(assignment: &Assignment<'_>, collector: &mut Collector<'_>) {
 fn walk_arguments(args: &ArgumentList<'_>, collector: &mut Collector<'_>) {
     for arg in args.arguments.iter() {
         walk_expression(arg.value(), collector);
+    }
+}
+
+/// Walk partial arguments in a function/method call.
+fn walk_partial_arguments(args: &PartialArgumentList<'_>, collector: &mut Collector<'_>) {
+    for arg in args.arguments.iter() {
+        if let Some(value) = arg.value() {
+            walk_expression(value, collector);
+        }
     }
 }
 

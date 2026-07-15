@@ -52,7 +52,7 @@
 use std::collections::HashSet;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -1535,7 +1535,7 @@ fn expr_has_get_defined_vars(expr: &Expression<'_>) -> bool {
         Expression::AnonymousClass(anon) => anon.argument_list.as_ref().is_some_and(|args| {
             args.arguments
                 .iter()
-                .any(|a| expr_has_get_defined_vars(a.value()))
+                .any(|a| a.value().is_some_and(expr_has_get_defined_vars))
         }),
         // Don't recurse into closures/arrow functions.
         Expression::Closure(_) | Expression::ArrowFunction(_) => false,

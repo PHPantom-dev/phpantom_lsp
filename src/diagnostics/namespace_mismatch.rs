@@ -4,7 +4,7 @@ use crate::Backend;
 use crate::composer;
 use crate::parser::with_parsed_program;
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 impl Backend {
     pub fn collect_namespace_mismatch_diagnostics(

@@ -5,7 +5,7 @@
 /// names to their fully-qualified equivalents.
 use std::collections::HashMap;
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;

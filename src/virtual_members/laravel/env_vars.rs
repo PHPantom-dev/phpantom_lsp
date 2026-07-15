@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;

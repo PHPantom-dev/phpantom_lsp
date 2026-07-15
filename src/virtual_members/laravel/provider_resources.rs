@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderResource {

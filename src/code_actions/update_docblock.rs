@@ -16,11 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(test)]
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_docblock::document::TagKind;
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
@@ -1369,7 +1369,7 @@ mod tests {
 
     /// Helper: parse PHP and check if an update is needed at the given offset.
     fn find_info(php: &str, offset: u32) -> Option<FunctionWithDocblock> {
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let ctx = find_cursor_context(&program.statements, offset);

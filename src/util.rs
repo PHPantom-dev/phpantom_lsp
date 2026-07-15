@@ -2248,11 +2248,11 @@ pub(crate) fn infer_type_from_literal(expr: &str) -> Option<PhpType> {
 /// similar features that need to locate the method body surrounding
 /// the cursor.
 pub(crate) fn find_enclosing_method_block_in_members<'a>(
-    members: impl Iterator<Item = &'a mago_syntax::ast::class_like::member::ClassLikeMember<'a>>,
+    members: impl Iterator<Item = &'a mago_syntax::cst::class_like::member::ClassLikeMember<'a>>,
     offset: u32,
-) -> Option<&'a mago_syntax::ast::block::Block<'a>> {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+) -> Option<&'a mago_syntax::cst::block::Block<'a>> {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     for member in members {
         if let ClassLikeMember::Method(method) = member

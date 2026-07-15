@@ -5,7 +5,7 @@
 /// resolver in [`super::forward_walk`] and the foreach/destructuring
 /// resolution module.
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -336,7 +336,7 @@ pub(in crate::completion) fn resolve_array_func_element_type(
 /// extracting their spans. This avoids serialising the argument list
 /// to a flat string and then re-splitting with `split_text_args`.
 pub(in crate::completion) fn extract_arg_texts_from_ast(
-    argument_list: &mago_syntax::ast::ArgumentList<'_>,
+    argument_list: &mago_syntax::cst::ArgumentList<'_>,
     content: &str,
 ) -> Vec<String> {
     argument_list
@@ -344,8 +344,8 @@ pub(in crate::completion) fn extract_arg_texts_from_ast(
         .iter()
         .map(|arg| {
             let value_span = match arg {
-                mago_syntax::ast::argument::Argument::Positional(pos) => pos.value.span(),
-                mago_syntax::ast::argument::Argument::Named(named) => named.value.span(),
+                mago_syntax::cst::argument::Argument::Positional(pos) => pos.value.span(),
+                mago_syntax::cst::argument::Argument::Named(named) => named.value.span(),
             };
             let start = value_span.start.offset as usize;
             let end = value_span.end.offset as usize;
@@ -361,11 +361,11 @@ pub(in crate::completion) fn extract_arg_texts_from_ast(
             // to the value `1` and misresolve conditional return types and
             // template parameters that key on `a`.
             match arg {
-                mago_syntax::ast::argument::Argument::Named(named) => {
+                mago_syntax::cst::argument::Argument::Named(named) => {
                     let name = crate::atom::bytes_to_str(named.name.value);
                     format!("{name}: {value}")
                 }
-                mago_syntax::ast::argument::Argument::Positional(_) => value.to_string(),
+                mago_syntax::cst::argument::Argument::Positional(_) => value.to_string(),
             }
         })
         .collect()

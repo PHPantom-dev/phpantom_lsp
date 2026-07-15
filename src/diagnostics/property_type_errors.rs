@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::access::Access;
-use mago_syntax::ast::class_like::member::ClassLikeMemberSelector;
-use mago_syntax::ast::expression::Expression;
-use mago_syntax::ast::statement::Statement;
-use mago_syntax::ast::variable::Variable;
+use mago_syntax::cst::access::Access;
+use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
+use mago_syntax::cst::expression::Expression;
+use mago_syntax::cst::statement::Statement;
+use mago_syntax::cst::variable::Variable;
 
 use tower_lsp::lsp_types::*;
 
@@ -156,7 +156,7 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) 
             }
         }
         Statement::Declare(declare) => {
-            use mago_syntax::ast::declare::DeclareBody;
+            use mago_syntax::cst::declare::DeclareBody;
             match &declare.body {
                 DeclareBody::Statement(inner) => {
                     collect_from_statement(inner, ctx);
@@ -173,11 +173,11 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) 
 }
 
 fn collect_from_class_member(
-    member: &mago_syntax::ast::class_like::member::ClassLikeMember<'_>,
+    member: &mago_syntax::cst::class_like::member::ClassLikeMember<'_>,
     ctx: &mut PropertyCheckCtx<'_>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     if let ClassLikeMember::Method(method) = member
         && let MethodBody::Concrete(block) = &method.body
@@ -189,10 +189,10 @@ fn collect_from_class_member(
 }
 
 fn collect_from_if_body(
-    body: &mago_syntax::ast::control_flow::r#if::IfBody<'_>,
+    body: &mago_syntax::cst::control_flow::r#if::IfBody<'_>,
     ctx: &mut PropertyCheckCtx<'_>,
 ) {
-    use mago_syntax::ast::control_flow::r#if::IfBody;
+    use mago_syntax::cst::control_flow::r#if::IfBody;
     match body {
         IfBody::Statement(inner) => {
             collect_from_statement(inner.statement, ctx);
@@ -222,10 +222,10 @@ fn collect_from_if_body(
 }
 
 fn collect_from_switch_body(
-    body: &mago_syntax::ast::control_flow::switch::SwitchBody<'_>,
+    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'_>,
     ctx: &mut PropertyCheckCtx<'_>,
 ) {
-    use mago_syntax::ast::control_flow::switch::SwitchBody;
+    use mago_syntax::cst::control_flow::switch::SwitchBody;
     match body {
         SwitchBody::BraceDelimited(b) => {
             for case in b.cases.iter() {

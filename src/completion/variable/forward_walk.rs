@@ -44,9 +44,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::argument::Argument;
-use mago_syntax::ast::sequence::TokenSeparatedSequence;
-use mago_syntax::ast::*;
+use mago_syntax::cst::argument::Argument;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
@@ -694,7 +694,7 @@ fn walk_closures_in_expr<'b>(
             // Constructor arguments evaluate in the outer scope (with the
             // outer `$this`), so scan them for closures there.
             if let Some(ref args) = anon.argument_list {
-                walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+                walk_closure_in_partial_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
             }
             // The anonymous class's own method bodies have their own
             // `$this` (the anonymous class), so walk them separately.
@@ -860,6 +860,45 @@ fn walk_closures_in_call_args<'b, F>(
         let arg_expr = match arg {
             Argument::Positional(a) => a.value,
             Argument::Named(a) => a.value,
+        };
+        match arg_expr {
+            Expression::Closure(_) | Expression::ArrowFunction(_) => {
+                let inferred = infer_fn(arg_idx);
+                walk_closures_in_expr(
+                    arg_expr,
+                    outer_scope,
+                    ctx,
+                    if inferred.is_empty() {
+                        None
+                    } else {
+                        Some(&inferred)
+                    },
+                );
+            }
+            _ => {
+                walk_closures_in_expr(arg_expr, outer_scope, ctx, None);
+            }
+        }
+    }
+}
+
+/// Walk the partial arguments of a call expression, invoking `infer_fn` for
+/// each argument index to get inferred callable parameter types.
+/// When an argument is a closure/arrow function, the inferred types
+/// are passed through so untyped parameters get the correct types.
+fn walk_closure_in_partial_call_args<'b, F>(
+    arguments: &'b TokenSeparatedSequence<'b, PartialArgument<'b>>,
+    outer_scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    infer_fn: F,
+) where
+    F: Fn(usize) -> Vec<PhpType>,
+{
+    for (arg_idx, arg) in arguments.iter().enumerate() {
+        let arg_expr = match arg {
+            PartialArgument::Positional(a) => a.value,
+            PartialArgument::Named(a) => a.value,
+            _ => continue,
         };
         match arg_expr {
             Expression::Closure(_) | Expression::ArrowFunction(_) => {
@@ -1796,11 +1835,11 @@ fn walk_top_level_statements<'a, 'b: 'a>(
 /// and analyze each one.  Handles the common PHP pattern:
 /// `if (!function_exists('name')) { function name(...) { ... } }`
 fn walk_functions_in_if_body<'b>(
-    body: &'b mago_syntax::ast::control_flow::r#if::IfBody<'b>,
+    body: &'b mago_syntax::cst::control_flow::r#if::IfBody<'b>,
     default_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::control_flow::r#if::IfBody;
+    use mago_syntax::cst::control_flow::r#if::IfBody;
 
     let statements: &[Statement<'b>] = match body {
         IfBody::Statement(stmt_body) => {
@@ -1842,12 +1881,12 @@ fn walk_functions_in_if_body<'b>(
 
 /// Walk a class member to find method bodies and run the forward walker.
 fn walk_class_member_body<'b>(
-    member: &'b mago_syntax::ast::class_like::member::ClassLikeMember<'b>,
+    member: &'b mago_syntax::cst::class_like::member::ClassLikeMember<'b>,
     enclosing_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     if let ClassLikeMember::Method(method) = member
         && let MethodBody::Concrete(block) = &method.body
@@ -1977,8 +2016,8 @@ fn seed_and_walk_function_body<'b>(
 /// accesses like `$this->prop` inside the anonymous class would then
 /// resolve against the outer class and be flagged as unknown.
 fn walk_anonymous_class_member_bodies<'b>(anon: &'b AnonymousClass<'b>, ctx: &ForwardWalkCtx<'_>) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     // The parser extracts anonymous classes as `ClassInfo` with the
     // synthetic name `__anonymous@<left_brace_offset>`.  Look it up so
@@ -3467,7 +3506,7 @@ fn process_increment_decrement<'b>(
     scope: &mut ScopeState,
     _ctx: &ForwardWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
+    use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
 
     let var_expr = match expr {
         Expression::UnaryPostfix(postfix) => match &postfix.operator {
@@ -4666,7 +4705,7 @@ fn process_compound_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::assignment::AssignmentOperator;
+    use mago_syntax::cst::assignment::AssignmentOperator;
 
     let var_name = match assignment.lhs {
         Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
@@ -4896,7 +4935,7 @@ fn resolve_rhs_with_scope<'b>(
     if let Expression::Assignment(assignment) = rhs
         && !assignment.operator.is_assign()
     {
-        use mago_syntax::ast::assignment::AssignmentOperator;
+        use mago_syntax::cst::assignment::AssignmentOperator;
         let result_type = match &assignment.operator {
             AssignmentOperator::Concat(_) => Some(PhpType::string()),
             AssignmentOperator::Modulo(_) => Some(PhpType::int()),
@@ -5018,7 +5057,7 @@ fn resolve_rhs_with_scope<'b>(
 
     // Type casts: (int)$x → int, (string)$x → string, etc.
     if let Expression::UnaryPrefix(prefix) = rhs {
-        use mago_syntax::ast::unary::UnaryPrefixOperator;
+        use mago_syntax::cst::unary::UnaryPrefixOperator;
         let cast_type = match &prefix.operator {
             UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
                 Some(PhpType::int())
@@ -5081,7 +5120,7 @@ fn resolve_rhs_with_scope<'b>(
 
     // Bitwise NOT (~): returns string when operand is string, int otherwise.
     if let Expression::UnaryPrefix(prefix) = rhs {
-        use mago_syntax::ast::unary::UnaryPrefixOperator;
+        use mago_syntax::cst::unary::UnaryPrefixOperator;
         if matches!(prefix.operator, UnaryPrefixOperator::BitwiseNot(_)) {
             let operand_types = resolve_rhs_with_scope(prefix.operand, scope, ctx);
             let is_string = !operand_types.is_empty()
@@ -5161,7 +5200,7 @@ fn resolve_rhs_with_scope<'b>(
 
     // Binary operators — the result type depends on the operator kind.
     if let Expression::Binary(binary) = rhs {
-        use mago_syntax::ast::binary::BinaryOperator;
+        use mago_syntax::cst::binary::BinaryOperator;
 
         // Spaceship (<=>): always int (-1, 0, or 1).
         if matches!(binary.operator, BinaryOperator::Spaceship(_)) {
@@ -6733,7 +6772,7 @@ fn collect_expr_assignment_deps(
     expr: &Expression<'_>,
     deps: &mut HashMap<String, HashSet<String>>,
 ) {
-    use mago_syntax::ast::variable::Variable;
+    use mago_syntax::cst::variable::Variable;
 
     if let Expression::Assignment(assign) = expr
         && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
@@ -6747,7 +6786,7 @@ fn collect_expr_assignment_deps(
 
 /// Collect all variable references from an expression (cheap, no type resolution).
 fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<String>) {
-    use mago_syntax::ast::variable::Variable;
+    use mago_syntax::cst::variable::Variable;
 
     match expr {
         Expression::Variable(Variable::Direct(dv)) => {
@@ -6788,16 +6827,16 @@ fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<String>) {
             }
         }
         Expression::Access(access) => match access {
-            mago_syntax::ast::access::Access::Property(pa) => {
+            mago_syntax::cst::access::Access::Property(pa) => {
                 collect_rhs_variables(pa.object, vars);
             }
-            mago_syntax::ast::access::Access::NullSafeProperty(pa) => {
+            mago_syntax::cst::access::Access::NullSafeProperty(pa) => {
                 collect_rhs_variables(pa.object, vars);
             }
-            mago_syntax::ast::access::Access::StaticProperty(sp) => {
+            mago_syntax::cst::access::Access::StaticProperty(sp) => {
                 collect_rhs_variables(sp.class, vars);
             }
-            mago_syntax::ast::access::Access::ClassConstant(cc) => {
+            mago_syntax::cst::access::Access::ClassConstant(cc) => {
                 collect_rhs_variables(cc.class, vars);
             }
         },
@@ -6828,7 +6867,7 @@ fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<String>) {
 
 /// Collect variable references from an argument list.
 fn collect_arglist_variables(
-    args: &mago_syntax::ast::argument::ArgumentList<'_>,
+    args: &mago_syntax::cst::argument::ArgumentList<'_>,
     vars: &mut HashSet<String>,
 ) {
     for arg in args.arguments.iter() {

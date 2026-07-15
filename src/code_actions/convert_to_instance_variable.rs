@@ -17,11 +17,11 @@
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::method::MethodBody;
-use mago_syntax::ast::class_like::property::Property;
-use mago_syntax::ast::sequence::Sequence;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::method::MethodBody;
+use mago_syntax::cst::class_like::property::Property;
+use mago_syntax::cst::sequence::Sequence;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;

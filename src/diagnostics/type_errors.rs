@@ -13,12 +13,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::Program;
-use mago_syntax::ast::argument::Argument;
-use mago_syntax::ast::call::Call;
-use mago_syntax::ast::expression::Expression;
-use mago_syntax::ast::literal::Literal;
-use mago_syntax::ast::statement::Statement;
+use mago_syntax::cst::argument::Argument;
+use mago_syntax::cst::call::Call;
+use mago_syntax::cst::expression::Expression;
+use mago_syntax::cst::literal::Literal;
+use mago_syntax::cst::statement::Statement;
+use mago_syntax::cst::{PartialArgument, Program};
 
 use tower_lsp::lsp_types::*;
 
@@ -862,7 +862,7 @@ fn contains_self_or_parent(ty: &PhpType) -> bool {
 /// Try to register the argument expressions of an [`ArgumentList`] if its
 /// `args_start` offset matches one of the call sites we are interested in.
 fn try_collect_argument_list<'a>(
-    arg_list: &'a mago_syntax::ast::argument::ArgumentList<'a>,
+    arg_list: &'a mago_syntax::cst::argument::ArgumentList<'a>,
     call_site_starts: &HashSet<u32>,
     result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
 ) {
@@ -881,6 +881,38 @@ fn try_collect_argument_list<'a>(
             let start = value.span().start.offset as usize;
             let end = value.span().end.offset as usize;
             (value, start, end)
+        })
+        .collect();
+    result.insert(args_start, expressions);
+}
+
+/// Try to register the partial argument expressions of an [`PartialArgumentList`] if its
+/// `args_start` offset matches one of the call sites we are interested in.
+fn try_collect_partial_argument_list<'a>(
+    arg_list: &'a mago_syntax::cst::argument::PartialArgumentList<'a>,
+    call_site_starts: &HashSet<u32>,
+    result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
+) {
+    let args_start = arg_list.left_parenthesis.end.offset;
+    if !call_site_starts.contains(&args_start) {
+        return;
+    }
+    // Placeholders have no expression and therefore no type to validate.
+    // Keep only supplied positional/named arguments.
+    let expressions: Vec<(&'a Expression<'a>, usize, usize)> = arg_list
+        .arguments
+        .iter()
+        .filter_map(|arg| {
+            let value = match arg {
+                PartialArgument::Positional(pos) => pos.value,
+                PartialArgument::Named(named) => named.value,
+                PartialArgument::NamedPlaceholder(_)
+                | PartialArgument::Placeholder(_)
+                | PartialArgument::VariadicPlaceholder(_) => return None,
+            };
+            let start = value.span().start.offset as usize;
+            let end = value.span().end.offset as usize;
+            Some((value, start, end))
         })
         .collect();
     result.insert(args_start, expressions);
@@ -1006,7 +1038,7 @@ fn collect_from_statement<'a>(
             }
         }
         Statement::Declare(declare) => {
-            use mago_syntax::ast::declare::DeclareBody;
+            use mago_syntax::cst::declare::DeclareBody;
             match &declare.body {
                 DeclareBody::Statement(inner) => {
                     collect_from_statement(inner, starts, result);
@@ -1041,13 +1073,13 @@ fn collect_from_statement<'a>(
 }
 
 fn collect_from_class_member<'a>(
-    member: &'a mago_syntax::ast::class_like::member::ClassLikeMember<'a>,
+    member: &'a mago_syntax::cst::class_like::member::ClassLikeMember<'a>,
     starts: &HashSet<u32>,
     result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
-    use mago_syntax::ast::class_like::property::{
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::property::{
         Property, PropertyHookBody, PropertyHookConcreteBody, PropertyItem,
     };
     match member {
@@ -1094,7 +1126,7 @@ fn collect_from_class_member<'a>(
             }
         }
         ClassLikeMember::EnumCase(ec) => {
-            use mago_syntax::ast::class_like::enum_case::EnumCaseItem;
+            use mago_syntax::cst::class_like::enum_case::EnumCaseItem;
             match &ec.item {
                 EnumCaseItem::Backed(b) => {
                     collect_from_expression(b.value, starts, result);
@@ -1107,11 +1139,11 @@ fn collect_from_class_member<'a>(
 }
 
 fn collect_from_if_body<'a>(
-    body: &'a mago_syntax::ast::control_flow::r#if::IfBody<'a>,
+    body: &'a mago_syntax::cst::control_flow::r#if::IfBody<'a>,
     starts: &HashSet<u32>,
     result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
 ) {
-    use mago_syntax::ast::control_flow::r#if::IfBody;
+    use mago_syntax::cst::control_flow::r#if::IfBody;
     match body {
         IfBody::Statement(if_stmt_body) => {
             collect_from_statement(if_stmt_body.statement, starts, result);
@@ -1143,11 +1175,11 @@ fn collect_from_if_body<'a>(
 }
 
 fn collect_from_switch_body<'a>(
-    body: &'a mago_syntax::ast::control_flow::switch::SwitchBody<'a>,
+    body: &'a mago_syntax::cst::control_flow::switch::SwitchBody<'a>,
     starts: &HashSet<u32>,
     result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
 ) {
-    use mago_syntax::ast::control_flow::switch::SwitchBody;
+    use mago_syntax::cst::control_flow::switch::SwitchBody;
     match body {
         SwitchBody::BraceDelimited(b) => {
             for case in b.cases.iter() {
@@ -1256,7 +1288,7 @@ fn collect_from_expression<'a>(
         }
         Expression::Match(match_expr) => {
             collect_from_expression(match_expr.expression, starts, result);
-            use mago_syntax::ast::control_flow::r#match::MatchArm;
+            use mago_syntax::cst::control_flow::r#match::MatchArm;
             for arm in match_expr.arms.iter() {
                 match arm {
                     MatchArm::Expression(expr_arm) => {
@@ -1272,7 +1304,7 @@ fn collect_from_expression<'a>(
             }
         }
         Expression::Yield(yield_expr) => {
-            use mago_syntax::ast::r#yield::Yield;
+            use mago_syntax::cst::r#yield::Yield;
             match yield_expr {
                 Yield::Value(v) => {
                     if let Some(val) = v.value {
@@ -1295,7 +1327,7 @@ fn collect_from_expression<'a>(
             collect_from_expression(clone.object, starts, result);
         }
         Expression::Access(access) => {
-            use mago_syntax::ast::access::Access;
+            use mago_syntax::cst::access::Access;
             match access {
                 Access::Property(pa) => {
                     collect_from_expression(pa.object, starts, result);
@@ -1312,7 +1344,7 @@ fn collect_from_expression<'a>(
             }
         }
         Expression::Construct(construct) => {
-            use mago_syntax::ast::construct::Construct;
+            use mago_syntax::cst::construct::Construct;
             match construct {
                 Construct::Isset(c) => {
                     for val in c.values.iter() {
@@ -1361,8 +1393,8 @@ fn collect_from_expression<'a>(
             collect_from_expression(pipe.callable, starts, result);
         }
         Expression::CompositeString(cs) => {
-            use mago_syntax::ast::string::{CompositeString, StringPart};
-            let walk_parts = |parts: &'a mago_syntax::ast::sequence::Sequence<
+            use mago_syntax::cst::string::{CompositeString, StringPart};
+            let walk_parts = |parts: &'a mago_syntax::cst::sequence::Sequence<
                 'a,
                 StringPart<'a>,
             >,
@@ -1397,8 +1429,8 @@ fn collect_from_expression<'a>(
         }
         Expression::AnonymousClass(anon) => {
             if let Some(ref args) = anon.argument_list {
-                try_collect_argument_list(args, starts, result);
-                collect_from_argument_list(args, starts, result);
+                try_collect_partial_argument_list(args, starts, result);
+                collect_from_partial_argument_list(args, starts, result);
             }
             for member in anon.members.iter() {
                 collect_from_class_member(member, starts, result);
@@ -1425,7 +1457,7 @@ fn collect_from_expression<'a>(
 }
 
 fn collect_from_argument_list<'a>(
-    arg_list: &'a mago_syntax::ast::argument::ArgumentList<'a>,
+    arg_list: &'a mago_syntax::cst::argument::ArgumentList<'a>,
     starts: &HashSet<u32>,
     result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
 ) {
@@ -1434,15 +1466,27 @@ fn collect_from_argument_list<'a>(
     }
 }
 
+fn collect_from_partial_argument_list<'a>(
+    arg_list: &'a mago_syntax::cst::argument::PartialArgumentList<'a>,
+    starts: &HashSet<u32>,
+    result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
+) {
+    for arg in arg_list.arguments.iter() {
+        if let Some(value) = arg.value() {
+            collect_from_expression(value, starts, result);
+        }
+    }
+}
+
 fn collect_from_array_elements<'a>(
-    elements: &'a mago_syntax::ast::sequence::TokenSeparatedSequence<
+    elements: &'a mago_syntax::cst::sequence::TokenSeparatedSequence<
         'a,
-        mago_syntax::ast::array::ArrayElement<'a>,
+        mago_syntax::cst::array::ArrayElement<'a>,
     >,
     starts: &HashSet<u32>,
     result: &mut HashMap<u32, Vec<(&'a Expression<'a>, usize, usize)>>,
 ) {
-    use mago_syntax::ast::array::ArrayElement;
+    use mago_syntax::cst::array::ArrayElement;
     for elem in elements.iter() {
         match elem {
             ArrayElement::KeyValue(kv) => {
@@ -1595,7 +1639,7 @@ impl Backend {
                             Expression::UnaryPrefix(unary)
                                 if matches!(
                                     unary.operator,
-                                    mago_syntax::ast::unary::UnaryPrefixOperator::Negation(_)
+                                    mago_syntax::cst::unary::UnaryPrefixOperator::Negation(_)
                                 ) =>
                             {
                                 match unary.operand {

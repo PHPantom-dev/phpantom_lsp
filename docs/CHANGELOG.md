@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Updated the bundled mago toolchain to 1.43.0.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @enwi in https://github.com/PHPantom-dev/phpantom_lsp/pull/234.
+
 ### Fixed
 
 ## [0.9.0] - 2026-07-20

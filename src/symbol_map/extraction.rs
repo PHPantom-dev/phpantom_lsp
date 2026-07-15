@@ -6,8 +6,8 @@
 //! [`extract_symbol_map`].
 
 use mago_span::HasSpan;
-use mago_syntax::ast::sequence::TokenSeparatedSequence;
-use mago_syntax::ast::*;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::*;
 
 use super::docblock::{
     class_ref_span, class_ref_span_ctx, extract_docblock_symbols, extract_param_var_spans,
@@ -1019,9 +1019,9 @@ fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
 /// Emits a `ClassReference` for the attribute class name and recurses
 /// into argument expressions.
 fn extract_from_attribute_lists<'a>(
-    attribute_lists: &mago_syntax::ast::sequence::Sequence<
+    attribute_lists: &mago_syntax::cst::sequence::Sequence<
         'a,
-        mago_syntax::ast::attribute::AttributeList<'a>,
+        mago_syntax::cst::attribute::AttributeList<'a>,
     >,
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
@@ -1041,10 +1041,10 @@ fn extract_from_attribute_lists<'a>(
             // signature help and named parameter completion work
             // inside `#[Attr(...)]` just like `new Attr(...)`.
             if let Some(ref arg_list) = attr.argument_list {
-                extract_from_arguments(&arg_list.arguments, ctx, scope_start);
+                extract_from_partial_arguments(&arg_list.arguments, ctx, scope_start);
                 let class_name = raw.trim_start_matches('\\');
                 if !class_name.is_empty() {
-                    emit_call_site(
+                    emit_partial_call_site(
                         format!("new {}", class_name),
                         arg_list,
                         &mut ctx.call_sites,
@@ -1066,7 +1066,12 @@ fn extract_from_attribute_lists<'a>(
                     &mut ctx.has_laravel_container_attrs,
                     ctx.content,
                 ) {
-                    try_emit_laravel_string_span(kind, arg_list, ctx.content, &mut ctx.spans);
+                    try_emit_laravel_string_span_partial(
+                        kind,
+                        arg_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
                 }
             }
         }
@@ -2621,7 +2626,7 @@ fn extract_from_expression<'a>(
         Expression::AnonymousClass(anon) => {
             // Constructor arguments.
             if let Some(ref args) = anon.argument_list {
-                extract_from_arguments(&args.arguments, ctx, scope_start);
+                extract_from_partial_arguments(&args.arguments, ctx, scope_start);
             }
 
             // Extends.
@@ -2897,6 +2902,22 @@ fn extract_from_arguments<'a>(
     }
 }
 
+/// Walk an argument list and extract symbols from each partial argument expression.
+fn extract_from_partial_arguments<'a>(
+    args: &TokenSeparatedSequence<'a, PartialArgument<'a>>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    for arg in args.iter() {
+        let arg_expr = match arg {
+            PartialArgument::Positional(pos) => pos.value,
+            PartialArgument::Named(named) => named.value,
+            _ => continue,
+        };
+        extract_from_expression(arg_expr, ctx, scope_start);
+    }
+}
+
 /// Walk array elements and extract symbols from each element expression.
 fn extract_from_array_elements<'a>(
     elements: &TokenSeparatedSequence<'a, ArrayElement<'a>>,
@@ -3042,6 +3063,81 @@ fn emit_call_site(
         arg_offsets,
         arg_count,
         has_unpacking,
+        named_arg_indices,
+        named_arg_names,
+        spread_arg_indices,
+    });
+}
+
+/// Build and push a [`CallSite`] from a partial argument list and its call expression string.
+fn emit_partial_call_site(
+    call_expression: String,
+    argument_list: &PartialArgumentList<'_>,
+    call_sites: &mut Vec<CallSite>,
+    untyped_closure_sites: &mut Vec<UntypedClosureSite>,
+) {
+    let args_start = argument_list.left_parenthesis.end.offset;
+    let args_end = argument_list.right_parenthesis.start.offset;
+    let comma_offsets = argument_list
+        .arguments
+        .tokens
+        .iter()
+        .map(|token| token.start.offset)
+        .collect();
+    let mut arg_offsets = Vec::with_capacity(argument_list.arguments.len());
+    let mut named_arg_indices = Vec::new();
+    let mut named_arg_names = Vec::new();
+    let mut spread_arg_indices = Vec::new();
+
+    for (index, argument) in argument_list.arguments.iter().enumerate() {
+        match argument {
+            PartialArgument::Positional(argument) => {
+                let offset = argument
+                    .ellipsis
+                    .map(|span| span.start.offset)
+                    .unwrap_or_else(|| argument.value.span().start.offset);
+                arg_offsets.push(offset);
+                if argument.ellipsis.is_some() {
+                    spread_arg_indices.push(index as u32);
+                }
+                collect_untyped_closure_site(
+                    argument.value,
+                    &call_expression,
+                    index,
+                    untyped_closure_sites,
+                );
+            }
+            PartialArgument::Named(argument) => {
+                arg_offsets.push(argument.name.span.start.offset);
+                named_arg_indices.push(index as u32);
+                named_arg_names.push(bytes_to_str(argument.name.value).to_string());
+                collect_untyped_closure_site(
+                    argument.value,
+                    &call_expression,
+                    index,
+                    untyped_closure_sites,
+                );
+            }
+            PartialArgument::NamedPlaceholder(argument) => {
+                arg_offsets.push(argument.name.span.start.offset);
+                named_arg_indices.push(index as u32);
+                named_arg_names.push(bytes_to_str(argument.name.value).to_string());
+            }
+            PartialArgument::Placeholder(argument) => arg_offsets.push(argument.span.start.offset),
+            PartialArgument::VariadicPlaceholder(argument) => {
+                arg_offsets.push(argument.span.start.offset)
+            }
+        }
+    }
+
+    call_sites.push(CallSite {
+        args_start,
+        args_end,
+        call_expression,
+        comma_offsets,
+        arg_count: argument_list.arguments.len() as u32,
+        has_unpacking: !spread_arg_indices.is_empty(),
+        arg_offsets,
         named_arg_indices,
         named_arg_names,
         spread_arg_indices,
@@ -3204,7 +3300,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let mut parts = Vec::new();
             for element in array.elements.iter() {
                 match element {
-                    mago_syntax::ast::ArrayElement::KeyValue(kv) => {
+                    mago_syntax::cst::ArrayElement::KeyValue(kv) => {
                         let val = expr_to_subject_text(kv.value);
                         if !val.is_empty() {
                             let key = expr_to_subject_text(kv.key);
@@ -3217,7 +3313,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push("...".to_string());
                         }
                     }
-                    mago_syntax::ast::ArrayElement::Value(v) => {
+                    mago_syntax::cst::ArrayElement::Value(v) => {
                         let val = expr_to_subject_text(v.value);
                         if val.is_empty() {
                             parts.push("...".to_string());
@@ -3225,7 +3321,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push(val);
                         }
                     }
-                    mago_syntax::ast::ArrayElement::Variadic(v) => {
+                    mago_syntax::cst::ArrayElement::Variadic(v) => {
                         let val = expr_to_subject_text(v.value);
                         if val.is_empty() {
                             parts.push("...".to_string());
@@ -3233,7 +3329,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push(format!("...{}", val));
                         }
                     }
-                    mago_syntax::ast::ArrayElement::Missing(_) => {
+                    mago_syntax::cst::ArrayElement::Missing(_) => {
                         parts.push("...".to_string());
                     }
                 }
@@ -3527,6 +3623,51 @@ fn try_emit_laravel_string_span(
         return;
     };
     let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let key = &content[inner_start as usize..inner_end as usize];
+    if key.is_empty() {
+        return;
+    }
+
+    if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
+        // Require at least one dot: bare keys like 'app' are not valid config paths.
+        return;
+    }
+
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelStringKey {
+            kind,
+            key: key.to_string(),
+        },
+    });
+}
+
+/// If the first argument of `argument_list` is a non-empty, non-interpolated
+/// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
+/// string content (inside the quotes) onto `spans`.
+///
+/// Called by the `config()` function-call extractor and the
+/// `Config::get()` / `Config::set()` static-call extractor so that
+/// find-references and go-to-definition for Laravel config keys can use
+/// the pre-built symbol map instead of re-parsing every file on demand.
+fn try_emit_laravel_string_span_partial(
+    kind: crate::symbol_map::LaravelStringKind,
+    argument_list: &PartialArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Some(Expression::Literal(literal::Literal::String(s))) = first_arg.value() else {
         return;
     };
     let inner_start = s.span.start.offset + 1;

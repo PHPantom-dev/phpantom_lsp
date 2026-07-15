@@ -28,11 +28,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 use tower_lsp::lsp_types::Url;
 
@@ -232,7 +232,7 @@ fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
 /// program and resolved-name table to `f` (which must extract owned data before
 /// the arena is dropped).
 fn with_parsed<R>(content: &str, f: impl FnOnce(&Program<'_>, &OwnedResolvedNames) -> R) -> R {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = parse_file_content(&arena, file_id, content.as_bytes());
     let resolved = NameResolver::new(&arena).resolve(program);
@@ -345,7 +345,7 @@ fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
 fn find_facade_accessor_return<'ast, 'arena>(
     node: Node<'ast, 'arena>,
 ) -> Option<&'ast Expression<'arena>> {
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     if let Node::Method(method) = node
         && bytes_to_str(method.name.value).eq_ignore_ascii_case("getFacadeAccessor")

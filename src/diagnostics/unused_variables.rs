@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;

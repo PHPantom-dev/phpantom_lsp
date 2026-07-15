@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
@@ -226,8 +226,8 @@ fn walk_class_string_assignments<'b>(
                 }
                 // Also walk the foreach body for nested assignments.
                 let body_stmts: Vec<&Statement> = match &foreach.body {
-                    mago_syntax::ast::ForeachBody::Statement(s) => vec![s],
-                    mago_syntax::ast::ForeachBody::ColonDelimited(b) => {
+                    mago_syntax::cst::ForeachBody::Statement(s) => vec![s],
+                    mago_syntax::cst::ForeachBody::ColonDelimited(b) => {
                         b.statements.iter().collect()
                     }
                 };

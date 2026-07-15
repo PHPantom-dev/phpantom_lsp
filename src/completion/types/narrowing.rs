@@ -34,7 +34,7 @@ use crate::php_type::PhpType;
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, ResolvedType, TypeAssertion};
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use super::conditional::extract_class_string_from_expr;
 use crate::completion::resolver::VarResolutionCtx;
@@ -133,9 +133,9 @@ pub(in crate::completion) fn expr_to_subject_key(expr: &Expression<'_>) -> Optio
 /// coercion so `$a[0]` and `$a["0"]` narrow the same subject).  Returns
 /// `None` for non-literal keys like `$a[$i]`.
 pub(in crate::completion) fn array_access_key_as_string(
-    aa: &mago_syntax::ast::ArrayAccess<'_>,
+    aa: &mago_syntax::cst::ArrayAccess<'_>,
 ) -> Option<String> {
-    use mago_syntax::ast::Literal;
+    use mago_syntax::cst::Literal;
     match aa.index {
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to stripping
@@ -712,7 +712,7 @@ pub(in crate::completion) fn try_extract_member_exists_guard(
 /// Returns `None` for anything that is not a plain string literal
 /// (interpolated strings, concatenations, variables, ...).
 fn string_literal_value(expr: &Expression<'_>) -> Option<String> {
-    use mago_syntax::ast::Literal;
+    use mago_syntax::cst::Literal;
     match expr {
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to stripping
@@ -1575,8 +1575,8 @@ pub(in crate::completion) fn statement_unconditionally_exits(stmt: &Statement<'_
         Statement::Expression(es) => matches!(
             es.expression,
             Expression::Throw(_)
-                | Expression::Construct(mago_syntax::ast::Construct::Exit(_))
-                | Expression::Construct(mago_syntax::ast::Construct::Die(_))
+                | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
+                | Expression::Construct(mago_syntax::cst::Construct::Die(_))
         ),
         // A block exits if its last statement exits.
         Statement::Block(block) => block

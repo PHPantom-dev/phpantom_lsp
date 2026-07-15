@@ -12,12 +12,12 @@
 //! structured via [`emit_type_spans`] which uses `mago-type-syntax` to
 //! parse types and walk the AST with accurate span information.
 
-use bumpalo::Bump;
+use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
 use mago_docblock::document::TagKind;
 use mago_span::{HasSpan, Position, Span};
-use mago_syntax::ast::*;
-use mago_type_syntax::ast as type_ast;
+use mago_syntax::cst::*;
+use mago_type_syntax::cst as type_ast;
 
 use crate::docblock::parser::parse_docblock;
 use crate::docblock::types::split_type_token;
@@ -601,9 +601,13 @@ pub(super) fn emit_type_spans(
         Position::new(effective_token.len() as u32),
     );
 
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let effective_token = arena.alloc_slice_copy(effective_token.as_bytes());
-    match mago_type_syntax::parse_str(&arena, parse_span, effective_token) {
+    // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
+    // the migration is tracked as a separate task.
+    #[allow(deprecated)]
+    let parsed = mago_type_syntax::parse_str(&arena, parse_span, effective_token);
+    match parsed {
         Ok(ty) => {
             let mut local_spans: Vec<SymbolSpan> = Vec::new();
             emit_type_spans_from_ast(&ty, 0, &mut local_spans);

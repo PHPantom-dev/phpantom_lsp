@@ -201,6 +201,7 @@ unlikely to move the needle for most users.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
 |     | **[Performance](todo/performance.md) / [Eager Resolution](todo/eager-resolution.md)**                                                                                       |             |             |
 | ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5--mago-style-separated-metadata)                                                                                | High        | High        |
+| P29 | [Migrate to `mago-phpdoc-syntax`](todo/performance.md#p29-migrate-to-mago-phpdoc-syntax) (drop deprecated `mago-docblock` / `mago-type-syntax`)                             | Medium      | Medium      |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
 | P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument--argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |
 | P22 | [Signature change re-queues slow diagnostics for every open file](todo/performance.md#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file)                  | Medium-High | Medium      |

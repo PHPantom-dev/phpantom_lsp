@@ -218,7 +218,7 @@ fn format_with_mago(
     php_version: mago_php_version::PHPVersion,
     settings: mago_formatter::settings::FormatSettings,
 ) -> Result<String, String> {
-    let arena = bumpalo::Bump::new();
+    let arena = mago_allocator::LocalArena::new();
     let formatter = mago_formatter::Formatter::new(&arena, php_version, settings);
 
     let formatted = formatter

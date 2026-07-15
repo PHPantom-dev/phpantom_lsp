@@ -102,8 +102,8 @@ mod simplify_null;
 mod update_docblock;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::sequence::Sequence;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::sequence::Sequence;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 

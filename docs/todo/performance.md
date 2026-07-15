@@ -728,6 +728,38 @@ body-return inference, since fixed by memoization).
 
 ---
 
+## P29. Migrate to `mago-phpdoc-syntax`
+
+**Impact: Medium · Effort: Medium**
+
+As of the 1.42/1.43 mago releases, `mago-docblock` and
+`mago-type-syntax` are both deprecated and frozen at 1.42.0. Upstream
+folded them into a single unified crate, `mago-phpdoc-syntax`, which
+parses docblock comments and their embedded type and constant
+expressions in one pass and is meant to replace both. The deprecation
+notices point at `mago_phpdoc_syntax::PHPDocParser` (for
+`parse_phpdoc_with_span`) and `mago_phpdoc_syntax::parse_type` (for
+`parse_str`).
+
+We currently call the deprecated functions at four sites, each wrapped
+in `#[allow(deprecated)]`:
+
+- `src/docblock/parser.rs` — `mago_docblock::parse_phpdoc_with_span`
+- `src/php_type.rs` — `mago_type_syntax::parse_str` (type-string parse
+  and the round-trip test helper)
+- `src/symbol_map/docblock.rs` — `mago_type_syntax::parse_str`
+
+`mago-phpdoc-syntax` first shipped at 1.44.0, so this migration is
+coupled to bumping the rest of the mago toolchain from 1.43.0 to
+1.44.0 (mixing 1.43 and 1.44 would pull two incompatible copies of the
+shared `mago-span` types). Do the version bump and the API migration
+together, drop `mago-docblock` and `mago-type-syntax` from
+`Cargo.toml`, and remove the `#[allow(deprecated)]` wrappers. The
+unified single-pass parser should also be a small win on the docblock
+parse hot path.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class

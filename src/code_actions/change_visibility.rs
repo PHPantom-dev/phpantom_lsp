@@ -28,10 +28,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(test)]
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::property::Property;
-use mago_syntax::ast::modifier::Modifier;
+use mago_syntax::cst::class_like::property::Property;
+use mago_syntax::cst::modifier::Modifier;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
@@ -548,7 +548,7 @@ fn find_visibility_from_context(ctx: &CursorContext<'_>, cursor: u32) -> Option<
 /// For constructor methods, check if the cursor is on a promoted
 /// parameter with a visibility modifier.
 fn find_promoted_param_visibility(
-    method: &mago_syntax::ast::class_like::method::Method<'_>,
+    method: &mago_syntax::cst::class_like::method::Method<'_>,
     cursor: u32,
 ) -> Option<VisibilityHit> {
     use mago_span::HasSpan;
@@ -602,7 +602,7 @@ mod tests {
 
     /// Helper: parse PHP and find visibility at a given byte offset.
     fn find_vis(php: &str, offset: u32) -> Option<VisibilityHit> {
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let ctx = find_cursor_context(&program.statements, offset);

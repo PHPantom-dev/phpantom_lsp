@@ -10,7 +10,7 @@
 //! This module is the single place that encodes PHP's binding rules so the
 //! various consumers stay consistent.
 
-use mago_syntax::ast::{Argument, ArgumentList, Expression};
+use mago_syntax::cst::{Argument, ArgumentList, Expression};
 
 use crate::atom::bytes_to_str;
 use crate::types::ParameterInfo;

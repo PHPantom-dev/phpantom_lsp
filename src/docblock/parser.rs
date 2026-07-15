@@ -17,7 +17,7 @@
 //! without borrowing from the arena.  This keeps the arena lifetime
 //! contained within each call.
 
-use bumpalo::Bump;
+use mago_allocator::{Arena, LocalArena};
 use mago_docblock::document::{Element, TagKind, TextSegment};
 use mago_span::Span;
 
@@ -92,7 +92,7 @@ impl DocblockInfo {
 ///   work with standalone strings), pass [`Span::default()`] or a
 ///   zero-offset span.
 pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
 
     // Work around a `mago-docblock` lexer quirk before parsing (see
     // `normalize_tag_indentation`).  The rewrite is length-preserving,
@@ -104,6 +104,9 @@ pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
     // long enough.
     let content: &[u8] = arena.alloc_slice_copy(normalized.as_bytes());
 
+    // `mago-docblock` is deprecated in favour of `mago-phpdoc-syntax`;
+    // the migration is tracked as a separate task.
+    #[allow(deprecated)]
     let document = mago_docblock::parse_phpdoc_with_span(&arena, content, base_span).ok()?;
 
     Some(collect_tags(&document))
@@ -210,7 +213,7 @@ fn collect_tags(document: &mago_docblock::document::Document<'_>) -> DocblockInf
     let mut description_parts: Vec<String> = Vec::new();
     let mut seen_tag = false;
 
-    for element in &document.elements {
+    for element in document.elements {
         match element {
             Element::Tag(tag) => {
                 seen_tag = true;
@@ -223,7 +226,7 @@ fn collect_tags(document: &mago_docblock::document::Document<'_>) -> DocblockInf
                 });
             }
             Element::Text(text) if !seen_tag => {
-                for seg in &text.segments {
+                for seg in text.segments {
                     match seg {
                         TextSegment::Paragraph { content, .. } => {
                             description_parts.push(bytes_to_str(content).to_owned());

@@ -155,7 +155,7 @@ project for PHP parsing and type representation:
 | `mago-type-syntax` | PHPStan/Psalm type expression parsing into `PhpType`   |
 
 `PhpType` (`src/php_type.rs`) is an owned enum that wraps the borrowed
-`mago_type_syntax::ast::Type` AST. Every type-carrying field in the
+`mago_type_syntax::cst::Type` AST. Every type-carrying field in the
 data model (`type_hint`, `return_type`, `native_type_hint`,
 `native_return_type`, `asserted_type`, `template_param_bounds` values,
 generics type arguments, `ResolvedType::type_string`) uses `PhpType`.

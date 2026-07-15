@@ -2,12 +2,12 @@
 //!
 //! This module provides [`PhpType`], an owned enum that represents PHP type
 //! expressions as a tree. It is converted from the borrowed
-//! `mago_type_syntax::ast::Type<'input>` AST and can be displayed back into a
+//! `mago_type_syntax::cst::Type<'input>` AST and can be displayed back into a
 //! canonical string form.
 //!
 //! # Design
 //!
-//! `mago_type_syntax::ast::Type` is `#[non_exhaustive]` with 69 variants and
+//! `mago_type_syntax::cst::Type` is `#[non_exhaustive]` with 69 variants and
 //! borrows from input. `PhpType` is simpler: keyword types are collapsed into
 //! `Named`, generic-parameterised references become `Generic`, and rarely-used
 //! variants fall back to `Raw`.
@@ -17,10 +17,10 @@
 
 use std::fmt;
 
-use bumpalo::Bump;
+use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
 use mago_span::{Position, Span};
-use mago_type_syntax::ast;
+use mago_type_syntax::cst;
 
 use crate::atom::bytes_to_str;
 
@@ -398,9 +398,13 @@ impl PhpType {
             Position::new(effective.len() as u32),
         );
 
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let effective = arena.alloc_slice_copy(effective.as_bytes());
-        match mago_type_syntax::parse_str(&arena, span, effective) {
+        // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
+        // the migration is tracked as a separate task.
+        #[allow(deprecated)]
+        let parsed = mago_type_syntax::parse_str(&arena, span, effective);
+        match parsed {
             Ok(ty) => convert(&ty),
             Err(_) => PhpType::Raw(input.to_owned()),
         }
@@ -4462,22 +4466,22 @@ fn native_scalar_name(name: &str) -> Option<&str> {
 }
 
 /// Convert a borrowed mago AST `Type` into an owned `PhpType`.
-fn convert(ty: &ast::Type<'_>) -> PhpType {
+fn convert(ty: &cst::Type<'_>) -> PhpType {
     match ty {
         // -- Composite types --------------------------------------------------
-        ast::Type::Union(_) => {
+        cst::Type::Union(_) => {
             let members = flatten_union(ty);
             PhpType::Union(members)
         }
-        ast::Type::Intersection(_) => {
+        cst::Type::Intersection(_) => {
             let members = flatten_intersection(ty);
             PhpType::Intersection(members)
         }
-        ast::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
-        ast::Type::Parenthesized(p) => convert(p.inner),
+        cst::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
+        cst::Type::Parenthesized(p) => convert(p.inner),
 
         // -- Named / Reference types ------------------------------------------
-        ast::Type::Reference(r) => {
+        cst::Type::Reference(r) => {
             let name = bytes_to_str(r.identifier.value).to_string();
             match &r.parameters {
                 Some(params) => {
@@ -4496,30 +4500,30 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- Array-like types with optional generic parameters ----------------
-        ast::Type::Array(a) => {
+        cst::Type::Array(a) => {
             convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
-        ast::Type::NonEmptyArray(a) => {
+        cst::Type::NonEmptyArray(a) => {
             convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
-        ast::Type::AssociativeArray(a) => {
+        cst::Type::AssociativeArray(a) => {
             convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
-        ast::Type::List(l) => {
+        cst::Type::List(l) => {
             convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
         }
-        ast::Type::NonEmptyList(l) => {
+        cst::Type::NonEmptyList(l) => {
             convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
         }
-        ast::Type::Iterable(i) => {
+        cst::Type::Iterable(i) => {
             convert_keyword_with_optional_generics(bytes_to_str(i.keyword.value), &i.parameters)
         }
 
         // -- Slice: T[] -------------------------------------------------------
-        ast::Type::Slice(s) => PhpType::Array(Box::new(convert(s.inner))),
+        cst::Type::Slice(s) => PhpType::Array(Box::new(convert(s.inner))),
 
         // -- Shape types ------------------------------------------------------
-        ast::Type::Shape(s) => {
+        cst::Type::Shape(s) => {
             let entries: Vec<ShapeEntry> = s
                 .fields
                 .iter()
@@ -4536,16 +4540,16 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
                 .collect();
 
             match s.kind {
-                ast::ShapeTypeKind::Array
-                | ast::ShapeTypeKind::NonEmptyArray
-                | ast::ShapeTypeKind::AssociativeArray
-                | ast::ShapeTypeKind::List
-                | ast::ShapeTypeKind::NonEmptyList => PhpType::ArrayShape(entries),
+                cst::ShapeTypeKind::Array
+                | cst::ShapeTypeKind::NonEmptyArray
+                | cst::ShapeTypeKind::AssociativeArray
+                | cst::ShapeTypeKind::List
+                | cst::ShapeTypeKind::NonEmptyList => PhpType::ArrayShape(entries),
             }
         }
 
         // -- Object type (with optional shape) --------------------------------
-        ast::Type::Object(o) => match &o.properties {
+        cst::Type::Object(o) => match &o.properties {
             Some(props) => {
                 let entries: Vec<ShapeEntry> = props
                     .fields
@@ -4567,7 +4571,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         },
 
         // -- Callable types ---------------------------------------------------
-        ast::Type::Callable(c) => {
+        cst::Type::Callable(c) => {
             let kind = bytes_to_str(c.keyword.value).to_string();
             match &c.specification {
                 Some(spec) => {
@@ -4602,7 +4606,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- Conditional types ------------------------------------------------
-        ast::Type::Conditional(c) => PhpType::Conditional {
+        cst::Type::Conditional(c) => PhpType::Conditional {
             param: c.subject.to_string(),
             negated: c.is_negated(),
             condition: Box::new(convert(c.target)),
@@ -4611,14 +4615,14 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         },
 
         // -- class-string / interface-string ----------------------------------
-        ast::Type::ClassString(c) => {
+        cst::Type::ClassString(c) => {
             let inner = c
                 .parameter
                 .as_ref()
                 .map(|p| Box::new(convert(&p.entry.inner)));
             PhpType::ClassString(inner)
         }
-        ast::Type::InterfaceString(i) => {
+        cst::Type::InterfaceString(i) => {
             let inner = i
                 .parameter
                 .as_ref()
@@ -4627,68 +4631,68 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- key-of / value-of ------------------------------------------------
-        ast::Type::KeyOf(k) => PhpType::KeyOf(Box::new(convert(&k.parameter.entry.inner))),
-        ast::Type::ValueOf(v) => PhpType::ValueOf(Box::new(convert(&v.parameter.entry.inner))),
+        cst::Type::KeyOf(k) => PhpType::KeyOf(Box::new(convert(&k.parameter.entry.inner))),
+        cst::Type::ValueOf(v) => PhpType::ValueOf(Box::new(convert(&v.parameter.entry.inner))),
 
         // -- int range --------------------------------------------------------
-        ast::Type::IntRange(r) => PhpType::IntRange(r.min.to_string(), r.max.to_string()),
+        cst::Type::IntRange(r) => PhpType::IntRange(r.min.to_string(), r.max.to_string()),
 
         // -- Index access: T[K] -----------------------------------------------
-        ast::Type::IndexAccess(i) => {
+        cst::Type::IndexAccess(i) => {
             PhpType::IndexAccess(Box::new(convert(i.target)), Box::new(convert(i.index)))
         }
 
         // -- Variable (e.g. $this in conditional types) -----------------------
-        ast::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
+        cst::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
 
         // -- Literal types ----------------------------------------------------
-        ast::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw).to_string()),
-        ast::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw).to_string()),
-        ast::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw).to_string()),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
-        ast::Type::Negated(n) => literal_number_type(format!("-{}", n.number)),
-        ast::Type::Posited(p) => literal_number_type(format!("+{}", p.number)),
+        cst::Type::Negated(n) => literal_number_type(format!("-{}", n.number)),
+        cst::Type::Posited(p) => literal_number_type(format!("+{}", p.number)),
 
         // -- Keyword types → Named -------------------------------------------
-        ast::Type::Mixed(k)
-        | ast::Type::NonEmptyMixed(k)
-        | ast::Type::Null(k)
-        | ast::Type::Void(k)
-        | ast::Type::Never(k)
-        | ast::Type::Resource(k)
-        | ast::Type::ClosedResource(k)
-        | ast::Type::OpenResource(k)
-        | ast::Type::True(k)
-        | ast::Type::False(k)
-        | ast::Type::Bool(k)
-        | ast::Type::Float(k)
-        | ast::Type::Int(k)
-        | ast::Type::PositiveInt(k)
-        | ast::Type::NegativeInt(k)
-        | ast::Type::NonPositiveInt(k)
-        | ast::Type::NonNegativeInt(k)
-        | ast::Type::NonZeroInt(k)
-        | ast::Type::String(k)
-        | ast::Type::StringableObject(k)
-        | ast::Type::ArrayKey(k)
-        | ast::Type::Numeric(k)
-        | ast::Type::Scalar(k)
-        | ast::Type::CallableString(k)
-        | ast::Type::LowercaseCallableString(k)
-        | ast::Type::UppercaseCallableString(k)
-        | ast::Type::NumericString(k)
-        | ast::Type::NonEmptyString(k)
-        | ast::Type::NonEmptyLowercaseString(k)
-        | ast::Type::LowercaseString(k)
-        | ast::Type::NonEmptyUppercaseString(k)
-        | ast::Type::UppercaseString(k)
-        | ast::Type::TruthyString(k)
-        | ast::Type::NonFalsyString(k)
-        | ast::Type::UnspecifiedLiteralInt(k)
-        | ast::Type::UnspecifiedLiteralString(k)
-        | ast::Type::UnspecifiedLiteralFloat(k)
-        | ast::Type::NonEmptyUnspecifiedLiteralString(k) => {
+        cst::Type::Mixed(k)
+        | cst::Type::NonEmptyMixed(k)
+        | cst::Type::Null(k)
+        | cst::Type::Void(k)
+        | cst::Type::Never(k)
+        | cst::Type::Resource(k)
+        | cst::Type::ClosedResource(k)
+        | cst::Type::OpenResource(k)
+        | cst::Type::True(k)
+        | cst::Type::False(k)
+        | cst::Type::Bool(k)
+        | cst::Type::Float(k)
+        | cst::Type::Int(k)
+        | cst::Type::PositiveInt(k)
+        | cst::Type::NegativeInt(k)
+        | cst::Type::NonPositiveInt(k)
+        | cst::Type::NonNegativeInt(k)
+        | cst::Type::NonZeroInt(k)
+        | cst::Type::String(k)
+        | cst::Type::StringableObject(k)
+        | cst::Type::ArrayKey(k)
+        | cst::Type::Numeric(k)
+        | cst::Type::Scalar(k)
+        | cst::Type::CallableString(k)
+        | cst::Type::LowercaseCallableString(k)
+        | cst::Type::UppercaseCallableString(k)
+        | cst::Type::NumericString(k)
+        | cst::Type::NonEmptyString(k)
+        | cst::Type::NonEmptyLowercaseString(k)
+        | cst::Type::LowercaseString(k)
+        | cst::Type::NonEmptyUppercaseString(k)
+        | cst::Type::UppercaseString(k)
+        | cst::Type::TruthyString(k)
+        | cst::Type::NonFalsyString(k)
+        | cst::Type::UnspecifiedLiteralInt(k)
+        | cst::Type::UnspecifiedLiteralString(k)
+        | cst::Type::UnspecifiedLiteralFloat(k)
+        | cst::Type::NonEmptyUnspecifiedLiteralString(k) => {
             PhpType::Named(normalize_keyword_casing(bytes_to_str(k.value)))
         }
 
@@ -4702,7 +4706,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
 /// `iterable<K, V>`).
 fn convert_keyword_with_optional_generics(
     keyword: &str,
-    parameters: &Option<ast::GenericParameters<'_>>,
+    parameters: &Option<cst::GenericParameters<'_>>,
 ) -> PhpType {
     let canonical = normalize_keyword_casing(keyword);
     match parameters {
@@ -4715,9 +4719,9 @@ fn convert_keyword_with_optional_generics(
 }
 
 /// Recursively flatten a left-leaning binary union tree into a flat `Vec`.
-fn flatten_union(ty: &ast::Type<'_>) -> Vec<PhpType> {
+fn flatten_union(ty: &cst::Type<'_>) -> Vec<PhpType> {
     match ty {
-        ast::Type::Union(u) => {
+        cst::Type::Union(u) => {
             let mut types = flatten_union(u.left);
             types.extend(flatten_union(u.right));
             types
@@ -4727,9 +4731,9 @@ fn flatten_union(ty: &ast::Type<'_>) -> Vec<PhpType> {
 }
 
 /// Recursively flatten a left-leaning binary intersection tree into a flat `Vec`.
-fn flatten_intersection(ty: &ast::Type<'_>) -> Vec<PhpType> {
+fn flatten_intersection(ty: &cst::Type<'_>) -> Vec<PhpType> {
     match ty {
-        ast::Type::Intersection(i) => {
+        cst::Type::Intersection(i) => {
             let mut types = flatten_intersection(i.left);
             types.extend(flatten_intersection(i.right));
             types
@@ -5089,8 +5093,11 @@ mod tests {
             Position::new(0),
             Position::new(input.len() as u32),
         );
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let input_arena = arena.alloc_slice_copy(input.as_bytes());
+        // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
+        // the migration is tracked as a separate task.
+        #[allow(deprecated)]
         let mago_canonical = match mago_type_syntax::parse_str(&arena, span, input_arena) {
             Ok(ty) => ty.to_string(),
             Err(_) => {

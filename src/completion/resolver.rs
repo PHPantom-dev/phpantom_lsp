@@ -1755,12 +1755,12 @@ pub(crate) fn apply_property_narrowing(
 /// Walk top-level statements to find the class + method containing the
 /// cursor, then apply narrowing to `results` for the given property path.
 fn walk_property_narrowing_in_statements<'b>(
-    statements: impl Iterator<Item = &'b mago_syntax::ast::Statement<'b>>,
+    statements: impl Iterator<Item = &'b mago_syntax::cst::Statement<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     for stmt in statements {
         match stmt {
@@ -1828,12 +1828,12 @@ fn walk_property_narrowing_in_statements<'b>(
 /// Walk class members to find the method containing the cursor, then
 /// apply instanceof / guard-clause narrowing for the property path.
 fn walk_property_narrowing_in_members<'b>(
-    members: impl Iterator<Item = &'b mago_syntax::ast::class_like::member::ClassLikeMember<'b>>,
+    members: impl Iterator<Item = &'b mago_syntax::cst::class_like::member::ClassLikeMember<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     for member in members {
         if let ClassLikeMember::Method(method) = member {
@@ -1854,12 +1854,12 @@ fn walk_property_narrowing_in_members<'b>(
 /// Walk statements applying only narrowing (no assignment scanning)
 /// for a property path like `$this->prop`.
 fn walk_property_narrowing_stmts<'b>(
-    statements: impl Iterator<Item = &'b mago_syntax::ast::Statement<'b>>,
+    statements: impl Iterator<Item = &'b mago_syntax::cst::Statement<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     use super::types::narrowing;
 
@@ -1944,13 +1944,13 @@ fn walk_property_narrowing_stmts<'b>(
 
 /// Apply property-level narrowing inside an if / elseif / else chain.
 fn walk_property_narrowing_if<'b>(
-    if_stmt: &'b mago_syntax::ast::If<'b>,
-    enclosing_stmt: &'b mago_syntax::ast::Statement<'b>,
+    if_stmt: &'b mago_syntax::cst::If<'b>,
+    enclosing_stmt: &'b mago_syntax::cst::Statement<'b>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     use super::types::narrowing;
 
@@ -2075,7 +2075,7 @@ fn walk_property_narrowing_if<'b>(
 
 /// Dispatch a single statement to `walk_property_narrowing_stmts`.
 fn walk_property_narrowing_stmt<'b>(
-    stmt: &'b mago_syntax::ast::Statement<'b>,
+    stmt: &'b mago_syntax::cst::Statement<'b>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
@@ -2093,12 +2093,12 @@ fn walk_property_narrowing_stmt<'b>(
 /// through those containers so a ternary nested inside them is still
 /// reached.
 fn walk_property_narrowing_expr<'b>(
-    expr: &'b mago_syntax::ast::Expression<'b>,
+    expr: &'b mago_syntax::cst::Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     use super::types::narrowing;
 

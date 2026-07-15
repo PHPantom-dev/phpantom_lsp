@@ -21,8 +21,8 @@
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::property::Property;
-use mago_syntax::ast::modifier::Modifier;
+use mago_syntax::cst::class_like::property::Property;
+use mago_syntax::cst::modifier::Modifier;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{

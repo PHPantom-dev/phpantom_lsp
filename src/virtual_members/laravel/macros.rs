@@ -23,11 +23,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::atom::bytes_to_str;
@@ -72,7 +72,7 @@ pub(crate) fn extract_macro_registrations(
         return Vec::new();
     }
 
-    let arena = Bump::new();
+    let arena = mago_allocator::LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = parse_file_content(&arena, file_id, content.as_bytes());
     let resolved = NameResolver::new(&arena).resolve(program);
@@ -104,7 +104,7 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
         return None;
     }
 
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = parse_file_content(&arena, file_id, content.as_bytes());
     let resolved = NameResolver::new(&arena).resolve(program);
@@ -349,8 +349,8 @@ fn collect_instance_macro_registrations(
     php_version: Option<PhpVersion>,
     out: &mut Vec<MacroRegistration>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     match node {
         Node::Program(program) => {
@@ -456,8 +456,8 @@ fn collect_instance_macros_in_body(
     php_version: Option<PhpVersion>,
     out: &mut Vec<MacroRegistration>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     match node {
         // A closure sees only its `use (...)` captures plus its own
@@ -753,7 +753,7 @@ pub(crate) fn parse_provider_class_list(content: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let arena = Bump::new();
+    let arena = mago_allocator::LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = parse_file_content(&arena, file_id, content.as_bytes());
     let resolved = NameResolver::new(&arena).resolve(program);
@@ -773,7 +773,7 @@ pub(crate) fn parse_provider_referenced_classes(content: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = parse_file_content(&arena, file_id, content.as_bytes());
     let resolved = NameResolver::new(&arena).resolve(program);
@@ -817,8 +817,8 @@ fn collect_provider_method_refs(
     seen: &mut HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     match node {
         Node::Class(class) => {

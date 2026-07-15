@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ParameterInfo};

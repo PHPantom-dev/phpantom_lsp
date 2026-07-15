@@ -15,10 +15,10 @@ use crate::php_type::PhpType;
 use crate::symbol_map::extract_symbol_map;
 use crate::types::TypeAliasDef;
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
@@ -26,11 +26,11 @@ use crate::types::ClassInfo;
 
 use super::DocblockCtx;
 
-/// Run `f` with a parsing arena, reusing a thread-local `Bump` across
+/// Run `f` with a parsing arena, reusing a thread-local `LocalArena` across
 /// calls instead of allocating a fresh one each time.
 ///
 /// `update_ast_inner` is invoked on every keystroke (each `didChange`),
-/// so a fresh `Bump::new()` per call returns its backing pages to the OS
+/// so a fresh `LocalArena::new()` per call returns its backing pages to the OS
 /// via `munmap` on drop and re-acquires them via `mmap` on the next
 /// parse. Reusing one arena and `reset()`ing it (an O(1) bump-pointer
 /// rewind that keeps the pages allocated) eliminates those syscalls
@@ -39,11 +39,11 @@ use super::DocblockCtx;
 /// Resolution can trigger a nested parse on the same thread (e.g.
 /// `find_or_load_function` calls `update_ast` while the outer parse is
 /// still using the arena). Such re-entrant calls fall back to a throwaway
-/// `Bump` so the shared arena is never aliased — the borrow held for the
+/// `LocalArena` so the shared arena is never aliased — the borrow held for the
 /// duration of `f` makes `try_borrow_mut` fail for the nested call.
-fn with_reusable_arena<R>(f: impl FnOnce(&Bump) -> R) -> R {
+fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
     thread_local! {
-        static ARENA: RefCell<Bump> = RefCell::new(Bump::with_capacity(512 * 1024));
+        static ARENA: RefCell<LocalArena> = const { RefCell::new(LocalArena::new()) };
     }
 
     ARENA.with(|cell| match cell.try_borrow_mut() {
@@ -51,7 +51,7 @@ fn with_reusable_arena<R>(f: impl FnOnce(&Bump) -> R) -> R {
             arena.reset();
             f(&arena)
         }
-        Err(_) => f(&Bump::new()),
+        Err(_) => f(&LocalArena::new()),
     })
 }
 

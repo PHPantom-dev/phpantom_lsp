@@ -22,7 +22,7 @@ use std::ops::ControlFlow;
 
 use tower_lsp::lsp_types::*;
 
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;

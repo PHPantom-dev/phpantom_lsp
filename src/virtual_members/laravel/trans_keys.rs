@@ -1,6 +1,6 @@
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
@@ -117,7 +117,7 @@ pub(crate) struct TransKeyMatch {
 }
 
 pub(crate) fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMatch> {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();

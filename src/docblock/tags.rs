@@ -19,7 +19,7 @@
 
 use mago_docblock::document::TagKind;
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
 use crate::types::{AssertionKind, PhpVersion, TypeAssertion};

@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::expression::Expression;
-use mago_syntax::ast::statement::Statement;
+use mago_syntax::cst::expression::Expression;
+use mago_syntax::cst::statement::Statement;
 
 use tower_lsp::lsp_types::*;
 
@@ -50,7 +50,7 @@ struct ResolvedReturn {
 
 /// Check whether a statement list contains any `yield` expression
 /// (indicating a generator function whose return type semantics differ).
-fn body_contains_yield(stmts: &mago_syntax::ast::sequence::Sequence<'_, Statement<'_>>) -> bool {
+fn body_contains_yield(stmts: &mago_syntax::cst::sequence::Sequence<'_, Statement<'_>>) -> bool {
     for stmt in stmts.iter() {
         if stmt_contains_yield(stmt) {
             return true;
@@ -103,8 +103,8 @@ fn stmt_contains_yield(stmt: &Statement<'_>) -> bool {
     }
 }
 
-fn if_body_contains_yield(body: &mago_syntax::ast::control_flow::r#if::IfBody<'_>) -> bool {
-    use mago_syntax::ast::control_flow::r#if::IfBody;
+fn if_body_contains_yield(body: &mago_syntax::cst::control_flow::r#if::IfBody<'_>) -> bool {
+    use mago_syntax::cst::control_flow::r#if::IfBody;
     match body {
         IfBody::Statement(inner) => {
             stmt_contains_yield(inner.statement)
@@ -132,9 +132,9 @@ fn if_body_contains_yield(body: &mago_syntax::ast::control_flow::r#if::IfBody<'_
 }
 
 fn switch_body_contains_yield(
-    body: &mago_syntax::ast::control_flow::switch::SwitchBody<'_>,
+    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'_>,
 ) -> bool {
-    use mago_syntax::ast::control_flow::switch::SwitchBody;
+    use mago_syntax::cst::control_flow::switch::SwitchBody;
     match body {
         SwitchBody::BraceDelimited(b) => b
             .cases
@@ -157,7 +157,7 @@ fn expr_contains_yield(expr: &Expression<'_>) -> bool {
 /// etc.) but does NOT recurse into closures, arrow functions, or nested
 /// function declarations — those have their own return types.
 fn collect_returns_from_body<'a>(
-    stmts: &mago_syntax::ast::sequence::Sequence<'a, Statement<'a>>,
+    stmts: &mago_syntax::cst::sequence::Sequence<'a, Statement<'a>>,
     returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
 ) {
     for stmt in stmts.iter() {
@@ -238,7 +238,7 @@ fn collect_returns_from_stmt<'a>(
             }
         }
         Statement::Declare(declare) => {
-            use mago_syntax::ast::declare::DeclareBody;
+            use mago_syntax::cst::declare::DeclareBody;
             match &declare.body {
                 DeclareBody::Statement(inner) => {
                     collect_returns_from_stmt(inner, returns);
@@ -262,10 +262,10 @@ fn collect_returns_from_stmt<'a>(
 }
 
 fn collect_returns_from_if_body<'a>(
-    body: &mago_syntax::ast::control_flow::r#if::IfBody<'a>,
+    body: &mago_syntax::cst::control_flow::r#if::IfBody<'a>,
     returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
 ) {
-    use mago_syntax::ast::control_flow::r#if::IfBody;
+    use mago_syntax::cst::control_flow::r#if::IfBody;
     match body {
         IfBody::Statement(inner) => {
             collect_returns_from_stmt(inner.statement, returns);
@@ -295,10 +295,10 @@ fn collect_returns_from_if_body<'a>(
 }
 
 fn collect_returns_from_switch_body<'a>(
-    body: &mago_syntax::ast::control_flow::switch::SwitchBody<'a>,
+    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'a>,
     returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
 ) {
-    use mago_syntax::ast::control_flow::switch::SwitchBody;
+    use mago_syntax::cst::control_flow::switch::SwitchBody;
     match body {
         SwitchBody::BraceDelimited(b) => {
             for case in b.cases.iter() {
@@ -665,7 +665,7 @@ fn process_top_level_statement(
             }
         }
         Statement::Declare(declare) => {
-            use mago_syntax::ast::declare::DeclareBody;
+            use mago_syntax::cst::declare::DeclareBody;
             match &declare.body {
                 DeclareBody::Statement(inner) => {
                     process_top_level_statement(
@@ -704,7 +704,7 @@ fn process_top_level_statement(
 #[allow(clippy::too_many_arguments)]
 /// Process a class member (looking for methods with return types).
 fn process_class_member(
-    member: &mago_syntax::ast::class_like::member::ClassLikeMember<'_>,
+    member: &mago_syntax::cst::class_like::member::ClassLikeMember<'_>,
     content: &str,
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -714,8 +714,8 @@ fn process_class_member(
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     let method = match member {
         ClassLikeMember::Method(m) => m,

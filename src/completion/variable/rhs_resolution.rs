@@ -28,8 +28,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, bytes_to_str};
@@ -2653,7 +2653,7 @@ fn resolve_rhs_function_call<'b>(
     // invoking it with `()` returns the underlying method's return
     // type.  Delegate to the matching call-resolution path.
     if let Expression::PartialApplication(pa) = func_call.function {
-        use mago_syntax::ast::ast::partial_application::PartialApplication;
+        use mago_syntax::cst::partial_application::PartialApplication;
         match pa {
             PartialApplication::StaticMethod(sma) => {
                 // For first-class callable invocation through late-static-binding
@@ -2705,7 +2705,7 @@ fn resolve_rhs_function_call<'b>(
                     }
                 }
                 // Build a synthetic StaticMethodCall and resolve it.
-                let synthetic = mago_syntax::ast::ast::call::StaticMethodCall {
+                let synthetic = mago_syntax::cst::call::StaticMethodCall {
                     class: sma.class,
                     double_colon: sma.double_colon,
                     method: sma.method.clone(),

@@ -27,8 +27,8 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::sequence::TokenSeparatedSequence;
-use mago_syntax::ast::*;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 use crate::completion::resolver::ResolutionCtx;

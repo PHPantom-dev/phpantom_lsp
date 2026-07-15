@@ -1,6 +1,6 @@
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::Backend;
@@ -159,7 +159,7 @@ fn scan_route_file(
     uri: &Url,
     file_dir: Option<&std::path::Path>,
 ) -> Vec<Location> {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut results = Vec::new();
@@ -365,7 +365,7 @@ fn scan_group_body<'a>(
                 if let Ok(ref included_content) = std::fs::read_to_string(&included) {
                     let sub_uri = Url::from_file_path(&included).unwrap_or_else(|_| uri.clone());
                     let sub_dir = included.parent().map(|d| d.to_path_buf());
-                    let arena = Bump::new();
+                    let arena = LocalArena::new();
                     let fid = FileId::new(b"included.php");
                     let prog = mago_syntax::parser::parse_file_content(
                         &arena,
@@ -445,7 +445,7 @@ fn collect_all_names_from_file(
     file_dir: Option<&std::path::Path>,
     out: &mut Vec<String>,
 ) {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     for stmt in program.statements.iter() {
@@ -591,7 +591,7 @@ fn collect_names_from_group_body<'a>(
                     // routes inherit the parent group's name (e.g.
                     // "eaglesys::").  Do NOT scan with empty prefix —
                     // that produces unprefixed names that are incorrect.
-                    let arena2 = Bump::new();
+                    let arena2 = LocalArena::new();
                     let fid2 = FileId::new(b"included.php");
                     let prog2 = mago_syntax::parser::parse_file_content(
                         &arena2,
