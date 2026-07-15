@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784064774020,
+  "lastUpdate": 1784078060846,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14580,6 +14580,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 45.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f191d25e4f1c2c363d85885efb5864585188092b",
+          "message": "A mock built with a test helper keeps the mocked class",
+          "timestamp": "2026-07-15T03:01:49+02:00",
+          "tree_id": "77ad899c8bf51670a523486b945a49f86ffa3a89",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f191d25e4f1c2c363d85885efb5864585188092b"
+        },
+        "date": 1784078059342,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 53.1,
             "unit": "MiB"
           },
           {
