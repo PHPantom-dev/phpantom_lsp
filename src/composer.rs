@@ -178,6 +178,142 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
     }
 }
 
+/// Extract PSR-4 mappings from path-repository packages in `installed.json`.
+///
+/// Path-repository packages (Composer `"type": "path"` repositories) are
+/// local packages symlinked into `vendor/`.  They are project code that
+/// happens to be organized as Composer packages — e.g. the `internachi/modular`
+/// pattern where each module lives under `app-modules/` or similar and has
+/// its own `composer.json` with PSR-4 mappings.
+///
+/// A package is included only when **all three** conditions are met:
+///
+/// 1. `dist.type == "path"` in `installed.json`.
+/// 2. `transport-options.symlink == true` — the package is symlinked into
+///    vendor, not copied.  A copied path-repo is effectively a snapshot
+///    and should be treated as a regular vendor package.
+/// 3. The canonicalized (symlink-resolved) package root is a subdirectory
+///    of the workspace root.  A symlink pointing outside the project
+///    (e.g. a shared library on disk) is not project code.
+///
+/// Their `autoload.psr-4` entries and `install-path` fields are combined
+/// to produce absolute directory mappings that can be appended to the
+/// project's own `psr4_mappings`.
+///
+/// Returns an empty `Vec` if `installed.json` does not exist, cannot be
+/// parsed, or contains no qualifying path-repository packages.
+pub fn extract_path_repo_psr4_mappings(
+    workspace_root: &Path,
+    vendor_dir: &str,
+) -> Vec<Psr4Mapping> {
+    let vendor_path = workspace_root.join(vendor_dir);
+    let installed_path = vendor_path.join("composer").join("installed.json");
+
+    let Ok(content) = fs::read_to_string(&installed_path) else {
+        return Vec::new();
+    };
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+
+    // installed.json: Composer 1 = top-level array, Composer 2 = { "packages": [...] }
+    let packages = if let Some(arr) = json.as_array() {
+        arr.as_slice()
+    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
+        pkgs.as_slice()
+    } else {
+        return Vec::new();
+    };
+
+    let composer_dir = vendor_path.join("composer");
+    let canonical_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let mut mappings = Vec::new();
+
+    for package in packages {
+        // Condition 1: dist.type must be "path".
+        let is_path_repo = package
+            .get("dist")
+            .and_then(|d| d.get("type"))
+            .and_then(|t| t.as_str())
+            == Some("path");
+        if !is_path_repo {
+            continue;
+        }
+
+        // Condition 2: must be symlinked, not copied.
+        let is_symlinked = package
+            .get("transport-options")
+            .and_then(|t| t.get("symlink"))
+            .and_then(|s| s.as_bool())
+            == Some(true);
+        if !is_symlinked {
+            continue;
+        }
+
+        // Resolve the package root on disk via install-path.
+        let pkg_root =
+            if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
+                composer_dir.join(install_path)
+            } else if let Some(name) = package.get("name").and_then(|n| n.as_str()) {
+                vendor_path.join(name)
+            } else {
+                continue;
+            };
+
+        // Canonicalize to follow symlinks to the real location.
+        let pkg_root = pkg_root.canonicalize().unwrap_or(pkg_root);
+        if !pkg_root.is_dir() {
+            continue;
+        }
+
+        // Condition 3: the resolved path must be inside the workspace.
+        if !pkg_root.starts_with(&canonical_root) {
+            continue;
+        }
+
+        // Extract autoload.psr-4 entries.
+        let Some(psr4) = package
+            .get("autoload")
+            .and_then(|a| a.get("psr-4"))
+            .and_then(|p| p.as_object())
+        else {
+            continue;
+        };
+
+        for (prefix, paths) in psr4 {
+            // The prefix should end with `\` per PSR-4 convention.
+            let normalised = normalise_prefix(prefix);
+
+            // paths can be a string or an array of strings.
+            let dirs: Vec<&str> = if let Some(s) = paths.as_str() {
+                vec![s]
+            } else if let Some(arr) = paths.as_array() {
+                arr.iter().filter_map(|v| v.as_str()).collect()
+            } else {
+                continue;
+            };
+
+            for dir in dirs {
+                let abs_path = pkg_root.join(dir);
+                if abs_path.is_dir() {
+                    mappings.push(Psr4Mapping {
+                        prefix: normalised.clone(),
+                        base_path: abs_path.to_string_lossy().into_owned(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by prefix length descending (longest-prefix-first matching).
+    mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
+
+    mappings
+}
+
 /// Parse `<vendor>/composer/autoload_classmap.php` and return a mapping
 /// from fully-qualified class name to file path (relative to the workspace
 /// root).

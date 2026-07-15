@@ -2007,7 +2007,12 @@ impl Backend {
         let vendor_path = root.join(&vendor_dir);
         self.add_vendor_dir(&vendor_path);
 
-        *self.psr4_mappings.write() = mappings;
+        // Include PSR-4 mappings from path-repository packages (local
+        // packages symlinked into vendor/, e.g. internachi/modular modules).
+        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
+        let mut all_mappings = mappings;
+        all_mappings.extend(path_repo_mappings);
+        *self.psr4_mappings.write() = all_mappings;
 
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();
@@ -2530,10 +2535,11 @@ impl Backend {
     pub(crate) fn rescan_composer_indexes(&self, root: &std::path::Path) {
         // Re-read composer.json for updated PSR-4 mappings.
         if let Some(pkg) = composer::read_composer_package(root) {
-            let mappings = composer::extract_psr4_mappings_from_package(&pkg);
+            let mut mappings = composer::extract_psr4_mappings_from_package(&pkg);
+            let vendor_dir = composer::get_vendor_dir(&pkg);
+            mappings.extend(composer::extract_path_repo_psr4_mappings(root, &vendor_dir));
             *self.psr4_mappings.write() = mappings;
 
-            let vendor_dir = composer::get_vendor_dir(&pkg);
             let vendor_path = root.join(&vendor_dir);
 
             // Rebuild vendor classmap, tracking dependency provenance so
