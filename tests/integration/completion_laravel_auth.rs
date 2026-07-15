@@ -446,6 +446,117 @@ class StoreRequest extends FormRequest {
     );
 }
 
+/// The configured model is referenced by an imported short name
+/// (`use App\Models\AdminUser; ... 'model' => AdminUser::class`) and only
+/// reaches `Authenticatable` through a base class it extends, mirroring a
+/// real Laravel app's `AdminUser extends Illuminate\Foundation\Auth\User`.
+/// The `use` statement in `config/auth.php` must be resolved so the model
+/// FQN is recognized, otherwise `$this->user()` widens to the bare
+/// contract and its members do not complete.
+#[tokio::test]
+async fn config_model_via_use_short_name_resolves() {
+    const COMPOSER: &str = r#"{
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "App\\Models\\": "src/Models/",
+            "Illuminate\\Contracts\\Auth\\": "vendor/illuminate/Contracts/Auth/",
+            "Illuminate\\Http\\": "vendor/illuminate/Http/",
+            "Illuminate\\Foundation\\Auth\\": "vendor/illuminate/Foundation/Auth/",
+            "Illuminate\\Foundation\\Http\\": "vendor/illuminate/Foundation/Http/"
+        }
+    }
+}"#;
+    let files: Vec<(&str, &str)> = vec![
+        (
+            "vendor/illuminate/Contracts/Auth/Authenticatable.php",
+            AUTHENTICATABLE_PHP,
+        ),
+        ("vendor/illuminate/Http/Request.php", REQUEST_PHP),
+        (
+            "vendor/illuminate/Foundation/Http/FormRequest.php",
+            FORM_REQUEST_PHP,
+        ),
+        (
+            "vendor/illuminate/Foundation/Auth/User.php",
+            "<?php
+namespace Illuminate\\Foundation\\Auth;
+use Illuminate\\Contracts\\Auth\\Authenticatable as AuthenticatableContract;
+class User implements AuthenticatableContract {
+    public function getAuthIdentifier() { return 1; }
+}
+",
+        ),
+        (
+            "src/Models/AdminUser.php",
+            "<?php
+namespace App\\Models;
+use Illuminate\\Foundation\\Auth\\User;
+final class AdminUser extends User {
+    public function isAdmin(): bool { return true; }
+}
+",
+        ),
+        (
+            "config/auth.php",
+            "<?php
+use App\\Models\\AdminUser;
+return [
+    'defaults' => ['guard' => 'web'],
+    'guards' => ['web' => ['provider' => 'users']],
+    'providers' => ['users' => ['model' => AdminUser::class]],
+];",
+        ),
+    ];
+
+    let form_request = "\
+<?php
+namespace App;
+use Illuminate\\Foundation\\Http\\FormRequest;
+class StoreRequest extends FormRequest {
+    public function authorize(): bool {
+        $this->user()->
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
+    let uri = Url::from_file_path(dir.path().join("src/StoreRequest.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: form_request.to_string(),
+            },
+        })
+        .await;
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 23,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let labels: Vec<String> = match result {
+        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
+        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
+        _ => Vec::new(),
+    };
+    assert!(
+        labels.iter().any(|l| l.starts_with("isAdmin")),
+        "expected AdminUser::isAdmin via config model imported by use, got: {labels:?}"
+    );
+}
+
 /// `$request->user()` where `$request` is a `Request`-typed **property**
 /// resolves the default guard's model.
 #[tokio::test]

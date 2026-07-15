@@ -19,10 +19,13 @@
 //! This is the first consumer of static config-value reading; it is written
 //! to be reusable (e.g. `Storage::disk()` reading `config/filesystems.php`).
 
+use std::collections::HashMap;
+
 use bumpalo::Bump;
 use mago_database::file::FileId;
 use mago_syntax::ast::*;
 
+use crate::Backend;
 use crate::atom::bytes_to_str;
 
 /// A statically-classified Laravel config value.
@@ -35,8 +38,9 @@ pub(crate) enum ConfigValue {
     /// A string literal, e.g. `'web'` or `'users'`.
     Str(String),
     /// A `::class` constant, e.g. `App\Models\User::class`.  The stored name
-    /// is exactly as written in the config file (short or fully-qualified);
-    /// callers resolve it against use-statements / the classmap.
+    /// is resolved against the config file's `use` statements at parse time,
+    /// so an imported short name (`use App\Models\User; User::class`) is kept
+    /// fully-qualified; callers still normalise it against the classmap.
     ClassString(String),
     /// A ternary or short-ternary over two or more sub-values, e.g.
     /// `env('is_admin') ? User::class : Admin::class`.  We do not evaluate the
@@ -190,8 +194,14 @@ pub(crate) fn parse_config_tree(content: &str) -> Option<ConfigNode> {
         }
     }
 
+    // Resolve `::class` references against the config file's own `use`
+    // statements, so `use App\Models\User; ... User::class` yields the
+    // fully-qualified `App\Models\User` rather than the bare short name.
+    let mut use_map: HashMap<String, String> = HashMap::new();
+    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+
     if let Some(expr) = return_expr {
-        return Some(node_from_expr(expr, content));
+        return Some(node_from_expr(expr, content, &use_map));
     }
 
     let var_name = returned_var_name?;
@@ -201,27 +211,60 @@ pub(crate) fn parse_config_tree(content: &str) -> Option<ConfigNode> {
             && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
             && dv.name == var_name.as_bytes()
         {
-            return Some(node_from_expr(assign.rhs, content));
+            return Some(node_from_expr(assign.rhs, content, &use_map));
         }
     }
 
     None
 }
 
+/// Resolve a class name written in a config file against its `use` statements.
+///
+/// Config files live in the global namespace, so a name is either already
+/// fully-qualified (a leading `\`, or a multi-segment name with no matching
+/// import) or an imported short name / aliased prefix. PHP resolves the first
+/// segment against the use-map and appends any trailing segments, exactly as
+/// `use App\Models\User; User::class` yields `App\Models\User`.
+fn resolve_config_class_name(name: &str, use_map: &HashMap<String, String>) -> String {
+    // A leading `\` marks an explicit fully-qualified name; strip it and use
+    // it verbatim without consulting imports.
+    if let Some(rest) = name.strip_prefix('\\') {
+        return rest.to_string();
+    }
+    let (first, rest) = match name.split_once('\\') {
+        Some((first, rest)) => (first, Some(rest)),
+        None => (name, None),
+    };
+    match use_map.get(first) {
+        Some(fqn) => match rest {
+            Some(rest) => format!("{fqn}\\{rest}"),
+            None => fqn.clone(),
+        },
+        // No import matches the first segment: the name is already relative to
+        // the global namespace, so it is its own FQN.
+        None => name.to_string(),
+    }
+}
+
 /// Build a [`ConfigNode`] from an arbitrary expression: arrays become
 /// [`ConfigNode::Array`], everything else is classified as a leaf value.
-fn node_from_expr(expr: &Expression<'_>, content: &str) -> ConfigNode {
+fn node_from_expr(
+    expr: &Expression<'_>,
+    content: &str,
+    use_map: &HashMap<String, String>,
+) -> ConfigNode {
     match expr {
-        Expression::Parenthesized(p) => node_from_expr(p.expression, content),
-        Expression::Array(arr) => array_node(arr.elements.iter(), content),
-        Expression::LegacyArray(arr) => array_node(arr.elements.iter(), content),
-        other => ConfigNode::Leaf(classify_value(other, content)),
+        Expression::Parenthesized(p) => node_from_expr(p.expression, content, use_map),
+        Expression::Array(arr) => array_node(arr.elements.iter(), content, use_map),
+        Expression::LegacyArray(arr) => array_node(arr.elements.iter(), content, use_map),
+        other => ConfigNode::Leaf(classify_value(other, content, use_map)),
     }
 }
 
 fn array_node<'a>(
     elements: impl Iterator<Item = &'a ArrayElement<'a>>,
     content: &str,
+    use_map: &HashMap<String, String>,
 ) -> ConfigNode {
     let mut entries = Vec::new();
     for element in elements {
@@ -231,53 +274,67 @@ fn array_node<'a>(
         let Some((key_text, _, _)) = super::helpers::extract_string_literal(kv.key, content) else {
             continue;
         };
-        entries.push((key_text.to_string(), node_from_expr(kv.value, content)));
+        entries.push((
+            key_text.to_string(),
+            node_from_expr(kv.value, content, use_map),
+        ));
     }
     ConfigNode::Array(entries)
 }
 
 /// Classify a leaf value expression into a [`ConfigValue`].
-fn classify_value(expr: &Expression<'_>, content: &str) -> ConfigValue {
+fn classify_value(
+    expr: &Expression<'_>,
+    content: &str,
+    use_map: &HashMap<String, String>,
+) -> ConfigValue {
     match expr {
-        Expression::Parenthesized(p) => classify_value(p.expression, content),
+        Expression::Parenthesized(p) => classify_value(p.expression, content, use_map),
         Expression::Literal(literal::Literal::String(_)) => {
             match super::helpers::extract_string_literal(expr, content) {
                 Some((text, _, _)) => ConfigValue::Str(text.to_string()),
                 None => ConfigValue::Dynamic,
             }
         }
-        Expression::Access(Access::ClassConstant(cca)) => classify_class_constant(cca),
+        Expression::Access(Access::ClassConstant(cca)) => classify_class_constant(cca, use_map),
         Expression::Conditional(cond) => {
             // `a ? b : c` and short `a ?: c`.  We never evaluate the
             // condition; the value is one of the branches.  For `?:` the
             // "then" branch is the condition itself.
             let then_expr = cond.then.unwrap_or(cond.condition);
             let mut arms = Vec::new();
-            flatten_one_of(classify_value(then_expr, content), &mut arms);
-            flatten_one_of(classify_value(cond.r#else, content), &mut arms);
+            flatten_one_of(classify_value(then_expr, content, use_map), &mut arms);
+            flatten_one_of(classify_value(cond.r#else, content, use_map), &mut arms);
             ConfigValue::OneOf(arms)
         }
-        Expression::Call(Call::Function(fc)) => classify_call(fc, content),
+        Expression::Call(Call::Function(fc)) => classify_call(fc, content, use_map),
         _ => ConfigValue::Dynamic,
     }
 }
 
-fn classify_class_constant(cca: &ClassConstantAccess<'_>) -> ConfigValue {
+fn classify_class_constant(
+    cca: &ClassConstantAccess<'_>,
+    use_map: &HashMap<String, String>,
+) -> ConfigValue {
     let is_class = matches!(
         &cca.constant,
         ClassLikeConstantSelector::Identifier(ident)
             if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
     );
     if is_class && let Expression::Identifier(id) = cca.class {
-        let name = bytes_to_str(id.value()).to_string();
+        let name = bytes_to_str(id.value());
         if !name.is_empty() {
-            return ConfigValue::ClassString(name);
+            return ConfigValue::ClassString(resolve_config_class_name(name, use_map));
         }
     }
     ConfigValue::Dynamic
 }
 
-fn classify_call(fc: &FunctionCall<'_>, content: &str) -> ConfigValue {
+fn classify_call(
+    fc: &FunctionCall<'_>,
+    content: &str,
+    use_map: &HashMap<String, String>,
+) -> ConfigValue {
     let Expression::Identifier(ident) = fc.function else {
         return ConfigValue::Dynamic;
     };
@@ -288,7 +345,9 @@ fn classify_call(fc: &FunctionCall<'_>, content: &str) -> ConfigValue {
     // `env('KEY')` has no static value.
     let default_arg = fc.argument_list.arguments.iter().nth(1);
     match default_arg {
-        Some(arg) => ConfigValue::EnvDefault(Box::new(classify_value(arg.value(), content))),
+        Some(arg) => {
+            ConfigValue::EnvDefault(Box::new(classify_value(arg.value(), content, use_map)))
+        }
         None => ConfigValue::Dynamic,
     }
 }

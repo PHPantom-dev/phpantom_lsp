@@ -58,6 +58,58 @@ fn classifies_short_class_constant() {
 }
 
 #[test]
+fn resolves_short_class_constant_via_use_statement() {
+    let tree = parse_config_tree(
+        "<?php use App\\Models\\AdminUser; return ['model' => AdminUser::class];",
+    )
+    .unwrap();
+    assert_eq!(
+        tree.value_at(&["model"]),
+        Some(&ConfigValue::ClassString(
+            "App\\Models\\AdminUser".to_string()
+        ))
+    );
+}
+
+#[test]
+fn resolves_aliased_class_constant_via_use_statement() {
+    let tree = parse_config_tree(
+        "<?php use App\\Models\\AdminUser as Model; return ['model' => Model::class];",
+    )
+    .unwrap();
+    assert_eq!(
+        tree.value_at(&["model"]),
+        Some(&ConfigValue::ClassString(
+            "App\\Models\\AdminUser".to_string()
+        ))
+    );
+}
+
+#[test]
+fn resolves_imported_prefix_in_class_constant() {
+    let tree =
+        parse_config_tree("<?php use App\\Models; return ['model' => Models\\AdminUser::class];")
+            .unwrap();
+    assert_eq!(
+        tree.value_at(&["model"]),
+        Some(&ConfigValue::ClassString(
+            "App\\Models\\AdminUser".to_string()
+        ))
+    );
+}
+
+#[test]
+fn leading_backslash_class_constant_ignores_imports() {
+    let tree =
+        parse_config_tree("<?php use Other\\User; return ['model' => \\App\\Models\\User::class];")
+            .unwrap();
+    assert_eq!(
+        tree.value_at(&["model"]),
+        Some(&ConfigValue::ClassString("App\\Models\\User".to_string()))
+    );
+}
+
+#[test]
 fn classifies_env_with_class_default() {
     let tree =
         parse_config_tree("<?php return ['model' => env('AUTH_MODEL', App\\Models\\User::class)];")

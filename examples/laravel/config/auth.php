@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Customer;
+
 return [
     'defaults' => [
         'guard' => 'web',
@@ -19,7 +21,7 @@ return [
     'providers' => [
         'users' => [
             'driver' => 'eloquent',
-            'model' => App\Models\Customer::class,
+            'model' => Customer::class,
         ],
         'admins' => [
             'driver' => 'eloquent',
