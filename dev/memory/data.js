@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784122815291,
+  "lastUpdate": 1784123738498,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14823,6 +14823,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lj.moritorii@web.de",
+            "name": "Moritz Wirger",
+            "username": "enwi"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "55c05db6c657a1affe4420d0abc9dcba0496a022",
+          "message": "Respect mago toml",
+          "timestamp": "2026-07-15T15:43:13+02:00",
+          "tree_id": "fbb5487f50e9dc6d72e3e338a405b6ca2903a96d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/55c05db6c657a1affe4420d0abc9dcba0496a022"
+        },
+        "date": 1784123736747,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 53.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64,
             "unit": "MiB"
           }
         ]
