@@ -1,0 +1,16 @@
+{
+    "name": "demo/common",
+    "description": "Shared module with macros (path-repository demo)",
+    "autoload": {
+        "psr-4": {
+            "Demo\\Common\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Demo\\Common\\CommonServiceProvider"
+            ]
+        }
+    }
+}

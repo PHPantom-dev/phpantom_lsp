@@ -374,6 +374,18 @@ class Demo
     }
 
 
+    // ── Macros from a path-repository module ──────────────────────────
+
+    public function moduleCollectionMacro(Collection $items): Collection
+    {
+        // `toUpper` is registered in Demo\Common\CommonServiceProvider (a
+        // path-repository package under app-modules/common/).  PHPantom
+        // discovers path-repo PSR-4 directories from installed.json,
+        // so macros defined in local modules work the same as app/ macros.
+        return $items->toUpper();   // → Collection
+    }
+
+
     // ── Contract type-hints resolve through the concrete class ──────────
 
     public function viewContract(\Illuminate\Contracts\View\View $view): void
