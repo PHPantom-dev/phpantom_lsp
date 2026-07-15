@@ -1,6 +1,6 @@
 use phpantom_lsp::composer::{
-    extract_require_once_paths, normalise_path, parse_autoload_classmap, parse_autoload_files,
-    parse_composer_json, resolve_class_path,
+    extract_path_repo_psr4_mappings, extract_require_once_paths, normalise_path,
+    parse_autoload_classmap, parse_autoload_files, parse_composer_json, resolve_class_path,
 };
 use std::fs;
 use std::path::Path;
@@ -873,4 +873,131 @@ fn test_classmap_top_level_class() {
         classmap.contains_key("Namespaced\\Example"),
         "Should handle namespaced classes alongside top-level ones"
     );
+}
+
+/// Helper: build a `vendor/composer/installed.json` (Composer 2 format)
+/// with the given package objects and write it into the workspace.
+fn write_installed_json(ws: &TestWorkspace, packages: &str) {
+    let full = ws.dir.path().join("vendor/composer/installed.json");
+    fs::create_dir_all(full.parent().unwrap()).expect("failed to create vendor/composer");
+    fs::write(full, format!(r#"{{ "packages": [{packages}] }}"#))
+        .expect("failed to write installed.json");
+}
+
+#[test]
+fn test_path_repo_psr4_symlinked_package_inside_workspace() {
+    let ws = TestWorkspace::new(r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#);
+    // The module lives inside the workspace at app-modules/common/.
+    ws.create_php_file("app-modules/common/src/.gitkeep", "");
+    write_installed_json(
+        &ws,
+        r#"{
+            "name": "demo/common",
+            "dist": { "type": "path" },
+            "transport-options": { "symlink": true },
+            "install-path": "../../app-modules/common",
+            "autoload": { "psr-4": { "Demo\\Common\\": "src/" } }
+        }"#,
+    );
+
+    let mappings = extract_path_repo_psr4_mappings(ws.root(), "vendor");
+    assert_eq!(mappings.len(), 1, "expected one path-repo mapping");
+    assert_eq!(mappings[0].prefix, "Demo\\Common\\");
+    assert!(
+        mappings[0]
+            .base_path
+            .trim_end_matches('/')
+            .ends_with("app-modules/common/src"),
+        "base_path should point at the module's src dir, got {}",
+        mappings[0].base_path
+    );
+}
+
+#[test]
+fn test_path_repo_psr4_skips_copied_package() {
+    let ws = TestWorkspace::new(r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#);
+    ws.create_php_file("app-modules/common/src/.gitkeep", "");
+    // symlink == false → the package was copied, treat as a normal vendor
+    // snapshot and do NOT add it to the project's PSR-4 mappings.
+    write_installed_json(
+        &ws,
+        r#"{
+            "name": "demo/common",
+            "dist": { "type": "path" },
+            "transport-options": { "symlink": false },
+            "install-path": "../../app-modules/common",
+            "autoload": { "psr-4": { "Demo\\Common\\": "src/" } }
+        }"#,
+    );
+
+    assert!(extract_path_repo_psr4_mappings(ws.root(), "vendor").is_empty());
+}
+
+#[test]
+fn test_path_repo_psr4_skips_non_path_dist() {
+    let ws = TestWorkspace::new(r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#);
+    ws.create_php_file("vendor/vendorpkg/lib/src/.gitkeep", "");
+    // dist.type == "zip" → a normal downloaded dependency, not a path repo.
+    write_installed_json(
+        &ws,
+        r#"{
+            "name": "vendorpkg/lib",
+            "dist": { "type": "zip" },
+            "transport-options": { "symlink": true },
+            "install-path": "../vendorpkg/lib",
+            "autoload": { "psr-4": { "Vendor\\Lib\\": "src/" } }
+        }"#,
+    );
+
+    assert!(extract_path_repo_psr4_mappings(ws.root(), "vendor").is_empty());
+}
+
+#[test]
+fn test_path_repo_psr4_skips_package_outside_workspace() {
+    let ws = TestWorkspace::new(r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#);
+    // A path repo whose resolved location is outside the workspace (e.g.
+    // a shared library elsewhere on disk) is not project code.
+    let external = tempfile::tempdir().expect("failed to create external dir");
+    fs::create_dir_all(external.path().join("src")).expect("failed to create external src");
+    let install_path = external.path().to_string_lossy().replace('\\', "\\\\");
+    write_installed_json(
+        &ws,
+        &format!(
+            r#"{{
+                "name": "shared/lib",
+                "dist": {{ "type": "path" }},
+                "transport-options": {{ "symlink": true }},
+                "install-path": "{install_path}",
+                "autoload": {{ "psr-4": {{ "Shared\\Lib\\": "src/" }} }}
+            }}"#
+        ),
+    );
+
+    assert!(extract_path_repo_psr4_mappings(ws.root(), "vendor").is_empty());
+}
+
+#[test]
+fn test_path_repo_psr4_no_installed_json() {
+    let ws = TestWorkspace::new(r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#);
+    assert!(extract_path_repo_psr4_mappings(ws.root(), "vendor").is_empty());
+}
+
+#[test]
+fn test_path_repo_psr4_missing_dir_skipped() {
+    let ws = TestWorkspace::new(r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#);
+    // The module dir exists but the declared src/ subdirectory does not,
+    // so no mapping is produced.
+    ws.create_php_file("app-modules/common/composer.json", "{}");
+    write_installed_json(
+        &ws,
+        r#"{
+            "name": "demo/common",
+            "dist": { "type": "path" },
+            "transport-options": { "symlink": true },
+            "install-path": "../../app-modules/common",
+            "autoload": { "psr-4": { "Demo\\Common\\": "src/" } }
+        }"#,
+    );
+
+    assert!(extract_path_repo_psr4_mappings(ws.root(), "vendor").is_empty());
 }

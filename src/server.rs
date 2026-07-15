@@ -2096,6 +2096,10 @@ impl Backend {
         let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
         let mut all_mappings = mappings;
         all_mappings.extend(path_repo_mappings);
+        // Keep the merged list longest-prefix-first so path-repo namespaces
+        // are matched before any shorter root prefix (e.g. an empty-prefix
+        // root fallback).
+        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
         *self.psr4_mappings.write() = all_mappings;
 
         // ── Build the classmap ──────────────────────────────────────
@@ -2622,6 +2626,9 @@ impl Backend {
             let mut mappings = composer::extract_psr4_mappings_from_package(&pkg);
             let vendor_dir = composer::get_vendor_dir(&pkg);
             mappings.extend(composer::extract_path_repo_psr4_mappings(root, &vendor_dir));
+            // Keep the merged list longest-prefix-first so path-repo
+            // namespaces are matched before any shorter root prefix.
+            mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
             *self.psr4_mappings.write() = mappings;
 
             let vendor_path = root.join(&vendor_dir);
