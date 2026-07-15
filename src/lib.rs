@@ -1222,16 +1222,42 @@ impl Backend {
         path: &Path,
     ) -> (ClassCompletionOrigin, Option<String>) {
         let vendor_paths = self.vendor_dir_paths.lock();
-        if !vendor_paths.iter().any(|vp| path.starts_with(vp)) {
-            return (ClassCompletionOrigin::Project, None);
-        }
+        let is_under_vendor = vendor_paths.iter().any(|vp| path.starts_with(vp));
+        drop(vendor_paths);
+
         let roots = self.vendor_package_origin_roots.read();
+
+        if is_under_vendor {
+            for (root, origin, pkg_name) in roots.iter() {
+                if path.starts_with(root) {
+                    return (*origin, Some(pkg_name.clone()));
+                }
+            }
+            return (ClassCompletionOrigin::VendorTransitive, None);
+        }
+
+        // Path is outside vendor/.  This is usually project code, but
+        // it can also be a symlinked path-repository package whose
+        // canonical path resolved outside vendor/.  Check whether any
+        // vendor package root matches.  If so, treat it as project code
+        // only when the root is inside the workspace (a local module);
+        // otherwise show the package provenance.
         for (root, origin, pkg_name) in roots.iter() {
             if path.starts_with(root) {
+                let ws = self.workspace_root.read();
+                if let Some(ref workspace) = *ws {
+                    let canonical_ws = workspace
+                        .canonicalize()
+                        .unwrap_or_else(|_| workspace.clone());
+                    if root.starts_with(&canonical_ws) {
+                        return (ClassCompletionOrigin::Project, None);
+                    }
+                }
                 return (*origin, Some(pkg_name.clone()));
             }
         }
-        (ClassCompletionOrigin::VendorTransitive, None)
+
+        (ClassCompletionOrigin::Project, None)
     }
 
     /// Return the completion origin **and** the Composer package name
