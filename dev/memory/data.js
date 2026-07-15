@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784145993169,
+  "lastUpdate": 1784148175926,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15061,6 +15061,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ae3197d1d57e8cc8ec635fd5cffa42621d196125",
+          "message": "Handle macro registered through a facade",
+          "timestamp": "2026-07-15T22:30:05+02:00",
+          "tree_id": "88987121f855d1b887cd9e7ced8a6b18fe24d443",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ae3197d1d57e8cc8ec635fd5cffa42621d196125"
+        },
+        "date": 1784148174014,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.8,
             "unit": "MiB"
           }
         ]
