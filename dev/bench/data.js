@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784141899887,
+  "lastUpdate": 1784143246264,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -84671,6 +84671,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.742,
             "range": "± 0.025",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "62ffa645b2614b1eff44b5517d15808bd8253529",
+          "message": "feat: show provenance badges for external path-repository packages\n\nProvenance detection (package_info_for_path) no longer assumes every\npath outside vendor/ is project code. Symlinked path-repository\npackages whose canonical path resolves outside the workspace root now\nshow the package name badge in hover instead of being silently treated\nas project code. Path-repo packages inside the workspace (e.g. modular\napp modules) continue to show no badge.\n\nPreviously, canonicalize() followed the symlink to a path outside\nvendor/, the starts_with(vendor_path) check failed, and the function\nreturned Project unconditionally.",
+          "timestamp": "2026-07-15T14:13:16-05:00",
+          "tree_id": "cc1bff12bdcf7f20f6eaf13a98813ee10565aeff",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/62ffa645b2614b1eff44b5517d15808bd8253529"
+        },
+        "date": 1784143244439,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.907,
+            "range": "± 0.074",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.037,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.085,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.122,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.19,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.18,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.745,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.425,
+            "range": "± 0.047",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.078,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.042,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.039,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.048,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 2.575,
+            "range": "± 0.344",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.234,
+            "range": "± 0.039",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.185,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.051,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.047,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.104,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.065,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.057,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.12,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.705,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 3.923,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.714,
+            "range": "± 0.028",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.025,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.023,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 47.391,
+            "range": "± 0.887",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.052,
+            "range": "± 0.028",
             "unit": "ms"
           }
         ]
