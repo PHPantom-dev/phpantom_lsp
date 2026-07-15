@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784125618793,
+  "lastUpdate": 1784134455938,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14891,6 +14891,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "495373f148a6e2d0f74f29d56dbded35b586d07c",
+          "message": "feat: resolve @param-closure-this in hover, go-to-definition, and go-to-type-definition\n\nWhen $this is inside a closure whose enclosing call site declares\n@param-closure-this, hover now shows the overridden type instead of\nthe lexically enclosing class. Go-to-definition and\ngo-to-type-definition on $this likewise jump to the overridden\nclass declaration. Previously only completion resolved the override.\n\nAdds 3 integration tests covering the override, fallback, and\nstandalone-function cases.",
+          "timestamp": "2026-07-15T11:42:36-05:00",
+          "tree_id": "0bd981ec2fed99cbdb0d2baa4834ffcacd605ae4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/495373f148a6e2d0f74f29d56dbded35b586d07c"
+        },
+        "date": 1784134454521,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.7,
             "unit": "MiB"
           }
         ]
