@@ -314,29 +314,3 @@ bypasses it. Not traced further — whoever fixes this should add a
 fixtures once the actual code path is confirmed. Likely affects every
 Laravel project's `FormRequest`/`Notification`/other `Request`
 subclasses that call `$this->user()`, not just this one.
-
-## B75. Facade-registered `Macroable::macro()` attaches to the wrong subject
-
-**Severity: Low (the confirmed false positives are resolved; this is
-completeness of macro recognition). The remaining gap is facade
-instance-call autocomplete only; the diagnostic is already suppressed
-via the contract → concrete binding.**
-
-A macro registered through a facade (`View::macro('extends', ...)`)
-lands, at runtime, on the facade's *root* class (e.g. the view
-factory), not on instances returned elsewhere. The current scan
-attaches the macro to the written target FQN (the facade class), which
-is correct for static facade calls (`View::extends()`) but does not
-help an instance call like `$view->extends()` on a value typed as the
-view *contract*. Fully modelling this needs facade-accessor →
-container-binding resolution (read the facade's `getFacadeAccessor()`
-string, then look it up in the container alias table built in
-`aliases.rs`) and is inherently ambiguous (the same macro name can be
-registered on unrelated roots). Until then these calls keep the
-`__call` fallback (diagnostic already suppressed via the
-contract-to-concrete binding in `patches.rs`).
-
-Out of scope: `Macroable::mixin()`, variable/computed targets, and
-string/array callables. When two registrations target the same class
-and name, first wins (runtime is last-wins, but collisions are
-vanishingly rare and either choice is defensible).

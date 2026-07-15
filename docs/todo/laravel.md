@@ -663,3 +663,37 @@ binding names (`app('...')`), facade string aliases, and anything else that
 requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.
+
+#### L18. `Macroable::mixin()` registrations
+
+**Impact: Low · Effort: Medium**
+
+The macro scanner recognizes `Target::macro('name', $closure)` and, for a
+facade target, also attaches the macro to the facade's concrete
+container-bound class. It does **not** yet handle `Target::mixin($object)`,
+the other `Macroable` registration path.
+
+`mixin()` copies every public method of the passed object (or, more commonly,
+of a class named via `Target::mixin(new SomeMixin())` /
+`Target::mixin(SomeMixin::class)`) onto the target. Each such method is itself
+a closure factory: a public method `foo()` on the mixin returns a `Closure`
+whose signature is the *actual* macro added as `Target::foo(...)`. To model
+this statically:
+
+1. Recognize `Target::mixin(new X)` / `Target::mixin(X::class)` and resolve
+   `X` to a class FQN via the file's `use` statements.
+2. For each public method of `X`, synthesize a macro on `Target` named after
+   the method, with parameters and return type taken from the closure the
+   method returns (parse the `return function (...) {...}` body).
+3. Reuse the facade-target expansion so a mixin registered through a facade
+   also attaches to the concrete class.
+
+Skip anything that is not a literal `new`/`::class` argument (variable or
+computed targets), matching the existing `macro()` scope. Also still out of
+scope for `macro()` itself: variable/computed name arguments and string/array
+callables in place of a closure (these are rare and carry no statically
+recoverable signature).
+
+Larastan reference: it boots the app and reflects the runtime `$macros`
+static, so it gets `mixin()` for free; we recover the common literal shape
+from source instead.

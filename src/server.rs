@@ -1913,11 +1913,15 @@ impl Backend {
             if memchr::memmem::find(content.as_bytes(), b"macro(").is_none() {
                 return;
             }
-            let regs =
+            let mut regs =
                 crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
-            if !regs.is_empty() {
-                index.set_file(uri, regs);
+            if regs.is_empty() {
+                return;
             }
+            // A macro registered through a facade also attaches to the
+            // facade's concrete container-bound class.
+            self.expand_facade_macros(&mut regs);
+            index.set_file(uri, regs);
         };
 
         for dir in dirs {
@@ -2031,8 +2035,11 @@ impl Backend {
         }
 
         let php_version = Some(*self.php_version.lock());
-        let regs =
+        let mut regs =
             crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
+        // A macro registered through a facade also attaches to the facade's
+        // concrete container-bound class.
+        self.expand_facade_macros(&mut regs);
 
         let targets = {
             let mut index = self.laravel_macros.write();

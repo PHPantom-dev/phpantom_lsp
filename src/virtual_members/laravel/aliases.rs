@@ -90,6 +90,58 @@ impl Backend {
         self.find_or_load_class(fqn)
     }
 
+    /// Expand a file's macro registrations so a macro registered through a
+    /// facade also attaches to the facade's concrete container-bound class.
+    ///
+    /// `View::macro('extends', …)` lands, at runtime, on the object the `View`
+    /// facade proxies (the view factory) — not on the facade class itself. The
+    /// scan records the written target (the facade FQN), which is correct for
+    /// static facade calls (`View::extends()`). This appends a second
+    /// registration targeting the concrete class so an instance call
+    /// (`$factory->extends()`) resolves too. Both registrations share the same
+    /// source location, so go-to-definition still lands on the `::macro(...)`
+    /// call regardless of which subject the call was made on.
+    ///
+    /// A no-op for the common case (targets like `Str`, `Collection` are not
+    /// facades): [`facade_macro_concrete`](Self::facade_macro_concrete) gates on
+    /// the facade alias table before reading any source.
+    pub(crate) fn expand_facade_macros(&self, regs: &mut Vec<super::macros::MacroRegistration>) {
+        let mut extra = Vec::new();
+        for reg in regs.iter() {
+            if let Some(concrete) = self.facade_macro_concrete(&reg.target)
+                && concrete != reg.target
+            {
+                let mut cloned = reg.clone();
+                cloned.target = concrete;
+                extra.push(cloned);
+            }
+        }
+        regs.extend(extra);
+    }
+
+    /// The concrete container-bound class a Laravel facade proxies to, resolved
+    /// statically without booting the application.
+    ///
+    /// Returns `None` unless `target` is a known facade (a value in the global
+    /// facade alias table), so a non-facade macro target never pays a source
+    /// read. For a genuine facade it parses `getFacadeAccessor()`: a string
+    /// return (`'view'`) is looked up in the core container alias table, and a
+    /// `::class` return resolves directly to that FQN. A string accessor that
+    /// is not in the container table (a binding registered only at runtime by a
+    /// service provider) yields `None`.
+    fn facade_macro_concrete(&self, target: &str) -> Option<String> {
+        let aliases = self.laravel_aliases();
+        // Gate on the facade table so only real facades trigger a source read.
+        if !aliases.facade.values().any(|fqn| fqn == target) {
+            return None;
+        }
+        let source = read_source_by_fqn(self, target)?;
+        match parse_facade_accessor(&source)? {
+            FacadeAccessor::Alias(key) => aliases.container.get(&key).cloned(),
+            FacadeAccessor::Class(fqn) => Some(fqn),
+        }
+    }
+
     /// The memoized Laravel alias tables, built on first use from the installed
     /// framework source and cached on the [`Backend`]. Rebuilt after a
     /// reindex (the cache is cleared alongside the other resolution caches).
@@ -261,6 +313,56 @@ fn parse_config_facade_aliases(content: &str) -> HashMap<String, String> {
         }
         out
     })
+}
+
+/// What a facade's `getFacadeAccessor()` returns.
+enum FacadeAccessor {
+    /// A container-binding string (`return 'view';`), looked up in the core
+    /// container alias table to find the concrete class.
+    Alias(String),
+    /// A direct class reference (`return Factory::class;`), already the FQN of
+    /// the concrete class.
+    Class(String),
+}
+
+/// Parse the return value of a facade's `getFacadeAccessor()` method.
+///
+/// Facades declare `protected static function getFacadeAccessor()` returning
+/// either a container-binding string or a `::class` reference. Returns `None`
+/// when the method is absent or returns anything else (e.g. a computed value).
+fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
+    with_parsed(content, |program, resolved| {
+        let return_value = find_facade_accessor_return(Node::Program(program))?;
+        if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
+            return Some(FacadeAccessor::Alias(text.to_string()));
+        }
+        class_const_fqn(return_value, resolved).map(FacadeAccessor::Class)
+    })
+}
+
+/// Find the first return-statement value inside a `getFacadeAccessor()` method
+/// reachable from `node`.
+fn find_facade_accessor_return<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+) -> Option<&'ast Expression<'arena>> {
+    use mago_syntax::ast::class_like::method::MethodBody;
+
+    if let Node::Method(method) = node
+        && bytes_to_str(method.name.value).eq_ignore_ascii_case("getFacadeAccessor")
+        && let MethodBody::Concrete(block) = &method.body
+    {
+        return block.statements.iter().find_map(|stmt| match stmt {
+            Statement::Return(ret) => ret.value,
+            _ => None,
+        });
+    }
+    let mut found = None;
+    node.visit_children(|child| {
+        if found.is_none() {
+            found = find_facade_accessor_return(child);
+        }
+    });
+    found
 }
 
 // ─── AST helpers ────────────────────────────────────────────────────────────

@@ -36,6 +36,7 @@ use crate::types::{ClassInfo, MethodInfo, PhpVersion};
 
 /// A single `Target::macro('name', closure)` registration recovered from
 /// source.
+#[derive(Clone)]
 pub(crate) struct MacroRegistration {
     /// FQN of the class written before `::macro`, resolved via the file's
     /// `use` statements.  This may be a `Macroable` class (the macro attaches

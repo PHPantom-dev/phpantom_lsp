@@ -146,6 +146,57 @@ return [
 }
 
 #[test]
+fn parses_facade_accessor_string_alias() {
+    let src = r#"<?php
+namespace Illuminate\Support\Facades;
+class View extends Facade
+{
+    protected static function getFacadeAccessor()
+    {
+        return 'view';
+    }
+}
+"#;
+    match parse_facade_accessor(src).expect("accessor parsed") {
+        FacadeAccessor::Alias(key) => assert_eq!(key, "view"),
+        FacadeAccessor::Class(fqn) => panic!("expected string alias, got class {fqn}"),
+    }
+}
+
+#[test]
+fn parses_facade_accessor_class_reference() {
+    let src = r#"<?php
+namespace App\Facades;
+class Widget extends Facade
+{
+    protected static function getFacadeAccessor()
+    {
+        return \App\Services\WidgetService::class;
+    }
+}
+"#;
+    match parse_facade_accessor(src).expect("accessor parsed") {
+        FacadeAccessor::Class(fqn) => assert_eq!(fqn, "App\\Services\\WidgetService"),
+        FacadeAccessor::Alias(key) => panic!("expected class reference, got alias {key}"),
+    }
+}
+
+#[test]
+fn facade_accessor_absent_yields_nothing() {
+    let src = r#"<?php
+namespace App;
+class NotAFacade
+{
+    public function unrelated()
+    {
+        return 'value';
+    }
+}
+"#;
+    assert!(parse_facade_accessor(src).is_none());
+}
+
+#[test]
 fn non_matching_source_yields_nothing() {
     let src = r#"<?php
 class Nothing
