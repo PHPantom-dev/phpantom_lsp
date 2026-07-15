@@ -84,50 +84,319 @@ $children[0]->getParent();`) works, so the array element type is
 available — only the inline `call(...)[index]->member` chain form
 fails in subject extraction/resolution.
 
-## B70. Call-expression arguments are not resolved for template binding and callback parameter inference
+## B71. `property_exists()` / `method_exists()` guards do not narrow the member set
 
-**Severity: Medium-High (~12 errors: phpmd 2, pdepend ~5, luxplus-website 3, agcms 1, + masked variants) · Confirmed with fixture**
+**Severity: Medium (6 errors, api-php) · Confirmed against the real project**
 
-Two facets of the same call-site gap:
+```php
+function validateResponse(AbstractResponse $response): void
+{
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        if ($response->MerchantErrorMessage && is_string($response->MerchantErrorMessage)) {
+            throw new ResponseMessageException($response->MerchantErrorMessage);
+        }
+    }
+}
+```
 
-1. `@template T` binding from `array<T>` fails when the argument
-   is a call expression (works for variables and array literals):
+(`src/AbstractApi.php:258-265` in `projects/api-php`, real code, not a
+fixture.) `AbstractResponse` doesn't declare `MerchantErrorMessage` —
+it's a dynamically populated response property — so accessing it
+unconditionally would be a genuine gap. But the access is guarded by
+`property_exists($response, 'MerchantErrorMessage')`, which proves the
+property exists for the rest of the branch. PHPStan models this via
+its `PropertyExistsTypeSpecifyingExtension`
+(`references/phpstan-src/src/Type/Php/PropertyExistsTypeSpecifyingExtension.php`),
+narrowing `$response` to `object&hasProperty('MerchantErrorMessage')`
+in the truthy branch. We have no equivalent, so all 6 accesses in this
+pattern (`MerchantErrorMessage` ×3, `CardHolderErrorMessage` ×2,
+`CardHolderMessageMustBeShown` ×1) are reported as
+`unknown_member` even though PHPStan considers the file clean at
+level max. This bucket in `projects/analyze-triage.md` was previously
+(and incorrectly) written up as an intentional "documented SDK gap" —
+that classification undercounted PHPantom's false positives and
+should be reverted once this is fixed.
 
-   ```php
-   /** @template T  @param array<T> $a  @return T */
-   function first(array $a): mixed { ... }
+`method_exists($x, 'name')` has the identical shape and is presumably
+affected too, though no sample project exercises it.
 
-   $emails = first(self::getEmailConfigs());  // getEmailConfigs(): array<string, EmailConfig>
-   $emails->address;   // "type of '$emails' could not be resolved"
-   ```
+A previous session started on a fix (narrowing via a virtual member
+injected into the resolved-type's `ClassInfo` for the guarded branch,
+hooked into `apply_condition_narrowing` /
+`apply_condition_narrowing_inverse` in
+`completion/variable/forward_walk.rs`, with the guard extraction in
+`completion/types/narrowing.rs::try_extract_member_exists_guard`) but
+was stopped mid-implementation because it had not been authorized —
+see the project rule about one task at a time and no sub-agents
+working the LSP in parallel. The unfinished diff, including its own
+integration tests, is saved at
+`docs/todo/patches/property-exists-narrowing.patch` (apply with `git
+apply` from the repo root). It compiled and 9 of 10 new tests passed;
+the one known-failing test
+(`property_access_outside_property_exists_guard_still_flagged`)
+indicates the narrowing was leaking out of the guarded branch,
+suspected to be a missing case in `ScopeState::merge_branch` (the
+newly-added virtual property must not survive a branch merge with a
+sibling branch that lacks it). Treat the patch as a reference starting
+point, not a finished fix — it needs review, the merge-branch leak
+fixed, and a decision on whether `already_present` should also check
+inherited members (currently it only checks `class_info.properties`
+directly, which is a deliberate but undocumented-to-the-team
+trade-off; see the patch's own comment).
 
-2. Callback parameter types are not inferred when the array
-   argument of `array_map`/`array_filter` is a call or property
-   expression (works when it is a variable):
+## B72. `new $className()` does not resolve to the class named by a `@var class-string<T>` annotation
 
-   ```php
-   array_map(static fn($node) => $node->getImage(), $new->getChildren());
-   //                            ^ "type of '$node' could not be resolved"
-   ```
+**Severity: Medium (6 errors, phpmd) · Confirmed against the real project, not yet isolated to a minimal fixture**
 
-The root is the same: `build_function_template_subs`' generic
-wrapper arm only resolves `$variable` arguments and array literals
-(see T25 in `docs/todo/type-inference.md`, where the array-literal
-case was added) — route argument resolution through the shared
-`resolve_rhs_expression` pipeline instead of special-casing
-argument syntax shapes.
+```php
+$className = $ruleNode['class'] ?? (...);
+if ((!$className instanceof Stringable) && !is_string($className)) {
+    throw new RuntimeException('Invalid class');
+}
 
-Related scope defect confirmed by the same fixtures: when the
-callback parameter shares its name with an outer variable, the
-parameter silently borrows the *outer* variable's type instead of
-failing (masking the gap and producing wrong types). Closure
-parameters must shadow outer variables unconditionally.
+/** @var class-string<Rule> */
+$className = (string) $className;
 
-A third facet of the same call-site gap: `app()->make($repository)`
-where `$repository` is a foreach element of a literal
-`[Foo::class, Bar::class, ...]` array — the declared
-`class-string<T>` union never binds `make()`'s template, so the
-chained call is unresolved (2 errors, luxplus-backoffice
-`app/Jobs/SalesInfo/UpdateSalesInfoLocalJob.php:37`). All facts are
-declared; only the argument-shape special-casing is in the way.
+$rule = new $className();
+$this->withNonEmptyStringAtKey($ruleNode, 'name', $rule->setName(...));
+// ...
+if ($rule->getPriority() <= $this->minimumPriority && ...) {
+```
 
+(`src/RuleSetFactory.php:82-123` in `projects/phpmd`, real code.) The
+bare `/** @var class-string<Rule> */` (no `$variableName` in the tag,
+which is valid PHPDoc/PHPStan syntax when the tag directly precedes
+the assignment it documents) should override `$className`'s type to
+`class-string<Rule>`, and `new $className()` should then resolve to
+`Rule`. Instead every member access on `$rule` after the
+instantiation (`setName`, `setMessage`, `setExternalInfoUrl`,
+`setRuleSetName`, `getPriority` ×2) is reported as
+`unresolved_member_access` ("type of '$rule' could not be resolved").
+PHPStan resolves this cleanly (the project passes at level max), so
+this is a real gap, not an intended diagnostic.
+
+Suspect areas: whether the bare (name-less) `@var` tag form is
+recognized at all by the docblock parser when the annotated statement
+is a self-reassignment (`$className = (string) $className;`, same
+variable on both sides) rather than a fresh binding, and whether
+`new $className()` reads the class-string's type argument via the
+same effective-type path as an explicit `@var class-string<Rule>
+$className`. Not yet isolated to a standalone fixture outside the
+project — attempts to reproduce it in a scratch file did not trigger
+the same failure, and further live bisection inside
+`projects/phpmd` was abandoned because the installed
+`phpantom_lsp` CLI (`~/.local/bin/phpantom_lsp` →
+`target/debug/phpantom_lsp`) is being actively rebuilt by a
+concurrent session, making repeated `analyze` runs an unreliable
+moving target for A/B comparison. Whoever picks this up should
+rebuild a pinned binary first (or use `cargo test`/a fixture-based
+repro instead of the CLI) before bisecting further.
+
+## B73. `elseif` narrowing on a property-path subject leaks the preceding branch's `instanceof` type
+
+**Severity: Low-Medium (1 error, bladestan) · Confirmed with a minimal fixture**
+
+```php
+class ArgNode {
+    public StringNode|ArrayNode $value;
+}
+
+/** @param list<ArgNode> $args */
+function extract(array $args): array {
+    $values = [];
+    if (count($args) === 2 && $args[0]->value instanceof StringNode) {
+        $values[] = $args[0]->value->value;
+    } elseif (count($args) === 1 && $args[0]->value instanceof ArrayNode) {
+        foreach ($args[0]->value->items as $element) {   // false positive here
+            $values[] = $element;
+        }
+    }
+    return $values;
+}
+```
+
+`$args[0]->value->items` in the `elseif` branch is flagged as
+`Property 'items' not found on class 'StringNode'` — the `elseif`'s
+own `instanceof ArrayNode` check is not being applied; the subject
+is still carrying the *first* branch's `StringNode` narrowing. This
+is the real-world Bladestan pattern (`src/PhpParser/NodeVisitor/
+ViewFunctionArgumentsNodeVisitor.php:82`, `->with('key', $var)` vs.
+`->with(['key' => $var])`, using `$args[0]->value` — a
+`nikic/php-parser` `Node\Expr\ArrayItem::$value`, unioned as
+`Expr\String_|Expr\Array_` in that codebase's terms).
+
+Isolated behaviour: reproduces for **property-path subjects**
+(`$args[0]->value`, and equally `$this->arg->value` — confirmed with
+both shapes) inside an `if`/`elseif` chain where each branch's
+condition is a compound `&&` (e.g. `count(...) === N && $subject
+instanceof X`). Does **not** reproduce for a bare-variable subject in
+the same if/elseif shape (`$node instanceof StringNode2` /
+`elseif (... && $node instanceof ArrayNode2)`), which narrows
+correctly. So the gap is specific to how property-path subjects
+(as opposed to plain `$variable`s) are tracked across `elseif`
+branches — plain variables get a fresh scope clone per branch
+(`ei_scope = pre_if_scope.clone()` in `apply_condition_narrowing_inverse`'s
+caller, `completion/variable/forward_walk.rs`), but the property-path
+resolution may be going through a different, non-scope-cloning path.
+
+Not root-caused to a specific function — two candidates were traced
+but neither was conclusively confirmed as the one the `analyze` CLI
+actually exercises for this case:
+
+- `walk_property_narrowing_if` in `completion/resolver.rs` (~line
+  1883) threads a single `&mut Vec<ClassInfo>` through the `if` body
+  and then each `elseif` clause *in sequence* without resetting it to
+  a pre-if snapshot between branches — structurally exactly the bug
+  this report describes — but each mutation call
+  (`try_apply_instanceof_narrowing`) is cursor-gated
+  (`ctx.cursor_offset` must fall inside the branch's span), so if the
+  diagnostic query's cursor sits only inside the `elseif` body, the
+  `if` branch's narrowing call should be a no-op. Whether diagnostics
+  actually invoke this cursor-based resolver per-usage-site (with
+  cursor set to each access in turn), or exclusively use the
+  scope-based forward walker, was not confirmed.
+- `apply_condition_narrowing` / `apply_condition_narrowing_inverse`
+  and their per-elseif caller in `completion/variable/forward_walk.rs`
+  (~line 5952) do correctly clone `pre_if_scope` per elseif branch for
+  scope-tracked keys, including property-path keys collected via
+  `collect_condition_property_keys` — this looked correct on
+  inspection, so if this is the actual path, the bug is more likely a
+  key-mismatch (e.g. `expr_to_subject_key` producing a different
+  string for the same subject in the condition-scan helpers vs. the
+  member-access check) than a missing scope clone.
+
+Whoever picks this up should add a `println!`/breakpoint trace (or a
+`cargo test` fixture under the existing narrowing test files —
+`tests/integration/completion_compound_narrowing.rs` or
+`diagnostics_compound_narrowing.rs` look like the right home) to
+confirm which pipeline handles this specific case before fixing it,
+rather than assuming one of the two candidates above.
+
+## B74. The auth-user-model patch does not apply through `FormRequest` inheritance
+
+**Severity: Medium (~9 errors, luxplus-backoffice) · Confirmed with a minimal fixture against the real project's config**
+
+```php
+final class UpdateMembershipBenefitRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return $this->user()?->can('memberships.manage') ?? false;
+    }
+}
+```
+
+`$this->user()` is flagged "type of '$this->user()' could not be
+resolved" (`unresolved_member_access` on `->can(...)`) in every
+`FormRequest` subclass across `projects/luxplus-backoffice` that
+calls `$this->user()`. Isolated with a throwaway fixture added
+directly to the real project (using its real `config/auth.php` and
+vendor tree, then removed): a class extending
+`Illuminate\Foundation\Http\FormRequest` and calling
+`$this->user()?->can(...)` reproduces the failure, while — per
+`virtual_members/laravel/auth.rs`'s own doc comment — the identical
+call on `Illuminate\Http\Request` or `Illuminate\Contracts\Auth\Guard`
+directly is supposed to resolve to the project's configured auth user
+model (that mechanism is `patch_auth_user_class`, gated in
+`resolution.rs::find_or_load_class_typed` on `loaded.name.as_str()`
+being exactly `"Guard"` or `"Request"`).
+
+`FormRequest extends \Illuminate\Http\Request` and does not redeclare
+`user()`, so the method is only reachable through inheritance
+merging. The gate's exact-short-name check suggests the patch never
+fires for `FormRequest` (or any other `Request` subclass) directly;
+whether the *inherited* `user()` method picks up the patched return
+type depends on whether the inheritance merge in `inheritance.rs`
+loads the `Request` parent through `find_or_load_class_typed` (which
+would already carry the patch) or through a different lookup that
+bypasses it. Not traced further — whoever fixes this should add a
+`FormRequest`-based case alongside the existing `auth_tests.rs`
+fixtures once the actual code path is confirmed. Likely affects every
+Laravel project's `FormRequest`/`Notification`/other `Request`
+subclasses that call `$this->user()`, not just this one.
+
+## B75. Laravel's `Macroable::macro()` runtime method registration is not recognized
+
+**Severity: Medium (~2 errors confirmed in luxplus-backoffice, likely undercounts other Laravel projects) · Confirmed against the real project**
+
+```php
+// vendor/livewire/livewire/src/Features/SupportPageComponents/SupportPageComponents.php
+View::macro('extends', function ($view, $params = []) { ... });
+
+// app/View/Components/Manufacturers/ListManufacturers.php
+$view = view('components.manufacturers.list-manufacturers', [...]);
+$view->extends('layouts.default');   // "Method 'extends' not found on class 'Illuminate\Contracts\View\View'"
+```
+
+Laravel's `Illuminate\Support\Traits\Macroable` trait lets any class
+that uses it register new methods at runtime via
+`SomeClass::macro('name', $closure)`, called from anywhere (a service
+provider's `boot()`, a package's own bootstrap code, etc.). We have no
+support for scanning `::macro()` registrations and synthesizing a
+virtual method from the closure's signature, so any subsequent call to
+a macro-added method is reported unknown. This is not limited to one
+package or method name — Livewire, several first-party Laravel
+components, and many third-party packages (and plenty of app-level
+`AppServiceProvider::boot()` code) register macros on `Collection`,
+`Builder`, `Str`, `Stringable`, `Response`, `View`, `Request`, and
+others via the same trait.
+
+Grep confirms there is currently zero handling of this anywhere in
+`src/` (`grep -rn 'macro' src/ --include='*.rs'` finds only an
+unrelated comment). This is a bigger feature than a single bug fix —
+it needs a project+vendor-wide scan for `X::macro('name', function
+(...) {...})` / `X::macro('name', fn(...) => ...)` call expressions
+(static call on any class using `Macroable`, or the trait itself),
+extracting the closure's parameter and return types, and injecting a
+virtual method onto `X`'s `ClassInfo` (with `$this` inside the closure
+bound to an instance of `X`, per `Macroable::__call`'s
+`Closure::bind`). Likely belongs in `virtual_members/` alongside the
+existing PHPDoc and Laravel providers, gated the same way (checked
+once per class, cached). File a proper design/estimate before
+starting — this is not a quick fix.
+
+## B76. `Storage::disk()` / `cloud()` declare the `Filesystem` contract instead of the concrete adapter they always build
+
+**Severity: Medium-High (38 errors, luxplus-backoffice) · Confirmed against the real project and framework source**
+
+```php
+Storage::fake('cdn');
+// ...
+Storage::disk('cdn')->assertExists($recent);   // "Method 'assertExists' not found on class 'Illuminate\Contracts\Filesystem\Filesystem'"
+Storage::disk('cdn')->download(...);           // same, 'download' not found
+```
+
+Every one of `FilesystemManager`'s driver-creation methods —
+`createLocalDriver` (via `LocalFilesystemAdapter`), `createFtpDriver`,
+`createSftpDriver` (both return `FilesystemAdapter` directly), and
+`createS3Driver` (`AwsS3V3Adapter`) — either returns
+`Illuminate\Filesystem\FilesystemAdapter` directly or a subclass of
+it (`LocalFilesystemAdapter extends FilesystemAdapter`,
+`AwsS3V3Adapter extends FilesystemAdapter`). So `disk()`/`cloud()` (on
+both `FilesystemManager` and the `Storage` facade's `@method` tags)
+always return a `FilesystemAdapter` in practice, but are declared as
+returning only the `Contracts\Filesystem\Filesystem`/`Cloud`
+interfaces — which don't declare `assertExists()`, `assertMissing()`,
+or `download()` (all only on the concrete adapter).
+
+**This is not a new problem in kind — it is the identical situation
+already fixed for `Storage::fake()`/`persistentFake()`** in
+`virtual_members/laravel/patches.rs`
+(`patch_storage_fake_return_types`, dispatched from
+`apply_laravel_patches`), whose own doc comment states the exact
+reasoning: "This is a declared-type correction (the runtime type is
+always the adapter), not container-binding resolution." `disk()` and
+`cloud()` just were never added to that patch's method-name check.
+The fix is almost certainly as simple as extending
+`patch_storage_fake_return_types` (or renaming it and adding `"disk"`
+and `"cloud"` alongside `"fake"`/`"persistentFake"` in its method-name
+match) — verify `cloud()`'s contract (`Illuminate\Contracts\Filesystem\Cloud`)
+is a compatible supertype of `FilesystemAdapter` before applying the
+same unconditional override there too.
+
+A custom driver registered via `Storage::extend()` with a
+non-`FilesystemAdapter`-based implementation would be missed by this
+patch (the override would be wrong for that one driver name), but
+this is the same acceptable tradeoff the project already made for
+`fake()`/`persistentFake()` — a declared fact that's true for every
+built-in driver, overridden the same way.

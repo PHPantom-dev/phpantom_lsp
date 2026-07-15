@@ -154,9 +154,28 @@ fn walk_class_string_assignments<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
+    // Track variables assigned an array literal of `::class` entries
+    // (e.g. `$repos = [Foo::class, Bar::class]`) so that a later
+    // `foreach ($repos as $repository)` can resolve `$repository` to the
+    // union of element classes.  Assignments precede the foreach in the
+    // statement stream, so recording them as we go makes the mapping
+    // available by the time the foreach is processed.
+    let mut array_class_vars: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for stmt in statements {
         if stmt.span().start.offset >= ctx.cursor_offset {
             continue;
+        }
+        // Record `$var = [A::class, B::class]` array-literal assignments.
+        if let Statement::Expression(expr_stmt) = stmt
+            && let Expression::Assignment(assignment) = expr_stmt.expression
+            && assignment.operator.is_assign()
+            && let Expression::Variable(Variable::Direct(dv)) = assignment.lhs
+        {
+            let names = extract_class_string_names_from_array(assignment.rhs);
+            if !names.is_empty() {
+                array_class_vars.insert(bytes_to_str(dv.name).to_string(), names);
+            }
         }
         match stmt {
             Statement::Expression(expr_stmt) => {
@@ -175,9 +194,17 @@ fn walk_class_string_assignments<'b>(
                 if let Some(name) = value_name
                     && name == ctx.var_name
                 {
-                    // Extract class names from the iterated expression
-                    // (e.g. `[Page::class, CustomPage::class]`).
-                    let class_names = extract_class_string_names_from_array(foreach.expression);
+                    // Extract class names from the iterated expression.
+                    // The iterable may be an inline array literal
+                    // (`[Page::class, CustomPage::class]`) or a variable
+                    // that was assigned one earlier (`$pages = [...]`).
+                    let mut class_names = extract_class_string_names_from_array(foreach.expression);
+                    if class_names.is_empty()
+                        && let Expression::Variable(Variable::Direct(dv)) = foreach.expression
+                        && let Some(names) = array_class_vars.get(bytes_to_str(dv.name))
+                    {
+                        class_names = names.clone();
+                    }
                     if !class_names.is_empty() {
                         results.clear();
                         for cn in class_names {

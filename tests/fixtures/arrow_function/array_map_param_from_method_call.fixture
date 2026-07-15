@@ -1,0 +1,17 @@
+// test: array_map callback parameter infers from a method-call array argument
+// feature: completion
+// expect: getImage(
+---
+<?php
+
+class ASTNode {
+    public function getImage(): string { return ''; }
+    /** @return array<int, ASTNode> */
+    public function getChildren(): array { return []; }
+}
+
+class Walker {
+    public function run(ASTNode $node): void {
+        array_map(static fn($child) => $child-><>, $node->getChildren());
+    }
+}

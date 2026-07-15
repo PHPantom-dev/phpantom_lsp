@@ -1,0 +1,16 @@
+// test: closure parameter shadows a same-named outer variable
+// feature: completion
+// expect_absent: outerMethod(
+---
+<?php
+
+class OuterThing {
+    public function outerMethod(): void {}
+}
+
+function takes_callback(callable $cb): void {}
+
+function demo(): void {
+    $node = new OuterThing();
+    takes_callback(fn($node) => $node-><>);
+}

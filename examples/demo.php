@@ -1759,6 +1759,11 @@ class ArrayFuncDemo
         $mapped = array_map(fn($pen) => $pen, $src->members);
         $mapped[0]->write();              // Pen from array_map fallback
 
+        // Untyped callback parameter inferred from a method-call array
+        // argument: `$pen` resolves to Pen from roster()'s list<Pen>.
+        array_map(fn($pen) => $pen->color(), $src->roster());
+        array_filter($src->roster(), fn($pen) => $pen->color() === 'blue');
+
         // array_reduce: return type inferred from initial value (3rd arg)
         $merged = array_reduce($src->members, function(Pen $carry, Pen $item): Pen {
             return $carry;

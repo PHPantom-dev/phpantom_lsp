@@ -35,6 +35,16 @@
 //!    on the result is unverifiable. We override the pre-8.4 case to
 //!    `stdClass|null`, matching PHPStan's function map.
 //!
+//! 3. **`array_map`** / **`array_filter`** -- phpstorm-stubs type the
+//!    callback as bare `callable` and the array as bare `array`, so a
+//!    closure passed to them (`array_map(fn($x) => …, $items)`) leaves
+//!    its parameter untyped. We add `@template TValue`, retype the
+//!    callback's first parameter as `TValue`, the array as
+//!    `array<TValue>`, and bind `TValue` from the array argument. Only
+//!    the callback's *input* type is patched here; the callback's
+//!    return type (and thus the function's own return) stays in the
+//!    value-inspecting logic in `raw_type_inference.rs`.
+//!
 //! ### Class patches
 //!
 //! 1. **`WeakMap`** -- phpstorm-stubs have `@template TKey of object`,
@@ -86,8 +96,81 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
     match func.name.as_str() {
         "range" => patch_range(func),
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
+        "array_map" => patch_array_map(func),
+        "array_filter" => patch_array_filter(func),
         _ => {}
     }
+}
+
+/// Link `array_map`'s callback parameter to the input array's element
+/// type so a closure passed to it gets its parameter typed.
+///
+/// phpstorm-stubs declare the callback as bare `callable|null` and the
+/// array as bare `array`, so `array_map(fn($x) => $x->foo(), $items)`
+/// leaves `$x` untyped.  We add `@template TValue`, retype the callback
+/// as `callable(TValue): mixed`, and the array as `array<TValue>`, then
+/// bind `TValue` from the array argument.  The callback's *return* type
+/// (and thus `array_map`'s own return) is still resolved by the
+/// value-inspecting logic in `raw_type_inference.rs`, which this patch
+/// leaves untouched by keeping the bare `array` return type.
+fn patch_array_map(func: &mut FunctionInfo) {
+    // Expected stub shape: `array_map(?callable $callback, array $array, …)`.
+    let callback_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$callback" => p.name,
+        _ => return,
+    };
+    let array_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$array" => p.name,
+        _ => return,
+    };
+    link_callback_to_array_element(func, callback_name, array_name, "mixed");
+}
+
+/// Link `array_filter`'s callback parameter to the input array's element
+/// type (the callback receives each element and returns a boolean).
+///
+/// Unlike `array_map`, `array_filter` takes the array first and the
+/// callback second: `array_filter(array $array, ?callable $callback, …)`.
+fn patch_array_filter(func: &mut FunctionInfo) {
+    let array_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$array" => p.name,
+        _ => return,
+    };
+    let callback_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$callback" => p.name,
+        _ => return,
+    };
+    link_callback_to_array_element(func, callback_name, array_name, "bool");
+}
+
+/// Shared helper: give `func` a single `TValue` template bound from the
+/// array parameter, and retype the callback as
+/// `callable(TValue): <callback_return>` so a closure argument's first
+/// parameter is inferred as the array's element type.
+fn link_callback_to_array_element(
+    func: &mut FunctionInfo,
+    callback_name: crate::atom::Atom,
+    array_name: crate::atom::Atom,
+    callback_return: &str,
+) {
+    const TVALUE: &str = "TValue";
+    let callback_hint = PhpType::parse(&format!("callable({}): {}", TVALUE, callback_return));
+    let array_hint = PhpType::parse(&format!("array<{}>", TVALUE));
+
+    for param in &mut func.parameters {
+        if param.name == callback_name {
+            param.type_hint = Some(callback_hint.clone());
+        } else if param.name == array_name {
+            param.type_hint = Some(array_hint.clone());
+        }
+    }
+
+    func.template_params = vec![atom(TVALUE)];
+    func.template_param_bounds = Default::default();
+    // Bind `TValue` from the array argument only.  The callback argument
+    // (an unannotated closure) can't bind it, and listing it would just
+    // add a no-op binding attempt.
+    func.template_bindings = vec![(atom(TVALUE), array_name)];
 }
 
 /// Patch `range()` to have a conditional return type.
@@ -569,6 +652,84 @@ mod tests {
             class.template_param_bounds.contains_key(&atom("TIterator")),
             "TIterator should have a bound"
         );
+    }
+
+    fn param(name: &str, type_hint: &str) -> crate::types::ParameterInfo {
+        crate::types::ParameterInfo {
+            name: atom(name),
+            is_required: true,
+            type_hint: Some(PhpType::parse(type_hint)),
+            native_type_hint: Some(PhpType::parse(type_hint)),
+            description: None,
+            default_value: None,
+            is_variadic: false,
+            is_reference: false,
+            closure_this_type: None,
+        }
+    }
+
+    #[test]
+    fn array_map_links_callback_to_array_element() {
+        let mut func = empty_function("array_map");
+        func.parameters = vec![param("$callback", "callable"), param("$array", "array")];
+        func.return_type = Some(PhpType::parse("array"));
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.template_params, vec![atom("TValue")]);
+        assert_eq!(
+            func.template_bindings,
+            vec![(atom("TValue"), atom("$array"))]
+        );
+        // The callback's first parameter is now `TValue`.
+        let callback = &func.parameters[0];
+        assert_eq!(
+            callback.type_hint,
+            Some(PhpType::parse("callable(TValue): mixed"))
+        );
+        // The array is `array<TValue>`.
+        assert_eq!(
+            func.parameters[1].type_hint,
+            Some(PhpType::parse("array<TValue>"))
+        );
+        // The return type is left bare so the value-inspecting element
+        // logic in raw_type_inference.rs stays authoritative.
+        assert_eq!(func.return_type, Some(PhpType::parse("array")));
+    }
+
+    #[test]
+    fn array_filter_links_callback_to_array_element() {
+        let mut func = empty_function("array_filter");
+        func.parameters = vec![param("$array", "array"), param("$callback", "callable")];
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.template_params, vec![atom("TValue")]);
+        assert_eq!(
+            func.template_bindings,
+            vec![(atom("TValue"), atom("$array"))]
+        );
+        assert_eq!(
+            func.parameters[0].type_hint,
+            Some(PhpType::parse("array<TValue>"))
+        );
+        assert_eq!(
+            func.parameters[1].type_hint,
+            Some(PhpType::parse("callable(TValue): bool"))
+        );
+    }
+
+    #[test]
+    fn array_map_unexpected_shape_not_patched() {
+        // A hand-written `@method array_map(...)` or a differently-shaped
+        // stub must not be rewritten.
+        let mut func = empty_function("array_map");
+        func.parameters = vec![param("$other", "array")];
+
+        apply_function_stub_patches(&mut func);
+
+        assert!(func.template_params.is_empty());
+        assert!(func.template_bindings.is_empty());
     }
 
     #[test]

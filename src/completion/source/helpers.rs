@@ -166,6 +166,26 @@ pub(in crate::completion) fn extract_closure_return_type_from_assignment(
 ///
 /// Returns `None` if the text is not a closure/arrow-function or if
 /// there is no return type hint.
+/// Check whether text is a closure or arrow-function literal, optionally
+/// prefixed with `static` — e.g. `fn($x) => …`, `function ($x) use (…) { … }`,
+/// `static fn($x) => …`.
+pub(in crate::completion) fn is_closure_like_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    let trimmed = trimmed
+        .strip_prefix("static")
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let is_arrow = trimmed.starts_with("fn")
+        && trimmed
+            .get(2..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+    let is_closure = trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+    is_arrow || is_closure
+}
+
 pub(in crate::completion) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
     let trimmed = text.trim();
 

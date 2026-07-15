@@ -1301,12 +1301,22 @@ fn build_constructor_template_subs(
                     }
                 } else if let Some(resolved_type) =
                     Backend::resolve_arg_text_to_type(arg_text, rctx)
+                        .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
                 {
                     // Extract the element type from array-like types
                     // so we bind T to the element, not the whole array.
+                    // The call-expression fallback covers arguments whose
+                    // declared return type is an array (`getConfigs()`
+                    // returning `array<string, Config>`) — those carry no
+                    // class info, so the general resolver yields nothing.
                     if let Some(elem_type) = resolved_type.extract_value_type(false) {
                         insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                    } else {
+                    } else if !resolved_type.is_array_like() {
+                        // The argument resolved to a genuine (non-array)
+                        // type — bind it directly.  A bare array-like
+                        // container whose element type can't be extracted
+                        // is left unbound so `T` falls back to its bound
+                        // (or `mixed`) rather than binding `T` to `array`.
                         insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                     }
                 }
@@ -2164,12 +2174,22 @@ pub(crate) fn build_function_template_subs(
                     }
                 } else if let Some(resolved_type) =
                     Backend::resolve_arg_text_to_type(arg_text, rctx)
+                        .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
                 {
                     // Extract the element type from array-like types
                     // so we bind T to the element, not the whole array.
+                    // The call-expression fallback covers arguments whose
+                    // declared return type is an array (`getConfigs()`
+                    // returning `array<string, Config>`) — those carry no
+                    // class info, so the general resolver yields nothing.
                     if let Some(elem_type) = resolved_type.extract_value_type(false) {
                         insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                    } else {
+                    } else if !resolved_type.is_array_like() {
+                        // The argument resolved to a genuine (non-array)
+                        // type — bind it directly.  A bare array-like
+                        // container whose element type can't be extracted
+                        // is left unbound so `T` falls back to its bound
+                        // (or `mixed`) rather than binding `T` to `array`.
                         insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                     }
                 }
@@ -2193,13 +2213,14 @@ pub(crate) fn build_function_template_subs(
                     insert_or_union(&mut subs, tpl_name.to_string(), concrete);
                     continue;
                 }
-                // For `@param array<TKey, TValue> $value` with a variable
-                // argument like `$users`, resolve the variable's raw type
-                // string (e.g. `User[]`, `array<int, User>`) and extract
-                // the positional generic argument.
+                // For `@param array<TKey, TValue> $value`, resolve the
+                // argument's raw iterable type — from a variable's
+                // annotations/assignments (`$users` as `array<int, User>`)
+                // or from a call expression's declared return type
+                // (`$this->getUsers()` returning `array<int, User>`) —
+                // and extract the positional generic argument.
                 if is_array_like_wrapper(wrapper_name)
-                    && arg_text.starts_with('$')
-                    && let Some(resolved) = resolve_arg_variable_raw_type(arg_text, rctx)
+                    && let Some(resolved) = resolve_arg_iterable_raw_type(arg_text, rctx)
                     && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
                 {
                     subs.insert(tpl_name.to_string(), concrete);
@@ -2433,6 +2454,53 @@ fn resolve_arg_variable_raw_type(
     } else {
         Some(ResolvedType::types_joined(&resolved))
     }
+}
+
+/// Resolve a call-expression argument (`$obj->method()`, `self::method()`,
+/// `helper()`) to its declared return type, preserving generic arguments
+/// that don't resolve to loadable classes (e.g. `array<string, Config>`).
+///
+/// Routes through the shared call-resolution pipeline
+/// (`resolve_call_return_types_expr_with_hint`) so class-level and
+/// method-level template substitutions apply to the returned type.
+/// Returns `None` when the text is not a call expression or the callee
+/// has no declared return type.
+fn resolve_arg_call_raw_type(
+    arg_text: &str,
+    rctx: &crate::completion::resolver::ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let trimmed = arg_text.trim();
+    if !trimmed.ends_with(')') {
+        return None;
+    }
+    // Closure/arrow-function literals also end with `)` but are not
+    // call expressions — their types are handled by the callable
+    // binding modes, not here.
+    if crate::completion::source::helpers::is_closure_like_text(trimmed) {
+        return None;
+    }
+    let expr = crate::subject_expr::SubjectExpr::parse(trimmed);
+    let crate::subject_expr::SubjectExpr::CallExpr { callee, args_text } = expr else {
+        return None;
+    };
+    let mut hint: Option<PhpType> = None;
+    Backend::resolve_call_return_types_expr_with_hint(&callee, &args_text, rctx, Some(&mut hint));
+    hint
+}
+
+/// Resolve an argument's raw iterable type for positional generic
+/// extraction, regardless of the argument's syntax shape.
+///
+/// Variables and property chains resolve through
+/// [`resolve_arg_variable_raw_type`] (docblock annotations, forward-walk
+/// scope, assignment scanning); call expressions resolve through the
+/// shared call return-type pipeline via [`resolve_arg_call_raw_type`].
+fn resolve_arg_iterable_raw_type(
+    arg_text: &str,
+    rctx: &crate::completion::resolver::ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    resolve_arg_variable_raw_type(arg_text, rctx)
+        .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
 }
 
 /// Extract the concrete type at `position` from an array type string.

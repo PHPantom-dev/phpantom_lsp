@@ -1,0 +1,24 @@
+// test: callback parameter infers when the array argument is a method call
+// feature: completion
+// expect: getImage(
+---
+<?php
+
+class ASTNode {
+    public function getImage(): string { return ''; }
+    /** @return array<int, ASTNode> */
+    public function getChildren(): array { return []; }
+}
+
+/**
+ * @template TValue
+ * @template TReturn
+ * @param callable(TValue): TReturn $callback
+ * @param array<TValue> $array
+ * @return array<TReturn>
+ */
+function map_nodes(callable $callback, array $array): array {}
+
+function demo(ASTNode $new): void {
+    map_nodes(static fn($node) => $node-><>, $new->getChildren());
+}

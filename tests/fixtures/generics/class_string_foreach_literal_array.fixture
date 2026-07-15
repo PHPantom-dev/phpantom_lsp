@@ -1,0 +1,33 @@
+// test: class-string union from foreach over an array-literal variable binds a conditional-return template
+// feature: completion
+// expect: fooM(
+// expect: barM(
+---
+<?php
+
+class Foo { public function fooM(): void {} }
+class Bar { public function barM(): void {} }
+
+class Container {
+    /**
+     * @template TClass of object
+     * @param string|class-string<TClass> $abstract
+     * @return ($abstract is class-string<TClass> ? TClass : mixed)
+     */
+    public function make($abstract) { return new $abstract; }
+}
+
+function app(): Container {}
+
+class Job {
+    public function run(): void {
+        $repositories = [
+            Foo::class,
+            Bar::class,
+        ];
+
+        foreach ($repositories as $repository) {
+            app()->make($repository)-><>
+        }
+    }
+}

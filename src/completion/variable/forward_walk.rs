@@ -1000,7 +1000,17 @@ fn seed_closure_params(
             }
         }
 
-        if !param_results.is_empty() {
+        // Closure/arrow-function parameters shadow same-named outer
+        // variables unconditionally.  Even when no type could be
+        // determined, the outer variable's type must not leak into the
+        // closure body — record the parameter as present-but-untyped
+        // and drop any synthetic keys (`$p->x`, `$p["k"]`) tracked for
+        // the shadowed outer variable.
+        scope.remove(&pname);
+        scope.invalidate_dependent_keys(&pname);
+        if param_results.is_empty() {
+            scope.set_empty(&pname);
+        } else {
             scope.seed(&pname, param_results);
         }
     }
