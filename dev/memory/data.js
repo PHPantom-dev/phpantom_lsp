@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784123738498,
+  "lastUpdate": 1784125618793,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14857,6 +14857,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "5d921e836cf07de76ed2c48726ed26aac08adff3",
+          "message": "feat(rename): update $param references in conditional return types\n\nExtend extract_param_var_spans() to scan @return / @phpstan-return /\n@psalm-return tags for parameter references inside conditional return\ntype annotations (e.g. `@return ($param is true ? T : U)`).\n\nPreviously, renaming a function parameter updated the signature,\n@param tag, and body usages but left the $param reference in the\n@return conditional stale. Now all occurrences — including nested\nconditionals — are renamed together.",
+          "timestamp": "2026-07-15T09:14:35-05:00",
+          "tree_id": "bcc434a9feef84ff3ae15571265e09a83f7e4780",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5d921e836cf07de76ed2c48726ed26aac08adff3"
+        },
+        "date": 1784125617436,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.4,
             "unit": "MiB"
           }
         ]
