@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784142148395,
+  "lastUpdate": 1784143511980,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14993,6 +14993,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "62ffa645b2614b1eff44b5517d15808bd8253529",
+          "message": "feat: show provenance badges for external path-repository packages\n\nProvenance detection (package_info_for_path) no longer assumes every\npath outside vendor/ is project code. Symlinked path-repository\npackages whose canonical path resolves outside the workspace root now\nshow the package name badge in hover instead of being silently treated\nas project code. Path-repo packages inside the workspace (e.g. modular\napp modules) continue to show no badge.\n\nPreviously, canonicalize() followed the symlink to a path outside\nvendor/, the starts_with(vendor_path) check failed, and the function\nreturned Project unconditionally.",
+          "timestamp": "2026-07-15T14:13:16-05:00",
+          "tree_id": "cc1bff12bdcf7f20f6eaf13a98813ee10565aeff",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/62ffa645b2614b1eff44b5517d15808bd8253529"
+        },
+        "date": 1784143509809,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.3,
             "unit": "MiB"
           }
         ]
