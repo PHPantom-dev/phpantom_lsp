@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784219383498,
+  "lastUpdate": 1784225908888,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15469,6 +15469,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "67a925ceac31be1717e9ef841070671a2ccd6f2c",
+          "message": "An inline `@var` before a `foreach` refines a broad iterable variable",
+          "timestamp": "2026-07-16T20:05:02+02:00",
+          "tree_id": "a036a23f21a4683ad477d90ec2bf3f5a79edb01f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/67a925ceac31be1717e9ef841070671a2ccd6f2c"
+        },
+        "date": 1784225907355,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.4,
             "unit": "MiB"
           }
         ]
