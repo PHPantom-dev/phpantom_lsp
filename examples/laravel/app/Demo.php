@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 
@@ -398,5 +399,23 @@ class Demo
         $view->getName();                 // concrete-only method → string
         $view->render();                  // concrete-only method → string
         $view->fragment('sidebar');       // concrete-only method
+    }
+
+
+    // ── Leading backslash bypasses a same-short-name import ────────────
+
+    public function globalRedisOverImport(): void
+    {
+        // This file imports `Illuminate\Support\Facades\Redis`, but a
+        // leading-backslash `\Redis` is an explicit global reference, so
+        // it resolves to the PECL extension's global `\Redis` class rather
+        // than the facade that shares the short name.
+        /** @var \Redis $client */
+        $client = new \Redis();
+        $client->select(1);               // global \Redis method
+        $client->connect('127.0.0.1');    // global \Redis method
+
+        // The bare `Redis` short name still resolves to the imported facade.
+        Redis::connection();              // Facades\Redis static method
     }
 }

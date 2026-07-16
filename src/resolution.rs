@@ -966,8 +966,16 @@ impl Backend {
             // `Event` (e.g. the PECL event extension).  Without this
             // check, `find_or_load_class("Event")` would find the stub
             // and short-circuit, never consulting the use-map.
+            //
+            // A leading backslash (`\Redis`) is an explicit global
+            // reference and must bypass imports entirely, even when an
+            // import shares the short name (e.g.
+            // `use Illuminate\Support\Facades\Redis;`).  Only strip the
+            // backslash for the direct FQN lookups below.
+            let has_leading_backslash = name.starts_with('\\');
             let stripped = name.strip_prefix('\\').unwrap_or(name);
-            if !stripped.contains('\\')
+            if !has_leading_backslash
+                && !stripped.contains('\\')
                 && let Some(fqn) = use_map.get(stripped)
                 && let Some(cls) = self.find_or_load_class(fqn)
             {

@@ -37,7 +37,6 @@ within the same impact tier.
 | B95 | [`isset($obj->prop)` guards and `property_exists()` ternaries don't prove the property](todo/bugs.md#b95-issetobj-prop-guards-and-property_exists-ternaries-do-not-prove-the-property-on-a-single-typed-subject) | Medium | Low-Medium |
 | B96 | [`reduce()` return template not bound from the closure's inferred return](todo/bugs.md#b96-reduces-return-template-is-not-bound-from-the-closures-inferred-return-type) | Medium | Medium |
 | B104 | [`instanceof` left of `&&` doesn't narrow an untyped closure param](todo/bugs.md#b104-instanceof-on-the-left-of--does-not-narrow-an-untyped-closure-parameter-on-the-right) | Low-Medium | Low |
-| B108 | [Leading-backslash docblock type resolved through a same-short-name import](todo/bugs.md#b108-a-leading-backslash-docblock-type-is-resolved-through-a-same-short-name-import) | Low-Medium | Low |
 | B100 | [Leading-backslash global function calls don't resolve in chains](todo/bugs.md#b100-leading-backslash-global-function-calls-do-not-resolve-in-member-chains) | Low | Low |
 | B105 | [Inline `@var` retype of a closure's `mixed` param ignored before `foreach`](todo/bugs.md#b105-an-inline-var-retype-of-a-closures-mixed-parameter-is-ignored-before-foreach) | Low | Low |
 | B106 | [`assertTrue(property_exists(...))` doesn't prove the property](todo/bugs.md#b106-asserttrueproperty_exists-does-not-prove-the-property-exists) | Low | Low |

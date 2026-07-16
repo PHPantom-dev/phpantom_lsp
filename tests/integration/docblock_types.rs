@@ -2229,3 +2229,73 @@ async fn test_parse_php_interface_method_tags() {
     assert_eq!(merged.methods[0].parameters.len(), 1);
     assert_eq!(merged.methods[0].parameters[0].name, "$attributes");
 }
+
+/// Test: An inline `@var \Redis` with a leading backslash resolves to the
+/// global class, bypassing a same-short-name import.
+///
+/// When `use App\Facades\Redis;` imports a facade named `Redis`, the
+/// leading backslash in `@var \Redis` must force resolution to the global
+/// `Redis` class instead of the imported facade.
+#[tokio::test]
+async fn test_var_leading_backslash_bypasses_same_short_name_import() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                            // 0
+        "namespace App\\Facades {\n",                         // 1
+        "    class Redis {\n",                                // 2
+        "        public function facadeOnly(): void {}\n",    // 3
+        "    }\n",                                            // 4
+        "}\n",                                                // 5
+        "namespace {\n",                                      // 6
+        "    class Redis {\n",                                // 7
+        "        public function select(int $db): void {}\n", // 8
+        "    }\n",                                            // 9
+        "}\n",                                                // 10
+        "namespace App {\n",                                  // 11
+        "    use App\\Facades\\Redis;\n",                     // 12
+        "    function run(): void {\n",                       // 13
+        "        /** @var \\Redis */\n",                      // 14
+        "        $client = something();\n",                   // 15
+        "        $client->\n",                                // 16
+        "    }\n",                                            // 17
+        "}\n",                                                // 18
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 16,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap().unwrap();
+    let names = completion_names(result);
+    assert!(
+        names.iter().any(|n| n == "select"),
+        "\\Redis should resolve to the global class (offering 'select'), not the facade. Got: {:?}",
+        names
+    );
+    assert!(
+        !names.iter().any(|n| n == "facadeOnly"),
+        "\\Redis must not resolve to the imported facade. Got: {:?}",
+        names
+    );
+}

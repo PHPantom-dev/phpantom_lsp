@@ -22,7 +22,7 @@ diagnostics per the declared-types philosophy there. The closure
 literal-return shape gap is filed as T31 in
 `docs/todo/type-inference.md`.
 
-The B91–B108 batch below comes from the 2026-07-16 full re-triage of
+The B91–B106 batch below comes from the 2026-07-16 full re-triage of
 the three remaining non-clean projects (PDepend, Luxplus Website,
 Luxplus Backoffice). Together they account for every remaining
 analyze error in those projects (42 errors after the same sweep's
@@ -355,21 +355,3 @@ The bare-`if` form of `property_exists()` narrowing shipped earlier;
 the same proof wrapped in PHPUnit's `assertTrue()` (whose
 `@psalm-assert true $condition` re-exports the inner condition) does
 not fire. Backoffice `ApplicationSettingsControllerTest.php:99`.
-
-## B108. A leading-backslash docblock type is resolved through a same-short-name import
-
-**Severity: Low-Medium (2 errors, luxplus-backoffice) · Reproduced with fixture**
-
-```php
-use Illuminate\Support\Facades\Redis;
-
-/** @var \Redis */
-$client = $cache->client();
-$client->select(1); // "Method 'select' not found on class 'Illuminate\Support\Facades\Redis'"
-```
-
-`\Redis` must resolve to the global class regardless of imports; the
-leading backslash is being stripped before name resolution, so the
-facade import wins. Backoffice `ApplicationSettingsController.php`
-(annotated `@var \Redis` during the 2026-07-16 sweep precisely so
-this resolves once fixed).

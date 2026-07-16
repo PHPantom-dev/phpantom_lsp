@@ -971,7 +971,15 @@ fn resolve_class_fully_inner(
     // parsed ClassInfo from uri_classes_index/stubs, which has unsubstituted
     // template parameters.  Fall back to the passed-in `class` only
     // when the loader cannot find it (e.g. anonymous classes).
-    let raw_class_arc = class_loader(fqn.as_str());
+    //
+    // Guard against a same-short-name import hijacking the reload: a
+    // global class like `\Redis` has the bare FQN `Redis`, and a file
+    // that imports `use Illuminate\Support\Facades\Redis;` would make
+    // the import-aware `class_loader("Redis")` return the facade
+    // instead.  Only accept the reload when it names the same class;
+    // otherwise keep the already-resolved `class`.
+    let raw_class_arc =
+        class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let effective_class: &ClassInfo = match &raw_class_arc {
         Some(raw) => raw,
         None => class,
