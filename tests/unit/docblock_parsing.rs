@@ -305,6 +305,38 @@ fn return_type_conditional_is_skipped() {
     assert_eq!(extract_return_type(doc), None);
 }
 
+// ── extract_return_type (parenthesized type groups) ─────────────────
+// A leading `(` opens either a conditional (handled above) or a
+// parenthesized type group.  DNF and grouped types must be parsed as
+// normal return types, not mistaken for conditionals and dropped.
+
+#[test]
+fn return_type_dnf_intersection_with_shape() {
+    let doc = "/** @return (Related&object{pivot: Pivot})|null */";
+    assert_eq!(
+        extract_return_type(doc),
+        Some(PhpType::parse("(Related&object{pivot: Pivot})|null"))
+    );
+}
+
+#[test]
+fn return_type_parenthesized_union_intersection() {
+    let doc = "/** @return (Foo|Bar)&Baz */";
+    assert_eq!(
+        extract_return_type(doc),
+        Some(PhpType::parse("(Foo|Bar)&Baz"))
+    );
+}
+
+#[test]
+fn return_type_dnf_with_trailing_description() {
+    let doc = "/** @return (Related&object{pivot: Pivot})|null The first result */";
+    assert_eq!(
+        extract_return_type(doc),
+        Some(PhpType::parse("(Related&object{pivot: Pivot})|null"))
+    );
+}
+
 // ── extract_return_type ─────────────────────────────────────────────
 
 #[test]

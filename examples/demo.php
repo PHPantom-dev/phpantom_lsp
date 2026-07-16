@@ -2544,6 +2544,25 @@ class IntersectionDemo
         $item->print();                       // from Printable
         $item->seal();                        // from Envelope
     }
+
+    /**
+     * A parenthesized "DNF" return type `(A&B)|null` resolves to the
+     * intersection instead of being discarded, so after a null check
+     * both interfaces' members are available on the result.
+     *
+     * @return (Envelope&Printable)|null
+     */
+    public function sealed(): ?Envelope
+    {
+        return openSealedEnvelope();
+    }
+
+    public function useSealed(): void
+    {
+        $item = $this->sealed();
+        $item?->print();                      // from Printable, via the DNF return type
+        $item?->seal();                       // from Envelope
+    }
 }
 
 
@@ -5429,6 +5448,16 @@ class Envelope
     public function seal(): void {}
 }
 
+class SealedEnvelope extends Envelope implements Printable
+{
+    public function print(): void {}
+}
+
+function openSealedEnvelope(): ?SealedEnvelope
+{
+    return new SealedEnvelope();
+}
+
 // ─── Shared Narrow Classes ──────────────────────────────────────────────────
 // These are small, purpose-built classes for demos. Keep them narrow (2-4
 // members each). If a demo needs a richer object, create a new class in a
@@ -6559,6 +6588,12 @@ function runDemoAssertions(): void
     // Can't instantiate an intersection directly, but we can verify interfaces
     assert(method_exists(Envelope::class, 'seal'), 'Envelope must have seal()');
     assert(interface_exists(Printable::class), 'Printable must be an interface');
+
+    // A parenthesized DNF return type `(Envelope&Printable)|null` really
+    // yields an object that satisfies both, so both members are callable.
+    $sealed = (new IntersectionDemo())->sealed();
+    assert($sealed instanceof Envelope, 'sealed() must return an Envelope');
+    assert($sealed instanceof Printable, 'sealed() must return a Printable');
 
     // ── First-class callable syntax ─────────────────────────────────────
     $fun = makePen(...);

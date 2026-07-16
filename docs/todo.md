@@ -43,7 +43,6 @@ within the same impact tier.
 | B105 | [Inline `@var` retype of a closure's `mixed` param ignored before `foreach`](todo/bugs.md#b105-an-inline-var-retype-of-a-closures-mixed-parameter-is-ignored-before-foreach) | Low | Low |
 | B106 | [`assertTrue(property_exists(...))` doesn't prove the property](todo/bugs.md#b106-asserttrueproperty_exists-does-not-prove-the-property-exists) | Low | Low |
 | B93 | [`for`-init assignment invisible to the loop's condition/update clauses](todo/bugs.md#b93-a-for-loops-init-clause-assignment-is-invisible-to-the-condition-and-update-clauses) | Low | Low |
-| B90 | [Mixin type argument doesn't follow the substitution chain when it's an inherited template parameter](todo/bugs.md#b90-a-mixins-type-argument-does-not-follow-the-substitution-chain-when-it-is-itself-an-inherited-template-parameter) | Low | Low |
 | L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
 | L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |
 | X4  | [Full background indexing](todo/indexing.md#x4-full-background-indexing) (workspace symbols, fast find-references)                                              | Medium      | High        |

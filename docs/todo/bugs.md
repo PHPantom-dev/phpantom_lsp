@@ -192,7 +192,7 @@ Website `ProductRoutineTest.php:163`, Backoffice
 
 ## B98. Full-project analyze nondeterministically fails to resolve closure parameters that resolve in single-file runs
 
-**Severity: Medium (0-10 errors per run: luxplus-website ×3, luxplus-backoffice ×1 + B90's 6 vendor errors appear/disappear) · Observed repeatedly, no isolated fixture possible**
+**Severity: Medium (0-10 errors per run: luxplus-website ×3, luxplus-backoffice ×1) · Observed repeatedly, no isolated fixture possible**
 
 ```php
 // UsersController.php — errors appear only in some full-project runs:
@@ -204,22 +204,13 @@ During the 2026-07-16 re-triage, Website's three `fn($e) => $e->value`
 errors (UsersController) appeared in the first full-project run and
 were absent from six later identical runs; Backoffice's
 `fn($cause) => $cause->value` error (CreateRefund.php:141) appears in
-full runs but never single-file; and Backoffice's vendor
-`Product.php` B90 errors were present in one full run and absent from
-the next with no input change. Same binary, same project state,
+full runs but never single-file. Same binary, same project state,
 different diagnostics — which files get analyzed together (worker
 scheduling) changes resolution results. Points at shared state
 (thread-locals or consumer-gated caches — see performance
 anti-patterns #4/#5 in `AGENTS.md`) leaking between files in the
 parallel analyze pipeline. Also makes the analyze-triage error
 counts themselves unstable by a few errors between runs.
-
-The vendor-file half (B90's `Product.php` appearing in one run and
-not the next) may be a separate race in the new "path-repos inside
-`vendor/` are indexed but not analyzed" scoping (uncommitted in
-`src/composer.rs` at the time of testing) rather than the closure
-state leak — the closure half reproduces on ordinary project files
-where that scoping plays no part.
 
 ## B99. An `array<T>|false` union loses the array's element type
 
@@ -407,28 +398,3 @@ leading backslash is being stripped before name resolution, so the
 facade import wins. Backoffice `ApplicationSettingsController.php`
 (annotated `@var \Redis` during the 2026-07-16 sweep precisely so
 this resolves once fixed).
-
-## B90. A mixin's type argument does not follow the substitution chain when it is itself an inherited template parameter
-
-**Severity: Low (~6 errors, luxplus-backoffice) · Confirmed from output, needs isolated fixture**
-
-```php
-/** @extends BelongsToMany<Subcategory, $this> */
-public function primarySubcategory(): BelongsToMany { ... }
-
-$primarySub = $this->primarySubcategory()->first();
-$primarySub?->vat_group_id; // "Cannot verify property ... — subject type 'TModel' could not be resolved"
-```
-
-`Illuminate\Database\Eloquent\Relations\Relation` declares
-`@mixin \Illuminate\Database\Eloquent\Builder<TRelatedModel>`, where
-`TRelatedModel` is `Relation`'s own template parameter (bound to
-`Subcategory` through `BelongsToMany<Subcategory, $this>`'s
-`@extends Relation<TRelatedModel, ...>`). Because the mixin's type
-argument is itself an inherited template parameter rather than a
-concrete type, substituting the mixin target's own template
-parameter (`Builder`'s `TModel`) resolves to the literal string
-`TRelatedModel` instead of following the chain back to `Subcategory`.
-The mixin argument needs to be re-resolved through the host class's
-own substitution map before it is used to bind the mixin target's
-templates.

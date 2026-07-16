@@ -1653,12 +1653,6 @@ fn extract_type_via_mago_from_info(info: &DocblockInfo, kinds: &[TagKind]) -> Op
                 continue;
             }
 
-            // PHPStan conditional return types start with `(` — skip them
-            // here; they are handled by `extract_conditional_return_type`.
-            if desc.starts_with('(') {
-                return None;
-            }
-
             // mago-docblock joins multi-line tag descriptions with `\n`.
             // Normalise newlines (and surrounding whitespace from
             // indentation) into a single space so that `split_type_token`
@@ -1671,7 +1665,19 @@ fn extract_type_via_mago_from_info(info: &DocblockInfo, kinds: &[TagKind]) -> Op
             }
 
             let raw = type_str.trim_end_matches(['.', ',']);
-            return sanitise_and_parse_docblock_type(raw);
+            let parsed = sanitise_and_parse_docblock_type(raw);
+
+            // A leading `(` may open either a PHPStan conditional return
+            // type (`($p is T ? A : B)`) or a parenthesized type group
+            // such as a DNF `(A&B)|null`.  Conditionals are handled
+            // separately by `extract_conditional_return_type`, so bail
+            // here only when the type genuinely parses as a conditional;
+            // a parenthesized union/intersection group is a normal type
+            // and must be returned.
+            if matches!(parsed, Some(PhpType::Conditional { .. })) {
+                return None;
+            }
+            return parsed;
         }
     }
 
