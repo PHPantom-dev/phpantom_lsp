@@ -5858,6 +5858,224 @@ function check(Response $response, string $name): void {
     );
 }
 
+/// PHPUnit's `assertTrue()` carries `@phpstan-assert true $condition`, so
+/// `assertTrue(property_exists($x, 'p'))` re-exports the inner condition
+/// exactly like `if (property_exists($x, 'p'))`: the guarded property must
+/// not be flagged afterwards.
+#[test]
+fn assert_true_property_exists_reexports_the_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class Response {
+    public int $code = 0;
+}
+class ResponseTest extends TestCase {
+    public function check(Response $response): void {
+        self::assertTrue(property_exists($response, 'MerchantErrorMessage'));
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "assertTrue(property_exists(...)) must prove the property, got: {diags:?}"
+    );
+}
+
+/// The `@psalm-assert` spelling of the re-export tag is handled the same
+/// as `@phpstan-assert`.
+#[test]
+fn assert_true_property_exists_reexports_the_guard_psalm_notation() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @psalm-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class Response {
+    public int $code = 0;
+}
+class ResponseTest extends TestCase {
+    public function check(Response $response): void {
+        self::assertTrue(property_exists($response, 'MerchantErrorMessage'));
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "@psalm-assert true must re-export like @phpstan-assert, got: {diags:?}"
+    );
+}
+
+/// The re-exported proof is scoped to the assertion: without it, the
+/// unknown property is still flagged.  This guards against the narrowing
+/// leaking to every property on the class.
+#[test]
+fn assert_true_property_exists_only_proves_the_guarded_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class Response {
+    public int $code = 0;
+}
+class ResponseTest extends TestCase {
+    public function check(Response $response): void {
+        self::assertTrue(property_exists($response, 'MerchantErrorMessage'));
+        echo $response->CardHolderErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("CardHolderErrorMessage")),
+        "only the guarded property is proven, got: {diags:?}"
+    );
+}
+
+/// The full backoffice pattern: `viewData()` returns `mixed`,
+/// `assertIsObject()` (a `@psalm-assert object` guard) narrows it to
+/// `object`, and `assertTrue(property_exists(...))` re-exports the
+/// property proof.  Member access on the result must not be flagged as an
+/// unresolved type.
+#[test]
+fn assert_is_object_then_assert_true_property_exists() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert object $actual */
+    public static function assertIsObject(mixed $actual): void {}
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class ControllerTest extends TestCase {
+    public function testEdit(): void {
+        $model = $this->viewData();
+        self::assertIsObject($model);
+        self::assertTrue(property_exists($model, 'value'));
+        echo $model->value;
+    }
+    public function viewData(): mixed { return null; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("$model")),
+        "assertIsObject + assertTrue(property_exists) must resolve the subject, got: {diags:?}"
+    );
+}
+
+/// `assertFalse()` carries `@phpstan-assert false $condition`, so
+/// `assertFalse(is_string($x))` re-exports the inverse of the guard —
+/// after it, a `string|Foo` union is narrowed to `Foo`.
+#[test]
+fn assert_false_reexports_the_inverse_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert false $condition */
+    public static function assertFalse(mixed $condition): void {}
+}
+class Widget {
+    public function render(): string { return ''; }
+}
+class WidgetTest extends TestCase {
+    public function check(string|Widget $value): void {
+        self::assertFalse(is_string($value));
+        echo $value->render();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("render")),
+        "assertFalse(is_string($value)) must narrow away the string branch, got: {diags:?}"
+    );
+}
+
+/// PHPUnit's `assertIs*` / `assertIsNot*` family (`@phpstan-assert <scalar>`)
+/// narrows a `string|Widget` union like the matching `is_*()` guard: a
+/// positive object/array assertion keeps or drops the class member, and the
+/// `assertIsNot*` negations drop or keep it symmetrically.  The scalar
+/// pseudo-types name no class, so they must route through the type-guard
+/// machinery rather than being treated as class narrowings.
+#[test]
+fn phpunit_scalar_type_asserts_narrow_a_union() {
+    let stubs = r#"
+class TestCase {
+    /** @phpstan-assert object $actual */
+    public static function assertIsObject(mixed $actual): void {}
+    /** @phpstan-assert !object $actual */
+    public static function assertIsNotObject(mixed $actual): void {}
+    /** @phpstan-assert string $actual */
+    public static function assertIsString(mixed $actual): void {}
+    /** @phpstan-assert !string $actual */
+    public static function assertIsNotString(mixed $actual): void {}
+    /** @phpstan-assert array<mixed> $actual */
+    public static function assertIsArray(mixed $actual): void {}
+}
+class Widget { public function render(): string { return ''; } }
+"#;
+    // (assertion body, whether `render()` should be flagged as invalid).
+    // When Widget is dropped, `$x` narrows to `string`, so `render()` is a
+    // scalar-member-access error rather than an unknown member — hence the
+    // test inspects all slow diagnostics, not only `unknown_member`.
+    let cases: [(&str, bool); 5] = [
+        // Keeps Widget → render valid.
+        ("self::assertIsObject($x);", false),
+        ("self::assertIsNotString($x);", false),
+        // Drops Widget → render on the surviving `string`, flagged.
+        ("self::assertIsNotObject($x);", true),
+        ("self::assertIsString($x);", true),
+        ("self::assertIsArray($x);", true),
+    ];
+    for (body, should_flag) in cases {
+        let backend = create_test_backend();
+        {
+            let mut cfg = backend.config();
+            cfg.diagnostics.unresolved_member_access = Some(true);
+            backend.set_config(cfg);
+        }
+        let uri = "file:///test.php";
+        let text = format!(
+            "<?php\n{stubs}\nclass T extends TestCase {{ public function check(string|Widget $x): void {{ {body} $x->render(); }} }}\n"
+        );
+        backend.update_ast(uri, &text);
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri, &text, &mut diags);
+        let flagged = diags.iter().any(|d| d.message.contains("render"));
+        assert_eq!(
+            flagged, should_flag,
+            "case `{body}` expected render flagged={should_flag}, got {flagged}: {diags:?}"
+        );
+    }
+}
+
 /// Indexing a call result inline (`call(...)[0]->member`) must resolve
 /// the element type of the return so member access on it is checked.
 ///

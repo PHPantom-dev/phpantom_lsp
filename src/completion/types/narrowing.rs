@@ -1034,17 +1034,52 @@ pub(in crate::completion) fn find_assertion_method_in_chain(
 /// `IfTrue` / `IfFalse` variants are handled by
 /// `try_apply_assert_condition_narrowing`.
 ///
-/// When the asserted type is a template parameter bound to a `class-string`
-/// argument that cannot be resolved to a concrete class (e.g.
-/// `assertInstanceOf($variableClass, $x)` where `$variableClass` holds an
-/// unknown class name), `*narrows_to_object` is set to `true`.  The caller
-/// then narrows the subject to `object` intersected with its prior type
-/// rather than destroying the type entirely, matching PHPStan's behaviour.
+/// Map a bare scalar / pseudo-type to the type-guard kind that narrows it.
+///
+/// So `@phpstan-assert string $x` (PHPUnit's `assertIsString`) narrows like
+/// `is_string($x)`, and its negation excludes `string`.  Returns `None` for
+/// class names and for pseudo-types without a corresponding guard —
+/// `iterable`, `resource`, and `null` (the last handled separately by the
+/// not-null path) — so those fall through to the class-based narrowing.
+fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
+    match ty {
+        PhpType::Array(_) | PhpType::ArrayShape(_) => Some(TypeGuardKind::Array),
+        PhpType::Generic(name, _) if crate::php_type::is_array_like_name(name) => {
+            // `iterable` is array-like by name but has no `is_iterable` guard
+            // kind, so it must not map to the array guard.
+            (!name.eq_ignore_ascii_case("iterable")).then_some(TypeGuardKind::Array)
+        }
+        PhpType::Named(n) => match n.to_ascii_lowercase().as_str() {
+            "array" | "list" | "non-empty-array" | "non-empty-list" => Some(TypeGuardKind::Array),
+            "string" => Some(TypeGuardKind::String),
+            "int" | "integer" => Some(TypeGuardKind::Int),
+            "float" | "double" => Some(TypeGuardKind::Float),
+            "bool" | "boolean" => Some(TypeGuardKind::Bool),
+            "object" => Some(TypeGuardKind::Object),
+            "numeric" => Some(TypeGuardKind::Numeric),
+            "callable" => Some(TypeGuardKind::Callable),
+            "scalar" => Some(TypeGuardKind::Scalar),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Scalar and pseudo-type assertions (PHPUnit's `assertIsString`,
+/// `assertIsObject`, `assertIsArray`, and their negations) name no class, so
+/// they cannot be narrowed through `apply_instanceof_*`.  When one is
+/// detected, `*type_guard` is set to `(kind, exclude)` and the caller applies
+/// [`apply_type_guard_inclusion`] / [`apply_type_guard_exclusion`] on the full
+/// resolved types instead, matching how the corresponding `is_*()` guard
+/// narrows.  The same channel carries the `object` fallback for a template
+/// assertion whose bound `class-string` argument could not be resolved
+/// (e.g. `assertInstanceOf($variableClass, $x)`): the subject is still known
+/// to be an object, so it is narrowed to `object` rather than cleared.
 pub(in crate::completion) fn try_apply_custom_assert_narrowing(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-    narrows_to_object: &mut bool,
+    type_guard: &mut Option<(TypeGuardKind, bool)>,
 ) {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
@@ -1082,7 +1117,18 @@ pub(in crate::completion) fn try_apply_custom_assert_narrowing(
             if !assertion.negated
                 && matches!(&effective_type, PhpType::Named(n) if info.template_params.iter().any(|t| t == n))
             {
-                *narrows_to_object = true;
+                *type_guard = Some((TypeGuardKind::Object, false));
+                continue;
+            }
+
+            // Scalar / pseudo-type assertions (`assertIsString`,
+            // `assertIsObject`, `assertIsArray`, and their `assertIsNot*`
+            // negations) are type guards, not class narrowings.  The named
+            // pseudo-type resolves to no class, so `apply_instanceof_inclusion`
+            // would clear the subject and `apply_instanceof_exclusion` would
+            // exclude nothing.  Route them through the type-guard machinery.
+            if let Some(kind) = scalar_assert_guard_kind(&effective_type) {
+                *type_guard = Some((kind, assertion.negated));
                 continue;
             }
 
@@ -1093,6 +1139,80 @@ pub(in crate::completion) fn try_apply_custom_assert_narrowing(
             }
         }
     }
+}
+
+/// Collect argument expressions that an assert-style call proves to be
+/// `true` or `false` by re-exporting an inner condition.
+///
+/// PHPUnit's `assertTrue()` carries `@phpstan-assert true $condition` and
+/// `assertFalse()` carries `@phpstan-assert false $condition` (the
+/// `@psalm-assert` spelling is treated identically).  When the matching
+/// argument is itself a boolean condition expression (e.g.
+/// `property_exists($model, 'value')`), asserting that it is `true` /
+/// `false` is equivalent to entering an `if` guarded by that condition.
+///
+/// Returns each such argument expression paired with the polarity the
+/// assertion proves: `true` means the expression is proven true (apply
+/// truthy condition narrowing), `false` means proven false (apply the
+/// inverse).  The caller feeds each expression into the standard
+/// condition-narrowing pipeline so every guard form (`instanceof`,
+/// `is_*`, `property_exists`, null checks, …) is honoured uniformly.
+pub(in crate::completion) fn collect_assert_reexport_conditions<'a>(
+    expr: &'a Expression<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<(&'a Expression<'a>, bool)> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Call(call) = expr else {
+        return Vec::new();
+    };
+    let Some(info) = extract_call_assertions(call, ctx) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for assertion in info.assertions {
+        if assertion.kind != AssertionKind::Always {
+            continue;
+        }
+        // Only a bare `true` / `false` literal assertion re-exports a
+        // condition.  `@phpstan-assert true $c` (negated `!true` ⇒ false)
+        // proves the argument true; `@phpstan-assert false $c` proves it
+        // false.
+        let asserts_true = if assertion.asserted_type.is_true() {
+            !assertion.negated
+        } else if assertion.asserted_type.is_false() {
+            assertion.negated
+        } else {
+            continue;
+        };
+        if let Some(arg_expr) =
+            assertion_arg_expression(info.argument_list, &assertion.param_name, info.parameters)
+        {
+            out.push((arg_expr, asserts_true));
+        }
+    }
+    out
+}
+
+/// Return the call-site argument expression bound to `param_name`.
+///
+/// Unlike [`find_assertion_arg_variable`], which reduces the argument to a
+/// subject key (and so discards non-subject expressions like nested
+/// calls), this returns the raw expression so the caller can treat it as a
+/// re-exported condition.
+fn assertion_arg_expression<'a>(
+    argument_list: &'a ArgumentList<'a>,
+    param_name: &str,
+    parameters: &[crate::types::ParameterInfo],
+) -> Option<&'a Expression<'a>> {
+    let param_idx = parameters.iter().position(|p| p.name == param_name)?;
+    let arg = argument_list.arguments.iter().nth(param_idx)?;
+    Some(match arg {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
+    })
 }
 
 /// Report whether a call expression carries an unconditional not-null

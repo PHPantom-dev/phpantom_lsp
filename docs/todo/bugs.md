@@ -339,19 +339,3 @@ function (mixed $subscriptions): bool {
 ```
 
 Backoffice `SubscriptionsControllerTest.php:99`.
-
-## B106. `assertTrue(property_exists(...))` does not prove the property exists
-
-**Severity: Low (1 error, luxplus-backoffice) · Reproduced with fixture**
-
-```php
-$model = $response->viewData('model'); // mixed
-self::assertIsObject($model);
-self::assertTrue(property_exists($model, 'value'));
-$model->value; // "type of '$model' could not be resolved"
-```
-
-The bare-`if` form of `property_exists()` narrowing shipped earlier;
-the same proof wrapped in PHPUnit's `assertTrue()` (whose
-`@psalm-assert true $condition` re-exports the inner condition) does
-not fire. Backoffice `ApplicationSettingsControllerTest.php:99`.

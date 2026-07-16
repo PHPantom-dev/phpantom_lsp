@@ -39,7 +39,6 @@ within the same impact tier.
 | B104 | [`instanceof` left of `&&` doesn't narrow an untyped closure param](todo/bugs.md#b104-instanceof-on-the-left-of--does-not-narrow-an-untyped-closure-parameter-on-the-right) | Low-Medium | Low |
 | B100 | [Leading-backslash global function calls don't resolve in chains](todo/bugs.md#b100-leading-backslash-global-function-calls-do-not-resolve-in-member-chains) | Low | Low |
 | B105 | [Inline `@var` retype of a closure's `mixed` param ignored before `foreach`](todo/bugs.md#b105-an-inline-var-retype-of-a-closures-mixed-parameter-is-ignored-before-foreach) | Low | Low |
-| B106 | [`assertTrue(property_exists(...))` doesn't prove the property](todo/bugs.md#b106-asserttrueproperty_exists-does-not-prove-the-property-exists) | Low | Low |
 | B93 | [`for`-init assignment invisible to the loop's condition/update clauses](todo/bugs.md#b93-a-for-loops-init-clause-assignment-is-invisible-to-the-condition-and-update-clauses) | Low | Low |
 | L18 | [`Storage::disk()` return type — resolve from config, don't guess](todo/laravel.md#l18-storagedisk-return-type-is-genuinely-polymorphic--resolve-from-config-dont-guess) | Medium-High | Low-Medium  |
 | L19 | [Redis client (phpredis/predis) — resolve from config, don't guess](todo/laravel.md#l19-redis-connection-client-is-chosen-by-config-phpredis-vs-predis--resolve-from-config-dont-guess) | Medium      | Low-Medium  |

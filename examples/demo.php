@@ -483,6 +483,44 @@ class InheritedAssertNarrowingDemo extends StaticAssert
 }
 
 
+// ── assertTrue / assertFalse Re-Export (PHPUnit shape) ─────────────────────
+
+// PHPUnit's assertTrue()/assertFalse() carry `@phpstan-assert true/false
+// $condition`, so wrapping a check in one re-exports that condition exactly
+// like the bare `if` form.  assertIsObject() first narrows the mixed value
+// to `object`.
+class AssertConditionReexportDemo extends StaticAssert
+{
+    public function demo(): void
+    {
+        // assertIsObject() narrows mixed → object; assertTrue(property_exists())
+        // then proves the dynamically-populated property.
+        $model = getUnknownValue();               // mixed
+        self::assertIsObject($model);             // narrowed to object
+        self::assertTrue(property_exists($model, 'value'));
+        echo $model->value;                       // proven by the re-exported guard
+
+        // assertFalse() re-exports the inverse of the condition: ruling out
+        // the Banana branch narrows the union to Rock.
+        $subject = pickRockOrBanana();            // Rock|Banana
+        self::assertFalse($subject instanceof Banana);
+        $subject->crush();                        // narrowed to Rock
+
+        // assertIsNotString() (a `@phpstan-assert !string` guard) drops the
+        // string arm of a union, leaving the object.
+        $mixedValue = self::pickStringOrRock();   // string|Rock
+        self::assertIsNotString($mixedValue);
+        $mixedValue->crush();                     // narrowed to Rock
+    }
+
+    /** @return string|Rock */
+    private static function pickStringOrRock(): string|Rock
+    {
+        return new Rock();
+    }
+}
+
+
 // ── Guard Clause Narrowing (Early Return / Throw) ──────────────────────────
 
 class GuardClauseDemo
@@ -5751,6 +5789,38 @@ class StaticAssert
     public static function isNotRock(mixed $value): bool
     {
         return !$value instanceof Rock;
+    }
+
+    /** @phpstan-assert object $value */
+    public static function assertIsObject(mixed $value): void
+    {
+        if (!is_object($value)) {
+            throw new \InvalidArgumentException('Expected object');
+        }
+    }
+
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void
+    {
+        if ($condition !== true) {
+            throw new \InvalidArgumentException('Expected true');
+        }
+    }
+
+    /** @phpstan-assert false $condition */
+    public static function assertFalse(mixed $condition): void
+    {
+        if ($condition !== false) {
+            throw new \InvalidArgumentException('Expected false');
+        }
+    }
+
+    /** @phpstan-assert !string $value */
+    public static function assertIsNotString(mixed $value): void
+    {
+        if (is_string($value)) {
+            throw new \InvalidArgumentException('Did not expect string');
+        }
     }
 }
 

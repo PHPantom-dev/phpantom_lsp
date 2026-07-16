@@ -5795,6 +5795,30 @@ fn process_assert_narrowing<'b>(
     // narrowing loop below can find and narrow them.
     seed_assert_arg_subject_keys(expr, scope, ctx);
 
+    // Re-export narrowing: PHPUnit's `assertTrue()` / `assertFalse()` carry
+    // `@psalm-assert true/false $condition`.  When the argument is a boolean
+    // condition expression (e.g. `property_exists($x, 'p')`), proving it
+    // true/false is equivalent to a guard on that condition, so run the
+    // standard condition-narrowing pipeline on the argument.
+    let reexport_conditions = {
+        let reexport_snapshot = scope.locals.clone();
+        let reexport_resolver = |vn: &str| -> Vec<ResolvedType> {
+            reexport_snapshot
+                .get(&atom(vn))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let reexport_ctx = build_var_ctx("", ctx, &reexport_resolver);
+        narrowing::collect_assert_reexport_conditions(expr, &reexport_ctx)
+    };
+    for (condition, asserts_true) in reexport_conditions {
+        if asserts_true {
+            apply_condition_narrowing(condition, scope, ctx);
+        } else {
+            apply_condition_narrowing_inverse(condition, scope, ctx);
+        }
+    }
+
     // Apply assert narrowing to each variable in scope.
     let scope_snapshot = scope.locals.clone();
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
@@ -5829,23 +5853,24 @@ fn process_assert_narrowing<'b>(
         });
 
         // @phpstan-assert / @psalm-assert
-        let mut narrows_to_object = false;
+        let mut type_guard: Option<(narrowing::TypeGuardKind, bool)> = None;
         ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_custom_assert_narrowing(
-                expr,
-                &var_ctx,
-                classes,
-                &mut narrows_to_object,
-            );
+            narrowing::try_apply_custom_assert_narrowing(expr, &var_ctx, classes, &mut type_guard);
         });
 
-        // A custom assert whose class argument could not be resolved (e.g.
-        // `assertInstanceOf($variableClass, $x)`) still guarantees the
-        // subject is an object.  Narrow to `object` intersected with the
-        // prior type: drop null/scalar union members but keep the class the
-        // subject already had, rather than unresolving it entirely.
-        if narrows_to_object {
-            narrowing::apply_type_guard_inclusion(narrowing::TypeGuardKind::Object, &mut results);
+        // A scalar / pseudo-type assertion (`assertIsString`, `assertIsObject`,
+        // `assertIsArray`, their `assertIsNot*` negations, or the `object`
+        // fallback for an unresolvable `assertInstanceOf` class argument) is a
+        // type guard, not a class narrowing.  Apply it on the full resolved
+        // types so union members are kept or dropped by category — e.g.
+        // `assertIsObject` drops null/scalar members while keeping the class,
+        // and `assertIsNotObject` drops the class.
+        if let Some((kind, exclude)) = type_guard {
+            if exclude {
+                narrowing::apply_type_guard_exclusion(kind, &mut results);
+            } else {
+                narrowing::apply_type_guard_inclusion(kind, &mut results);
+            }
         }
 
         // A not-null assertion (`@phpstan-assert !null $x`, e.g. PHPUnit's
