@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784233027874,
+  "lastUpdate": 1784237052178,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15571,6 +15571,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "1272ab55b837dd85562edf20b23945e8d331c990",
+          "message": "fix: suppress PSR-4 mismatch warnings for inline test fixtures\n\nSkip the namespace and filename mismatch diagnostics in files that mix\ntop-level executable statements with an inline enum, trait, class, or\ninterface. This keeps embedded test fixtures and stubs quiet while\npreserving the diagnostics for normal single-class PSR-4 files, and\nadds regression tests covering the inline-fixture shape.",
+          "timestamp": "2026-07-16T16:10:33-05:00",
+          "tree_id": "1f015ce1db5a9f3e28ac42095c19139430a86e9f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1272ab55b837dd85562edf20b23945e8d331c990"
+        },
+        "date": 1784237050696,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.6,
             "unit": "MiB"
           }
         ]
