@@ -618,6 +618,80 @@ pub(in crate::completion) fn try_extract_class_string_guard(
     }
 }
 
+/// Detect a member-existence guard on `var_name`:
+///
+///   - `property_exists($var, 'name')` — proves `$var` has a property
+///     called `name` in the branch where the guard is true.  PHPStan
+///     models this as an `object&hasProperty(name)` intersection.
+///   - `method_exists($var, 'name')` — same for a method called `name`.
+///
+/// Only literal member names are recognised — a dynamic name proves the
+/// existence of *some* member but not which one, so nothing can be added
+/// to the type.
+///
+/// Returns `Some((member_name, is_method, negated))`; `negated` is `true`
+/// when the guard is wrapped in `!`.
+pub(in crate::completion) fn try_extract_member_exists_guard(
+    expr: &Expression<'_>,
+    var_name: &str,
+) -> Option<(String, bool, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_member_exists_guard(inner.expression, var_name)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            try_extract_member_exists_guard(prefix.operand, var_name)
+                .map(|(name, is_method, negated)| (name, is_method, !negated))
+        }
+        Expression::Call(Call::Function(func_call)) => {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => bytes_to_str(ident.value()),
+                _ => return None,
+            };
+            let is_method = match func_name {
+                "property_exists" => false,
+                "method_exists" => true,
+                _ => return None,
+            };
+            let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
+            if args.len() < 2 {
+                return None;
+            }
+            if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                return None;
+            }
+            let member = string_literal_value(argument_value(args[1]))?;
+            Some((member, is_method, false))
+        }
+        _ => None,
+    }
+}
+
+/// Extract the unquoted value of a string literal expression.
+///
+/// Returns `None` for anything that is not a plain string literal
+/// (interpolated strings, concatenations, variables, ...).
+fn string_literal_value(expr: &Expression<'_>) -> Option<String> {
+    use mago_syntax::ast::Literal;
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the unquoted content; fall back to stripping
+            // quotes from `raw`.
+            Some(
+                s.value
+                    .map(|v| bytes_to_str(v).to_string())
+                    .unwrap_or_else(|| {
+                        let raw_str = bytes_to_str(s.raw);
+                        crate::util::unquote_php_string(raw_str)
+                            .unwrap_or(raw_str)
+                            .to_string()
+                    }),
+            )
+        }
+        _ => None,
+    }
+}
+
 /// Extract the value expression from a positional or named argument.
 fn argument_value<'b>(arg: &'b Argument<'b>) -> &'b Expression<'b> {
     match arg {

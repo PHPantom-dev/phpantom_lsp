@@ -5650,3 +5650,210 @@ class Outer
         "$this->outerProp() after the anon class must resolve on Outer, got: {diags:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// property_exists() / method_exists() narrowing
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Inside `if (property_exists($x, 'Name'))`, accessing `$x->Name` must
+/// not be flagged — the guard proves the (dynamically populated) property
+/// exists.  PHPStan models this as `object&hasProperty(Name)`.
+#[test]
+fn property_exists_guard_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        if ($response->MerchantErrorMessage && is_string($response->MerchantErrorMessage)) {
+            throw new \RuntimeException($response->MerchantErrorMessage);
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "property_exists guard must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// A `&&` chain of two property_exists guards proves both properties
+/// (the api-php AltaPay pattern).
+#[test]
+fn property_exists_and_chain_allows_both_properties() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'CardHolderErrorMessage') && property_exists($response, 'CardHolderMessageMustBeShown')) {
+        if ($response->CardHolderMessageMustBeShown && is_string($response->CardHolderErrorMessage)) {
+            throw new \RuntimeException($response->CardHolderErrorMessage);
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("CardHolder")),
+        "chained property_exists guards must allow both properties, got: {diags:?}"
+    );
+}
+
+/// Without the guard the unknown property is still flagged — the
+/// narrowing must not leak outside the guarded branch.
+#[test]
+fn property_access_outside_property_exists_guard_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        echo 'ok';
+    }
+    echo $response->MerchantErrorMessage;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "access after the guarded branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// A property other than the guarded one is still flagged inside the
+/// branch.
+#[test]
+fn property_exists_guard_only_proves_the_guarded_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        echo $response->SomethingElse;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("SomethingElse")),
+        "unguarded property inside the branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// The else branch of a positive guard proves nothing — the member is
+/// absent there, so access is still flagged.
+#[test]
+fn property_exists_else_branch_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        echo 'ok';
+    } else {
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "else branch of property_exists must still flag the property, got: {diags:?}"
+    );
+}
+
+/// After a guard clause `if (!property_exists($x, 'p')) { return; }`,
+/// the property is known to exist.
+#[test]
+fn negated_property_exists_guard_clause_allows_access_after() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (!property_exists($response, 'MerchantErrorMessage')) {
+        return;
+    }
+    echo $response->MerchantErrorMessage;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "negated property_exists guard clause must allow access after it, got: {diags:?}"
+    );
+}
+
+/// `method_exists($x, 'name')` proves the method inside the branch.
+#[test]
+fn method_exists_guard_allows_method_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Handler {
+    public function run(): void {}
+}
+function check(Handler $handler): void {
+    if (method_exists($handler, 'customHook')) {
+        $handler->customHook();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("customHook")),
+        "method_exists guard must allow the guarded method, got: {diags:?}"
+    );
+}
+
+/// A dynamic (non-literal) member name proves the existence of *some*
+/// member but not which one — nothing is added, and other accesses stay
+/// flagged.
+#[test]
+fn property_exists_with_dynamic_name_adds_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response, string $name): void {
+    if (property_exists($response, $name)) {
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "dynamic property_exists must not prove arbitrary properties, got: {diags:?}"
+    );
+}

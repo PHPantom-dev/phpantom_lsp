@@ -278,6 +278,43 @@ class CompoundNarrowingDemo
 }
 
 
+// ── property_exists() / method_exists() Narrowing ───────────────────────────
+// A member-existence guard proves the (otherwise unknown) member for the rest
+// of the branch, mirroring PHPStan's `object&hasProperty(...)` intersection.
+// The proof is confined to the guarded branch: the same access outside it is
+// still flagged.
+
+class MemberExistsNarrowingDemo
+{
+    public function property(ApiResponse $response): ?string
+    {
+        // property_exists() proves the dynamically-populated property, so the
+        // access resolves instead of reporting an unknown member.
+        if (property_exists($response, 'errorMessage') && is_string($response->errorMessage)) {
+            return $response->errorMessage;       // proven by property_exists
+        }
+        return null;
+    }
+
+    public function guardClause(ApiResponse $response): string
+    {
+        // Negated guard clause: after the early return the property exists.
+        if (!property_exists($response, 'detail')) {
+            return 'none';
+        }
+        return (string) $response->detail;        // proven after the guard
+    }
+
+    public function method(DynamicHandler $handler): void
+    {
+        // method_exists() proves the method for the guarded branch.
+        if (method_exists($handler, 'customHook')) {
+            $handler->customHook();               // proven by method_exists
+        }
+    }
+}
+
+
 // ── Type Guard Narrowing (is_array, is_object, …) ──────────────────────────
 
 class TypeGuardNarrowingDemo
@@ -3919,6 +3956,23 @@ class ConvertToClosureDemo
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
+// ── Member-existence narrowing scaffolding ─────────────────────────────────────
+
+// Response object whose extra fields are populated dynamically at runtime, so
+// they are not declared statically. `property_exists()` guards prove them.
+#[\AllowDynamicProperties]
+class ApiResponse
+{
+    public int $status = 0;
+}
+
+// Handler whose `customHook()` is not declared — `method_exists()` guards prove
+// it. Deliberately has no `__call`, so only the guard makes the call resolve.
+class DynamicHandler
+{
+    public function run(): void {}
+}
+
 // ── Method-Tag Template scaffolding ────────────────────────────────────────────
 
 /**
@@ -5772,6 +5826,21 @@ function runDemoAssertions(): void
     // ── class-string guard keeps its type argument ─────────────────────
     $guarded = (new ClassStringVarDemo())->guardedInstantiation(Pen::class);
     assert($guarded instanceof Pen, 'new $className() resolves to Pen after a class_exists() guard');
+
+    // ── property_exists() narrowing ─────────────────────────────────────
+    // The dynamic fields are populated through a variable property name so the
+    // runtime setup mirrors how these responses are filled in real code.
+    $memberDemo = new MemberExistsNarrowingDemo();
+    $response = new ApiResponse();
+    $field = 'errorMessage';
+    $response->$field = 'boom';                    // dynamically populated
+    assert($memberDemo->property($response) === 'boom', 'property_exists guard reads the dynamic property');
+    assert($memberDemo->property(new ApiResponse()) === null, 'no property → guard is false');
+    $withDetail = new ApiResponse();
+    $field = 'detail';
+    $withDetail->$field = 'context';
+    assert($memberDemo->guardClause($withDetail) === 'context', 'negated property_exists guard clause reads the property after it');
+    assert($memberDemo->guardClause(new ApiResponse()) === 'none', 'guard clause returns early when the property is absent');
 
     // ── Pseudo-type class-name collision ────────────────────────────────
     $num = new Number('42');

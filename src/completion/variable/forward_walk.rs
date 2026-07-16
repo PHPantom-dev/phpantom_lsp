@@ -53,7 +53,7 @@ use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::types::narrowing;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{PhpType, ShapeEntry};
-use crate::types::{AccessKind, ClassInfo, ResolvedType};
+use crate::types::{AccessKind, ClassInfo, MethodInfo, PropertyInfo, ResolvedType};
 
 // ─── Hover scope cache (Phase 3) ────────────────────────────────────────────
 //
@@ -2047,6 +2047,14 @@ impl ScopeState {
                             {
                                 existing.type_string = rt.type_string.clone();
                             }
+                            // A virtual member that only one branch's
+                            // class_info carries (e.g. a member injected by
+                            // `property_exists` / `method_exists` narrowing
+                            // inside a guarded branch) must not survive the
+                            // merge: the member is only proven where the
+                            // guard held.  Drop any virtual member missing
+                            // from the incoming branch.
+                            drop_branch_local_virtual_members(existing, rt);
                             merged_into_existing = true;
                             break;
                         }
@@ -2086,6 +2094,73 @@ impl ScopeState {
             }
         }
     }
+}
+
+/// Drop virtual members from `existing`'s class_info that the `incoming`
+/// branch's same-class class_info does not carry.
+///
+/// Branch-local narrowing (notably `property_exists` / `method_exists`)
+/// injects a virtual member into a *clone* of the variable's class_info
+/// for the guarded branch only.  When that branch merges with a sibling
+/// that never proved the member, the union no longer guarantees it, so
+/// the injected member must not leak into the merged scope.
+///
+/// Only virtual members are reconciled — real declared members are
+/// identical across branches (same class source) and never removed.  A
+/// virtual member present in *both* branches (e.g. an `@property` tag or
+/// a Laravel model column baked into the base class_info) is kept,
+/// because both branches derive from the same pre-branch class_info, so
+/// any base virtual member appears on both sides and only narrowing-added
+/// members appear on one.
+fn drop_branch_local_virtual_members(existing: &mut ResolvedType, incoming: &ResolvedType) {
+    let (Some(ex_cls), Some(in_cls)) = (&existing.class_info, &incoming.class_info) else {
+        return;
+    };
+    // Same Arc → identical member sets, nothing to reconcile.  This is
+    // the common case (no branch narrowed the type), so the merge stays
+    // cheap.
+    if Arc::ptr_eq(ex_cls, in_cls) {
+        return;
+    }
+
+    let incoming_virtual_props: HashSet<&str> = in_cls
+        .properties
+        .iter()
+        .filter(|p| p.is_virtual)
+        .map(|p| p.name.as_str())
+        .collect();
+    let incoming_virtual_methods: HashSet<String> = in_cls
+        .methods
+        .iter()
+        .filter(|m| m.is_virtual)
+        .map(|m| m.name.to_ascii_lowercase())
+        .collect();
+
+    let drop_prop = ex_cls
+        .properties
+        .iter()
+        .any(|p| p.is_virtual && !incoming_virtual_props.contains(p.name.as_str()));
+    let drop_method = ex_cls
+        .methods
+        .iter()
+        .any(|m| m.is_virtual && !incoming_virtual_methods.contains(&m.name.to_ascii_lowercase()));
+    if !drop_prop && !drop_method {
+        return;
+    }
+
+    let mut narrowed = (**ex_cls).clone();
+    if drop_prop {
+        narrowed
+            .properties
+            .make_mut()
+            .retain(|p| !p.is_virtual || incoming_virtual_props.contains(p.name.as_str()));
+    }
+    if drop_method {
+        narrowed.methods.make_mut().retain(|m| {
+            !m.is_virtual || incoming_virtual_methods.contains(&m.name.to_ascii_lowercase())
+        });
+    }
+    existing.class_info = Some(Arc::new(narrowed));
 }
 
 /// Simplify unions in a scope by collapsing child/parent class pairs.
@@ -8158,6 +8233,9 @@ fn apply_condition_narrowing<'b>(
 
     // in_array($var, $haystack, true) narrowing.
     apply_in_array_narrowing(condition, scope, ctx, false);
+
+    // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
+    apply_member_exists_narrowing(condition, scope, false);
 }
 
 /// Apply inverse narrowing for a single condition expression (not
@@ -8245,6 +8323,11 @@ fn apply_condition_narrowing_inverse_single<'b>(
             }
         }
     }
+
+    // Inverse member-existence narrowing: after a guard clause like
+    // `if (!property_exists($x, 'name')) { return; }`, the member is
+    // known to exist.
+    apply_member_exists_narrowing(condition, scope, true);
 }
 
 /// Apply inverse condition-based narrowing (for else branches and
@@ -8325,6 +8408,83 @@ fn apply_condition_narrowing_inverse<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+}
+
+/// Apply `property_exists($var, 'name')` / `method_exists($var, 'name')`
+/// narrowing to the scope.
+///
+/// In the branch where the guard holds, each class in the variable's
+/// resolved union gains a virtual member of the guarded name (unknown
+/// type), mirroring PHPStan's `object&hasProperty('name')` intersection.
+/// Member access, completion, and hover inside the branch then treat the
+/// member as present instead of reporting it unknown.
+///
+/// `inverted` is `false` for the truthy branch (a bare guard proves the
+/// member exists) and `true` for the inverse path (else branch / after an
+/// exiting guard clause), where the *negated* form proves it.
+fn apply_member_exists_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    inverted: bool,
+) {
+    for operand in collect_and_chain_operands(condition) {
+        let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+        for var_name in &var_names {
+            let Some((member, is_method, negated)) =
+                narrowing::try_extract_member_exists_guard(operand, var_name)
+            else {
+                continue;
+            };
+            // Only the direction where the guard is known TRUE adds
+            // information — "the member does not exist" removes nothing
+            // we model.
+            if negated != inverted {
+                continue;
+            }
+
+            let mut results = scope.get(var_name).to_vec();
+            let mut changed = false;
+            for rt in &mut results {
+                let Some(class_info) = &rt.class_info else {
+                    continue;
+                };
+                // Skip when the member is already declared on the class
+                // itself — nothing to add, and injecting an untyped
+                // virtual member would shadow the declared type.  Only
+                // own members are checked (resolving ancestors here
+                // would be expensive); guarding a *statically declared
+                // inherited* member with `property_exists` is rare, and
+                // the cost is an unknown member type inside the branch,
+                // never a false diagnostic.
+                let already_present = if is_method {
+                    class_info.get_method_ci(&member).is_some()
+                } else {
+                    class_info
+                        .properties
+                        .iter()
+                        .any(|p| p.name.as_str() == member)
+                };
+                if already_present {
+                    continue;
+                }
+                let mut narrowed = (**class_info).clone();
+                if is_method {
+                    narrowed
+                        .methods
+                        .push(Arc::new(MethodInfo::virtual_method(&member, None)));
+                } else {
+                    narrowed
+                        .properties
+                        .push(PropertyInfo::virtual_property(&member, None));
+                }
+                rt.class_info = Some(Arc::new(narrowed));
+                changed = true;
+            }
+            if changed {
+                scope.set(var_name, results);
+            }
+        }
+    }
 }
 
 /// Apply `in_array($var, $haystack, true)` narrowing.
