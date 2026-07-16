@@ -763,24 +763,37 @@ fn resolve_target_classes_expr_inner_impl(
             // but sources the raw type from the method/function signature
             // instead of from docblock annotations or assignments.
             if let SubjectExpr::CallExpr { callee, args_text } = base.as_ref() {
-                let call_raw = resolve_call_raw_return_type(callee, args_text, ctx);
-                if let Some(raw) = call_raw {
-                    let candidates = std::iter::once(raw);
-                    if let Some(resolved) =
-                        super::source::helpers::try_chained_array_access_with_candidates(
-                            candidates,
-                            segments,
-                            current_class,
-                            all_classes,
-                            class_loader,
-                        )
-                    {
-                        return resolved.into_iter().map(ResolvedType::from_arc).collect();
-                    }
+                // Resolve the call's return type with template and generic
+                // substitution applied, so that a method declared
+                // `@return T[]` with a `class-string<T>` parameter resolves
+                // its element type from the call-site argument (e.g.
+                // `$a->findChildrenOfType(Foo::class)[0]` → `Foo`).  The
+                // un-substituted raw return type is kept as a fallback for
+                // callees the hint path doesn't cover.
+                let mut hint: Option<PhpType> = None;
+                let _ = Backend::resolve_call_return_types_expr_with_hint(
+                    callee,
+                    args_text,
+                    ctx,
+                    Some(&mut hint),
+                );
+                let raw = resolve_call_raw_return_type(callee, args_text, ctx);
+                let candidates = hint.into_iter().chain(raw);
+                if let Some(resolved) =
+                    super::source::helpers::try_chained_array_access_with_candidates(
+                        candidates,
+                        segments,
+                        current_class,
+                        all_classes,
+                        class_loader,
+                    )
+                {
+                    return resolved.into_iter().map(ResolvedType::from_arc).collect();
                 }
-                // If raw-type approach didn't work, fall back to resolving
-                // the call normally (handles cases like `getItems()[0]`
-                // where the return type is already a class with ArrayAccess).
+                // Neither the substituted hint nor the raw return type had
+                // array-shape / generic / iterable annotations covering the
+                // bracket access.  Return empty: `call()[i]` is never the
+                // same type as `call()`.
                 return vec![];
             }
 

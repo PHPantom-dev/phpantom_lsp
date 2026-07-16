@@ -1,6 +1,6 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
-    create_test_backend_with_exception_stubs,
+    create_test_backend_with_exception_stubs, create_test_backend_with_stubs,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -5855,5 +5855,76 @@ function check(Response $response, string $name): void {
             .iter()
             .any(|d| d.message.contains("MerchantErrorMessage")),
         "dynamic property_exists must not prove arbitrary properties, got: {diags:?}"
+    );
+}
+
+/// Indexing a call result inline (`call(...)[0]->member`) must resolve
+/// the element type of the return so member access on it is checked.
+///
+/// A method declared `@return T[]` with a `class-string<T>` argument
+/// binds `T` from the call-site argument, so
+/// `$a->findChildrenOfType(Attr::class)[0]` is an `Attr`: a real method
+/// on `Attr` must not be flagged, but an unknown one must be.
+#[test]
+fn inline_indexed_template_call_resolves_element_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Node {
+    public function getParent(): ?Node { return null; }
+}
+class Attr extends Node {
+    public function attrName(): string { return ''; }
+}
+class Holder {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T[]
+     */
+    public function findChildrenOfType(string $type): array { return []; }
+}
+function run(Holder $a): void {
+    $a->findChildrenOfType(Attr::class)[0]->attrName();
+    $a->findChildrenOfType(Attr::class)[0]->bogusMethod();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("attrName")),
+        "real method on the inferred element type must not be flagged, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("bogusMethod")),
+        "unknown method on the inferred element type must be flagged, got: {diags:?}"
+    );
+}
+
+/// `EnumName::cases()[0]->member` must resolve to the enum instance so
+/// member access is checked, because `cases()` returns a list of the
+/// enum's own instances even though the stub declares it `: array`.
+#[test]
+fn inline_indexed_enum_cases_resolves_element_member() {
+    let backend = create_test_backend_with_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+enum Priority: int
+{
+    case Low = 1;
+    case High = 3;
+}
+function run(): void {
+    echo Priority::cases()[0]->value;
+    echo Priority::cases()[0]->bogusProp;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'value'")),
+        "backed-enum 'value' property must not be flagged, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("bogusProp")),
+        "unknown property on the enum instance must be flagged, got: {diags:?}"
     );
 }

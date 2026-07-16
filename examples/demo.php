@@ -707,6 +707,11 @@ class MethodTemplateDemo
             $group[0]->write();                           // Pen|Marker from union class-string bind
         }
 
+        // Indexing the call result inline keeps the template binding, so
+        // the `@return T[]` element resolves from the `class-string<T>`
+        // argument without an intermediate variable.
+        $locator->getAll(Pen::class)[0]->write();         // Pen from class-string<T> → T[] element
+
         Factory::create(Pen::class)->write();             // static @template
         resolve(Marker::class)->highlight();              // function @template
 
@@ -2197,6 +2202,11 @@ class StaticEnumDemo
 
         // self::/static:: inside enum methods resolve to the enum type
         Status::defaultValue();      // self::Active->value inside enum
+
+        // cases() returns a list of the enum's own instances, so indexing
+        // it inline resolves the element back to the enum.
+        Status::cases()[0]->value;   // "active" — cases()[0] is a Status
+        Priority::cases()[0]->name;  // "Low" — cases()[0] is a Priority
     }
 }
 
@@ -6008,6 +6018,9 @@ function runDemoAssertions(): void
         assert($group[0] instanceof $penClass, 'getAll() must return an instance of each class in the union');
     }
 
+    // Indexing the call result inline keeps the template binding.
+    assert($locator->getAll(Pen::class)[0] instanceof Pen, 'getAll(Pen::class)[0] must be a Pen');
+
     // A class-string<T>|T union parameter accepts a class name or an
     // instance and returns an instance either way.
     assert($locator->build(Pen::class) instanceof Pen, 'build(Pen::class) must return a Pen instance');
@@ -6225,6 +6238,12 @@ function runDemoAssertions(): void
     $manual = Mode::Manual;
     assert($manual instanceof Mode, 'Mode::Manual must be Mode');
     assert($manual->name === 'Manual', 'Mode::Manual->name must be "Manual"');
+
+    // cases() returns a list of the enum's own instances; indexing it
+    // inline resolves the element back to the enum.
+    assert(Status::cases()[0] instanceof Status, 'Status::cases()[0] must be a Status');
+    assert(Status::cases()[0]->value === 'active', 'Status::cases()[0]->value must be "active"');
+    assert(Priority::cases()[0]->name === 'Low', 'Priority::cases()[0]->name must be "Low"');
 
     $fromString = Status::from('active');
     assert($fromString === Status::Active, 'Status::from("active") must be Status::Active');

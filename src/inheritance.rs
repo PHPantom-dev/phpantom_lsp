@@ -673,6 +673,25 @@ pub(crate) fn resolve_class_with_inheritance(
         }
     }
 
+    // Refine the `cases()` method on enums.  The `UnitEnum` interface
+    // declares `public static function cases(): array`, which loses the
+    // element type: `Country::cases()[0]` would resolve to `mixed`.
+    // Every concrete enum returns a list of its own instances, so
+    // replace the bare `array` with `list<EnumName>` (using the FQN so
+    // the element resolves regardless of the call site's namespace).
+    if merged.kind == crate::types::ClassLikeKind::Enum {
+        let element = PhpType::Named(merged.fqn().to_string());
+        let list_type = PhpType::Generic("list".to_string(), vec![element]);
+        if let Some(cases) = merged
+            .methods
+            .make_mut()
+            .iter_mut()
+            .find(|m| m.name.eq_ignore_ascii_case("cases"))
+        {
+            Arc::make_mut(cases).return_type = Some(list_type);
+        }
+    }
+
     merged
 }
 

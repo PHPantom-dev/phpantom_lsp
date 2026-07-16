@@ -67,19 +67,3 @@ filed here were *not* this bug — they were a framework docblock gap
 `LengthAwarePaginator`), now corrected so the paginators resolve
 their element type through `IteratorAggregate`. This bug is only
 the SPL / direct-iteration case above.
-
-## B69. Indexing a call result inline breaks the rest of the chain
-
-**Severity: Medium-High (~16 errors: pdepend ~9, luxplus-backoffice 7) · Confirmed with fixture**
-
-```php
-$a->findChildrenOfType(ASTAttribute::class)[0]->getParent();
-// "type of '$a->findChildrenOfType(ASTAttribute::class)[]' could not be resolved"
-
-Country::cases()[0]->value;   // same failure on enum cases()
-```
-
-Splitting into two statements (`$children = $a->findChildrenOfType(...);
-$children[0]->getParent();`) works, so the array element type is
-available — only the inline `call(...)[index]->member` chain form
-fails in subject extraction/resolution.

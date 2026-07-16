@@ -396,6 +396,42 @@ async fn test_static_method_return_array_access() {
 }
 
 #[tokio::test]
+async fn test_method_return_template_class_string_array_access() {
+    // A method declared `@return T[]` whose `T` is bound from a
+    // `class-string<T>` argument must resolve its element type from the
+    // call-site argument when the result is indexed inline:
+    // `$a->findChildrenOfType(Foo::class)[0]->`.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test_tmpl_arr.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    public function getParent(): ?Node { return null; }\n",
+        "}\n",
+        "class Attr extends Node {\n",
+        "    public function attrName(): string { return ''; }\n",
+        "}\n",
+        "class Holder {\n",
+        "    /**\n",
+        "     * @template T of Node\n",
+        "     * @param class-string<T> $type\n",
+        "     * @return T[]\n",
+        "     */\n",
+        "    public function findChildrenOfType(string $type): array { return []; }\n",
+        "}\n",
+        "class Consumer {\n",
+        "    public function run(Holder $a): void {\n",
+        "        $a->findChildrenOfType(Attr::class)[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let result = complete_at(&backend, &uri, text, 17, 48).await;
+    let items = unwrap_items(result);
+    assert_has_member(&items, "attrName");
+}
+
+#[tokio::test]
 async fn test_method_return_list_array_access() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///test_method_list_arr.php").unwrap();

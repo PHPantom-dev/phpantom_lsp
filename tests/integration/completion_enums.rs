@@ -78,6 +78,81 @@ async fn test_completion_nullsafe_arrow_on_tryfrom() {
     }
 }
 
+/// Test: `Priority::cases()[0]->` should suggest `name` and `value`.
+///
+/// The `UnitEnum::cases()` stub is declared `: array`, so the element
+/// type of an inline `cases()[0]` index is only known once `cases()` is
+/// refined to `list<Priority>` for the concrete enum.
+#[tokio::test]
+async fn test_completion_arrow_on_cases_index() {
+    let backend = create_test_backend_with_stubs();
+
+    let uri = Url::parse("file:///cases_index_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Priority: int\n",
+        "{\n",
+        "    case Low = 1;\n",
+        "    case Medium = 2;\n",
+        "    case High = 3;\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function test(): void {\n",
+        "        Priority::cases()[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 30,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should return results for cases()[0]->"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.contains("name")),
+                "cases()[0]-> should include 'name', got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.contains("value")),
+                "cases()[0]-> should include 'value', got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// Test: Verify that `->` (without `?`) on tryFrom still works (regression guard).
 #[tokio::test]
 async fn test_completion_regular_arrow_on_tryfrom() {
