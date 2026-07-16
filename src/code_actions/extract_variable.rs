@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::ScopeMap;
@@ -621,6 +622,24 @@ impl Backend {
             return;
         }
 
+        let in_executable_body = crate::parser::with_parsed_program(
+            content,
+            "extract_variable_context",
+            |program, _| {
+                matches!(
+                    find_cursor_context(&program.statements, start_offset as u32),
+                    CursorContext::InFunction(_, true)
+                        | CursorContext::InClassLike {
+                            member: MemberContext::Method(_, true),
+                            ..
+                        }
+                )
+            },
+        );
+        if !in_executable_body {
+            return;
+        }
+
         let selected_text = &content[start_offset..end_offset];
 
         // Skip if the selection is purely whitespace.
@@ -1174,6 +1193,51 @@ mod tests {
         assert!(
             extract_actions.is_empty(),
             "should not offer extract variable for empty selection"
+        );
+    }
+
+    #[test]
+    fn extract_variable_not_offered_for_trait_name_selection() {
+        let backend = crate::Backend::new_test();
+        let uri = "file:///test.php";
+        let content = "<?php\ntrait ExampleFeatureTrait {}\n";
+
+        backend.update_ast(uri, content);
+
+        let start = content.find("ExampleFeatureTrait").unwrap() as u32;
+        let end = start + "ExampleFeatureTrait".len() as u32;
+        let start_pos = crate::util::offset_to_position(content, start as usize);
+        let end_pos = crate::util::offset_to_position(content, end as usize);
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: uri.parse().unwrap(),
+            },
+            range: Range {
+                start: start_pos,
+                end: end_pos,
+            },
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let actions = backend.handle_code_action(uri, content, &params);
+        let extract_actions: Vec<_> = actions
+            .iter()
+            .filter(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => ca.title.contains("Extract variable"),
+                _ => false,
+            })
+            .collect();
+
+        assert!(
+            extract_actions.is_empty(),
+            "should not offer extract variable for trait name selection"
         );
     }
 
