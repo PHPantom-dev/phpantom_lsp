@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784225908888,
+  "lastUpdate": 1784230639790,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15503,6 +15503,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "421f71ad2826302a5d20e8096c321a1abf31daa7",
+          "message": "Gate class_name_mismatch on PSR-4 and a fe clean ups",
+          "timestamp": "2026-07-16T21:22:34+02:00",
+          "tree_id": "230d40904ef64f98b6ccb3f1ac7101a2fdfb3fdd",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/421f71ad2826302a5d20e8096c321a1abf31daa7"
+        },
+        "date": 1784230637750,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.7,
             "unit": "MiB"
           }
         ]
