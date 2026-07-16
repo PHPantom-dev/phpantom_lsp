@@ -703,10 +703,14 @@ impl Backend {
             cache.insert(uri_str.to_string(), fast_diagnostics.clone());
         }
 
-        // Push assembled diagnostics immediately so the editor sees
-        // fast results (strikethrough, dimming) merged with whatever
-        // slow / external results are already cached.
+        // Update the assembled cache immediately so pull-capable editors
+        // can see fast diagnostics before the slower native passes finish.
         self.assemble_and_push(uri_str).await;
+        if self.supports_pull_diagnostics.load(Ordering::Acquire)
+            && let Some(client) = &self.client
+        {
+            let _ = client.workspace_diagnostic_refresh().await;
+        }
 
         // ── Phase 2: compute and cache slow diagnostics ─────────────
         let slow_diagnostics = {
@@ -735,8 +739,13 @@ impl Backend {
             cache.insert(uri_str.to_string(), slow_diagnostics);
         }
 
-        // Push again with fresh slow results merged in.
+        // Update again with fresh slow results merged in.
         self.assemble_and_push(uri_str).await;
+        if self.supports_pull_diagnostics.load(Ordering::Acquire)
+            && let Some(client) = &self.client
+        {
+            let _ = client.workspace_diagnostic_refresh().await;
+        }
     }
 
     /// Assemble diagnostics from all per-source caches for a URI and
@@ -874,19 +883,12 @@ impl Backend {
 
         if pull_mode {
             // ── Pull mode ───────────────────────────────────────────
-            // Push only fast diagnostics so the editor sees syntax
-            // errors and unused-import warnings instantly.  The full
-            // set (fast + slow + external) is cached in `diag_last_full`
-            // for the next pull response.  After caching, the caller
-            // sends `workspace/diagnostic/refresh` so the editor
-            // re-pulls the updated set.
-            let fast_only = {
-                let cache = self.diag_last_fast.lock();
-                cache.get(uri_str).cloned().unwrap_or_default()
-            };
-            let fast_only = self.filter_suppressed(fast_only);
-            client.publish_diagnostics(uri, fast_only, None).await;
-
+            // Pull-capable clients use `textDocument/diagnostic` as the
+            // single source of truth for native diagnostics.  We only cache
+            // the merged set here; the caller triggers
+            // `workspace/diagnostic/refresh` so the editor re-pulls.  This
+            // avoids duplicate diagnostics in clients that keep pushed and
+            // pulled diagnostics in separate namespaces.
             {
                 let mut cache = self.diag_last_full.lock();
                 cache.insert(uri_str.to_string(), full);
@@ -1127,16 +1129,6 @@ impl Backend {
                     }
                 };
                 self.publish_diagnostics_for_file(uri, &content).await;
-            }
-
-            // In pull mode the freshly computed full set is now cached with a
-            // bumped resultId, but the editor doesn't know to ask for it. Ask
-            // it to re-pull so the new diagnostics replace the stale ones the
-            // pull handler has been returning during the recompute.
-            if self.supports_pull_diagnostics.load(Ordering::Acquire)
-                && let Some(client) = &self.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
             }
         }
     }
