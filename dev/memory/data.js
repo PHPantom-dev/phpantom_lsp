@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784213218514,
+  "lastUpdate": 1784219383498,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15435,6 +15435,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "449789cdba21191d4abcd22d8e97d5a3f2e910a7",
+          "message": "fix: duplicate native diagnostics in pull-mode editors\n\nSwitch native diagnostics to a pull-only delivery model when the client\nsupports pull diagnostics. Cache and refresh after both the fast pass\nand the full slow pass so quick diagnostics stay responsive without\nduplicating squiggles in clients that keep pushed and pulled diagnostics\nseparate.",
+          "timestamp": "2026-07-16T11:15:07-05:00",
+          "tree_id": "444b3ba08acf76e7217a5a1a96fdbe2748a06925",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/449789cdba21191d4abcd22d8e97d5a3f2e910a7"
+        },
+        "date": 1784219381245,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.1,
             "unit": "MiB"
           }
         ]
