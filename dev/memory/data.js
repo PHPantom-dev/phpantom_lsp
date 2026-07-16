@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784170172051,
+  "lastUpdate": 1784171304949,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15265,6 +15265,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c73e4101f6b8435a1f5afed76077f3077a21d55e",
+          "message": "Resolve shapes written across multiple lines",
+          "timestamp": "2026-07-16T04:56:04+02:00",
+          "tree_id": "ad2a700706d9d583714eb06681848c8626c75c47",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c73e4101f6b8435a1f5afed76077f3077a21d55e"
+        },
+        "date": 1784171303226,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 49.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.6,
             "unit": "MiB"
           }
         ]
