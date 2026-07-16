@@ -2,6 +2,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
+use crate::diagnostics::namespace_mismatch::is_structural_single_classlike_file;
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::offset_to_position;
 
@@ -24,6 +25,10 @@ pub(crate) fn class_name_mismatch_diagnostic(
     uri: &str,
     content: &str,
 ) -> Option<Diagnostic> {
+    if !is_structural_single_classlike_file(content) {
+        return None;
+    }
+
     let file_path = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok())?;
 
     // Only files that fall under a PSR-4 mapping are required to name their
@@ -79,4 +84,27 @@ pub(crate) fn class_name_range(content: &str, class: &ClassInfo) -> Option<Range
         start: offset_to_position(content, name_start),
         end: offset_to_position(content, name_end),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::class_name_mismatch_diagnostic;
+    use crate::Backend;
+    use crate::composer::Psr4Mapping;
+    use std::path::PathBuf;
+
+    #[test]
+    fn class_name_mismatch_skipped_for_inline_fixture_file() {
+        let backend = Backend::new_test_with_workspace(
+            PathBuf::from("/project"),
+            vec![Psr4Mapping {
+                prefix: "App\\Models\\".to_string(),
+                base_path: "app/Models/".to_string(),
+            }],
+        );
+        let uri = "file:///project/app/Models/ExampleState.php";
+        let php = "<?php\nnamespace App\\Models;\n\nit('demo', function (): void {});\n\nenum WrongName: int {\n    case One = 1;\n}\n";
+
+        assert!(class_name_mismatch_diagnostic(&backend, uri, php).is_none());
+    }
 }

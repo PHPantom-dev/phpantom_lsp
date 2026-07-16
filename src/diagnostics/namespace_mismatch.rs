@@ -2,6 +2,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
+use crate::parser::with_parsed_program;
+
+use mago_syntax::ast::*;
 
 impl Backend {
     pub fn collect_namespace_mismatch_diagnostics(
@@ -22,6 +25,10 @@ pub(crate) fn namespace_mismatch_diagnostic(
     uri: &str,
     content: &str,
 ) -> Option<Diagnostic> {
+    if !is_structural_single_classlike_file(content) {
+        return None;
+    }
+
     let workspace_root = backend.workspace_root().read().clone()?;
     let file_path = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok())?;
 
@@ -99,4 +106,89 @@ pub(crate) fn namespace_decl_from_content(content: &str) -> Option<(Option<Strin
             },
         },
     ))
+}
+
+pub(crate) fn is_structural_single_classlike_file(content: &str) -> bool {
+    with_parsed_program(content, "psr4_file_shape", |program, _| {
+        let mut classlikes = 0usize;
+        let mut has_other_top_level = false;
+        collect_file_shape(
+            program.statements.iter(),
+            &mut classlikes,
+            &mut has_other_top_level,
+        );
+        classlikes == 1 && !has_other_top_level
+    })
+}
+
+fn collect_file_shape<'a>(
+    statements: impl Iterator<Item = &'a Statement<'a>>,
+    classlikes: &mut usize,
+    has_other_top_level: &mut bool,
+) {
+    for stmt in statements {
+        match stmt {
+            Statement::Namespace(ns) => {
+                collect_file_shape(ns.statements().iter(), classlikes, has_other_top_level);
+            }
+            Statement::Declare(declare) => match &declare.body {
+                DeclareBody::Statement(body) => {
+                    classify_statement(body, classlikes, has_other_top_level);
+                }
+                DeclareBody::ColonDelimited(body) => {
+                    collect_file_shape(body.statements.iter(), classlikes, has_other_top_level);
+                }
+            },
+            other => {
+                classify_statement(other, classlikes, has_other_top_level);
+            }
+        }
+    }
+}
+
+fn classify_statement(
+    stmt: &Statement<'_>,
+    classlikes: &mut usize,
+    has_other_top_level: &mut bool,
+) {
+    match stmt {
+        Statement::OpeningTag(_) | Statement::ClosingTag(_) | Statement::Noop(_) => {}
+        Statement::Use(_) => {}
+        Statement::Class(_)
+        | Statement::Interface(_)
+        | Statement::Trait(_)
+        | Statement::Enum(_) => {
+            *classlikes += 1;
+        }
+        _ => *has_other_top_level = true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_structural_single_classlike_file, namespace_mismatch_diagnostic};
+    use crate::Backend;
+    use crate::composer::Psr4Mapping;
+    use std::path::PathBuf;
+
+    #[test]
+    fn structural_helper_rejects_inline_fixture_file() {
+        let php = "<?php\n\nit('demo', function (): void {});\n\nenum ExampleState: int {\n    case One = 1;\n}\n";
+        assert!(!is_structural_single_classlike_file(php));
+    }
+
+    #[test]
+    fn namespace_mismatch_skipped_for_inline_fixture_file() {
+        let backend = Backend::new_test_with_workspace(
+            PathBuf::from("/project"),
+            vec![Psr4Mapping {
+                prefix: "App\\Models\\".to_string(),
+                base_path: "app/Models/".to_string(),
+            }],
+        );
+        let uri = "file:///project/app/Models/ExampleState.php";
+        let php = "<?php\nnamespace App\\Wrong;\n\nit('demo', function (): void {});\n\nenum ExampleState: int {\n    case One = 1;\n}\n";
+
+        assert!(namespace_mismatch_diagnostic(&backend, uri, php).is_none());
+    }
 }
