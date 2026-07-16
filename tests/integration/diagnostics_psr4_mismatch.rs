@@ -155,6 +155,27 @@ fn no_class_name_mismatch_without_psr4_mappings() {
     );
 }
 
+/// A production file that mixes a top-level side-effect statement (an
+/// `if` guard, not a bare function call like Pest's `it(...)`) with a
+/// single class must still be flagged when the class name does not match
+/// the filename. Only bare top-level call statements are treated as the
+/// "inline test fixture" shape that suppresses the mismatch checks.
+#[test]
+fn class_name_mismatch_still_flagged_with_top_level_if_guard() {
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &[]);
+
+    let (_, diags) = fast_diagnostics(
+        &backend,
+        dir.path(),
+        "src/Models/User.php",
+        "<?php\nnamespace App\\Models;\n\nif (!defined('FOO')) {\n    define('FOO', 1);\n}\n\nclass Customer {}\n",
+    );
+    assert!(
+        has_code(&diags, "class_name_mismatch"),
+        "expected class_name_mismatch despite the top-level if guard, got: {diags:?}"
+    );
+}
+
 #[test]
 fn fix_namespace_quick_fix_corrects_declaration() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[]);

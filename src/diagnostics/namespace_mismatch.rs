@@ -160,7 +160,20 @@ fn classify_statement(
         | Statement::Enum(_) => {
             *classlikes += 1;
         }
-        _ => *has_other_top_level = true,
+        // A bare top-level function call (e.g. Pest's `it(...)`,
+        // `describe(...)`, `uses(...)`) is the signature of a test/script
+        // file that happens to declare a local fixture class-like, rather
+        // than a normal PSR-4 source file whose sole purpose is that
+        // declaration. Other statement kinds (`if`, `declare`, `require`,
+        // `return`, ...) are common in ordinary production files and must
+        // not disqualify the mismatch checks, or genuine PSR-4 violations
+        // would go undetected.
+        Statement::Expression(expr_stmt)
+            if matches!(expr_stmt.expression, Expression::Call(Call::Function(_))) =>
+        {
+            *has_other_top_level = true;
+        }
+        _ => {}
     }
 }
 
