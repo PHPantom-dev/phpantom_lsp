@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784240589155,
+  "lastUpdate": 1784242880820,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15639,6 +15639,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "577f5fea6feae445d6633d0440b2fbceb264ad3a",
+          "message": "Inline test fixtures no longer trigger PSR-4 mismatch warnings",
+          "timestamp": "2026-07-17T00:46:59+02:00",
+          "tree_id": "eeb859504abe93926ee3fc65d09d0ef0792a9d0b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/577f5fea6feae445d6633d0440b2fbceb264ad3a"
+        },
+        "date": 1784242878866,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.8,
             "unit": "MiB"
           }
         ]
