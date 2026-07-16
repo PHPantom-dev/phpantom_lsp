@@ -654,6 +654,72 @@ pub fn resolve_class_path(
     None
 }
 
+/// Reverse of [`resolve_class_path`]: given a file path, compute the
+/// expected PSR-4 namespace and class name.
+///
+/// Returns `Some((namespace, class_name))` where `namespace` is the
+/// expected namespace (e.g. `"App\\Models"`) and `class_name` is the
+/// expected short class name (the filename stem, e.g. `"User"`).
+///
+/// Returns `None` if the file doesn't end in `.php` or doesn't fall
+/// under any PSR-4 mapping.
+pub fn resolve_namespace_from_path(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    file_path: &Path,
+) -> Option<(Option<String>, String)> {
+    if file_path.extension().and_then(|e| e.to_str()) != Some("php") {
+        return None;
+    }
+
+    let file_unix = file_path.to_str()?.replace('\\', "/");
+
+    let mut best: Option<(&Psr4Mapping, String)> = None;
+
+    for mapping in mappings {
+        let abs_base = workspace_root.join(&mapping.base_path);
+        let abs_base_str = abs_base.to_str()?.replace('\\', "/");
+        let abs_base_slash = if abs_base_str.ends_with('/') {
+            abs_base_str
+        } else {
+            format!("{}/", abs_base_str)
+        };
+
+        if let Some(remainder) = file_unix.strip_prefix(&abs_base_slash)
+            && best
+                .as_ref()
+                .is_none_or(|(b, _)| mapping.base_path.len() > b.base_path.len())
+        {
+            best = Some((mapping, remainder.to_string()));
+        }
+    }
+
+    let (mapping, remainder) = best?;
+    let without_ext = remainder.strip_suffix(".php")?;
+    let class_name = without_ext
+        .rsplit('/')
+        .next()
+        .unwrap_or(without_ext)
+        .to_string();
+    let ns_from_path = without_ext.replace('/', "\\");
+    let prefix = mapping.prefix.trim_end_matches('\\');
+
+    let namespace = if ns_from_path.contains('\\') {
+        let dir_part = &ns_from_path[..ns_from_path.rfind('\\').unwrap()];
+        if prefix.is_empty() {
+            Some(dir_part.to_string())
+        } else {
+            Some(format!("{}\\{}", prefix, dir_part))
+        }
+    } else if prefix.is_empty() {
+        None
+    } else {
+        Some(prefix.to_string())
+    };
+
+    Some((namespace, class_name))
+}
+
 /// Extract file paths from `require_once` statements in PHP source content.
 ///
 /// Handles both the statement form and the function-like form:
@@ -1396,5 +1462,151 @@ mod tests {
         // Drupal package present but no scaffold config and no matching dirs
         let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
         assert!(detect_drupal_web_root(dir.path(), &p).is_none());
+    }
+
+    // ── resolve_namespace_from_path ─────────────────────────────────
+
+    #[test]
+    fn reverse_psr4_basic() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Models/User.php"));
+        assert_eq!(
+            result,
+            Some((Some("App\\Models".to_string()), "User".to_string()))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_root_of_mapping() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Kernel.php"));
+        assert_eq!(
+            result,
+            Some((Some("App".to_string()), "Kernel".to_string()))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_deeply_nested() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result = resolve_namespace_from_path(
+            &mappings,
+            root,
+            Path::new("/project/app/Http/Controllers/Api/V2/UserController.php"),
+        );
+        assert_eq!(
+            result,
+            Some((
+                Some("App\\Http\\Controllers\\Api\\V2".to_string()),
+                "UserController".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_longest_base_path_wins() {
+        let mappings = vec![
+            Psr4Mapping {
+                prefix: "App\\".to_string(),
+                base_path: "app/".to_string(),
+            },
+            Psr4Mapping {
+                prefix: "App\\Models\\".to_string(),
+                base_path: "app/Models/".to_string(),
+            },
+        ];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Models/User.php"));
+        assert_eq!(
+            result,
+            Some((Some("App\\Models".to_string()), "User".to_string()))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_empty_prefix() {
+        let mappings = vec![Psr4Mapping {
+            prefix: String::new(),
+            base_path: "src/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/src/Foo.php"));
+        assert_eq!(result, Some((None, "Foo".to_string())));
+    }
+
+    #[test]
+    fn reverse_psr4_empty_prefix_nested() {
+        let mappings = vec![Psr4Mapping {
+            prefix: String::new(),
+            base_path: "src/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/src/Bar/Baz.php"));
+        assert_eq!(result, Some((Some("Bar".to_string()), "Baz".to_string())));
+    }
+
+    #[test]
+    fn reverse_psr4_no_match() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result = resolve_namespace_from_path(
+            &mappings,
+            root,
+            Path::new("/project/vendor/some/File.php"),
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn reverse_psr4_non_php() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Foo.txt"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn reverse_psr4_absolute_base_path() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "Acme\\Billing\\".to_string(),
+            base_path: "/project/modules/billing/src/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result = resolve_namespace_from_path(
+            &mappings,
+            root,
+            Path::new("/project/modules/billing/src/Models/Invoice.php"),
+        );
+        assert_eq!(
+            result,
+            Some((
+                Some("Acme\\Billing\\Models".to_string()),
+                "Invoice".to_string()
+            ))
+        );
     }
 }

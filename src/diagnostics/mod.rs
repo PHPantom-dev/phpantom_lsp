@@ -161,11 +161,13 @@
 //! debounce timers in both modes because they are expensive.
 
 mod argument_count;
+pub(crate) mod class_name_mismatch;
 mod deprecated;
 pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod invalid_class_kind;
+pub(crate) mod namespace_mismatch;
 mod syntax_errors;
 mod type_errors;
 pub(crate) mod undefined_variables;
@@ -210,6 +212,8 @@ impl Backend {
         self.collect_syntax_error_diagnostics(uri_str, content, out);
         self.collect_unused_import_diagnostics(uri_str, content, out);
         self.collect_unused_variable_diagnostics(uri_str, content, out);
+        self.collect_namespace_mismatch_diagnostics(uri_str, content, out);
+        self.collect_class_name_mismatch_diagnostics(uri_str, content, out);
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,

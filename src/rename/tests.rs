@@ -1337,16 +1337,16 @@ async fn rename_class_updates_use_import() {
 
     let text_decl = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Resources;\n",
+        "namespace Acme\\Tasks\\Resources;\n",
         "\n",
         "class TaskResource {}\n",
     );
 
     let text_usage = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks;\n",
+        "namespace Acme\\Tasks;\n",
         "\n",
-        "use Eagle\\Tasks\\Resources\\TaskResource;\n",
+        "use Acme\\Tasks\\Resources\\TaskResource;\n",
         "\n",
         "class Task {\n",
         "    protected static string $service = TaskResource::class;\n",
@@ -1368,7 +1368,7 @@ async fn rename_class_updates_use_import() {
 
     // The use statement should have the FQN last segment updated.
     assert!(
-        result.contains("use Eagle\\Tasks\\Resources\\TaskResourceService;"),
+        result.contains("use Acme\\Tasks\\Resources\\TaskResourceService;"),
         "Use statement should be updated; got:\n{}",
         result
     );
@@ -1398,16 +1398,16 @@ async fn rename_class_preserves_explicit_alias() {
 
     let text_decl = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Resources;\n",
+        "namespace Acme\\Tasks\\Resources;\n",
         "\n",
         "class TaskResource {}\n",
     );
 
     let text_usage = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Http;\n",
+        "namespace Acme\\Tasks\\Http;\n",
         "\n",
-        "use Eagle\\Tasks\\Resources\\TaskResource as ResourceService;\n",
+        "use Acme\\Tasks\\Resources\\TaskResource as ResourceService;\n",
         "\n",
         "class Controller {\n",
         "    private ResourceService $service;\n",
@@ -1431,7 +1431,7 @@ async fn rename_class_preserves_explicit_alias() {
 
     // The use statement FQN should be updated, but the alias kept.
     assert!(
-        result.contains("use Eagle\\Tasks\\Resources\\TaskResourceService as ResourceService;"),
+        result.contains("use Acme\\Tasks\\Resources\\TaskResourceService as ResourceService;"),
         "Use statement FQN should update, alias preserved; got:\n{}",
         result
     );
@@ -2044,16 +2044,16 @@ async fn rename_class_cross_file_with_file_rename() {
 
     let text_decl = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Resources;\n",
+        "namespace Acme\\Tasks\\Resources;\n",
         "\n",
         "class TaskResource {}\n",
     );
 
     let text_usage = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks;\n",
+        "namespace Acme\\Tasks;\n",
         "\n",
-        "use Eagle\\Tasks\\Resources\\TaskResource;\n",
+        "use Acme\\Tasks\\Resources\\TaskResource;\n",
         "\n",
         "class Task {\n",
         "    public function resource(): TaskResource {\n",
@@ -2088,7 +2088,7 @@ async fn rename_class_cross_file_with_file_rename() {
     // Apply edits to verify correctness.
     let result_usage = apply_edits(text_usage, &usage_edits);
     assert!(
-        result_usage.contains("use Eagle\\Tasks\\Resources\\TaskDto;"),
+        result_usage.contains("use Acme\\Tasks\\Resources\\TaskDto;"),
         "Use statement should be updated; got:\n{}",
         result_usage
     );
@@ -3095,20 +3095,19 @@ async fn rename_function_param_propagates_into_closure_use_and_arrow() {
 // ─── Namespace rename tests ─────────────────────────────────────────────────
 
 #[tokio::test]
-async fn prepare_rename_namespace_returns_segment_range() {
+async fn prepare_rename_namespace_returns_full_range() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///a.php").unwrap();
     let text = "<?php\nnamespace App\\Models\\User;\nclass User {}\n";
     open_file(&backend, &uri, text).await;
 
-    // Cursor on "Models" (line 1, char 14 is inside "Models").
+    // Cursor on "Models" (line 1, char 14 is inside the namespace).
     let resp = prepare_rename(&backend, &uri, 1, 14).await;
     assert!(resp.is_some(), "Expected prepare rename to succeed");
     if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
-        assert_eq!(placeholder, "Models");
-        // "Models" starts at char 14 in "namespace App\Models\User;"
-        assert_eq!(range.start.character, 14);
-        assert_eq!(range.end.character, 20);
+        assert_eq!(placeholder, "App\\Models\\User");
+        assert_eq!(range.start.character, 10);
+        assert_eq!(range.end.character, 25);
     } else {
         panic!("Expected RangeWithPlaceholder");
     }
@@ -3125,15 +3124,55 @@ async fn prepare_rename_namespace_first_segment() {
     let resp = prepare_rename(&backend, &uri, 1, 11).await;
     assert!(
         resp.is_some(),
-        "Expected prepare rename to succeed for first segment"
+        "Expected prepare rename to succeed for namespace"
     );
     if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
-        assert_eq!(placeholder, "App");
+        assert_eq!(placeholder, "App\\Models");
         assert_eq!(range.start.character, 10);
-        assert_eq!(range.end.character, 13);
+        assert_eq!(range.end.character, 20);
     } else {
         panic!("Expected RangeWithPlaceholder");
     }
+}
+
+#[tokio::test]
+async fn rename_namespace_full_placeholder_can_replace_multiple_segments() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services\\Billing;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\Billing\\PaymentService;\n",
+        "function demo(PaymentService $p): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 11, "App\\Handlers\\Payments").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let result_a = apply_edits(text_a, &edits_for_uri(&edit, &uri_a));
+    assert!(
+        result_a.contains("namespace App\\Handlers\\Payments;"),
+        "Namespace declaration should be updated: {}",
+        result_a
+    );
+
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    assert!(
+        result_b.contains("use App\\Handlers\\Payments\\PaymentService;"),
+        "Use statement should be updated: {}",
+        result_b
+    );
 }
 
 #[tokio::test]
@@ -3210,6 +3249,108 @@ async fn rename_namespace_updates_use_statements_cross_file() {
         "Use statement should be updated: {}",
         result_b
     );
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_use_statements_in_indexed_unopened_file() {
+    use std::path::PathBuf;
+
+    let workspace = PathBuf::from("/tmp/test_workspace_ns_indexed_unopened");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
+    let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
+    let uri_b = Url::from_file_path(workspace.join("b.php")).unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\PaymentService;\n",
+        "class BillingController {\n",
+        "    public function handle(PaymentService $p): void {}\n",
+        "}\n",
+    );
+
+    std::fs::write(workspace.join("a.php"), text_a).unwrap();
+    std::fs::write(workspace.join("b.php"), text_b).unwrap();
+
+    open_file(&backend, &uri_a, text_a).await;
+
+    // Index b.php without opening it. This simulates a workspace-scanned file
+    // that has class metadata available but no live file_imports/symbol_map.
+    backend.parse_and_cache_content(text_b, uri_b.as_str());
+
+    let edit = rename(&backend, &uri_a, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    assert!(
+        !edits_b.is_empty(),
+        "Expected edits in indexed unopened file b"
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("use App\\Handlers\\PaymentService;"),
+        "Use statement should be updated in indexed unopened file: {}",
+        result_b
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
+    use std::path::PathBuf;
+
+    let workspace = PathBuf::from("/tmp/test_workspace_ns_usage_only");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
+    let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
+    let uri_b = Url::from_file_path(workspace.join("b.php")).unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\PaymentService;\n",
+        "function demo(PaymentService $p): void {}\n",
+    );
+
+    std::fs::write(workspace.join("a.php"), text_a).unwrap();
+    std::fs::write(workspace.join("b.php"), text_b).unwrap();
+
+    open_file(&backend, &uri_a, text_a).await;
+
+    let edit = rename(&backend, &uri_a, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    assert!(
+        !edits_b.is_empty(),
+        "Expected edits in unopened usage-only file b"
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("use App\\Handlers\\PaymentService;"),
+        "Use statement should be updated in unopened usage-only file: {}",
+        result_b
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[tokio::test]
