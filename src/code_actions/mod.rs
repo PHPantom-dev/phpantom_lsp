@@ -82,6 +82,7 @@ mod extract_constant;
 mod extract_function;
 mod extract_interface;
 mod extract_variable;
+mod fix_class_case;
 mod fix_class_name;
 mod fix_namespace;
 mod generate_constructor;
@@ -256,6 +257,9 @@ impl Backend {
 
         // ── Fix class name (filename mismatch) ──────────────────────────
         self.collect_fix_class_name_actions(uri, content, params, &mut actions);
+
+        // ── Fix class-reference case (PSR-4 autoload safety) ────────────
+        self.collect_fix_class_case_actions(uri, content, params, &mut actions);
 
         // ── Extract interface ────────────────────────────────────────────
         self.collect_extract_interface_actions(uri, content, params, &mut actions);

@@ -160,6 +160,7 @@
 //! debounce timers in both modes because they are expensive.
 
 mod argument_count;
+pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
 mod deprecated;
 pub(crate) mod helpers;
@@ -271,6 +272,7 @@ impl Backend {
         }
 
         self.collect_unknown_class_diagnostics(uri_str, content, out);
+        self.collect_class_case_mismatch_diagnostics(uri_str, content, out);
         self.collect_unknown_member_diagnostics(uri_str, content, out);
         self.collect_unknown_function_diagnostics(uri_str, content, out);
         // NOTE: unresolved_member_access diagnostics are now emitted

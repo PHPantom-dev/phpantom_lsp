@@ -411,6 +411,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                         b.collect_unknown_class_diagnostics(u, c, o)
                                     },
                                 ),
+                                ("class_case_mismatch", &|b, u, c, o| {
+                                    b.collect_class_case_mismatch_diagnostics(u, c, o)
+                                }),
                                 ("unknown_member", &|b, u, c, o| {
                                     b.collect_unknown_member_diagnostics(u, c, o)
                                 }),
