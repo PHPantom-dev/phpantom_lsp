@@ -919,6 +919,13 @@ impl Backend {
                 .map(|i| atom(&Self::resolve_name(i, use_map, namespace)))
                 .collect();
 
+            // Resolve the `@phpstan-require-extends` base class to its
+            // fully-qualified name so it is loadable cross-file.
+            if let Some(ref required) = class.require_extends {
+                class.require_extends =
+                    Some(atom(&Self::resolve_name(required, use_map, namespace)));
+            }
+
             // Resolve trait names in `insteadof` precedence adaptations
             for prec in &mut class.trait_precedences {
                 prec.trait_name = atom(&Self::resolve_name(&prec.trait_name, use_map, namespace));

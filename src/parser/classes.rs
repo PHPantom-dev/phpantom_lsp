@@ -186,6 +186,8 @@ struct ClassDocblockInfo {
     /// Each entry is `(MixinClassName, [TypeArg1, TypeArg2, …])`.
     /// Only populated for mixins that have generic arguments.
     mixin_generics: Vec<(Atom, Vec<PhpType>)>,
+    /// Required base class from a `@phpstan-require-extends` tag (traits only).
+    require_extends: Option<Atom>,
     /// URLs from `@link` and `@see` tags in the class-level docblock.
     links: Vec<String>,
     /// `@see` references from the class-level docblock.
@@ -256,6 +258,7 @@ fn extract_class_docblock<'a>(
             .collect(),
         mixins,
         mixin_generics,
+        require_extends: docblock::extract_require_extends_from_info(&info).map(|n| atom(&n)),
         links: docblock::extract_link_urls_from_info(&info),
         see_refs: docblock::extract_see_references_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
@@ -1016,6 +1019,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: class.modifiers.contains_final(),
                         is_abstract: class.modifiers.contains_abstract(),
                         deprecation_message: class_depr.message,
@@ -1127,6 +1131,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: false,
                         is_abstract: false,
                         deprecation_message: iface_depr.message,
@@ -1214,6 +1219,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: false,
                         is_abstract: false,
                         deprecation_message: trait_depr.message,
@@ -1350,6 +1356,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: true,
                         is_abstract: false,
                         deprecation_message: enum_depr.message,
@@ -1551,6 +1558,7 @@ impl Backend {
             used_traits,
             mixins: vec![],
             mixin_generics: vec![],
+            require_extends: None,
             is_final: false,
             is_abstract: false,
             deprecation_message: None,

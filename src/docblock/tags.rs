@@ -285,6 +285,44 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
     results
 }
 
+/// Extract the required base class from a `@phpstan-require-extends`
+/// (or `@psalm-require-extends` / bare `@require-extends`) tag.
+///
+/// This tag appears on traits to declare that any using class must extend
+/// the named base class. Returns the class name as written (minus any
+/// generic arguments), which is resolved to a fully-qualified name later
+/// during post-processing. Returns `None` when no such tag is present.
+pub fn extract_require_extends(docblock: &str) -> Option<String> {
+    let info = parse_docblock_for_tags(docblock)?;
+    extract_require_extends_from_info(&info)
+}
+
+/// Like [`extract_require_extends`], but operates on a pre-parsed
+/// [`DocblockInfo`].
+pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> {
+    for tag in info.tags_by_kinds(&[
+        TagKind::RequireExtends,
+        TagKind::PhpstanRequireExtends,
+        TagKind::PsalmRequireExtends,
+    ]) {
+        let desc = tag.description.trim();
+        if desc.is_empty() {
+            continue;
+        }
+        // Take the first type token so a trailing description or generic
+        // argument list does not leak into the class name.
+        let (type_token, _remainder) = split_type_token(desc);
+        let base = match PhpType::parse(type_token) {
+            PhpType::Generic(name, _) | PhpType::Named(name) => name,
+            _ => continue,
+        };
+        if !base.is_empty() {
+            return Some(base);
+        }
+    }
+    None
+}
+
 /// Strip a leading `\` from a `PhpType` without a `to_string()` →
 /// `PhpType::parse()` round-trip.  Uses `resolve_names` which already
 /// walks the entire type structure recursively.

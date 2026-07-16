@@ -1274,6 +1274,47 @@ fn mixin_tag_simple() {
 }
 
 #[test]
+fn require_extends_tag_simple() {
+    let doc = concat!("/**\n", " * @phpstan-require-extends TestCase\n", " */",);
+    assert_eq!(extract_require_extends(doc), Some("TestCase".to_string()));
+}
+
+#[test]
+fn require_extends_tag_fqn() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-extends \\Tests\\TestCase\n",
+        " */",
+    );
+    assert_eq!(
+        extract_require_extends(doc),
+        Some("\\Tests\\TestCase".to_string())
+    );
+}
+
+#[test]
+fn require_extends_tag_psalm_variant() {
+    let doc = concat!("/**\n", " * @psalm-require-extends BaseCase\n", " */",);
+    assert_eq!(extract_require_extends(doc), Some("BaseCase".to_string()));
+}
+
+#[test]
+fn require_extends_tag_strips_generic_arguments() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-extends Collection<int, string>\n",
+        " */",
+    );
+    assert_eq!(extract_require_extends(doc), Some("Collection".to_string()));
+}
+
+#[test]
+fn require_extends_tag_absent() {
+    let doc = concat!("/**\n", " * @mixin ShoppingCart\n", " */",);
+    assert_eq!(extract_require_extends(doc), None);
+}
+
+#[test]
 fn mixin_tag_fqn() {
     let doc = concat!("/**\n", " * @mixin \\App\\Models\\ShoppingCart\n", " */",);
     let mixins = extract_mixin_tags(doc);

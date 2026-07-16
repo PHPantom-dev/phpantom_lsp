@@ -4470,3 +4470,161 @@ async fn test_require_extends_and_implements_combined_self_return() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── @phpstan-require-extends surfaces base members on $this ─────────────────
+
+#[tokio::test]
+async fn test_completion_require_extends_this_members_same_file() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///require_extends_same.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class TestBase {\n",
+        "    public function mock(string $class): object { return new \\stdClass(); }\n",
+        "}\n",
+        "/** @phpstan-require-extends TestBase */\n",
+        "trait MocksStorageService {\n",
+        "    protected function helper(): void {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"mock"),
+                "Should include required base class method 'mock', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"helper"),
+                "Should still include the trait's own method 'helper', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_require_extends_this_members_cross_file_psr4() {
+    let composer_json = r#"{
+        "autoload": {
+            "psr-4": {
+                "Tests\\": "tests/"
+            }
+        }
+    }"#;
+
+    let base_php = concat!(
+        "<?php\n",
+        "namespace Tests;\n",
+        "class TestCase {\n",
+        "    public function mock(string $class): object { return new \\stdClass(); }\n",
+        "}\n",
+    );
+
+    let trait_php = concat!(
+        "<?php\n",
+        "namespace Tests\\Support;\n",
+        "use Tests\\TestCase;\n",
+        "/** @phpstan-require-extends \\Tests\\TestCase */\n",
+        "trait MocksStorageService {\n",
+        "    protected function helper(): void {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            ("tests/TestCase.php", base_php),
+            ("tests/Support/MocksStorageService.php", trait_php),
+        ],
+    );
+
+    // Open the trait file itself: it is analyzed standalone, exactly as
+    // PHPStan never does (PHPStan only sees traits through using classes).
+    let uri = Url::parse("file:///MocksStorageService.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: trait_php.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"mock"),
+                "Should include cross-file required base method 'mock', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

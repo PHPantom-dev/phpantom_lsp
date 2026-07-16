@@ -356,31 +356,6 @@ the same proof wrapped in PHPUnit's `assertTrue()` (whose
 `@psalm-assert true $condition` re-exports the inner condition) does
 not fire. Backoffice `ApplicationSettingsControllerTest.php:99`.
 
-## B107. `@phpstan-require-extends` is not used to resolve `$this` members inside trait bodies
-
-**Severity: Medium (6 errors, luxplus-backoffice) · Reproduced in-project**
-
-```php
-/** @phpstan-require-extends \Tests\TestCase */
-trait MocksStorageService
-{
-    protected function mockStorageForImport(string $filePath): MockInterface
-    {
-        $storageResultMock = $this->mock(GetFileResult::class); // TestCase::mock()
-        $storageResultMock->shouldReceive('getLocalPath'); // "type of '$storageResultMock' could not be resolved"
-    }
-}
-```
-
-The identical body inside a class extending `TestCase` resolves
-fully, and the tag is already parsed by the docblock parser — it
-just isn't consulted when resolving `$this` in a trait analyzed
-standalone. PHPStan only analyzes traits in the context of using
-classes, so annotated helper traits like this are clean there.
-Backoffice `tests/Support/MocksStorageService.php` (5) and
-`tests/Support/PaginationAssertions.php` (1) — both files now carry
-the annotation, so they become clean the moment this ships.
-
 ## B108. A leading-backslash docblock type is resolved through a same-short-name import
 
 **Severity: Low-Medium (2 errors, luxplus-backoffice) · Reproduced with fixture**

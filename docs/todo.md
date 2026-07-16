@@ -31,7 +31,6 @@ within the same impact tier.
 | B99 | [`array<T>\|false` union loses the array's element type](todo/bugs.md#b99-an-arraytfalse-union-loses-the-arrays-element-type) | Medium | Low |
 | B102 | [Conditional return types with `static<...>` branches don't resolve](todo/bugs.md#b102-conditional-return-types-with-static-generic-branches-do-not-resolve) | Medium | Low-Medium |
 | B103 | [`return $this` in a trait method resolves to the trait, not the using class](todo/bugs.md#b103-return-this-in-a-trait-method-resolves-to-the-trait-instead-of-the-using-class) | Medium | Low-Medium |
-| B107 | [`@phpstan-require-extends` not used for `$this` in trait bodies](todo/bugs.md#b107-phpstan-require-extends-is-not-used-to-resolve-this-members-inside-trait-bodies) | Medium | Low-Medium |
 | B101 | [Guard-branch reassignment discards the other path's type when partially unresolved](todo/bugs.md#b101-reassignment-inside-a-guard-branch-discards-the-other-paths-type-when-the-initial-type-is-partially-unresolved) | Medium | Medium |
 | B92 | [Assert narrowing can't override list-destructured variables with unresolvable RHS](todo/bugs.md#b92-assert-narrowing-cannot-override-variables-assigned-by-list-destructuring-from-an-unresolvable-rhs) | Medium | Low-Medium |
 | B94 | [Closure param declared union overridden by inferred collection element type](todo/bugs.md#b94-a-closure-parameters-declared-union-type-is-overridden-by-the-inferred-collection-element-type) | Medium | Low-Medium |

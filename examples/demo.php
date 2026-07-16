@@ -4016,8 +4016,44 @@ class ConvertToClosureDemo
     }
 }
 
+// ── @phpstan-require-extends: base members on $this in a trait ───────────────
+
+/**
+ * A trait annotated with `@phpstan-require-extends` guarantees that every
+ * class using it extends the named base class, so `$this` inside the trait
+ * can access that base class's members even though the trait analyzed
+ * standalone does not declare them.
+ *
+ * @phpstan-require-extends RequireExtendsTestCase
+ */
+trait MocksServiceDemo
+{
+    public function mockPath(): string
+    {
+        $mock = $this->makeMock();                // RequireExtendsTestCase::makeMock() → Mock
+        return $mock->path();                     // Mock::path() → string
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
+
+// ── @phpstan-require-extends scaffolding ────────────────────────────────────
+
+class Mock
+{
+    public function path(): string { return '/tmp/mock'; }
+}
+
+class RequireExtendsTestCase
+{
+    public function makeMock(): Mock { return new Mock(); }
+}
+
+final class RequireExtendsConsumer extends RequireExtendsTestCase
+{
+    use MocksServiceDemo;
+}
 
 // ── SPL wrapper-iterator scaffolding ───────────────────────────────────────────
 
@@ -5931,6 +5967,10 @@ function runDemoAssertions(): void
     $withDetail->$field = 'context';
     assert($memberDemo->guardClause($withDetail) === 'context', 'negated property_exists guard clause reads the property after it');
     assert($memberDemo->guardClause(new ApiResponse()) === 'none', 'guard clause returns early when the property is absent');
+
+    // ── @phpstan-require-extends base members on $this ──────────────────
+    $consumer = new RequireExtendsConsumer();
+    assert($consumer->mockPath() === '/tmp/mock', 'trait method reaches base class member via @phpstan-require-extends');
 
     // ── Pseudo-type class-name collision ────────────────────────────────
     $num = new Number('42');

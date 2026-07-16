@@ -1596,6 +1596,18 @@ pub struct ClassInfo {
     /// concrete types, analogous to how `extends_generics` works for
     /// parent class inheritance.
     pub mixin_generics: Vec<(Atom, Vec<PhpType>)>,
+    /// Required base class from a `@phpstan-require-extends` tag.
+    ///
+    /// Only meaningful on traits. When a trait carries
+    /// `@phpstan-require-extends \Tests\TestCase`, any class that uses the
+    /// trait must extend that base class, so inside the trait's methods
+    /// `$this` has access to the base class's members. Resolved to a
+    /// fully-qualified name during post-processing (see
+    /// `resolve_parent_class_names` in `parser/ast_update.rs`).
+    ///
+    /// `None` when the trait has no such tag (or the declaration is not a
+    /// trait).
+    pub require_extends: Option<Atom>,
     /// Whether the class is declared `final`.
     ///
     /// Final classes cannot be extended, so `static::` is equivalent to
@@ -1878,6 +1890,7 @@ impl ClassInfo {
             || self.used_traits != other.used_traits
             || self.mixins != other.mixins
             || self.mixin_generics != other.mixin_generics
+            || self.require_extends != other.require_extends
             || self.is_final != other.is_final
             || self.is_abstract != other.is_abstract
             || self.deprecation_message != other.deprecation_message
