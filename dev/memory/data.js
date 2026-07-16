@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784204039304,
+  "lastUpdate": 1784209932766,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15333,6 +15333,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 63.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "db4025e7a8bf2e7b48f8497506f6b756ece690c0",
+          "message": "Parenthesized return types resolve instead of being dropped",
+          "timestamp": "2026-07-16T15:37:25+02:00",
+          "tree_id": "fb76d438c45118207ebd2a4baf7b99d0f851f91a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/db4025e7a8bf2e7b48f8497506f6b756ece690c0"
+        },
+        "date": 1784209930401,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 64.5,
             "unit": "MiB"
           }
         ]
