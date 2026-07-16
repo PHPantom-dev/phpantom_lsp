@@ -82,6 +82,8 @@ mod extract_constant;
 mod extract_function;
 mod extract_interface;
 mod extract_variable;
+mod fix_class_name;
+mod fix_namespace;
 mod generate_constructor;
 mod generate_getter_setter;
 mod generate_property_hooks;
@@ -248,6 +250,12 @@ impl Backend {
 
         // ── Convert switch to match expression ──────────────────────────
         self.collect_convert_switch_to_match_actions(uri, content, params, &mut actions);
+
+        // ── Fix namespace (PSR-4 mismatch) ──────────────────────────────
+        self.collect_fix_namespace_actions(uri, content, params, &mut actions);
+
+        // ── Fix class name (filename mismatch) ──────────────────────────
+        self.collect_fix_class_name_actions(uri, content, params, &mut actions);
 
         // ── Extract interface ────────────────────────────────────────────
         self.collect_extract_interface_actions(uri, content, params, &mut actions);
