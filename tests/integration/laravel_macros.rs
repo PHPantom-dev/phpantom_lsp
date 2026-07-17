@@ -205,7 +205,7 @@ class Consumer {
             assert_eq!(location.uri, Url::parse(provider_uri).unwrap());
             // The `Collection::macro('sumField', ...)` line in PROVIDER_PHP.
             assert_eq!(location.range.start.line, 5);
-            assert_eq!(location.range.start.character, 26);
+            assert_eq!(location.range.start.character, 27);
         }
         other => panic!("expected a scalar location, got: {other:?}"),
     }

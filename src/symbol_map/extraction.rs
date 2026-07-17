@@ -244,8 +244,20 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
 
+    let mut member_access_indices: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (idx, span) in ctx.spans.iter().enumerate() {
+        if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
+            member_access_indices
+                .entry(member_name.clone())
+                .or_default()
+                .push(idx);
+        }
+    }
+
     SymbolMap {
         spans: ctx.spans,
+        member_access_indices,
         var_defs: ctx.var_defs,
         scopes: ctx.scopes,
         arrow_fn_scopes: ctx.arrow_fn_scopes,
@@ -2004,6 +2016,13 @@ fn extract_from_expression<'a>(
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                     let member_name = bytes_to_str(ident.value).to_string();
+                    if member_name.eq_ignore_ascii_case("macro") {
+                        try_emit_laravel_macro_string_span(
+                            &method_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     if is_laravel_config_repository_call(method_call.object, &member_name) {
                         try_emit_laravel_string_span(
                             crate::symbol_map::LaravelStringKind::Config,
@@ -2094,6 +2113,13 @@ fn extract_from_expression<'a>(
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
                     let member_name = bytes_to_str(ident.value).to_string();
+                    if member_name.eq_ignore_ascii_case("macro") {
+                        try_emit_laravel_macro_string_span(
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     // Emit call site for static method call: `Class::method(...)`
                     emit_call_site(
                         format!("{}::{}", subject_text, member_name),
@@ -3463,6 +3489,37 @@ fn try_emit_laravel_string_span(
         kind: SymbolKind::LaravelStringKey {
             kind,
             key: key.to_string(),
+        },
+    });
+}
+
+/// If `argument_list` starts with a plain, non-empty string literal, push a
+/// [`SymbolKind::LaravelMacroString`] span covering the string content.
+fn try_emit_laravel_macro_string_span(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let name = &content[inner_start as usize..inner_end as usize];
+    if name.is_empty() {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelMacroString {
+            name: name.to_string(),
         },
     });
 }

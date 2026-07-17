@@ -391,7 +391,9 @@ impl Backend {
 
                 SymbolKind::Comment => (TT_COMMENT, 0),
 
-                SymbolKind::LaravelStringKey { .. } => continue,
+                SymbolKind::LaravelStringKey { .. } | SymbolKind::LaravelMacroString { .. } => {
+                    continue;
+                }
             };
 
             if let Some(abs) = offset_to_absolute(

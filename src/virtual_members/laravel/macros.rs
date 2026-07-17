@@ -110,6 +110,9 @@ pub(crate) struct LaravelMacroIndex {
     /// jumps to the registration call site rather than the target class's own
     /// file (where the macro has no declaration).
     locations: HashMap<(String, String), (String, u32)>,
+    /// Reverse lookup from a registration string location back to the target
+    /// FQN(s) and macro name it contributes.
+    reverse_locations: HashMap<(String, u32), Vec<(String, String)>>,
 }
 
 impl LaravelMacroIndex {
@@ -153,6 +156,47 @@ impl LaravelMacroIndex {
             .map(|(uri, offset)| (uri.as_str(), *offset))
     }
 
+    /// All macro targets contributed by the registration string at `uri` +
+    /// `offset`, filtered to the given `name`.
+    pub(crate) fn targets_at(&self, uri: &str, offset: u32, name: &str) -> Vec<String> {
+        [offset, offset.saturating_sub(1)]
+            .into_iter()
+            .find_map(|candidate| {
+                self.reverse_locations
+                    .get(&(uri.to_string(), candidate))
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter(|(_, entry_name)| entry_name == name)
+                            .map(|(target, _)| target.clone())
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether `fqn` has a recognized macro registration named `name`.
+    pub(crate) fn has_macro(&self, fqn: &str, name: &str) -> bool {
+        self.locations
+            .contains_key(&(fqn.to_string(), name.to_string()))
+    }
+
+    /// The sole registration location for `name`, if exactly one target in the
+    /// index contributes that macro name.
+    pub(crate) fn unique_definition_for_name(&self, name: &str) -> Option<(&str, u32)> {
+        let mut matches = self
+            .locations
+            .iter()
+            .filter_map(|((_, macro_name), (uri, offset))| {
+                (macro_name == name).then_some((uri.as_str(), *offset))
+            });
+        let first = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(first)
+    }
+
     /// Every class FQN that has at least one macro (used to evict stale
     /// resolved-class cache entries when the index changes).
     pub(crate) fn target_fqns(&self) -> Vec<String> {
@@ -165,6 +209,7 @@ impl LaravelMacroIndex {
     fn rebuild_merged(&mut self) {
         let mut merged: HashMap<String, Vec<Arc<MethodInfo>>> = HashMap::new();
         let mut locations: HashMap<(String, String), (String, u32)> = HashMap::new();
+        let mut reverse_locations: HashMap<(String, u32), Vec<(String, String)>> = HashMap::new();
         for (uri, regs) in self.by_uri.iter() {
             for reg in regs {
                 let bucket = merged.entry(reg.target.clone()).or_default();
@@ -188,10 +233,15 @@ impl LaravelMacroIndex {
                         .entry((reg.target.clone(), reg.method.name.to_string()))
                         .or_insert_with(|| (uri.clone(), reg.name_offset));
                 }
+                reverse_locations
+                    .entry((uri.clone(), reg.name_offset))
+                    .or_default()
+                    .push((reg.target.clone(), reg.method.name.to_string()));
             }
         }
         self.merged = merged;
         self.locations = locations;
+        self.reverse_locations = reverse_locations;
     }
 }
 

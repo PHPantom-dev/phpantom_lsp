@@ -654,7 +654,7 @@ impl Backend {
             (uri.to_string(), offset)
         };
         let content = self.get_file_content(&uri)?;
-        let position = crate::util::offset_to_position(&content, offset as usize);
+        let position = crate::util::offset_to_position(&content, offset as usize + 1);
         let parsed_uri = Url::parse(&uri).ok()?;
         Some(point_location(parsed_uri, position))
     }

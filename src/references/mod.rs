@@ -204,6 +204,7 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
+                is_method_call,
                 ..
             } => {
                 // Resolve the subject to determine the class hierarchy
@@ -237,14 +238,47 @@ impl Backend {
                     return self.find_constructor_references(&seeds, include_declaration);
                 }
 
-                self.find_member_references(
+                let mut locations = self.find_member_references(
                     member_name,
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.as_ref(),
                     allow_unresolved_member_subjects,
-                )
+                );
+
+                if *is_method_call && include_declaration {
+                    let before_len = locations.len();
+                    let call_position = offset_to_position(content, span_start as usize);
+                    for def in self.resolve_definition(uri, content, call_position) {
+                        let mut start = def.range.start;
+                        let mut end = def.range.end;
+                        if start == end {
+                            let def_uri = def.uri.to_string();
+                            if let Some(def_content) = self.get_file_content(&def_uri)
+                                && let Some(def_span) =
+                                    self.lookup_symbol_at_position(&def_uri, &def_content, start)
+                            {
+                                start = offset_to_position(&def_content, def_span.start as usize);
+                                end = offset_to_position(&def_content, def_span.end as usize);
+                            }
+                        }
+                        push_unique_location(&mut locations, &def.uri, start, end);
+                    }
+                    self.append_laravel_macro_registration_locations(
+                        &mut locations,
+                        member_name,
+                        declaration_scope.as_ref().or(hierarchy.as_ref()),
+                    );
+                    if locations.len() == before_len {
+                        self.append_unique_laravel_macro_registration_location(
+                            &mut locations,
+                            member_name,
+                        );
+                    }
+                }
+
+                locations
             }
             SymbolKind::FunctionCall { name, .. } => {
                 let ctx = self.file_context(uri);
@@ -322,8 +356,151 @@ impl Backend {
                 )
             }
 
+            SymbolKind::LaravelMacroString { name } => self.find_laravel_macro_references(
+                uri,
+                span_start,
+                name,
+                include_declaration,
+                allow_unresolved_member_subjects,
+            ),
+
             SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => Vec::new(),
         }
+    }
+
+    fn find_laravel_macro_references(
+        &self,
+        uri: &str,
+        span_start: u32,
+        name: &str,
+        include_declaration: bool,
+        _allow_unresolved_subjects: bool,
+    ) -> Vec<Location> {
+        let targets = {
+            let index = self.laravel_macros.read();
+            index.targets_at(uri, span_start, name)
+        };
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let hierarchy = self.collect_hierarchy_for_fqns(&targets);
+
+        let snapshot = self.user_file_symbol_maps();
+        let mut locations = Vec::new();
+        for (file_uri, symbol_map) in &snapshot {
+            if symbol_map.member_access_indices(name).is_empty() {
+                continue;
+            }
+
+            let Ok(parsed_uri) = Url::parse(file_uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(file_uri) else {
+                continue;
+            };
+            let file_ctx = self.file_context(file_uri);
+
+            for &span_idx in symbol_map.member_access_indices(name) {
+                let span = &symbol_map.spans[span_idx];
+                let SymbolKind::MemberAccess {
+                    member_name,
+                    subject_text,
+                    is_static,
+                    ..
+                } = &span.kind
+                else {
+                    continue;
+                };
+                if member_name != name {
+                    continue;
+                }
+
+                let matches_macro = if subject_text.contains('(') {
+                    // Chained call receivers like `$query->pluck(...)->macroName()`
+                    // are expensive to resolve precisely here and are the main
+                    // real-world macro-registration rename case.
+                    true
+                } else {
+                    let subject_fqns = self.resolve_subject_to_fqns(
+                        subject_text,
+                        *is_static,
+                        &file_ctx,
+                        span.start,
+                        &content,
+                    );
+                    !subject_fqns.is_empty()
+                        && subject_fqns.iter().any(|fqn| hierarchy.contains(fqn))
+                };
+                if !matches_macro {
+                    continue;
+                }
+
+                let start = offset_to_position(&content, span.start as usize);
+                let end = offset_to_position(&content, span.end as usize);
+                push_unique_location(&mut locations, &parsed_uri, start, end);
+            }
+        }
+
+        if include_declaration {
+            let macro_scope: HashSet<String> = targets.iter().cloned().collect();
+            self.append_laravel_macro_registration_locations(
+                &mut locations,
+                name,
+                Some(&macro_scope),
+            );
+        }
+
+        locations
+    }
+
+    fn append_laravel_macro_registration_locations(
+        &self,
+        locations: &mut Vec<Location>,
+        name: &str,
+        targets: Option<&HashSet<String>>,
+    ) {
+        let Some(targets) = targets else {
+            return;
+        };
+        let index = self.laravel_macros.read();
+        for target in targets {
+            if !index.has_macro(target, name) {
+                continue;
+            }
+            let Some((uri, offset)) = index.definition(target, name) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(uri) else {
+                continue;
+            };
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let start = offset_to_position(&content, offset as usize + 1);
+            let end = offset_to_position(&content, offset as usize + 1 + name.len());
+            push_unique_location(locations, &parsed_uri, start, end);
+        }
+    }
+
+    fn append_unique_laravel_macro_registration_location(
+        &self,
+        locations: &mut Vec<Location>,
+        name: &str,
+    ) {
+        let index = self.laravel_macros.read();
+        let Some((uri, offset)) = index.unique_definition_for_name(name) else {
+            return;
+        };
+        let Some(content) = self.get_file_content_arc(uri) else {
+            return;
+        };
+        let Ok(parsed_uri) = Url::parse(uri) else {
+            return;
+        };
+        let start = offset_to_position(&content, offset as usize + 1);
+        let end = offset_to_position(&content, offset as usize + 1 + name.len());
+        push_unique_location(locations, &parsed_uri, start, end);
     }
 
     /// Find all references to a variable within its enclosing scope.
@@ -1107,21 +1284,23 @@ impl Backend {
         for (file_uri, symbol_map) in &snapshot {
             // First pass: name-only check to avoid unnecessary work.
             // When a hierarchy is present (e.g. Laravel), we allow static mismatch.
-            let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
-                SymbolKind::MemberAccess {
-                    member_name,
-                    is_static,
-                    ..
-                } if member_name == target_member => {
-                    hierarchy.is_some() || *is_static == target_is_static
-                }
-                SymbolKind::MemberDeclaration { name, is_static }
-                    if include_declaration && name == target_member =>
-                {
-                    hierarchy.is_some() || *is_static == target_is_static
-                }
-                _ => false,
-            });
+            let has_member_access_match = symbol_map
+                .member_access_indices(target_member)
+                .iter()
+                .any(|&idx| match &symbol_map.spans[idx].kind {
+                    SymbolKind::MemberAccess { is_static, .. } => {
+                        hierarchy.is_some() || *is_static == target_is_static
+                    }
+                    _ => false,
+                });
+            let has_declaration_match = include_declaration
+                && symbol_map.spans.iter().any(|span| match &span.kind {
+                    SymbolKind::MemberDeclaration { name, is_static } if name == target_member => {
+                        hierarchy.is_some() || *is_static == target_is_static
+                    }
+                    _ => false,
+                });
+            let has_potential_match = has_member_access_match || has_declaration_match;
 
             // Special check for property declarations in ClassInfo (represented as Variable spans)
             let mut check_ast_map = false;
@@ -1160,7 +1339,8 @@ impl Backend {
             let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
                 std::cell::OnceCell::new();
 
-            for span in &symbol_map.spans {
+            for &span_idx in symbol_map.member_access_indices(target_member) {
+                let span = &symbol_map.spans[span_idx];
                 match &span.kind {
                     SymbolKind::MemberAccess {
                         subject_text,
@@ -1220,56 +1400,61 @@ impl Backend {
                             range: Range { start, end },
                         });
                     }
-                    SymbolKind::MemberDeclaration { name, is_static }
-                        if include_declaration && name == target_member =>
-                    {
-                        if *is_static != target_is_static && hierarchy.is_none() {
-                            continue;
-                        }
+                    _ => {}
+                }
+            }
 
-                        // Check if the enclosing class is in the hierarchy.
-                        let declaration_filter = if *is_static == target_is_static {
-                            declaration_scope.or(hierarchy)
-                        } else {
-                            hierarchy
-                        };
-                        if let Some(hier) = declaration_filter {
-                            let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
-                            let enclosing =
-                                find_class_at_offset(&ctx.classes, span.start).or_else(|| {
-                                    // Docblock MemberDeclaration spans are before the
-                                    // opening brace; fall back to the nearest class.
-                                    ctx.classes
-                                        .iter()
-                                        .map(|c| c.as_ref())
-                                        .filter(|c| {
-                                            c.keyword_offset > 0 && span.start < c.start_offset
-                                        })
-                                        .min_by_key(|c| c.start_offset)
-                                });
-                            if let Some(enclosing) = enclosing {
-                                let fqn = enclosing.fqn().to_string();
-                                if !hier.contains(&fqn) {
-                                    continue;
+            if include_declaration {
+                for span in &symbol_map.spans {
+                    match &span.kind {
+                        SymbolKind::MemberDeclaration { name, is_static }
+                            if name == target_member =>
+                        {
+                            if *is_static != target_is_static && hierarchy.is_none() {
+                                continue;
+                            }
+
+                            let declaration_filter = if *is_static == target_is_static {
+                                declaration_scope.or(hierarchy)
+                            } else {
+                                hierarchy
+                            };
+                            if let Some(hier) = declaration_filter {
+                                let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
+                                let enclosing = find_class_at_offset(&ctx.classes, span.start)
+                                    .or_else(|| {
+                                        ctx.classes
+                                            .iter()
+                                            .map(|c| c.as_ref())
+                                            .filter(|c| {
+                                                c.keyword_offset > 0 && span.start < c.start_offset
+                                            })
+                                            .min_by_key(|c| c.start_offset)
+                                    });
+                                if let Some(enclosing) = enclosing {
+                                    let fqn = enclosing.fqn().to_string();
+                                    if !hier.contains(&fqn) {
+                                        continue;
+                                    }
                                 }
                             }
-                        }
 
-                        if file_content.is_none() {
-                            file_content = self.get_file_content_arc(file_uri);
-                        }
-                        let Some(ref content) = file_content else {
-                            break;
-                        };
+                            if file_content.is_none() {
+                                file_content = self.get_file_content_arc(file_uri);
+                            }
+                            let Some(ref content) = file_content else {
+                                break;
+                            };
 
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        locations.push(Location {
-                            uri: parsed_uri.clone(),
-                            range: Range { start, end },
-                        });
+                            let start = offset_to_position(content, span.start as usize);
+                            let end = offset_to_position(content, span.end as usize);
+                            locations.push(Location {
+                                uri: parsed_uri.clone(),
+                                range: Range { start, end },
+                            });
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
 
@@ -1562,6 +1747,12 @@ impl Backend {
         if fqns.is_empty() {
             return (None, None);
         }
+        if let Some(macro_targets) = self.collect_macro_declaring_targets(&fqns, member_name) {
+            return (
+                Some(self.collect_hierarchy_for_fqns(&macro_targets)),
+                Some(self.collect_macro_declaring_scope(&macro_targets)),
+            );
+        }
         (
             Some(self.collect_hierarchy_for_fqns(&fqns)),
             self.collect_declaring_seed_scope(&fqns, member_name, is_static),
@@ -1824,6 +2015,49 @@ impl Backend {
         Some(scope)
     }
 
+    fn collect_macro_declaring_targets(
+        &self,
+        seed_fqns: &[String],
+        member_name: &str,
+    ) -> Option<Vec<String>> {
+        let index = self.laravel_macros.read();
+        let mut targets = Vec::new();
+        for seed in seed_fqns {
+            let mut ancestors = HashSet::new();
+            let normalized = normalize_fqn(seed).to_string();
+            ancestors.insert(normalized.clone());
+            let class_loader =
+                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+            self.collect_ancestors(&normalized, &class_loader, &mut ancestors);
+            for candidate in ancestors {
+                if index.has_macro(&candidate, member_name) && !targets.contains(&candidate) {
+                    targets.push(candidate);
+                }
+            }
+        }
+        (!targets.is_empty()).then_some(targets)
+    }
+
+    fn collect_macro_declaring_scope(&self, macro_targets: &[String]) -> HashSet<String> {
+        let mut scope: HashSet<String> = macro_targets
+            .iter()
+            .map(|fqn| normalize_fqn(fqn).to_string())
+            .collect();
+        let mut queue: std::collections::VecDeque<String> = scope.iter().cloned().collect();
+        let gti = self.gti_index.read();
+        while let Some(fqn) = queue.pop_front() {
+            if let Some(descendants) = gti.get(&fqn) {
+                for desc in descendants {
+                    let normalized = normalize_fqn(desc).to_string();
+                    if scope.insert(normalized.clone()) {
+                        queue.push_back(normalized);
+                    }
+                }
+            }
+        }
+        scope
+    }
+
     fn defines_member(
         &self,
         fqn: &str,
@@ -1964,10 +2198,6 @@ impl Backend {
         // files that are not open in the editor can still be discovered.
         // The existing-URI filter below keeps this cheap by parsing only files
         // that are not already in `symbol_maps`.
-        let has_scanned_workspace = self
-            .workspace_indexed
-            .load(std::sync::atomic::Ordering::Relaxed);
-
         let workspace_root = self.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
@@ -1979,12 +2209,7 @@ impl Backend {
             let walk_start = std::time::Instant::now();
             let php_files = collect_php_files_gitignore(&root, &vendor_dir_paths);
             tracing::info!(
-                "ensure_workspace_indexed: Phase 2 {} found {} PHP files in {:?}",
-                if has_scanned_workspace {
-                    "refresh disk walk"
-                } else {
-                    "disk walk"
-                },
+                "ensure_workspace_indexed: Phase 2 disk walk found {} PHP files in {:?}",
                 php_files.len(),
                 walk_start.elapsed()
             );

@@ -1,4 +1,6 @@
 use crate::Backend;
+use crate::virtual_members::laravel::extract_macro_registrations;
+use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -40,6 +42,27 @@ async fn find_references(
         .await
         .unwrap()
         .unwrap_or_default()
+}
+
+fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
+    let mut index = backend.laravel_macros.write();
+    index.set_file(
+        uri.to_string(),
+        extract_macro_registrations(text, Some(*backend.php_version.lock())),
+    );
+    index.rebuild();
+    backend
+        .laravel_has_macros
+        .store(!index.is_empty(), Ordering::Relaxed);
+}
+
+fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
+    for (line_idx, line) in haystack.lines().enumerate() {
+        if let Some(char_idx) = line.find(needle) {
+            return (line_idx as u32, char_idx as u32);
+        }
+    }
+    panic!("needle not found: {needle}");
 }
 
 // ─── Variable References ────────────────────────────────────────────────────
@@ -1856,5 +1879,172 @@ async fn test_constructor_references_finds_attribute_usage() {
         has_attr_usage,
         "Expected the `#[MyAttr(1)]` attribute usage (L5) to be a constructor reference, got {:?}",
         locs
+    );
+}
+
+#[tokio::test]
+async fn test_macro_registration_string_references_include_call_sites() {
+    let backend = Backend::new_test();
+    let class_uri = Url::parse("file:///Widget.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "function demo(Widget $widget): void {\n",
+        "    Widget::shine();\n",
+        "    $widget->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &class_uri, class_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let locs = find_references(&backend, &provider_uri, line, character, true).await;
+    assert_eq!(
+        locs.len(),
+        3,
+        "expected declaration + static + instance call: {locs:?}"
+    );
+    assert!(locs.iter().any(|loc| loc.uri == provider_uri));
+    assert!(locs.iter().any(|loc| {
+        loc.uri == caller_uri && loc.range.start.line == 4 && loc.range.start.character == 12
+    }));
+    assert!(locs.iter().any(|loc| {
+        loc.uri == caller_uri && loc.range.start.line == 5 && loc.range.start.character == 13
+    }));
+}
+
+#[tokio::test]
+async fn test_macro_references_from_descendant_call_include_ancestor_and_sibling_calls() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let child_uri = Url::parse("file:///EloquentCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let child_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class EloquentCollection extends BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "use App\\Support\\EloquentCollection;\n",
+        "function demo(BaseCollection $base, EloquentCollection $eloquent): void {\n",
+        "    $base->shine();\n",
+        "    $eloquent->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &child_uri, child_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let locs = find_references(&backend, &caller_uri, 6, 16, true).await;
+    assert_eq!(
+        locs.len(),
+        3,
+        "expected registration + base + descendant call: {locs:?}"
+    );
+    assert!(locs.iter().any(|loc| loc.uri == provider_uri));
+    assert!(locs.iter().any(|loc| {
+        loc.uri == caller_uri && loc.range.start.line == 5 && loc.range.start.character == 11
+    }));
+    assert!(locs.iter().any(|loc| {
+        loc.uri == caller_uri && loc.range.start.line == 6 && loc.range.start.character == 15
+    }));
+}
+
+#[tokio::test]
+async fn test_macro_registration_references_include_unresolved_chain_call() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "function demo($query): void {\n",
+        "    $query->pluck('name', 'id')->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let shine_subject = backend
+        .symbol_maps
+        .read()
+        .get(caller_uri.as_str())
+        .expect("caller symbol map should exist")
+        .spans
+        .iter()
+        .find_map(|span| match &span.kind {
+            crate::symbol_map::SymbolKind::MemberAccess {
+                member_name,
+                subject_text,
+                ..
+            } if member_name == "shine" => Some(subject_text.clone()),
+            _ => None,
+        })
+        .expect("expected member-access span for unresolved chain call");
+    assert!(
+        shine_subject.contains("pluck"),
+        "expected chain subject text, got {shine_subject:?}"
+    );
+    assert!(
+        shine_subject.contains('('),
+        "expected call-chain subject text, got {shine_subject:?}"
+    );
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let locs = find_references(&backend, &provider_uri, line, character, true).await;
+    assert!(
+        locs.iter().any(|loc| {
+            loc.uri == caller_uri && loc.range.start.line == 3 && loc.range.start.character == 33
+        }),
+        "expected unresolved chain macro call to be included: {locs:?}"
     );
 }
