@@ -7,7 +7,7 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-The three entries below come from the 2026-07-18 analyze triage
+The entries below come from the 2026-07-18 analyze triage
 refresh over the sample projects (see `projects/analyze-triage.md`).
 
 ## B110. Container string alias resolution (`app('x')` / `resolve('x')`) does not apply once the call result is assigned to a variable
@@ -29,26 +29,35 @@ has no equivalent check, so `$var = resolve('blade.compiler');` loses
 the binding. Bladestan's `BladeCompilerFactory.php:17-18` is the only
 sample-project occurrence.
 
-## B111. `assertInstanceOf()` narrowing requires a literal `X::class` argument; a variable holding the same class-string does not narrow
+## B111. `assertInstanceOf()` does not narrow when the expected class is list-destructured from a source array
 
-**Severity: Low-Medium (4 errors, pdepend) · Reproduced with fixture**
+**Severity: Low (1 error, pdepend) · Reproduced with fixture**
 
 ```php
-$expectedTypeClass = Wanted::class; // held in a variable, not inlined
-static::assertInstanceOf($expectedTypeClass, $type);
-$type->getImage(); // "type of '$type' could not be resolved"
+$items = [
+    ['null|int|float', '$number', ASTUnionType::class],
+];
+foreach ($items as $index => $expected) {
+    [$expectedType, $expectedVariable, $expectedTypeClass] = $expected;
+    [$type, $variable] = $declarations[$index];
+    static::assertInstanceOf($expectedTypeClass, $type);
+    $type->getImage(); // "type of '$type' could not be resolved"
+}
 ```
 
-`static::assertInstanceOf(Wanted::class, $type)` (the class inlined
-directly in the call) narrows `$type` fine. Replacing only the inline
-class with a variable holding the exact same `Wanted::class` value,
-with everything else unchanged, reintroduces the error — confirmed by
-toggling a single line in a fixture copied from the real file. The
-narrowing logic doesn't fold the variable back to its literal value,
-so the assert is treated as an unknown-target instanceof check and no
-narrowing happens. Accounts for all 4 remaining `getImage()` errors in
-PDepend's PHP 8.1/8.2 parser tests
-(`AllowNullAndFalseAsStandAloneTypesTest.php`, `TrueTypeTest.php`,
-`PHPParserVersion81Test.php` ×2), each using
-`$expectedTypeClass = ASTScalarType::class;` or
-`$expected[2] ?? ASTScalarType::class;` one line before the assert.
+A variable assigned a `::class` value directly (`$cls = Foo::class;`)
+or via null-coalesce (`$cls = $arr[2] ?? Foo::class;`), including inside
+a braced loop body, now narrows the assert subject. The remaining case
+is when the expected-class variable is *list-destructured* out of a
+source array: `$expectedTypeClass` is the third element of each
+`$items` row, bound through the foreach value variable `$expected`.
+Resolving it requires matching the destructure position against the
+foreach source array's element at that index, which the class-string
+resolver (`completion/variable/class_string_resolution.rs`) does not do
+— it only recognizes direct assignments. The proper fix routes
+class-string-value resolution through the shared forward walker (which
+already tracks destructuring and foreach bindings) rather than
+extending the special-purpose resolver, to avoid a parallel resolution
+path (see CLAUDE.md performance anti-pattern #6). Accounts for the one
+remaining `getImage()` error in PDepend's
+`PHPParserVersion81Test.php` (the `testUnionTypesX` provider loop).

@@ -4277,6 +4277,103 @@ class ParserTest extends BaseAssert {
     );
 }
 
+/// A variable holding a `::class` literal (e.g. `$cls = Wanted::class;`)
+/// used as the class-string argument to `assertInstanceOf` must narrow
+/// the subject the same way the inlined `Wanted::class` literal does.
+#[test]
+fn assert_narrows_via_variable_class_string_argument() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testDestructure(array $declarations): void {
+        $expectedTypeClass = Wanted::class;
+        [$type, $variable] = $declarations[0];
+        static::assertInstanceOf($expectedTypeClass, $type);
+        $type->getImage();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow via a variable holding a ::class literal, got: {diags:?}",
+    );
+}
+
+/// A variable holding a `::class` literal that is assigned *inside a braced
+/// block* (e.g. a `foreach (...) { $cls = Wanted::class; ... }` body) must
+/// still resolve for `assertInstanceOf` narrowing.  This is the PHPUnit
+/// data-provider loop shape: assign the expected class in the loop body, then
+/// assert the subject against it and call a method on the narrowed subject.
+#[test]
+fn assert_narrows_via_variable_class_string_assigned_in_foreach_body() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, mixed $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testTypedProperties(array $declarations, array $items): void {
+        foreach ($items as $index => $expected) {
+            $expectedTypeClass = $expected[2] ?? Wanted::class;
+            [$type, $variable] = $declarations[$index];
+            static::assertInstanceOf(
+                $expectedTypeClass,
+                $type,
+                "message"
+            );
+            $type->getImage();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow via a variable assigned a ::class literal inside \
+         a foreach body, got: {diags:?}",
+    );
+}
+
 /// An exact-type assertion `@phpstan-assert =Type $x` must not emit a
 /// bogus `Class '=Type' not found` diagnostic on the docblock.
 #[test]

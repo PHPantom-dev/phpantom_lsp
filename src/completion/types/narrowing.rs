@@ -33,6 +33,7 @@ use crate::atom::{Atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, ResolvedType, TypeAssertion};
 
+use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
 use super::conditional::extract_class_string_from_expr;
@@ -1358,7 +1359,13 @@ fn resolve_assertion_template_type(
         return PhpType::Named(fqn);
     }
 
-    // Try to resolve a variable argument's class-string type.
+    // Try to resolve a variable argument's class-string type.  Resolve it at
+    // the argument's own offset rather than `ctx.cursor_offset`: the latter is
+    // `u32::MAX` during whole-method diagnostics walks, which defeats the
+    // class-body detection in `resolve_class_string_targets` (its
+    // `cursor <= class_end` bound never holds), and using the call site is
+    // more precise anyway (a later reassignment of the variable must not fold
+    // back into the assertion).
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
         let var_name = bytes_to_str(dv.name).to_string();
         let targets =
@@ -1367,7 +1374,7 @@ fn resolve_assertion_template_type(
                 ctx.current_class,
                 ctx.all_classes,
                 ctx.content,
-                ctx.cursor_offset,
+                arg_expr.span().start.offset,
                 ctx.class_loader,
             );
         if let Some(first) = targets.into_iter().next() {
