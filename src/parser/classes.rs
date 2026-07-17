@@ -2484,6 +2484,8 @@ impl Backend {
                         has_scope_attribute: has_scope_attr,
                         is_abstract: method.is_abstract(),
                         is_virtual: false,
+                        is_macro: false,
+                        is_inferred_return: false,
                         type_assertions,
                         throws,
                         if_this_is: method_docblock_text

@@ -38,6 +38,8 @@ enum MemberOrigin {
     /// The member is virtual (synthesized from `@method`, `@property`,
     /// `@mixin`, or a framework provider).
     Virtual,
+    /// The member is a macro registration.
+    Macro,
 }
 
 /// Check whether the **raw** (unmerged) class declares a member with the
@@ -89,12 +91,15 @@ fn build_origin_lines(
     member_name: &str,
     owner: &ClassInfo,
     is_virtual: bool,
+    is_macro: bool,
     member_kind: MemberKindForOrigin,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     let mut origins: Vec<MemberOrigin> = Vec::new();
 
-    if is_virtual {
+    if is_macro {
+        origins.push(MemberOrigin::Macro);
+    } else if is_virtual {
         origins.push(MemberOrigin::Virtual);
     }
 
@@ -158,6 +163,7 @@ fn build_origin_lines(
             MemberOrigin::Override(name) => format!("↑ overrides **{}**", name),
             MemberOrigin::Implements(name) => format!("◆ implements **{}**", name),
             MemberOrigin::Virtual => "👻 virtual".to_string(),
+            MemberOrigin::Macro => "🔌 macro".to_string(),
         })
         .collect();
 
@@ -566,6 +572,7 @@ impl Backend {
                     function_loader: Some(&function_loader),
                     scope_var_resolver: None,
                     is_in_static_method: false,
+                    preserve_static: false,
                 };
 
                 let access_kind = if *is_static {
@@ -1214,6 +1221,7 @@ impl Backend {
             &method.name,
             owner,
             method.is_virtual,
+            method.is_macro,
             MemberKindForOrigin::Method,
             class_loader,
         );
@@ -1238,11 +1246,13 @@ impl Backend {
         format_see_refs(&resolved_see, &method.links, &mut lines);
 
         // Build the readable param/return section as markdown.
+        let show_inferred = method.is_inferred_return || inferred_return_type.is_some();
         if let Some(section) = build_param_return_section(
             &method.parameters,
             effective_return,
             method.native_return_type.as_ref(),
             method.return_description.as_deref(),
+            show_inferred,
         ) {
             lines.push(section);
         }
@@ -1309,6 +1319,7 @@ impl Backend {
             &property.name,
             owner,
             property.is_virtual,
+            false,
             MemberKindForOrigin::Property,
             class_loader,
         );
@@ -1379,6 +1390,7 @@ impl Backend {
             &constant.name,
             owner,
             constant.is_virtual,
+            false,
             MemberKindForOrigin::Constant,
             class_loader,
         );

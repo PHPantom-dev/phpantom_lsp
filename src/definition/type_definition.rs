@@ -96,6 +96,7 @@ impl Backend {
                     ),
                     scope_var_resolver: None,
                     is_in_static_method: false,
+                    preserve_static: false,
                 };
 
                 let candidates = ResolvedType::into_arced_classes(

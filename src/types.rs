@@ -601,6 +601,18 @@ pub struct MethodInfo {
     /// Set to `true` by [`MethodInfo::virtual_method`] and by providers;
     /// set to `false` by the parser for real declared methods.
     pub is_virtual: bool,
+    /// Whether this method originates from a `::macro()` registration.
+    ///
+    /// Used by hover to show a "macro" indicator instead of the generic
+    /// "virtual" label, so the user can distinguish macros from `@method`
+    /// or `@mixin` synthesized members.
+    pub is_macro: bool,
+    /// Whether the return type was inferred from closure body analysis
+    /// rather than explicitly declared via a type hint or docblock.
+    ///
+    /// When `true`, hover appends "(inferred)" to the return type line
+    /// so the user knows the type is best-effort, not authoritative.
+    pub is_inferred_return: bool,
     /// Type assertions declared via `@phpstan-assert` / `@psalm-assert` tags
     /// in the method's docblock.
     ///
@@ -652,6 +664,8 @@ impl MethodInfo {
             && self.has_scope_attribute == other.has_scope_attribute
             && self.is_abstract == other.is_abstract
             && self.is_virtual == other.is_virtual
+            && self.is_macro == other.is_macro
+            && self.is_inferred_return == other.is_inferred_return
             && self.throws == other.throws
             && self.parameters.len() == other.parameters.len()
             && self
@@ -706,6 +720,8 @@ impl MethodInfo {
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: true,
+            is_macro: false,
+            is_inferred_return: false,
             type_assertions: Vec::new(),
             throws: Vec::new(),
             if_this_is: None,
@@ -737,6 +753,8 @@ impl MethodInfo {
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: true,
+            is_macro: false,
+            is_inferred_return: false,
             type_assertions: Vec::new(),
             throws: Vec::new(),
             if_this_is: None,

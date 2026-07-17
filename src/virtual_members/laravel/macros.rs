@@ -52,6 +52,11 @@ pub(crate) struct MacroRegistration {
     /// call jumps here, since the synthesized method has no declaration in the
     /// target class's own file.
     pub name_offset: u32,
+    /// Raw source text of the closure / arrow-function argument.
+    ///
+    /// Kept so the backend can infer a return type from the body when the
+    /// registration has no explicit `: ReturnType` annotation.
+    pub closure_text: Option<String>,
 }
 
 /// Extract every literal macro registration from a file's source.
@@ -551,7 +556,9 @@ fn build_instance_registration(
     let name_arg = args.next()?.value();
     let name = macro_name(name_arg)?;
     let name_offset = name_arg.span().start.offset;
-    let (parameter_list, return_type_hint) = closure_signature(args.next()?.value())?;
+    let closure_expr = args.next()?.value();
+    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
+    let closure_text = expr_source_text(Some(closure_expr), content);
 
     let parameters =
         crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
@@ -560,11 +567,13 @@ fn build_instance_registration(
     let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
     method.parameters = parameters;
     method.native_return_type = return_type;
+    method.is_macro = true;
 
     Some(MacroRegistration {
         target: target.to_string(),
         method,
         name_offset,
+        closure_text,
     })
 }
 
@@ -582,7 +591,9 @@ fn build_registration(
     let name_arg = args.next()?.value();
     let name = macro_name(name_arg)?;
     let name_offset = name_arg.span().start.offset;
-    let (parameter_list, return_type_hint) = closure_signature(args.next()?.value())?;
+    let closure_expr = args.next()?.value();
+    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
+    let closure_text = expr_source_text(Some(closure_expr), content);
 
     let parameters =
         crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
@@ -591,12 +602,22 @@ fn build_registration(
     let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
     method.parameters = parameters;
     method.native_return_type = return_type;
+    method.is_macro = true;
 
     Some(MacroRegistration {
         target,
         method,
         name_offset,
+        closure_text,
     })
+}
+
+fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> Option<String> {
+    let expr = expr?;
+    let span = expr.span();
+    let start = span.start.offset as usize;
+    let end = span.end.offset as usize;
+    (start < end && end <= content.len()).then(|| content[start..end].to_string())
 }
 
 /// Resolve the class written before `::macro` to a fully-qualified name via

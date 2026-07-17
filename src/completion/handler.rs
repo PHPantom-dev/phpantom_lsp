@@ -989,6 +989,7 @@ impl Backend {
             function_loader: Some(&function_loader),
             scope_var_resolver: None,
             is_in_static_method: false,
+            preserve_static: false,
         };
         let mut resolved = if suppress {
             vec![]
@@ -1014,6 +1015,7 @@ impl Backend {
                     function_loader: Some(&function_loader),
                     scope_var_resolver: None,
                     is_in_static_method: false,
+                    preserve_static: false,
                 };
                 resolved = super::resolver::resolve_target_classes(
                     &target.subject,
