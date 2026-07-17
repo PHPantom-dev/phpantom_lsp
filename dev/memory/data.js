@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784321345933,
+  "lastUpdate": 1784322857858,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16285,6 +16285,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "14fc0b8a63c61e01b99917d0d1d31ed4b50a59a0",
+          "message": "feat: macro hover with origin indicator and inferred return types\n\nMacro methods now show a \"macro\" origin indicator in hover instead\nof the generic \"virtual\" label, helping users distinguish ::macro()\nregistrations from @method/@mixin synthesized members.\n\nWhen a macro closure has no explicit return type hint, the return\ntype is inferred from the closure body and displayed with an\n\"(inferred)\" annotation. This also applies to regular methods\nwhose return types are inferred at hover time.\n\nA new preserve_static flag on ResolutionCtx controls whether\n$this/self/static resolve to their keyword form or the concrete\nclass name. For method chains like $this->transform(...), the\nlast method's declared return type is used directly via\nresolve_chain_declared_return(), preserving $this, static, and\ngeneric parameters that the general expression resolver would\nflatten to a bare class name. Raw class methods are checked\nbefore the fully-resolved class so template parameter names\n(e.g. TValue) are preserved instead of being replaced with\ntheir bounds.\n\nKey changes:\n- is_macro and is_inferred_return fields on MethodInfo\n- MemberOrigin::Macro variant for hover rendering\n- preserve_static on ResolutionCtx with chain-aware resolution\n- resolve_chain_declared_return() for declared return type lookup\n- 4 new integration tests for hover behavior",
+          "timestamp": "2026-07-17T15:59:40-05:00",
+          "tree_id": "e3b13f2e4b381f2baf6c6703ff27f5c339c1de83",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/14fc0b8a63c61e01b99917d0d1d31ed4b50a59a0"
+        },
+        "date": 1784322855204,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.5,
             "unit": "MiB"
           }
         ]
