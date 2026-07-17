@@ -331,6 +331,11 @@ impl Backend {
                 if locs.is_empty() { None } else { Some(locs) }
             }
 
+            SymbolKind::LaravelMacroString { .. } => Some(vec![point_location(
+                Url::parse(uri).ok()?,
+                crate::util::offset_to_position(content, cursor_offset as usize),
+            )]),
+
             SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => None,
         }
     }

@@ -375,6 +375,18 @@ impl LanguageServer for Backend {
                 .await;
         }
 
+        // Build workspace symbol maps in the background so the first
+        // workspace-wide references/rename request does not have to pay for
+        // parsing every unopened file interactively.  Skip this in headless
+        // test backends (no client) to keep integration tests deterministic.
+        if self.client.is_some() {
+            let backend = self.clone_for_blocking();
+            tokio::spawn(async move {
+                let _ =
+                    tokio::task::spawn_blocking(move || backend.ensure_workspace_indexed()).await;
+            });
+        }
+
         // Spawn the background diagnostic worker. We build a shallow
         // clone of `self` that shares every `Arc`-wrapped field (maps,
         // caches, the diagnostic notify/pending slot) so the worker

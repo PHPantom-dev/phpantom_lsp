@@ -85,6 +85,7 @@ impl Backend {
             }
             SymbolKind::NamespaceDeclaration { .. }
             | SymbolKind::LaravelStringKey { .. }
+            | SymbolKind::LaravelMacroString { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
             | SymbolKind::Comment => Vec::new(),

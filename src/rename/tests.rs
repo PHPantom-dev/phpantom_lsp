@@ -1,6 +1,8 @@
 #![cfg(test)]
 
 use crate::Backend;
+use crate::virtual_members::laravel::extract_macro_registrations;
+use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -50,6 +52,27 @@ async fn rename(
     };
 
     backend.rename(params).await.unwrap()
+}
+
+fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
+    let mut index = backend.laravel_macros.write();
+    index.set_file(
+        uri.to_string(),
+        extract_macro_registrations(text, Some(*backend.php_version.lock())),
+    );
+    index.rebuild();
+    backend
+        .laravel_has_macros
+        .store(!index.is_empty(), Ordering::Relaxed);
+}
+
+fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
+    for (line_idx, line) in haystack.lines().enumerate() {
+        if let Some(char_idx) = line.find(needle) {
+            return (line_idx as u32, char_idx as u32);
+        }
+    }
+    panic!("needle not found: {needle}");
 }
 
 /// Collect all text edits for a given URI from a WorkspaceEdit.
@@ -4051,5 +4074,247 @@ async fn rename_class_move_updates_cross_file_usage() {
         !result_usage.contains("TaskResource"),
         "No stale references should remain; got:\n{}",
         result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_registration_string_updates_call_sites() {
+    let backend = Backend::new_test();
+    let class_uri = Url::parse("file:///Widget.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "function demo(Widget $widget): void {\n",
+        "    Widget::shine();\n",
+        "    $widget->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &class_uri, class_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let edit = rename(&backend, &provider_uri, line, character, "glow").await;
+    assert!(edit.is_some(), "expected macro rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(provider_result.contains("macro('glow'"));
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(caller_result.contains("Widget::glow();"), "{caller_result}");
+    assert!(
+        caller_result.contains("$widget->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_call_site_updates_registration_string() {
+    let backend = Backend::new_test();
+    let class_uri = Url::parse("file:///Widget.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "function demo(Widget $widget): void {\n",
+        "    Widget::shine();\n",
+        "    $widget->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &class_uri, class_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let edit = rename(&backend, &caller_uri, 4, 14, "glow").await;
+    assert!(edit.is_some(), "expected macro rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(
+        provider_result.contains("macro('glow'"),
+        "{provider_result}"
+    );
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(caller_result.contains("Widget::glow();"), "{caller_result}");
+    assert!(
+        caller_result.contains("$widget->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_from_descendant_call_updates_ancestor_and_sibling_calls() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let child_uri = Url::parse("file:///EloquentCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let child_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class EloquentCollection extends BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "use App\\Support\\EloquentCollection;\n",
+        "function demo(BaseCollection $base, EloquentCollection $eloquent): void {\n",
+        "    $base->shine();\n",
+        "    $eloquent->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &child_uri, child_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let edit = rename(&backend, &caller_uri, 6, 16, "glow").await;
+    assert!(edit.is_some(), "expected descendant macro rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(
+        provider_result.contains("macro('glow'"),
+        "{provider_result}"
+    );
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(caller_result.contains("$base->glow();"), "{caller_result}");
+    assert!(
+        caller_result.contains("$eloquent->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_registration_string_updates_unresolved_chain_call() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "function demo($query): void {\n",
+        "    $query->pluck('name', 'id')->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let edit = rename(&backend, &provider_uri, line, character, "glow").await;
+    assert!(edit.is_some(), "expected macro rename edit");
+    let edit = edit.unwrap();
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(
+        caller_result.contains("$query->pluck('name', 'id')->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_chain_call_updates_registration_string() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "function demo($query): void {\n",
+        "    $query->pluck('name', 'id')->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let edit = rename(&backend, &caller_uri, 3, 33, "glow").await;
+    assert!(edit.is_some(), "expected macro chain rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(
+        provider_result.contains("macro('glow'"),
+        "{provider_result}"
+    );
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(
+        caller_result.contains("$query->pluck('name', 'id')->glow();"),
+        "{caller_result}"
     );
 }

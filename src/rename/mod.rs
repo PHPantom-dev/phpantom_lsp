@@ -805,6 +805,7 @@ impl Backend {
             SymbolKind::FunctionCall { name, .. } => Some((name.clone(), range)),
             SymbolKind::ConstantReference { name } => Some((name.clone(), range)),
             SymbolKind::NamespaceDeclaration { name } => Some((name.clone(), range)),
+            SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
             SymbolKind::LaravelStringKey { .. }
             | SymbolKind::Keyword
