@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784315028672,
+  "lastUpdate": 1784315215774,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16217,6 +16217,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f0390d975c87869212d52482ea9695b5cf96caa2",
+          "message": "A `for` loop's init-clause variable resolves in the condition and update\nclauses",
+          "timestamp": "2026-07-17T20:52:44+02:00",
+          "tree_id": "9a3e1e7570ab795157b3a18e6e1c94b56f0b3412",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f0390d975c87869212d52482ea9695b5cf96caa2"
+        },
+        "date": 1784315213591,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.3,
             "unit": "MiB"
           }
         ]
