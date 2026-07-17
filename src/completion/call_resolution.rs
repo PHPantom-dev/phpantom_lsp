@@ -1034,6 +1034,7 @@ impl Backend {
             function_loader: Some(&function_loader_cl),
             scope_var_resolver: None,
             is_in_static_method: false,
+            preserve_static: false,
         };
 
         let parsed = SubjectExpr::parse(expr);
@@ -2980,11 +2981,26 @@ impl Backend {
             return Some(PhpType::Named(resolved_name));
         }
 
-        // $this / self / static → current class
+        // $this / self / static → current class (or preserve the keyword when asked)
         if is_self_or_static(trimmed) {
-            return ctx
-                .current_class
-                .map(|c| PhpType::Named(c.name.to_string()));
+            return ctx.current_class.map(|c| {
+                if ctx.preserve_static {
+                    PhpType::Named(trimmed.to_string())
+                } else {
+                    PhpType::Named(c.name.to_string())
+                }
+            });
+        }
+
+        // When preserve_static is set, try resolving method chains by
+        // looking up the last method's declared return type directly.
+        // This preserves $this/static and generics that the general
+        // expression resolver would flatten to a bare class name.
+        if ctx.preserve_static
+            && trimmed.contains("->")
+            && let Some(ty) = resolve_chain_declared_return(trimmed, ctx)
+        {
+            return Some(ty);
         }
 
         // General expression fallback: parse the argument text as a
@@ -3112,6 +3128,7 @@ impl Backend {
             function_loader: ctx.function_loader,
             scope_var_resolver: Some(&param_aware_resolver),
             is_in_static_method: ctx.is_in_static_method,
+            preserve_static: false,
         };
         Self::resolve_arg_text_to_type(body, &param_ctx)
     }
@@ -3135,6 +3152,67 @@ fn resolve_expression_to_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<Php
         return None;
     }
     Some(crate::types::ResolvedType::types_joined(&results))
+}
+
+/// Resolve a method chain by looking up the *declared* return type of the
+/// last method call, rather than flattening the whole chain to a bare class
+/// name.
+///
+/// For `$this->transform(str(...))`, this:
+///   1. Parses into `CallExpr { callee: MethodCall { base: This, method: "transform" } }`
+///   2. Resolves `This` → `Collection` class
+///   3. Looks up `transform` on `Collection` → gets declared return type (`$this`)
+///   4. Returns `$this` directly, preserving generics and self-references
+///
+/// Falls back to `None` when the expression is not a method call or the
+/// method's return type is unknown.
+fn resolve_chain_declared_return(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let expr = crate::subject_expr::SubjectExpr::parse(text);
+    let (base, method_name) = match &expr {
+        crate::subject_expr::SubjectExpr::CallExpr { callee, .. } => match callee.as_ref() {
+            crate::subject_expr::SubjectExpr::MethodCall { base, method } => {
+                (base.as_ref(), method.as_str())
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    let base_results =
+        super::resolver::resolve_target_classes_expr(base, crate::types::AccessKind::Arrow, ctx);
+
+    for rt in &base_results {
+        let ci = rt.class_info.as_ref()?;
+
+        // Try the raw class first — its return types preserve template
+        // parameter names (e.g. `TValue`) that full resolution replaces
+        // with their bounds (`mixed`).
+        if let Some(method) = ci
+            .methods
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(method_name))
+            && let Some(ref ret) = method.return_type
+        {
+            return Some(ret.clone());
+        }
+
+        // Fall back to the fully resolved class for inherited methods.
+        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            ci,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        if let Some(method) = resolved
+            .methods
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(method_name))
+            && let Some(ref ret) = method.return_type
+        {
+            return Some(ret.clone());
+        }
+    }
+
+    None
 }
 
 /// Resolve a `ClassName::Member` expression to a type.

@@ -1954,6 +1954,7 @@ impl Backend {
             if regs.is_empty() {
                 return;
             }
+            self.infer_laravel_macro_return_types(&mut regs, &uri, content);
             // A macro registered through a facade also attaches to the
             // facade's concrete container-bound class.
             self.expand_facade_macros(&mut regs);
@@ -1983,7 +1984,7 @@ impl Backend {
                 let Some(imported_uri) = self.resolve_class_uri(imported_fqn) else {
                     continue;
                 };
-                if !self.is_laravel_macro_helper_uri_allowed(uri, &imported_uri) {
+                if !self.is_macro_helper_uri_allowed(uri, &imported_uri) {
                     continue;
                 }
                 if candidate_uris.insert(imported_uri.clone()) {
@@ -2117,6 +2118,7 @@ impl Backend {
         let php_version = Some(*self.php_version.lock());
         let mut regs =
             crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
+        self.infer_laravel_macro_return_types(&mut regs, uri, content);
         // A macro registered through a facade also attaches to the facade's
         // concrete container-bound class.
         self.expand_facade_macros(&mut regs);
@@ -2155,7 +2157,45 @@ impl Backend {
             .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
     }
 
-    fn is_laravel_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
+    fn infer_laravel_macro_return_types(
+        &self,
+        regs: &mut [crate::virtual_members::laravel::MacroRegistration],
+        uri: &str,
+        content: &str,
+    ) {
+        let file_ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&file_ctx);
+        let function_loader = self.function_loader(&file_ctx);
+        for reg in regs.iter_mut() {
+            if reg.method.return_type.is_some() || reg.method.native_return_type.is_some() {
+                continue;
+            }
+            let Some(closure_text) = reg.closure_text.as_deref() else {
+                continue;
+            };
+            let Some(target_class) = self.find_or_load_class(&reg.target) else {
+                continue;
+            };
+            let rctx = crate::completion::resolver::ResolutionCtx {
+                current_class: Some(target_class.as_ref()),
+                all_classes: &file_ctx.classes,
+                content,
+                cursor_offset: reg.name_offset,
+                class_loader: &class_loader,
+                resolved_class_cache: Some(&self.resolved_class_cache),
+                function_loader: Some(&function_loader),
+                scope_var_resolver: None,
+                is_in_static_method: false,
+                preserve_static: true,
+            };
+            if let Some(ty) = Self::infer_closure_return_type(closure_text, &rctx) {
+                reg.method.return_type = Some(ty);
+                reg.method.is_inferred_return = true;
+            }
+        }
+    }
+
+    fn is_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
         let Ok(provider_url) = tower_lsp::lsp_types::Url::parse(provider_uri) else {
             return false;
         };

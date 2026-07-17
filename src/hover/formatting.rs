@@ -192,6 +192,7 @@ pub(super) fn build_param_return_section(
     effective_return: Option<&PhpType>,
     native_return: Option<&PhpType>,
     return_description: Option<&str>,
+    is_inferred_return: bool,
 ) -> Option<String> {
     let mut entries = Vec::new();
 
@@ -235,11 +236,14 @@ pub(super) fn build_param_return_section(
     };
     let has_ret_desc = return_description.is_some_and(|d| !d.is_empty());
 
-    if ret_type_differs || has_ret_desc {
+    if ret_type_differs || has_ret_desc || (is_inferred_return && effective_return.is_some()) {
         let mut entry = String::from("**return**");
-        if ret_type_differs {
+        if ret_type_differs || (is_inferred_return && effective_return.is_some()) {
             if let Some(eff) = effective_return {
                 entry.push_str(&format!(" `{}`", shorten_php_type(eff)));
+            }
+            if is_inferred_return {
+                entry.push_str(" *(inferred)*");
             }
             if has_ret_desc {
                 entry.push_str("  \n\u{00a0}\u{00a0}\u{00a0}\u{00a0}");
@@ -398,6 +402,7 @@ pub(crate) fn hover_for_function(
         func.return_type.as_ref(),
         func.native_return_type.as_ref(),
         func.return_description.as_deref(),
+        false,
     ) {
         lines.push(section);
     }

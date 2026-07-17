@@ -184,6 +184,14 @@ pub(crate) struct ResolutionCtx<'a> {
     /// resolves to nothing.  Precomputed from the `SymbolMap` at the
     /// call site to avoid re-parsing the AST.
     pub is_in_static_method: bool,
+    /// When `true`, `$this` / `self` / `static` resolve to their
+    /// keyword form rather than the concrete class name, and method
+    /// chains use the last method's declared return type directly.
+    ///
+    /// Used by macro return-type inference so that `return $this;` in
+    /// a macro closure produces `$this` — preserving polymorphism and
+    /// generics that the general resolver would flatten.
+    pub preserve_static: bool,
 }
 
 /// Bundles the common parameters threaded through variable-type resolution.
@@ -249,6 +257,7 @@ impl<'a> VarResolutionCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             scope_var_resolver: self.scope_var_resolver,
             is_in_static_method: false,
+            preserve_static: false,
         }
     }
 

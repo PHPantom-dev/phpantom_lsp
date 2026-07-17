@@ -39,6 +39,19 @@ class AppServiceProvider {
 }
 ";
 
+const PROVIDER_RETURNS_THIS_PHP: &str = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Support\\Collection;
+class AppServiceProvider {
+    public function boot(): void {
+        Collection::macro('asValueLabel', function () {
+            return $this;
+        });
+    }
+}
+";
+
 fn workspace_files(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir) {
     create_psr4_workspace(
         COMPOSER_JSON,
@@ -119,6 +132,60 @@ class Consumer {
     assert!(
         names.contains(&"count"),
         "real methods should still appear, got: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn macro_without_return_hint_can_chain_from_this_return() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): void {
+        $c->asValueLabel()->
+    }
+}
+";
+    let (backend, _dir) = workspace_files(consumer);
+    open(
+        &backend,
+        "file:///src/Providers/AppServiceProvider.php",
+        PROVIDER_RETURNS_THIS_PHP,
+    )
+    .await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 28,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result.expect("completion should return results") {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"count"),
+        "macro returning $this should preserve chain completions, got: {names:?}"
     );
 }
 
@@ -840,4 +907,120 @@ class Consumer {
         names.contains(&"lateSum"),
         "helper referenced by the edited provider should be scanned, got: {names:?}"
     );
+}
+
+#[tokio::test]
+async fn hover_on_macro_call_shows_macro_origin() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): void {
+        $c->sumField('price');
+    }
+}
+";
+    let (backend, _dir) = workspace_files(consumer);
+    open(
+        &backend,
+        "file:///src/Providers/AppServiceProvider.php",
+        PROVIDER_PHP,
+    )
+    .await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let hover = result.expect("hover should return a result");
+    if let HoverContents::Markup(markup) = hover.contents {
+        let value = &markup.value;
+        assert!(
+            value.contains("macro"),
+            "hover should show macro origin indicator, got:\n{value}"
+        );
+        assert!(
+            !value.contains("(inferred)"),
+            "explicit return type should not show (inferred), got:\n{value}"
+        );
+    } else {
+        panic!("expected HoverContents::Markup");
+    }
+}
+
+#[tokio::test]
+async fn hover_on_macro_with_inferred_return_shows_annotation() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): void {
+        $c->asValueLabel();
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", COLLECTION_PHP),
+            (
+                "src/Providers/AppServiceProvider.php",
+                PROVIDER_RETURNS_THIS_PHP,
+            ),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+    open(
+        &backend,
+        "file:///src/Providers/AppServiceProvider.php",
+        PROVIDER_RETURNS_THIS_PHP,
+    )
+    .await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let hover = result.expect("hover should return a result");
+    if let HoverContents::Markup(markup) = hover.contents {
+        let value = &markup.value;
+        assert!(
+            value.contains("macro"),
+            "hover should show macro origin indicator, got:\n{value}"
+        );
+        assert!(
+            value.contains("(inferred)"),
+            "inferred return type should show (inferred) annotation, got:\n{value}"
+        );
+    } else {
+        panic!("expected HoverContents::Markup");
+    }
 }
