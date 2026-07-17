@@ -217,6 +217,24 @@ Kate (KDE) has built-in LSP support. Open **Settings → Configure Kate → LSP 
 ```
 
 </details>
+<details>
+<summary><b>Opencode</b></summary>
+You can add this to your `opencode.json` file, it will be invoked when the AI uses the edit tool to edit a PHP file from within opencode.
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "php": {
+      "command": ["phpantom_lsp", "--stdio"],
+      "extensions": [".php"]
+    }
+  }
+}
+```
+
+You can add additional extensions to invoke it on if appropriate for your project.  
+</details>
 
 ## Project Configuration
 
