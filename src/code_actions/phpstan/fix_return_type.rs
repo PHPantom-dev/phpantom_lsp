@@ -327,11 +327,16 @@ impl Backend {
     /// Returns an [`InferredReturnType`] that separates the native PHP
     /// type hint from the richer effective type.  When they differ (e.g.
     /// `list<string>` vs `array`), the caller should add a `@return` tag.
+    ///
+    /// When `self_as_marker` is `true`, `return $this;` yields the self-like
+    /// marker `$this` so the type engine can map it to the receiver class
+    /// rather than the (possibly trait) class that declares the method.
     pub(crate) fn infer_return_type_for_function(
         &self,
         uri: &str,
         content: &str,
         func_line: usize,
+        self_as_marker: bool,
     ) -> Option<InferredReturnType> {
         // Set up the resolution infrastructure from Backend state.
         let local_classes: Vec<Arc<ClassInfo>> = self
@@ -351,6 +356,7 @@ impl Backend {
             &local_classes,
             &class_loader,
             Some(&function_loader),
+            self_as_marker,
         )
     }
 }
@@ -369,6 +375,13 @@ impl Backend {
 /// type hint from the richer effective type.  When they differ (e.g.
 /// `list<string>` vs `array`), the caller should add a `@return` tag.
 ///
+/// When `self_as_marker` is `true`, a `return $this;` statement yields
+/// the self-like marker `$this` instead of resolving to the concrete
+/// enclosing class.  The type engine needs this so that a fluent method
+/// inherited from a trait maps to the class the method is *called on*,
+/// not the trait that lexically declares it.  Code actions that write a
+/// concrete return type or docblock pass `false`.
+///
 /// This is the shared core used by:
 /// - `Backend::infer_return_type_for_function` (PHPStan code actions)
 /// - `enrichment_return_type` (Generate / Update PHPDoc)
@@ -378,6 +391,7 @@ pub(crate) fn infer_return_type(
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
+    self_as_marker: bool,
 ) -> Option<InferredReturnType> {
     let lines: Vec<&str> = content.lines().collect();
     if func_line >= lines.len() {
@@ -427,7 +441,9 @@ pub(crate) fn infer_return_type(
         } else if let Some(rest) = inner.strip_prefix("return ") {
             let expr = rest.strip_suffix(';').unwrap_or(rest).trim();
             has_return_with_value = true;
-            if let Some(t) = infer_type_from_literal(expr) {
+            if self_as_marker && expr == "$this" {
+                return_types.push(PhpType::this());
+            } else if let Some(t) = infer_type_from_literal(expr) {
                 let resolved = t.resolve_names(&|name: &str| {
                     if let Some(cls) = class_loader(name) {
                         cls.fqn().to_string()
@@ -512,6 +528,15 @@ pub(crate) fn infer_return_type(
 
             // Strip trailing `;`
             let expr = rest.strip_suffix(';').unwrap_or(rest).trim();
+
+            // `return $this;` is a fluent self-return.  Yield the self-like
+            // marker so the caller maps it to the actual receiver class
+            // rather than the class that lexically declares the method
+            // (which for a trait method is the trait, not the using class).
+            if self_as_marker && expr == "$this" {
+                return_types.push(PhpType::this());
+                continue;
+            }
 
             // Try syntax-level inference first (cheap).
             if let Some(t) = infer_type_from_literal(expr) {
@@ -641,6 +666,9 @@ pub(crate) fn enrichment_return_type(
         local_classes,
         class_loader,
         function_loader,
+        // Docblock generation wants a concrete written type, not a `$this`
+        // marker, so resolve `return $this` to the enclosing class.
+        false,
     )?;
 
     // Return the effective type if it's richer than the native hint,
@@ -705,7 +733,7 @@ impl Backend {
                 let (paren_line, _) = find_close_paren_before_brace(&lines, brace_line)?;
                 let func_line = find_func_keyword_line(&lines, paren_line)?;
 
-                let our = self.infer_return_type_for_function(&data.uri, content, func_line);
+                let our = self.infer_return_type_for_function(&data.uri, content, func_line, false);
                 let current = read_current_return_type(content, diag_line);
 
                 let edits = if should_use_own_inference(&our, &current) {
@@ -743,7 +771,7 @@ impl Backend {
             ACTION_KIND_ADD_TYPE => {
                 // Infer the type now (deferred from collect phase).
                 let inferred =
-                    self.infer_return_type_for_function(&data.uri, content, diag_line)?;
+                    self.infer_return_type_for_function(&data.uri, content, diag_line, false)?;
 
                 let native_str = inferred.native.to_string();
 

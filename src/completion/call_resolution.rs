@@ -477,8 +477,26 @@ impl Backend {
         let backend = self.clone_for_diagnostic_worker();
 
         let inferrer = move |class_fqn: &str, method: &MethodInfo| -> Option<PhpType> {
-            // Find the file URI for this class.
-            let file_uri = backend.fqn_uri_index.read().get(class_fqn).cloned()?;
+            // The method may have been inherited from a trait or parent class
+            // declared in a *different* file.  `method.name_offset` is relative
+            // to that declaring file, so reading the receiver's own file at
+            // that offset would land on the wrong location.  Resolve the class
+            // that actually declares the method and read *its* file.
+            let file_uri = backend
+                .find_or_load_class(class_fqn)
+                .map(|receiver| {
+                    let loader = |name: &str| backend.find_or_load_class(name);
+                    crate::hover::find_declaring_class(
+                        &receiver,
+                        &method.name,
+                        &crate::hover::MemberKindForOrigin::Method,
+                        &loader,
+                    )
+                })
+                .and_then(|decl| backend.fqn_uri_index.read().get(&decl.fqn()).cloned())
+                // Fall back to the receiver's own file when the declaring
+                // class could not be located (e.g. only known via the AST).
+                .or_else(|| backend.fqn_uri_index.read().get(class_fqn).cloned())?;
 
             // Read the file content.
             let content = backend.get_file_content(&file_uri)?;
@@ -510,7 +528,8 @@ impl Backend {
                 }
             }
 
-            let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line)?;
+            let result =
+                backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
 
             // Prefer the effective type (richer, e.g. `list<string>`)
             // over the native type (e.g. `array`).
@@ -2054,6 +2073,13 @@ impl Backend {
                 && !method.is_virtual
                 && let Some(inferred) = try_infer_body_return_type(&class_info.fqn(), method)
             {
+                // A body-inferred `return $this` yields a self-like marker.
+                // Map it to the receiver class so the chain continues with
+                // the class the method was called on, not the trait/parent
+                // that declares the fluent method.
+                if inferred.is_self_like() {
+                    return vec![Arc::new(class_info.clone())];
+                }
                 return super::type_resolution::type_hint_to_classes_typed(
                     &inferred,
                     &class_info.fqn(),

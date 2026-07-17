@@ -22,7 +22,7 @@ diagnostics per the declared-types philosophy there. The closure
 literal-return shape gap is filed as T31 in
 `docs/todo/type-inference.md`.
 
-The B91–B103 batch below comes from the 2026-07-16 full re-triage of
+The B91–B102 batch below comes from the 2026-07-16 full re-triage of
 the three remaining non-clean projects (PDepend, Luxplus Website,
 Luxplus Backoffice). Together they account for every remaining
 analyze error in those projects (42 errors after the same sweep's
@@ -289,26 +289,3 @@ conditional breaks it whether the condition parameter is omitted
 (default) or passed explicitly. This is Laravel's actual
 `Collection::chunk()` docblock, so every `chunk()` call in a Laravel
 project hits it. Backoffice `PushNotificationService.php:60`.
-
-## B103. `return $this` in a trait method resolves to the trait instead of the using class
-
-**Severity: Medium (2 errors, luxplus-backoffice) · Reproduced with fixture**
-
-```php
-trait MakesAssertions
-{
-    function assertSee(string $v) { return $this; } // no return type
-}
-
-class Testable { use MakesAssertions; public int $x = 1; }
-
-$t->assertSee('a')->x; // "Property 'x' not found on class 'MakesAssertions'"
-```
-
-Body-inferred `return $this` works for plain class methods, but for
-a trait method the chain continues with the *trait* as the subject,
-so members of the using class (including its other traits and magic
-`__call`) disappear after the first chained call. This is Livewire's
-`Testable` shape, breaking every multi-step Livewire test assertion
-chain. Backoffice `ShowReorderListTest.php:78`,
-`ProductListTest.php:30`.

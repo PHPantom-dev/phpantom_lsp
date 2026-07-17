@@ -539,7 +539,7 @@ impl Backend {
         func_line: usize,
         iterable_type: &str,
     ) -> Option<Vec<PhpType>> {
-        let inferred = self.infer_return_type_for_function(uri, content, func_line)?;
+        let inferred = self.infer_return_type_for_function(uri, content, func_line, false)?;
 
         // Prefer the effective type (richer, e.g. `list<string>`),
         // falling back to the native type.

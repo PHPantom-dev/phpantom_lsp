@@ -4628,3 +4628,169 @@ async fn test_completion_require_extends_this_members_cross_file_psr4() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Body-inferred `return $this` in trait methods ──────────────────────────
+
+/// A trait method whose body is `return $this;` (no declared return type)
+/// must resolve to the *using* class, so a chained call continues with the
+/// using class's members, not the trait's.  Same-file variant.
+#[tokio::test]
+async fn test_return_this_trait_method_resolves_to_using_class_same_file() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///trait_return_this_sf.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait MakesAssertions {\n",
+        "    function assertSee(string $v)\n",
+        "    {\n",
+        "        $ok = true;\n",
+        "        return $this;\n",
+        "    }\n",
+        "}\n",
+        "class Testable {\n",
+        "    use MakesAssertions;\n",
+        "    public int $count = 1;\n",
+        "    function run() {\n",
+        "        $t = new Testable();\n",
+        "        $t->assertSee('a')->\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 28,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    match result.expect("Completion should return results") {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(""))
+                .collect();
+            assert!(
+                names.contains(&"count"),
+                "Chain through a trait's `return $this` should expose the using \
+                 class's property `count`, got: {names:?}"
+            );
+            assert!(
+                names.contains(&"assertSee"),
+                "The trait method should still be available on the chain, got: {names:?}"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Cross-file variant: the trait lives in one PSR-4 file, the using class in
+/// another, and the chained call in a third.  The body-inferred `return $this`
+/// must still resolve to the using class (previously the foreign-file byte
+/// offset made inference fail entirely, so the chain resolved to nothing).
+#[tokio::test]
+async fn test_return_this_trait_method_resolves_to_using_class_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/MakesAssertions.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "trait MakesAssertions {\n",
+                    "    function assertSee(string $v)\n",
+                    "    {\n",
+                    "        $ok = true;\n",
+                    "        return $this;\n",
+                    "    }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Testable.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class Testable {\n",
+                    "    use MakesAssertions;\n",
+                    "    public int $count = 1;\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let uri = Url::parse("file:///consumer.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Testable;\n",
+        "function run(Testable $t) {\n",
+        "    $t->assertSee('a')->\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 3,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    match result.expect("Completion should return results") {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(""))
+                .collect();
+            assert!(
+                names.contains(&"count"),
+                "Cross-file chain through a trait's `return $this` should expose \
+                 the using class's property `count`, got: {names:?}"
+            );
+            assert!(
+                names.contains(&"assertSee"),
+                "The trait method should still be available on the chain, got: {names:?}"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

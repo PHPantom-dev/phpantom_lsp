@@ -151,6 +151,28 @@ class ChainingDemo
 }
 
 
+// ── Trait `return $this` Fluent Chains ──────────────────────────────────────
+// A trait method whose body is `return $this;` (no declared return type)
+// resolves to the class that uses the trait, so a chained call continues with
+// the using class's own members — not just the trait's.
+
+class TraitFluentChainDemo
+{
+    public function demo(): void
+    {
+        $page = new TestablePage();
+
+        // Each step resolves to TestablePage (the using class), so the whole
+        // chain — including TestablePage's own members — stays available.
+        $page->assertSee('Welcome')       // trait method, body `return $this;`
+            ->assertSee('Dashboard')      // still TestablePage, not the trait
+            ->status;                     // using class's own property
+
+        $page->assertSee('x')->refresh(); // using class's own method resolves
+    }
+}
+
+
 // ── @var Docblock Override ──────────────────────────────────────────────────
 
 class VarDocblockDemo
@@ -4580,6 +4602,28 @@ trait ZooTraitB
     public function elephant(string $value): string { return $value; }
 }
 
+trait MakesPageAssertions
+{
+    /** Fluent assertion with no declared return type — body returns $this. */
+    public function assertSee(string $value)
+    {
+        $seen = $value !== '';
+        return $this;
+    }
+}
+
+class TestablePage
+{
+    use MakesPageAssertions;
+
+    public int $status = 200;
+
+    public function refresh(): static
+    {
+        return $this;
+    }
+}
+
 /**
  * @property-read string $iguana
  * @method string jaguar()
@@ -6043,6 +6087,11 @@ function runDemoAssertions(): void
     assert($pen instanceof Pen, 'createPen() must return Pen (inferred from body)');
     $tool = $factory->createTool(true);
     assert($tool instanceof Pen || $tool instanceof Pencil, 'createTool() must return Pen|Pencil');
+
+    // ── Trait `return $this` fluent chain ───────────────────────────────
+    $page = new TestablePage();
+    assert($page->assertSee('a') instanceof TestablePage, 'trait return $this resolves to the using class');
+    assert($page->assertSee('a')->assertSee('b')->status === 200, 'chained trait return $this keeps the using class members');
 
     // ── Ternary Condition Narrowing ─────────────────────────────────────
     $penTool = new TernaryNarrowingDemo(new Pen());
