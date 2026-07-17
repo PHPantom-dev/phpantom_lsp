@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784254463302,
+  "lastUpdate": 1784258079084,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15741,6 +15741,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 64.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "02026e275f1f417b67188282263347e390788764",
+          "message": "docs: clarify native diagnostic transport policy\n\nDocument that native diagnostics prefer pull delivery when the client supports it and use push only as a fallback for push-only clients. Make the server comments and architecture notes explicit that PHPantom intentionally avoids mixing both native transport models for the same client because that creates competing diagnostic streams with client-dependent merge behavior.",
+          "timestamp": "2026-07-16T22:00:38-05:00",
+          "tree_id": "1a8b904448c49262a667cad13d46d02dc0aca884",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/02026e275f1f417b67188282263347e390788764"
+        },
+        "date": 1784258076714,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 51.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65,
             "unit": "MiB"
           }
         ]
