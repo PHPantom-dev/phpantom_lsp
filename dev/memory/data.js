@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784292523906,
+  "lastUpdate": 1784304550305,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15911,6 +15911,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "e7172f5f4f5981ad854036e4a34cecbf067c6835",
+          "message": "feat: improve laravel macro rename and references\n\nTreat Laravel macro registration strings as first-class rename and\nreference targets so edits propagate between ::macro('name', ...)\nand matching call sites, including collection-style fluent chains.\nLand macro go-to-definition on the macro name itself, index\nmember-access names for cheaper workspace scans, and warm workspace\nsymbol maps in the background so repeated rename and reference\nrequests avoid reparsing unopened files.",
+          "timestamp": "2026-07-17T10:54:23-05:00",
+          "tree_id": "ed30e35a01aa1a1349010f55c0de62306745f5b7",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e7172f5f4f5981ad854036e4a34cecbf067c6835"
+        },
+        "date": 1784304548175,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93,
             "unit": "MiB"
           }
         ]
