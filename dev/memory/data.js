@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784264794515,
+  "lastUpdate": 1784266636901,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15809,6 +15809,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7d288e3cceb12b44bea1db38d0bef49f9d6ee610",
+          "message": "Leading-backslash global function calls resolve in member chains",
+          "timestamp": "2026-07-17T07:23:08+02:00",
+          "tree_id": "882480f76bed7f043d632963d68a28ba3b661051",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7d288e3cceb12b44bea1db38d0bef49f9d6ee610"
+        },
+        "date": 1784266634896,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 41.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65,
             "unit": "MiB"
           }
         ]
