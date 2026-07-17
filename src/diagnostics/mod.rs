@@ -24,7 +24,7 @@
 //! 10. **`unresolved_*`** — the analyser couldn't determine the type of an
 //!     expression (opt-in coverage hints).
 //!
-//! Two delivery models are supported:
+//! Two native delivery models are supported:
 //!
 //! - **Pull model** (`textDocument/diagnostic`, LSP 3.17) — the editor
 //!   requests diagnostics when it needs them.  Only visible files are
@@ -34,6 +34,12 @@
 //! - **Push model** (`textDocument/publishDiagnostics`) — the server
 //!   pushes diagnostics after every edit.  Used as a fallback for clients
 //!   that do not advertise pull-diagnostic support.
+//!
+//! Native diagnostics are intentionally sent through exactly one of these
+//! channels per client.  When pull is available, PHPantom uses pull only;
+//! push is reserved for clients that do not support pull.  Mixing both for
+//! the same native diagnostics makes client-side merge behavior ambiguous and
+//! can surface duplicates or flicker.
 //!
 //! Providers are grouped into three phases so that cheap results appear
 //! immediately and expensive external tools never block native feedback:
@@ -152,9 +158,10 @@
 //! The pull handler (`textDocument/diagnostic`) returns this cached set.
 //! If the cache is missing (e.g. the file was just opened), the pull
 //! handler triggers computation directly instead of returning empty
-//! results.  Pushing anything in pull mode would duplicate native
-//! diagnostics because editors that support pull keep pushed and
-//! pulled sets in separate namespaces and merge them additively.
+//! results.  This is not a workaround for a single client; it is the
+//! intended server contract.  A pull-capable client already has a canonical
+//! native diagnostic stream, so pushing the same native diagnostics as well
+//! would create two competing streams that clients may merge differently.
 //!
 //! External tool workers (PHPStan, PHPCS, Mago) use their own
 //! debounce timers in both modes because they are expensive.

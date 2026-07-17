@@ -53,9 +53,12 @@
 //!   - `code_actions::generate_getter_setter` — Generate `getX()`/`setX()`
 //!     accessor methods (or `isX()` for `bool` properties) from a property
 //!     declaration
-//! - [`diagnostics`] — Diagnostic collection and delivery.  Supports both
-//!   pull diagnostics (`textDocument/diagnostic`, LSP 3.17) and push
-//!   diagnostics (`textDocument/publishDiagnostics`) as a fallback.
+//! - [`diagnostics`] — Diagnostic collection and delivery.  Native
+//!   diagnostics prefer the pull model (`textDocument/diagnostic`, LSP
+//!   3.17) whenever the client supports it.  Push diagnostics
+//!   (`textDocument/publishDiagnostics`) are a compatibility fallback for
+//!   clients that do not support pull diagnostics; the server should not
+//!   mix both native delivery models for the same client.
 //!   Currently implemented providers:
 //!   - `diagnostics::deprecated` — `@deprecated` usage diagnostics (strikethrough
 //!     via `DiagnosticTag::Deprecated` on references to deprecated symbols)

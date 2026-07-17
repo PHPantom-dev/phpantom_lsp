@@ -4,8 +4,11 @@
 /// which handles all LSP protocol messages (initialize, didOpen, didChange,
 /// didClose, completion, diagnostic, etc.).
 ///
-/// **Diagnostic delivery.** Two models are supported, selected automatically
-/// based on the client's capabilities:
+/// **Diagnostic delivery.** Two native delivery models are supported and are
+/// selected automatically from the client's capabilities. The server treats
+/// pull diagnostics as the preferred modern path and uses push only as a
+/// fallback for older clients; it deliberately does not send the same native
+/// diagnostics through both channels for the same client.
 ///
 /// - **Pull model** (preferred) — when the client advertises
 ///   `textDocument.diagnostic` support, the server registers a

@@ -1094,6 +1094,22 @@ Diagnostics run in three independent background `tokio::spawn` tasks so they nev
 2. **PHPStan worker** — runs PHPStan in editor mode (`--tmp-file` / `--instead-of`). Debounces at 2 000 ms.
 3. **PHPCS worker** — runs PHP_CodeSniffer via `phpcs --report=json` with stdin piping. Debounces at 2 000 ms.
 
+### Native transport choice
+
+For native diagnostics, PHPantom chooses exactly one LSP delivery model per
+client:
+
+1. **Pull if supported** (`textDocument/diagnostic` / `workspace/diagnostic`)
+2. **Push otherwise** (`textDocument/publishDiagnostics`)
+
+This is intentional, not a client-specific workaround. Pull diagnostics are
+the newer client-driven model and are the preferred path when available.
+Pushing the same native diagnostics alongside pull creates two competing
+streams for one source of truth, which clients may merge, replace, or
+deduplicate differently. The server therefore treats push as a compatibility
+fallback for older clients rather than mixing both transports for the same
+native diagnostic set.
+
 Each worker is created during `initialized` via `clone_for_diagnostic_worker`, which builds a shallow clone of the `Backend`. All `Arc`-wrapped fields (maps, caches, the notify/pending slots) are shared by `Arc::clone`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 
 Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, `vendor_dir_paths`, and `config`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds hot-reloading of `.phpantom.toml` or runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
