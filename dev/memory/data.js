@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784267577684,
+  "lastUpdate": 1784292523906,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15877,6 +15877,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 65,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "099a50fa6c5de92bbeb5fcbcf03dd04095398e73",
+          "message": "feat: improve laravel macro discovery\n\nDiscover Laravel macros from provider-rooted helper classes while\npreserving real vendor package registrations such as Livewire, Inertia,\nNightwatch, and Laraflake. Cache cheap macro-token checks to avoid\nrepeated scans, and support statically typed variable macro\nregistrations so patterns like Builder  followed by\n->macro(...) resolve correctly.",
+          "timestamp": "2026-07-17T07:33:38-05:00",
+          "tree_id": "f23ee73f3ae5a5fc4eae30ee1786a9c97998b43d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/099a50fa6c5de92bbeb5fcbcf03dd04095398e73"
+        },
+        "date": 1784292520693,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.9,
             "unit": "MiB"
           }
         ]
