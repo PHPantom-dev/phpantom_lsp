@@ -26,7 +26,6 @@ within the same impact tier.
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | B91 | [Narrowing guards don't apply to array-index subject expressions](todo/bugs.md#b91-narrowing-guards-do-not-apply-to-array-index-subject-expressions) | Medium | Medium |
-| B97 | [Dynamic-key array element access doesn't resolve the element type](todo/bugs.md#b97-array-element-access-with-a-dynamic-non-literal-key-does-not-resolve-the-element-type) | Medium | Medium |
 | B92 | [Assert narrowing can't override list-destructured variables with unresolvable RHS](todo/bugs.md#b92-assert-narrowing-cannot-override-variables-assigned-by-list-destructuring-from-an-unresolvable-rhs) | Medium | Low-Medium |
 | B94 | [Closure param declared union overridden by inferred collection element type](todo/bugs.md#b94-a-closure-parameters-declared-union-type-is-overridden-by-the-inferred-collection-element-type) | Medium | Low-Medium |
 | B95 | [`isset($obj->prop)` guards and `property_exists()` ternaries don't prove the property](todo/bugs.md#b95-issetobj-prop-guards-and-property_exists-ternaries-do-not-prove-the-property-on-a-single-typed-subject) | Medium | Low-Medium |

@@ -1833,7 +1833,11 @@ fn resolve_rhs_array_access<'b>(
                 .shape_value_type(key)
                 .cloned()
                 .or_else(|| current.extract_element_type().cloned()),
-            ArrayBracketSegment::ElementAccess => current.extract_element_type().cloned(),
+            // A dynamic (non-literal) key can address any entry, so a
+            // shape yields the union of its value types (via
+            // `iterable_element_type`); generic arrays yield their
+            // value type as before.
+            ArrayBracketSegment::ElementAccess => current.iterable_element_type(),
         };
 
         if let Some(element) = extracted {

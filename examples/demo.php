@@ -1738,7 +1738,7 @@ class ShapeMethodDemo
     }
 
     /** @return array{pen: Pen, pencil: Pencil, active: bool} */
-    public function getToolKit(): array { return []; }
+    public function getToolKit(): array { return ['pen' => new Pen(), 'pencil' => new Pencil(), 'active' => true]; }
 
     /** @return object{name: string, age: int, active: bool} */
     public function getProfile(): object { return (object) []; }
@@ -1751,6 +1751,35 @@ class ShapeMethodDemo
     {
         $config['host'];                  // string
         $config['tool']->write();         // Pen
+    }
+
+    // Indexing with a dynamic (non-literal) key resolves to the union of
+    // the shape's value types.
+    public function dynamicKey(string $which): void
+    {
+        $kit = $this->getToolKit();
+        $tool = $kit[$which] ?? null;     // Pen|Pencil|bool|null
+        if ($tool instanceof Pen) {
+            $tool->write();               // Pen after instanceof
+        }
+
+        // A map of shapes built through a dynamic-key write reads back
+        // element-by-element.
+        $sums = [];
+        foreach ([1, 2] as $id) {
+            $sums[$id] = $this->getToolKit();
+            $sums[$id]['pen']->write();   // Pen through the dynamic-key write
+        }
+
+        // Nested dynamic writes read back across the same key path.
+        $report = [];
+        $count = 0;
+        foreach ([new Pen(), new Pen()] as $pen) {
+            $report['data'][$count]['tool'] = $pen;
+            $entry = $report['data'][$count]['tool'];
+            $entry->write();              // Pen
+            $count++;
+        }
     }
 }
 
@@ -6984,6 +7013,29 @@ function runDemoAssertions(): void
     foreach ($foreachDestrInv as ['tool' => $fTool, 'count' => $fCount]) {
         assert($fTool instanceof Pen, 'Foreach destructured tool must be Pen');
         assert(is_int($fCount), 'Foreach destructured count must be int');
+    }
+
+    // ── Dynamic (non-literal) key on a shape ────────────────────────────
+    $shapeDemo = new ShapeMethodDemo();
+    $dynKit = $shapeDemo->getToolKit();
+    $dynWhich = 'pen';
+    $dynTool = $dynKit[$dynWhich] ?? null;
+    assert($dynTool instanceof Pen, 'Dynamic key on shape must yield a shape value');
+
+    $dynSums = [];
+    foreach ([1, 2] as $dynId) {
+        $dynSums[$dynId] = $shapeDemo->getToolKit();
+        assert($dynSums[$dynId]['pen'] instanceof Pen,
+            'Dynamic-key write must read back the shape value');
+    }
+
+    $dynReport = [];
+    $dynCount = 0;
+    foreach ([new Pen(), new Pen()] as $dynPen) {
+        $dynReport['data'][$dynCount]['tool'] = $dynPen;
+        $dynEntry = $dynReport['data'][$dynCount]['tool'];
+        assert($dynEntry instanceof Pen, 'Nested dynamic write must read back Pen');
+        $dynCount++;
     }
 
     // ── Ambiguous variables ─────────────────────────────────────────────

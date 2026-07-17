@@ -5374,7 +5374,11 @@ fn process_array_key_assignment<'b>(
             let merged =
                 super::resolution::merge_nested_shape_keys(&base_type, &keys, &value_php_type);
             scope.set(&base_name, vec![ResolvedType::from_type_string(merged)]);
-        } else if key_chain.len() == 1 && !base_type.is_array_shape() {
+        } else {
+            // The chain contains at least one dynamic (non-literal) key,
+            // e.g. `$sums[$id] = …` or `$return['data'][$count]['earnings']
+            // = …`.  Literal segments are tracked as shape entries and
+            // dynamic segments as generic `array<K, V>` levels.
             let rhs_offset = assignment.span().start.offset;
             let scope_locals = &scope.locals;
             let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
@@ -5384,9 +5388,22 @@ fn process_array_key_assignment<'b>(
                     .unwrap_or_default()
             };
             let rhs_ctx = ctx.var_ctx_for_with_scope("$__idx", rhs_offset, &scope_resolver);
-            let key_php_type = super::resolution::infer_array_key_type(key_chain[0], &rhs_ctx);
-            let merged =
-                super::resolution::merge_keyed_type(&base_type, &key_php_type, &value_php_type);
+            let write_keys: Vec<super::resolution::ArrayWriteKey> = key_chain
+                .iter()
+                .map(
+                    |idx| match super::resolution::extract_array_key_for_shape(idx) {
+                        Some(key) => super::resolution::ArrayWriteKey::Shape(key),
+                        None => super::resolution::ArrayWriteKey::Keyed(
+                            super::resolution::infer_array_key_type(idx, &rhs_ctx),
+                        ),
+                    },
+                )
+                .collect();
+            let merged = super::resolution::merge_nested_array_write(
+                &base_type,
+                &write_keys,
+                &value_php_type,
+            );
             scope.set(&base_name, vec![ResolvedType::from_type_string(merged)]);
         }
     }

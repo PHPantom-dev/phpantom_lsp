@@ -1,0 +1,24 @@
+// test: loop-built map of shapes indexed with a dynamic key resolves the shape value
+// feature: completion
+// expect: add(
+---
+<?php
+
+class Decimal {
+    public function toString(): string { return ''; }
+    public function add(Decimal $other): Decimal { return $this; }
+}
+
+class Aggregator {
+    /** @return array{bonusCashPaid: Decimal, bonusCashEarned: Decimal} */
+    private function getStructure(): array { return []; }
+
+    /** @param list<int> $ids */
+    public function aggregate(array $ids, Decimal $paid): void {
+        $sums = [];
+        foreach ($ids as $id) {
+            $sums[$id] = $this->getStructure();
+            $sums[$id]['bonusCashPaid']-><>
+        }
+    }
+}

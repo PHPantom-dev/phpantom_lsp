@@ -1221,6 +1221,12 @@ impl PhpType {
             }
             PhpType::Array(inner) => inner.is_scalar_leaf(),
             PhpType::Nullable(inner) => inner.is_scalar_leaf(),
+            // A shape is only a scalar leaf when every entry value is;
+            // `array{price: Decimal}` yields the non-scalar `Decimal`
+            // when indexed or iterated.
+            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+                entries.iter().all(|e| e.value_type.is_scalar_leaf())
+            }
             _ => self.is_scalar(),
         }
     }
@@ -5927,6 +5933,23 @@ mod tests {
         let ty = PhpType::parse("User|array<int>");
         let val = ty.extract_value_type(false).unwrap();
         assert_eq!(val, &PhpType::Named("int".to_owned()));
+    }
+
+    #[test]
+    fn extract_value_type_shape_element_with_class_value_not_skipped() {
+        // array<int, array{price: Decimal}> — the shape element carries a
+        // non-scalar value, so skip_scalar=true must not discard it.
+        let ty = PhpType::parse("array<int, array{price: Decimal}>");
+        let val = ty.extract_value_type(true).unwrap();
+        assert!(matches!(val, PhpType::ArrayShape(_)));
+    }
+
+    #[test]
+    fn extract_value_type_shape_element_all_scalar_skipped() {
+        // array<int, array{count: int}> — every shape value is scalar, so
+        // skip_scalar=true skips the element.
+        let ty = PhpType::parse("array<int, array{count: int}>");
+        assert!(ty.extract_value_type(true).is_none());
     }
 
     // ─── extract_key_type tests ─────────────────────────────────────────────

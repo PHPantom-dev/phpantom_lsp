@@ -161,31 +161,3 @@ $total->toFixed(2); // "type of '$total' could not be resolved"
 so binding it requires inferring the closure's return type
 (`Decimal`, from `$carry->add(...)`). Website
 `OrderDetailedResource.php:155`.
-
-## B97. Array element access with a dynamic (non-literal) key does not resolve the element type
-
-**Severity: Medium (~4 errors: luxplus-website ×1, luxplus-backoffice ×2, plus 1 cascade) · Reproduced with fixture**
-
-```php
-/** @return array{normalPrice: Decimal, memberPrice: Decimal} */
-private function getPrices(): array {}
-
-$prices = $this->getPrices();
-$price = $prices[$priceToUse] ?? null;      // $priceToUse: string
-if ($price === null) { return ''; }
-$price->toString(); // "type of '$price' could not be resolved" — literal key works
-
-// Same family with a loop-built map of shapes:
-$sums[$id] = $this->getStructure();          // array{bonusCashPaid: Decimal, ...}
-$sums[$id]['bonusCashPaid']->add($paid);     // unresolved
-
-// And nested dynamic writes read back across iterations:
-$return['data'][$count]['earnings'] = $price;
-$sum = $return['data'][$count]['earnings'];  // unresolved
-$sum->add($price);
-```
-
-Indexing a shape (or a homogeneous map built in a loop) with a
-variable key should resolve to the union of the value types.
-Website `ProductRoutineTest.php:163`, Backoffice
-`RAFEventsAggregatorService.php:108` and `EconomyController.php:540`.
