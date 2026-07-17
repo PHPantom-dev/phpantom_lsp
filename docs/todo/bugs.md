@@ -93,7 +93,7 @@ statement. Rewriting as a `while` loop resolves. PDepend
 
 ## B94. A closure parameter's declared union type is overridden by the inferred collection element type
 
-**Severity: Medium (shares 3 errors with B95, luxplus-website) · Reproduced with fixture**
+**Severity: Medium (~3 errors, luxplus-website) · Reproduced with fixture**
 
 ```php
 /** @param Collection<int, CanApply>|Collection<int, ViewModel>|Collection<int, stdClass> $items */
@@ -114,27 +114,3 @@ member's element type (`CanApply`), discarding the parameter's own
 declared union. A declared parameter type must win over (or at
 least union with) the inferred element type. Website
 `SalesCampaignGroupDiscountService.php`.
-
-## B95. `isset($obj->prop)` guards and `property_exists()` ternaries do not prove the property on a single-typed subject
-
-**Severity: Medium (shares 3 errors with B94, luxplus-website) · Reproduced with fixture**
-
-```php
-function probeIsset(CanApply $item): int
-{
-    if (isset($item->salesCampaignGroupId)) {
-        return $item->salesCampaignGroupId; // "Property ... not found on class 'CanApply'"
-    }
-    return 0;
-}
-
-function probeTernary(CanApply $item): mixed
-{
-    return property_exists($item, 'qty') ? $item->qty : 1; // same
-}
-```
-
-`property_exists()` in an `if` statement already proves the member
-(shipped earlier); the ternary form does not, and `isset($obj->prop)`
-does not in either form. PHPStan treats both as existence proofs for
-the guarded access.

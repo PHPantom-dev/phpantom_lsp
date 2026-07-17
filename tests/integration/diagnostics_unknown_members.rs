@@ -5989,6 +5989,121 @@ class ControllerTest extends TestCase {
     );
 }
 
+/// `isset($obj->prop)` in an `if` proves the property exists inside the
+/// branch, exactly like `property_exists($obj, 'prop')`.
+#[test]
+fn isset_property_guard_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeIsset(CanApply $item): int {
+    if (isset($item->salesCampaignGroupId)) {
+        return $item->salesCampaignGroupId;
+    }
+    return 0;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("salesCampaignGroupId")),
+        "isset($item->prop) guard must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// The property guarded by `isset` must still be flagged outside the
+/// branch — the proof does not leak past the `if`.
+#[test]
+fn property_access_outside_isset_guard_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeIsset(CanApply $item): int {
+    if (isset($item->salesCampaignGroupId)) {
+        echo 'ok';
+    }
+    return $item->salesCampaignGroupId;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("salesCampaignGroupId")),
+        "access after the isset branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// `isset($obj->prop)` in a ternary condition proves the property inside
+/// the then-branch.
+#[test]
+fn isset_property_ternary_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeTernary(CanApply $item): mixed {
+    return isset($item->qty) ? $item->qty : 1;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("qty")),
+        "isset($item->qty) ternary must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// `property_exists($obj, 'prop')` in a ternary condition proves the
+/// property inside the then-branch, exactly like the `if` form.
+#[test]
+fn property_exists_ternary_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeTernary(CanApply $item): mixed {
+    return property_exists($item, 'qty') ? $item->qty : 1;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("qty")),
+        "property_exists ternary must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// The else-branch of a `property_exists` ternary proves nothing — the
+/// guarded property is still flagged there.
+#[test]
+fn property_exists_ternary_else_branch_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeTernary(CanApply $item): mixed {
+    return property_exists($item, 'qty') ? 1 : $item->qty;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("qty")),
+        "else-branch of a property_exists ternary must still flag the property, got: {diags:?}"
+    );
+}
+
 /// `assertFalse()` carries `@phpstan-assert false $condition`, so
 /// `assertFalse(is_string($x))` re-exports the inverse of the guard —
 /// after it, a `string|Foo` union is narrowed to `Foo`.

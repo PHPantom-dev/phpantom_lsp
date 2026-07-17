@@ -3498,19 +3498,21 @@ fn record_match_ternary_snapshots<'b>(
             }
         }
         Expression::Conditional(conditional) => {
-            // Only apply narrowing when the condition contains an
-            // instanceof check (simple or compound OR).  General
-            // truthiness/null narrowing is too broad and can produce
-            // incorrect scope snapshots for arbitrary ternaries.
-            let has_instanceof = {
+            // Only apply narrowing when the condition adds information the
+            // guarded branch relies on: an instanceof check (simple or
+            // compound OR) or a member-existence proof
+            // (`property_exists`/`method_exists`/`isset($x->prop)`).
+            // General truthiness/null narrowing is too broad and can
+            // produce incorrect scope snapshots for arbitrary ternaries.
+            let has_narrowing = {
                 let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
                 var_names.iter().any(|vn| {
                     narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
                         || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
                             .is_some()
                 })
-            };
-            if has_instanceof {
+            } || condition_proves_member(conditional.condition, scope);
+            if has_narrowing {
                 let mut then_scope = scope.clone();
                 apply_condition_narrowing(conditional.condition, &mut then_scope, ctx);
                 if let Some(then_expr) = conditional.then {
@@ -3643,9 +3645,11 @@ fn apply_cursor_ternary_narrowing<'b>(
             }
         }
         Expression::Conditional(conditional) => {
-            // Check if the condition contains an instanceof check for
+            // Check if the condition contains an instanceof check or a
+            // member-existence proof
+            // (`property_exists`/`method_exists`/`isset($x->prop)`) for
             // any variable currently in scope.
-            let has_instanceof = {
+            let has_narrowing = {
                 let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
                 var_names.iter().any(|vn| {
                     narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
@@ -3657,8 +3661,8 @@ fn apply_cursor_ternary_narrowing<'b>(
                         || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
                             .is_some()
                 })
-            };
-            if has_instanceof {
+            } || condition_proves_member(conditional.condition, scope);
+            if has_narrowing {
                 if let Some(then_expr) = conditional.then {
                     let then_span = then_expr.span();
                     if cursor >= then_span.start.offset && cursor <= then_span.end.offset {
@@ -8479,6 +8483,24 @@ fn apply_condition_narrowing_inverse<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+}
+
+/// Report whether `condition` contains a member-existence proof for any
+/// variable currently in `scope`: `property_exists($x, 'name')`,
+/// `method_exists($x, 'name')`, or `isset($x->name)` (all recognised by
+/// [`narrowing::try_extract_member_exists_guard`]).
+///
+/// Ternary branch narrowing runs only for conditions that add information
+/// the guarded branch relies on.  Like `instanceof`, these guards qualify:
+/// the then-branch of `property_exists($x, 'p') ? $x->p : …` depends on the
+/// proof that `$x->p` exists.
+fn condition_proves_member(condition: &Expression<'_>, scope: &ScopeState) -> bool {
+    let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+    collect_and_chain_operands(condition).iter().any(|operand| {
+        var_names
+            .iter()
+            .any(|vn| narrowing::try_extract_member_exists_guard(operand, vn.as_str()).is_some())
+    })
 }
 
 /// Apply `property_exists($var, 'name')` / `method_exists($var, 'name')`

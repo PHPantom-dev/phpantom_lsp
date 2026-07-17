@@ -337,6 +337,29 @@ class MemberExistsNarrowingDemo
         return (string) $response->detail;        // proven after the guard
     }
 
+    public function issetGuard(ApiResponse $response): ?string
+    {
+        // isset($obj->prop) proves the property exists (and is non-null)
+        // for the guarded branch, exactly like property_exists().
+        if (isset($response->errorMessage)) {
+            return (string) $response->errorMessage; // proven by isset
+        }
+        return null;
+    }
+
+    public function ternary(ApiResponse $response): string
+    {
+        // Both member-existence guards prove the property in a ternary's
+        // then-branch, mirroring the if-statement form.
+        $viaPropertyExists = property_exists($response, 'detail')
+            ? (string) $response->detail          // proven by property_exists
+            : 'none';
+        $viaIsset = isset($response->errorMessage)
+            ? (string) $response->errorMessage    // proven by isset
+            : 'none';
+        return $viaPropertyExists . '|' . $viaIsset;
+    }
+
     public function method(DynamicHandler $handler): void
     {
         // method_exists() proves the method for the guarded branch.
@@ -6245,6 +6268,18 @@ function runDemoAssertions(): void
     $withDetail->$field = 'context';
     assert($memberDemo->guardClause($withDetail) === 'context', 'negated property_exists guard clause reads the property after it');
     assert($memberDemo->guardClause(new ApiResponse()) === 'none', 'guard clause returns early when the property is absent');
+    $issetResp = new ApiResponse();
+    $field = 'errorMessage';
+    $issetResp->$field = 'boom';
+    assert($memberDemo->issetGuard($issetResp) === 'boom', 'isset($obj->prop) guard reads the dynamic property');
+    assert($memberDemo->issetGuard(new ApiResponse()) === null, 'isset guard is false when the property is absent');
+    $ternaryResp = new ApiResponse();
+    $field = 'detail';
+    $ternaryResp->$field = 'd';
+    $field = 'errorMessage';
+    $ternaryResp->$field = 'e';
+    assert($memberDemo->ternary($ternaryResp) === 'd|e', 'property_exists and isset ternaries read the proven properties');
+    assert($memberDemo->ternary(new ApiResponse()) === 'none|none', 'member-existence ternaries fall back when the properties are absent');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = loadPensOrFail();

@@ -639,6 +639,9 @@ pub(in crate::completion) fn try_extract_class_string_guard(
 ///     called `name` in the branch where the guard is true.  PHPStan
 ///     models this as an `object&hasProperty(name)` intersection.
 ///   - `method_exists($var, 'name')` — same for a method called `name`.
+///   - `isset($var->name)` — proves `$var` has a property called `name`
+///     (and that it is non-null) in the branch where the guard is true.
+///     PHPStan treats this as an existence proof for the guarded access.
 ///
 /// Only literal member names are recognised — a dynamic name proves the
 /// existence of *some* member but not which one, so nothing can be added
@@ -657,6 +660,27 @@ pub(in crate::completion) fn try_extract_member_exists_guard(
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
             try_extract_member_exists_guard(prefix.operand, var_name)
                 .map(|(name, is_method, negated)| (name, is_method, !negated))
+        }
+        // `isset($var->name)` proves the property exists on `$var`.  An
+        // `isset()` may carry several arguments; the first whose subject
+        // is `var_name` and whose member name is a literal identifier
+        // proves that member.  Only direct property access on `var_name`
+        // counts (a chained `$var->a->b` proves nothing about `$var`).
+        Expression::Construct(Construct::Isset(isset)) => {
+            for value in isset.values.iter() {
+                let (object, property) = match value {
+                    Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+                    Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+                    _ => continue,
+                };
+                if expr_to_subject_key(object).as_deref() != Some(var_name) {
+                    continue;
+                }
+                if let ClassLikeMemberSelector::Identifier(ident) = property {
+                    return Some((bytes_to_str(ident.value).to_string(), false, false));
+                }
+            }
+            None
         }
         Expression::Call(Call::Function(func_call)) => {
             let func_name = match func_call.function {
