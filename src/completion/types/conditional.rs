@@ -337,10 +337,17 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     );
                 }
 
-                // Check if the argument text matches `X::class`
-                if let Some(arg) = arg_text
-                    && let Some(class_name) = extract_class_name_from_text(arg)
-                {
+                // Check if the argument text matches `X::class`.  When the
+                // argument is omitted entirely, fall back to a `Foo::class`
+                // parameter default so `app()` resolves the same as
+                // `app(Foo::class)`.
+                let class_name = arg_text.and_then(extract_class_name_from_text).or_else(|| {
+                    arg_text
+                        .is_none()
+                        .then(|| default_class_string_name(params.get(param_idx)))
+                        .flatten()
+                });
+                if let Some(class_name) = class_name {
                     let class_name =
                         resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
                     let resolved = crate::util::resolve_name_via_loader(&class_name, class_loader);
@@ -995,6 +1002,19 @@ fn resolve_self_keyword(name: &str, calling_class_name: Option<&str>) -> Option<
     }
 }
 
+/// When a class-string conditional parameter receives no argument, fall back
+/// to a `Foo::class` default value so an omitted argument resolves the same as
+/// if the default had been passed explicitly.
+///
+/// For example, a helper `function app(string $name = Application::class)` with
+/// `@param class-string<T> $name` and `@return T` returns `Application` when
+/// called as `app()`, just as `app(Foo::class)` returns `Foo`. Returns `None`
+/// when the parameter has no default, or the default is not a `::class`
+/// expression (e.g. `null`), leaving the else branch to apply.
+fn default_class_string_name(param: Option<&ParameterInfo>) -> Option<String> {
+    extract_class_name_from_text(param?.default_value.as_deref()?)
+}
+
 fn extract_class_name_from_text(text: &str) -> Option<String> {
     let trimmed = text.trim();
     let name = trimmed.strip_suffix("::class")?;
@@ -1211,8 +1231,18 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     )
                 };
 
-                // Check if the argument is `X::class`
-                if let Some(class_name) = arg_expr.and_then(extract_class_string_from_expr) {
+                // Check if the argument is `X::class`.  When the argument is
+                // omitted entirely, fall back to a `Foo::class` parameter
+                // default so `app()` resolves the same as `app(Foo::class)`.
+                let class_name = arg_expr
+                    .and_then(extract_class_string_from_expr)
+                    .or_else(|| {
+                        arg_expr
+                            .is_none()
+                            .then(|| default_class_string_name(params.get(param_idx)))
+                            .flatten()
+                    });
+                if let Some(class_name) = class_name {
                     let class_name =
                         resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
                     let resolved = crate::util::resolve_name_via_loader(&class_name, class_loader);

@@ -138,35 +138,3 @@ function probeTernary(CanApply $item): mixed
 (shipped earlier); the ternary form does not, and `isset($obj->prop)`
 does not in either form. PHPStan treats both as existence proofs for
 the guarded access.
-
-## B109. A templated helper with a `class-string` default stops resolving at project scale
-
-**Severity: Medium (22 errors, agcms) · Not reproduced in a minimal fixture**
-
-```php
-/**
- * @template T of object
- * @param class-string<T> $name
- * @return T
- */
-function app(string $name = Application::class): object { /* … */ }
-
-$app = app();
-$app->basePath($path); // "type of '$app' could not be resolved"
-```
-
-All 22 agcms errors are this exact pattern: a zero-argument call to
-the project's own `app()` helper, whose `@template T` should bind
-from the parameter's default value (`Application::class`, imported
-via `use App\Application;` in `inc/helpers.php`).
-
-A minimal cross-file reproduction (same helper docblock, same
-`composer.json` shape with a PSR-4 dir plus a `files` autoload entry
-for the helper, a consumer class calling `$app = app()`) resolves
-correctly and reports no errors. The failure only appears when
-analyzing the full agcms project, is deterministic across runs, and
-predates the 2026-07 determinism/caching commits (reproduced back to
-at least `fca9e96c`). The triage table's "0 errors" entry for agcms
-was stale. Possibly a project-scale indexing path loses the
-parameter default or its use-statement resolution.
-Repro: `phpantom_lsp analyze --project-root projects/agcms`.

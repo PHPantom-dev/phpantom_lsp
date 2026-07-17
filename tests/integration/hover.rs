@@ -12557,3 +12557,74 @@ class App {
         "$this should resolve to Config via @param-closure-this, got: {text}"
     );
 }
+
+/// A templated helper whose `class-string<T>` parameter has a `Foo::class`
+/// default binds `T` from that default when called with no arguments, so
+/// `$app = app()` resolves to the default class the same as
+/// `app(Application::class)` would.
+#[test]
+fn hover_class_string_template_helper_binds_from_default_when_no_args() {
+    let backend = create_test_backend();
+    let uri = "file:///app_helper.php";
+    let content = r#"<?php
+class Application {
+    public function basePath(string $path = ''): string { return $path; }
+}
+
+/**
+ * @template T of object
+ * @param class-string<T> $name
+ * @return T
+ */
+function app(string $name = Application::class): object {
+    return new Application();
+}
+
+function test(): void {
+    $app = app();
+    $app;
+}
+"#;
+
+    // Hover `$app` on the line after the assignment.
+    let hover = hover_at(&backend, uri, content, 16, 5).expect("expected hover on $app");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Application"),
+        "$app = app() should resolve to Application via the parameter default, got: {text}"
+    );
+}
+
+/// The same helper called with an explicit `Foo::class` argument still binds
+/// `T` from the argument, not the default.
+#[test]
+fn hover_class_string_template_helper_binds_from_explicit_arg() {
+    let backend = create_test_backend();
+    let uri = "file:///app_helper_arg.php";
+    let content = r#"<?php
+class Application {}
+class Mailer {}
+
+/**
+ * @template T of object
+ * @param class-string<T> $name
+ * @return T
+ */
+function app(string $name = Application::class): object {
+    return new Application();
+}
+
+function test(): void {
+    $mailer = app(Mailer::class);
+    $mailer;
+}
+"#;
+
+    // Hover `$mailer` on the line after the assignment.
+    let hover = hover_at(&backend, uri, content, 15, 5).expect("expected hover on $mailer");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Mailer"),
+        "$mailer = app(Mailer::class) should resolve to Mailer, got: {text}"
+    );
+}
