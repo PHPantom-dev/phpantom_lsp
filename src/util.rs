@@ -1631,6 +1631,14 @@ pub(crate) fn find_brace_match_line(
 }
 
 impl Backend {
+    pub(crate) fn laravel_macro_token_cached(&self, uri: &str, content: &str) -> bool {
+        let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
+        self.laravel_macro_token_cache
+            .write()
+            .insert(uri.to_string(), has_token);
+        has_token
+    }
+
     /// Look up a class by its (possibly namespace-qualified) name in the
     /// in-memory `uri_classes_index`, without triggering any disk I/O.
     ///

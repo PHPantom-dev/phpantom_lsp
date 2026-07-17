@@ -231,6 +231,52 @@ fn parse_provider_class_list_empty_without_class_const() {
 }
 
 #[test]
+fn parse_provider_referenced_classes_collects_method_body_refs() {
+    let content = r#"<?php
+namespace App\Providers;
+
+use App\Macros\CollectionMacros;
+    class MacroServiceProvider {
+        public function boot(): void {
+            CollectionMacros::boot();
+            LocalMacros::register();
+        }
+
+        private function registerResponse(): void {
+            \App\Macros\ResponseMacros::boot();
+        }
+}
+"#;
+    assert_eq!(
+        parse_provider_referenced_classes(content),
+        vec![
+            "App\\Macros\\CollectionMacros".to_string(),
+            "App\\Providers\\LocalMacros".to_string(),
+            "App\\Macros\\ResponseMacros".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn extracts_instance_macro_from_typed_parameter() {
+    let content = r#"<?php
+use Illuminate\Database\Eloquent\Builder;
+
+class ConfidentialScope {
+    public function extend(Builder $query): void {
+        $query->macro('withConfidential', function (bool $flag = true): Builder {
+            return $this;
+        });
+    }
+}
+"#;
+    let regs = extract_macro_registrations(content, None);
+    assert_eq!(regs.len(), 1);
+    assert_eq!(regs[0].target, "Illuminate\\Database\\Eloquent\\Builder");
+    assert_eq!(regs[0].method.name.as_str(), "withConfidential");
+}
+
+#[test]
 fn index_removes_file_contributions_when_emptied() {
     let content = r#"<?php
 use Illuminate\Support\Collection;

@@ -1890,36 +1890,31 @@ impl Backend {
     }
 
     /// Build the Laravel macro index by scanning the project's own source
-    /// directories, plus the service-provider files of installed vendor
-    /// packages, for `Target::macro('name', closure)` registrations.
+    /// service providers, plus one level of classes they import, for
+    /// `Target::macro('name', closure)` registrations.
     ///
-    /// Project code is walked via the PSR-4 source directories.  Vendor macros
-    /// are recovered from the service providers packages register (via
-    /// `extra.laravel.providers` in `installed.json`) plus any providers the
-    /// app registers in `bootstrap/providers.php` / `config/app.php`, rather
-    /// than re-reading the whole vendor tree.  Called once after indexing for
-    /// Laravel projects.  Files are byte-prefiltered for `macro(` so only
-    /// candidates are parsed.
+    /// Vendor macros are recovered from the service providers packages register
+    /// (via `extra.laravel.providers` in `installed.json`) plus any providers
+    /// the app registers in `bootstrap/providers.php` / `config/app.php`,
+    /// rather than re-reading the whole vendor tree. Project macros follow the
+    /// same provider-rooted shape: each provider file is scanned directly and
+    /// each imported class is scanned as a one-level helper candidate. Called
+    /// once after indexing for Laravel projects. Files are byte-prefiltered for
+    /// `macro(` so only candidates are parsed.
     fn build_laravel_macro_index(&self) {
         let php_version = Some(*self.php_version.lock());
-        let vendor = self.vendor_dir_paths.lock().clone();
-
-        // Distinct PSR-4 source base directories (project code only).
-        let mut dirs: Vec<std::path::PathBuf> = Vec::new();
-        for mapping in self.psr4_mappings.read().iter() {
-            let dir = std::path::PathBuf::from(&mapping.base_path);
-            if !dirs.contains(&dir) {
-                dirs.push(dir);
-            }
-        }
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
+        let mut candidate_uris: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut provider_uris: Vec<String> = Vec::new();
+        let mut imported_uris: Vec<String> = Vec::new();
 
         // Scan a single file's content into the index, keyed by its URI.
         let scan_content = |index: &mut crate::virtual_members::laravel::LaravelMacroIndex,
                             uri: String,
                             content: &str| {
-            if memchr::memmem::find(content.as_bytes(), b"macro(").is_none() {
+            if !self.laravel_macro_token_cached(&uri, content) {
                 return;
             }
             let mut regs =
@@ -1933,46 +1928,57 @@ impl Backend {
             index.set_file(uri, regs);
         };
 
-        for dir in dirs {
-            if !dir.is_dir() {
-                continue;
-            }
-            for file in crate::util::collect_php_files(&dir, &vendor) {
-                let Ok(bytes) = std::fs::read(&file) else {
-                    continue;
-                };
-                // Byte pre-filter before the UTF-8 conversion so non-candidate
-                // files are skipped as cheaply as possible.
-                if memchr::memmem::find(&bytes, b"macro(").is_none() {
-                    continue;
-                }
-                let Ok(content) = String::from_utf8(bytes) else {
-                    continue;
-                };
-                scan_content(&mut index, crate::util::path_to_uri(&file), &content);
-            }
-        }
-
-        // Vendor- and app-registered service providers: scan each provider's
-        // source file for macro registrations.
+        // Vendor- and app-registered service providers seed macro discovery.
         for fqn in self.laravel_provider_fqns() {
             let Some(uri) = self.resolve_class_uri(&fqn) else {
                 continue;
             };
-            if index.has_uri(&uri) {
-                continue; // already scanned as project source
+            if candidate_uris.insert(uri.clone()) {
+                provider_uris.push(uri);
             }
-            let Some(content) = self.get_file_content(&uri) else {
+        }
+
+        for uri in &provider_uris {
+            let Some(content) = self.get_file_content(uri) else {
                 continue;
             };
-            scan_content(&mut index, uri, &content);
+            scan_content(&mut index, uri.clone(), &content);
+
+            for imported_fqn in
+                crate::virtual_members::laravel::parse_provider_referenced_classes(&content)
+            {
+                let Some(imported_uri) = self.resolve_class_uri(&imported_fqn) else {
+                    continue;
+                };
+                if !self.is_laravel_macro_helper_uri_allowed(uri, &imported_uri) {
+                    continue;
+                }
+                if candidate_uris.insert(imported_uri.clone()) {
+                    imported_uris.push(imported_uri);
+                }
+            }
+        }
+
+        for uri in &imported_uris {
+            let Some(content) = self.get_file_content(uri) else {
+                continue;
+            };
+            scan_content(&mut index, uri.clone(), &content);
         }
 
         index.rebuild();
         let has_macros = !index.is_empty();
+        let target_count = index.target_fqns().len();
         *self.laravel_macros.write() = index;
         self.laravel_has_macros
             .store(has_macros, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(
+            "PHPantom: scanned {} Laravel macro candidates ({} providers, {} imported classes), indexed {} macro targets",
+            candidate_uris.len(),
+            provider_uris.len(),
+            imported_uris.len(),
+            target_count,
+        );
     }
 
     /// Collect the FQNs of every Laravel service provider that could register a
@@ -2037,6 +2043,10 @@ impl Backend {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
+        if self.is_laravel_macro_seed_uri(uri) {
+            self.build_laravel_macro_index();
+            return;
+        }
         let had = self.laravel_macros.read().has_uri(uri);
         let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
         if !had && !has_token {
@@ -2065,6 +2075,72 @@ impl Backend {
         for fqn in targets {
             crate::virtual_members::evict_fqn(&mut cache, &fqn);
         }
+    }
+
+    fn is_laravel_macro_seed_uri(&self, uri: &str) -> bool {
+        if let Some(root) = self.workspace_root.read().clone() {
+            for rel in ["bootstrap/providers.php", "config/app.php"] {
+                if crate::util::path_to_uri(&root.join(rel)) == uri {
+                    return true;
+                }
+            }
+        }
+
+        for fqn in self.laravel_provider_fqns() {
+            if self.resolve_class_uri(&fqn).as_deref() == Some(uri) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn is_laravel_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
+        let Ok(provider_url) = tower_lsp::lsp_types::Url::parse(provider_uri) else {
+            return false;
+        };
+        let Ok(helper_url) = tower_lsp::lsp_types::Url::parse(helper_uri) else {
+            return false;
+        };
+        let Ok(provider_path) = provider_url.to_file_path() else {
+            return false;
+        };
+        let Ok(helper_path) = helper_url.to_file_path() else {
+            return false;
+        };
+
+        // Vendor providers may live under the workspace root, so classify
+        // package-local vendor helpers before the broader app-root check.
+        if let Some(root) = self.vendor_package_root(&provider_path) {
+            return helper_path.starts_with(&root);
+        }
+
+        if let Some(root) = self.workspace_root.read().clone()
+            && provider_path.starts_with(&root)
+        {
+            return helper_path.starts_with(&root) && !self.is_in_vendor_dir(&helper_path);
+        }
+
+        false
+    }
+
+    fn vendor_package_root(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
+        for vendor_dir in self.vendor_dir_paths.lock().iter() {
+            if let Ok(rel) = path.strip_prefix(vendor_dir)
+                && let mut comps = rel.components()
+                && let (Some(vendor), Some(package)) = (comps.next(), comps.next())
+            {
+                return Some(vendor_dir.join(vendor).join(package));
+            }
+        }
+        None
+    }
+
+    fn is_in_vendor_dir(&self, path: &std::path::Path) -> bool {
+        self.vendor_dir_paths
+            .lock()
+            .iter()
+            .any(|vendor_dir| path.starts_with(vendor_dir))
     }
 
     /// Initialize a single-project workspace (root `composer.json` exists).

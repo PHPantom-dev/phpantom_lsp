@@ -20,7 +20,7 @@
 //! to the concrete class's `__call`, which is the current gracefully
 //! degraded behaviour.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bumpalo::Bump;
@@ -82,6 +82,13 @@ pub(crate) fn extract_macro_registrations(
             out.push(reg);
         }
     }
+    collect_instance_macro_registrations(
+        Node::Program(program),
+        &owned,
+        content,
+        php_version,
+        &mut out,
+    );
     out
 }
 
@@ -235,6 +242,184 @@ fn collect_macro_calls<'ast, 'arena>(
     node.visit_children(|child| collect_macro_calls(child, out));
 }
 
+fn collect_instance_macro_registrations(
+    node: Node<'_, '_>,
+    resolved: &OwnedResolvedNames,
+    content: &str,
+    php_version: Option<PhpVersion>,
+    out: &mut Vec<MacroRegistration>,
+) {
+    use mago_syntax::ast::class_like::member::ClassLikeMember;
+    use mago_syntax::ast::class_like::method::MethodBody;
+
+    match node {
+        Node::Program(program) => {
+            for statement in program.statements.iter() {
+                collect_instance_macro_registrations(
+                    Node::Statement(statement),
+                    resolved,
+                    content,
+                    php_version,
+                    out,
+                );
+            }
+        }
+        Node::Statement(Statement::Namespace(namespace)) => {
+            for statement in namespace.statements().iter() {
+                collect_instance_macro_registrations(
+                    Node::Statement(statement),
+                    resolved,
+                    content,
+                    php_version,
+                    out,
+                );
+            }
+        }
+        Node::Statement(Statement::Function(function)) => collect_instance_macros_in_body(
+            Node::Block(&function.body),
+            &typed_parameter_targets(&function.parameter_list, resolved),
+            content,
+            php_version,
+            out,
+        ),
+        Node::Class(class) => {
+            for member in class.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_instance_macros_in_body(
+                        Node::Block(body),
+                        &typed_parameter_targets(&method.parameter_list, resolved),
+                        content,
+                        php_version,
+                        out,
+                    );
+                }
+            }
+        }
+        Node::Trait(trait_) => {
+            for member in trait_.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_instance_macros_in_body(
+                        Node::Block(body),
+                        &typed_parameter_targets(&method.parameter_list, resolved),
+                        content,
+                        php_version,
+                        out,
+                    );
+                }
+            }
+        }
+        Node::Enum(enum_) => {
+            for member in enum_.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_instance_macros_in_body(
+                        Node::Block(body),
+                        &typed_parameter_targets(&method.parameter_list, resolved),
+                        content,
+                        php_version,
+                        out,
+                    );
+                }
+            }
+        }
+        _ => node.visit_children(|child| {
+            collect_instance_macro_registrations(child, resolved, content, php_version, out)
+        }),
+    }
+}
+
+fn collect_instance_macros_in_body(
+    node: Node<'_, '_>,
+    typed_targets: &HashMap<String, String>,
+    content: &str,
+    php_version: Option<PhpVersion>,
+    out: &mut Vec<MacroRegistration>,
+) {
+    if let Node::MethodCall(call) = node
+        && let ClassLikeMemberSelector::Identifier(ident) = &call.method
+        && bytes_to_str(ident.value).eq_ignore_ascii_case("macro")
+        && let Expression::Variable(Variable::Direct(dv)) = call.object
+        && let Some(target) = typed_targets.get(bytes_to_str(dv.name))
+        && let Some(reg) = build_instance_registration(call, target, content, php_version)
+    {
+        out.push(reg);
+    }
+    node.visit_children(|child| {
+        collect_instance_macros_in_body(child, typed_targets, content, php_version, out)
+    });
+}
+
+fn typed_parameter_targets(
+    params: &FunctionLikeParameterList<'_>,
+    resolved: &OwnedResolvedNames,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for param in params.parameters.iter() {
+        let Some(hint) = param.hint.as_ref() else {
+            continue;
+        };
+        let Some(target) = resolve_hint_target_fqn(hint, resolved) else {
+            continue;
+        };
+        out.insert(bytes_to_str(param.variable.name).to_string(), target);
+    }
+    out
+}
+
+fn resolve_hint_target_fqn(hint: &Hint<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
+    match hint {
+        Hint::Identifier(ident) => {
+            let raw = bytes_to_str(ident.value());
+            if matches!(
+                raw.to_ascii_lowercase().as_str(),
+                "self" | "static" | "parent"
+            ) {
+                return None;
+            }
+            let offset = ident.span().start.offset;
+            resolved
+                .get(offset)
+                .map(|fqn| fqn.trim_start_matches('\\').to_string())
+                .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()))
+        }
+        Hint::Nullable(nullable) => resolve_hint_target_fqn(nullable.hint, resolved),
+        Hint::Parenthesized(paren) => resolve_hint_target_fqn(paren.hint, resolved),
+        _ => None,
+    }
+}
+
+fn build_instance_registration(
+    mc: &MethodCall<'_>,
+    target: &str,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    let mut args = mc.argument_list.arguments.iter();
+    let name_arg = args.next()?.value();
+    let name = macro_name(name_arg)?;
+    let name_offset = name_arg.span().start.offset;
+    let (parameter_list, return_type_hint) = closure_signature(args.next()?.value())?;
+
+    let parameters =
+        crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
+    let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
+
+    let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
+    method.parameters = parameters;
+    method.native_return_type = return_type;
+
+    Some(MacroRegistration {
+        target: target.to_string(),
+        method,
+        name_offset,
+    })
+}
+
 /// Build a [`MacroRegistration`] from a `Target::macro('name', closure)` call,
 /// or `None` when the call does not match the supported literal shape.
 fn build_registration(
@@ -369,6 +554,23 @@ pub(crate) fn parse_provider_class_list(content: &str) -> Vec<String> {
     out
 }
 
+pub(crate) fn parse_provider_referenced_classes(content: &str) -> Vec<String> {
+    if !content.contains("::") && !content.contains("new ") {
+        return Vec::new();
+    }
+
+    let arena = Bump::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, content.as_bytes());
+    let resolved = NameResolver::new(&arena).resolve(program);
+    let owned = OwnedResolvedNames::from_resolved(&resolved);
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    collect_provider_method_refs(Node::Program(program), &owned, &mut seen, &mut out);
+    out
+}
+
 /// The value expression of a top-level `return [ 'key' => … ]` array entry.
 fn find_return_array_entry<'ast, 'arena>(
     program: &'ast Program<'arena>,
@@ -393,6 +595,110 @@ fn find_return_array_entry<'ast, 'arena>(
         }
     }
     None
+}
+
+fn collect_provider_method_refs(
+    node: Node<'_, '_>,
+    resolved: &OwnedResolvedNames,
+    seen: &mut HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    use mago_syntax::ast::class_like::member::ClassLikeMember;
+    use mago_syntax::ast::class_like::method::MethodBody;
+
+    match node {
+        Node::Class(class) => {
+            for member in class.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_class_refs(Node::Block(body), resolved, seen, out);
+                }
+            }
+        }
+        Node::AnonymousClass(class) => {
+            for member in class.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_class_refs(Node::Block(body), resolved, seen, out);
+                }
+            }
+        }
+        Node::Trait(trait_) => {
+            for member in trait_.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_class_refs(Node::Block(body), resolved, seen, out);
+                }
+            }
+        }
+        Node::Enum(enum_) => {
+            for member in enum_.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    collect_class_refs(Node::Block(body), resolved, seen, out);
+                }
+            }
+        }
+        Node::Interface(_) => {}
+        _ => node.visit_children(|child| collect_provider_method_refs(child, resolved, seen, out)),
+    }
+}
+
+fn collect_class_refs(
+    node: Node<'_, '_>,
+    resolved: &OwnedResolvedNames,
+    seen: &mut HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    match node {
+        Node::StaticMethodCall(call) => push_resolved_expr_fqn(call.class, resolved, seen, out),
+        Node::ClassConstantAccess(access)
+            if matches!(
+                &access.constant,
+                ClassLikeConstantSelector::Identifier(id)
+                    if bytes_to_str(id.value).eq_ignore_ascii_case("class")
+            ) =>
+        {
+            push_resolved_expr_fqn(access.class, resolved, seen, out)
+        }
+        _ => node.visit_children(|child| collect_class_refs(child, resolved, seen, out)),
+    }
+}
+
+fn push_resolved_expr_fqn(
+    expr: &Expression<'_>,
+    resolved: &OwnedResolvedNames,
+    seen: &mut HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    let Expression::Identifier(ident) = expr else {
+        return;
+    };
+    let raw = bytes_to_str(ident.value());
+    if matches!(
+        raw.to_ascii_lowercase().as_str(),
+        "self" | "static" | "parent"
+    ) {
+        return;
+    }
+    let Some(fqn) = resolved.get(ident.span().start.offset) else {
+        if raw.is_empty() {
+            return;
+        }
+        let raw = raw.trim_start_matches('\\').to_string();
+        if seen.insert(raw.clone()) {
+            out.push(raw);
+        }
+        return;
+    };
+    let fqn = fqn.trim_start_matches('\\').to_string();
+    if seen.insert(fqn.clone()) {
+        out.push(fqn);
+    }
 }
 
 /// Recursively collect the FQN of every `Something::class` constant reachable

@@ -96,6 +96,8 @@ impl Backend {
             self.update_ast_inner(&uri_owned, &content_owned)
         });
 
+        self.laravel_macro_token_cached(uri, content);
+
         // Keep the Laravel macro index coherent with edits to files that
         // register macros.  Cheap no-op for files without a `macro(` call.
         self.refresh_laravel_macros(uri, content);
