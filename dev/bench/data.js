@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784321088163,
+  "lastUpdate": 1784322598358,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -91967,6 +91967,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.74,
             "range": "± 0.016",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "14fc0b8a63c61e01b99917d0d1d31ed4b50a59a0",
+          "message": "feat: macro hover with origin indicator and inferred return types\n\nMacro methods now show a \"macro\" origin indicator in hover instead\nof the generic \"virtual\" label, helping users distinguish ::macro()\nregistrations from @method/@mixin synthesized members.\n\nWhen a macro closure has no explicit return type hint, the return\ntype is inferred from the closure body and displayed with an\n\"(inferred)\" annotation. This also applies to regular methods\nwhose return types are inferred at hover time.\n\nA new preserve_static flag on ResolutionCtx controls whether\n$this/self/static resolve to their keyword form or the concrete\nclass name. For method chains like $this->transform(...), the\nlast method's declared return type is used directly via\nresolve_chain_declared_return(), preserving $this, static, and\ngeneric parameters that the general expression resolver would\nflatten to a bare class name. Raw class methods are checked\nbefore the fully-resolved class so template parameter names\n(e.g. TValue) are preserved instead of being replaced with\ntheir bounds.\n\nKey changes:\n- is_macro and is_inferred_return fields on MethodInfo\n- MemberOrigin::Macro variant for hover rendering\n- preserve_static on ResolutionCtx with chain-aware resolution\n- resolve_chain_declared_return() for declared return type lookup\n- 4 new integration tests for hover behavior",
+          "timestamp": "2026-07-17T15:59:40-05:00",
+          "tree_id": "e3b13f2e4b381f2baf6c6703ff27f5c339c1de83",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/14fc0b8a63c61e01b99917d0d1d31ed4b50a59a0"
+        },
+        "date": 1784322596044,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 6.343,
+            "range": "± 0.243",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.054,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.125,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.162,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.241,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.264,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.979,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.986,
+            "range": "± 0.06",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.133,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.061,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.057,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.081,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.817,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.245,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.258,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.078,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.054,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.131,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.117,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.107,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.199,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.086,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.558,
+            "range": "± 0.039",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.092,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.04,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.038,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 70.441,
+            "range": "± 0.454",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.78,
+            "range": "± 0.022",
             "unit": "ms"
           }
         ]
