@@ -246,18 +246,23 @@ impl Backend {
         let mut names = Vec::new();
 
         for (file_uri, _) in snapshot {
-            // Match resources/views/**/*.blade.php or *.php
             let Some(rel) = extract_view_relative_path(&file_uri) else {
                 continue;
             };
             names.push(rel);
         }
+
+        for res in &self.laravel_provider_resources.read().view_dirs {
+            collect_namespaced_view_names(&res.path, &res.namespace, &mut names);
+        }
+
         names.sort();
         names.dedup();
         names
     }
 
-    /// Enumerate all config keys by scanning `config/` files.
+    /// Enumerate all config keys by scanning `config/` files and
+    /// package config files discovered from service providers.
     fn enumerate_all_config_keys(&self) -> Vec<String> {
         use crate::virtual_members::laravel::{
             collect_laravel_config_declarations, laravel_config_prefix_from_uri,
@@ -278,15 +283,27 @@ impl Backend {
                 keys.push(d.key);
             }
         }
+
+        for res in &self.laravel_provider_resources.read().config_files {
+            if let Ok(content) = std::fs::read_to_string(&res.path) {
+                let decls = collect_laravel_config_declarations(&content, &res.namespace);
+                for d in decls {
+                    keys.push(d.key);
+                }
+            }
+        }
+
         keys.sort();
         keys.dedup();
         keys
     }
 
-    /// Enumerate all translation keys by scanning `lang/` files.
+    /// Enumerate all translation keys by scanning `lang/` files and
+    /// package translation directories discovered from service providers.
     ///
     /// Supports both PHP array files (`lang/en/messages.php` → `messages.key`)
     /// and JSON translation files (`lang/en.json` → raw key strings).
+    /// Package translations use `namespace::file.key` syntax.
     fn enumerate_all_trans_keys(&self) -> Vec<String> {
         let snapshot = self.user_file_symbol_maps();
         let mut keys = Vec::new();
@@ -311,8 +328,11 @@ impl Backend {
             }
         }
 
-        // Also collect keys from JSON translation files on disk.
         collect_json_trans_keys(self, &mut keys);
+
+        for res in &self.laravel_provider_resources.read().trans_dirs {
+            collect_namespaced_trans_keys(&res.path, &res.namespace, &mut keys);
+        }
 
         keys.sort();
         keys.dedup();
@@ -425,6 +445,92 @@ fn collect_json_trans_keys(backend: &crate::Backend, out: &mut Vec<String>) {
                     out.push(k.clone());
                 }
             }
+        }
+    }
+}
+
+/// Recursively scan a package view directory and collect view names
+/// in `namespace::dot.notation` format.
+fn collect_namespaced_view_names(dir: &std::path::Path, namespace: &str, out: &mut Vec<String>) {
+    collect_view_names_recursive(dir, dir, namespace, out);
+}
+
+fn collect_view_names_recursive(
+    base: &std::path::Path,
+    dir: &std::path::Path,
+    namespace: &str,
+    out: &mut Vec<String>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_view_names_recursive(base, &path, namespace, out);
+        } else if let Some(rel) = path.strip_prefix(base).ok().and_then(|r| r.to_str()) {
+            let name = rel
+                .strip_suffix(".blade.php")
+                .or_else(|| rel.strip_suffix(".php"));
+            if let Some(name) = name {
+                let dotted = name.replace([std::path::MAIN_SEPARATOR, '/'], ".");
+                out.push(format!("{namespace}::{dotted}"));
+            }
+        }
+    }
+}
+
+/// Scan a package translation directory and collect keys in
+/// `namespace::file.key` format (PHP files) or `namespace::raw_key`
+/// (JSON files with empty namespace).
+fn collect_namespaced_trans_keys(dir: &std::path::Path, namespace: &str, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_namespaced_trans_from_locale_dir(&path, namespace, out);
+        } else if path.extension().is_some_and(|e| e == "json")
+            && namespace.is_empty()
+            && let Ok(content) = std::fs::read_to_string(&path)
+            && let Ok(map) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+        {
+            for k in map.keys() {
+                out.push(k.clone());
+            }
+        }
+    }
+}
+
+fn collect_namespaced_trans_from_locale_dir(
+    dir: &std::path::Path,
+    namespace: &str,
+    out: &mut Vec<String>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().is_some_and(|e| e == "php") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let prefix = if namespace.is_empty() {
+            stem.to_string()
+        } else {
+            format!("{namespace}::{stem}")
+        };
+        let decls = crate::virtual_members::laravel::collect_trans_declarations(&content, &prefix);
+        for d in decls {
+            out.push(d.key);
         }
     }
 }

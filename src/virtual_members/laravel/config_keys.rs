@@ -233,7 +233,23 @@ pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Op
                 return Some(crate::definition::point_location(target_uri, pos));
             }
 
-            // Key not found exactly in this file, but this is the matching file stem.
+            return Some(crate::definition::point_location(
+                target_uri,
+                Position::new(0, 0),
+            ));
+        }
+    }
+
+    let first_part = parts.first()?;
+    for res in &backend.laravel_provider_resources.read().config_files {
+        if res.namespace == *first_part && res.path.is_file() {
+            let target_uri = Url::from_file_path(&res.path).ok()?;
+            let target_content = std::fs::read_to_string(&res.path).ok()?;
+            let declarations = collect_laravel_config_declarations(&target_content, &res.namespace);
+            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+                let pos = crate::util::offset_to_position(&target_content, decl.start);
+                return Some(crate::definition::point_location(target_uri, pos));
+            }
             return Some(crate::definition::point_location(
                 target_uri,
                 Position::new(0, 0),

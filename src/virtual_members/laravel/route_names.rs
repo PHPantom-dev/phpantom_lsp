@@ -138,6 +138,16 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
             .and_then(|p| p.parent().map(|d| d.to_path_buf()));
         results.extend(scan_route_file(&content, name, &uri, file_dir.as_deref()));
     }
+
+    for route_path in &backend.laravel_provider_resources.read().route_files {
+        if let Ok(content) = std::fs::read_to_string(route_path)
+            && let Ok(uri) = Url::from_file_path(route_path)
+        {
+            let file_dir = route_path.parent();
+            results.extend(scan_route_file(&content, name, &uri, file_dir));
+        }
+    }
+
     results
 }
 
@@ -415,6 +425,14 @@ pub(crate) fn enumerate_all_route_names(backend: &Backend) -> Vec<String> {
             .and_then(|p| p.parent().map(|d| d.to_path_buf()));
         collect_all_names_from_file(&content, file_dir.as_deref(), &mut names);
     }
+
+    for route_path in &backend.laravel_provider_resources.read().route_files {
+        if let Ok(content) = std::fs::read_to_string(route_path) {
+            let file_dir = route_path.parent();
+            collect_all_names_from_file(&content, file_dir, &mut names);
+        }
+    }
+
     names.sort();
     names.dedup();
     names
@@ -595,36 +613,6 @@ fn collect_names_from_group_body<'a>(
     }
 }
 
-/// Try to extract a relative path from a `__DIR__ . '/path.php'` expression.
-///
-/// Returns the string literal portion (e.g. `"/ems/accounting.php"`).
-fn extract_dir_concat_path<'a>(expr: &Expression<'a>, content: &'a str) -> Option<&'a str> {
-    let Expression::Binary(bin) = expr else {
-        return None;
-    };
-    // Check LHS is __DIR__
-    let is_dir = matches!(
-        bin.lhs,
-        Expression::MagicConstant(MagicConstant::Directory { .. })
-    );
-    if !is_dir {
-        return None;
-    }
-    // RHS should be a string literal
-    let Expression::Literal(literal::Literal::String(s)) = bin.rhs else {
-        return None;
-    };
-    if let Some(value) = s.value {
-        Some(crate::atom::bytes_to_str(value))
-    } else {
-        let start = s.span.start.offset as usize + 1;
-        let end = s.span.end.offset as usize - 1;
-        if start < end && end <= content.len() {
-            Some(&content[start..end])
-        } else {
-            None
-        }
-    }
-}
+use super::helpers::extract_dir_concat_path;
 
 pub(crate) use super::helpers::{chain_name_prefix, extract_as_prefix_from_args};
