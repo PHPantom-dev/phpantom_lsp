@@ -16,10 +16,47 @@ use crate::atom::bytes_to_str;
 ///
 /// Falls back to the top of the file when the exact key cannot be located.
 pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Location> {
-    let snapshot = backend.user_file_symbol_maps();
     let mut results = Vec::new();
 
-    // PHP file-based translations: first segment is the file stem.
+    if let Some((namespace, rest)) = key.split_once("::") {
+        let file_stem = rest.split('.').next().unwrap_or(rest);
+        for res in &backend.laravel_provider_resources.read().trans_dirs {
+            if res.namespace != namespace {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&res.path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let locale_dir = entry.path();
+                if !locale_dir.is_dir() {
+                    continue;
+                }
+                let candidate = locale_dir.join(format!("{file_stem}.php"));
+                if !candidate.is_file() {
+                    continue;
+                }
+                let Ok(content) = std::fs::read_to_string(&candidate) else {
+                    continue;
+                };
+                let Ok(uri) = Url::from_file_path(&candidate) else {
+                    continue;
+                };
+                let prefix = format!("{namespace}::{file_stem}");
+                let declarations = collect_trans_declarations(&content, &prefix);
+                if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+                    let pos = crate::util::offset_to_position(&content, decl.start);
+                    results.push(crate::definition::point_location(uri, pos));
+                    continue;
+                }
+                results.push(crate::definition::point_location(uri, Position::new(0, 0)));
+            }
+        }
+        return results;
+    }
+
+    let snapshot = backend.user_file_symbol_maps();
+
     let file_stem = key.split('.').next().unwrap_or(key);
     let target_suffix = format!("/{file_stem}.php");
 
@@ -43,12 +80,10 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
                 continue;
             }
 
-            // File matched by stem but key not found — point to top of file.
             results.push(crate::definition::point_location(uri, Position::new(0, 0)));
         }
     }
 
-    // Also check JSON translation files on disk.
     if let Some(root) = backend.workspace_root.read().clone() {
         for sub in &["lang", "resources/lang"] {
             let dir = root.join(sub);

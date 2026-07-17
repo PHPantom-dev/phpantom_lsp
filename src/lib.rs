@@ -532,6 +532,7 @@ pub struct Backend {
     /// view names, translation keys).  `None` = not yet computed.
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
     /// or `lang/` is updated.
+    pub(crate) laravel_provider_resources: Arc<RwLock<virtual_members::laravel::ProviderResources>>,
     pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
     /// Per-target member completion cache.
     ///
@@ -956,6 +957,9 @@ impl Backend {
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            laravel_provider_resources: Arc::new(RwLock::new(
+                virtual_members::laravel::ProviderResources::default(),
+            )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
@@ -1054,6 +1058,9 @@ impl Backend {
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            laravel_provider_resources: Arc::new(RwLock::new(
+                virtual_members::laravel::ProviderResources::default(),
+            )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
@@ -1659,6 +1666,7 @@ impl Backend {
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_date_class: Arc::clone(&self.laravel_date_class),
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
+            laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),

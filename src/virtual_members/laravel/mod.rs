@@ -87,6 +87,7 @@ mod factory;
 mod helpers;
 mod macros;
 pub(crate) mod patches;
+mod provider_resources;
 mod relationships;
 mod route_names;
 mod scopes;
@@ -108,6 +109,7 @@ pub(crate) use macros::{
     inject_macros, parse_installed_providers, parse_provider_class_list,
     parse_provider_referenced_classes,
 };
+pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
 pub(crate) use route_names::enumerate_all_route_names;
 pub(crate) use trans_keys::collect_trans_declarations;
 

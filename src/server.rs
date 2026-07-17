@@ -510,6 +510,7 @@ impl LanguageServer for Backend {
         if self.resolved_class_cache.read().is_laravel() {
             self.build_laravel_date_class();
             self.build_laravel_macro_index();
+            self.build_provider_resources();
         }
 
         // Mark initialization as complete so that diagnostic workers
@@ -2215,6 +2216,56 @@ impl Backend {
         ["bootstrap/providers.php", "config/app.php"]
             .iter()
             .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
+    }
+
+    fn build_provider_resources(&self) {
+        let mut resources = crate::virtual_members::laravel::ProviderResources::default();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for fqn in self.laravel_provider_fqns() {
+            let Some(uri) = self.resolve_class_uri(&fqn) else {
+                continue;
+            };
+            if !seen.insert(uri.clone()) {
+                continue;
+            }
+            let Some(content) = self.get_file_content(&uri) else {
+                continue;
+            };
+            let file_dir = tower_lsp::lsp_types::Url::parse(&uri)
+                .ok()
+                .and_then(|u| u.to_file_path().ok())
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            let Some(file_dir) = file_dir else {
+                continue;
+            };
+
+            resources.merge(crate::virtual_members::laravel::extract_provider_resources(
+                &content, &file_dir,
+            ));
+        }
+
+        let config_count = resources.config_files.len();
+        let view_count = resources.view_dirs.len();
+        let trans_count = resources.trans_dirs.len();
+        let route_count = resources.route_files.len();
+        *self.laravel_provider_resources.write() = resources;
+
+        if config_count + view_count + trans_count + route_count > 0 {
+            let mut cache = self.laravel_string_key_cache.write();
+            cache.config_keys = None;
+            cache.view_names = None;
+            cache.trans_keys = None;
+            cache.route_names = None;
+        }
+
+        tracing::info!(
+            "PHPantom: discovered {} package config files, {} view dirs, {} translation dirs, {} route files from service providers",
+            config_count,
+            view_count,
+            trans_count,
+            route_count,
+        );
     }
 
     fn infer_laravel_macro_return_types(
