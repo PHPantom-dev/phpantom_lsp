@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784332520074,
+  "lastUpdate": 1784332960167,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16348,6 +16348,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 42.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c349a58037d4bfcae1e4b3db8784432390372e27",
+          "message": "Preserve static context",
+          "timestamp": "2026-07-18T01:48:17+02:00",
+          "tree_id": "f32a5221caf6095fd840f255358913dceebc1260",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c349a58037d4bfcae1e4b3db8784432390372e27"
+        },
+        "date": 1784332958646,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.2,
             "unit": "MiB"
           },
           {
