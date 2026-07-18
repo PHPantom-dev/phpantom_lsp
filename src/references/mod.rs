@@ -2278,15 +2278,17 @@ impl Backend {
 
         std::thread::scope(|s| {
             for chunk in &chunks {
-                let handle = std::thread::Builder::new().spawn_scoped(s, move || {
-                    for (uri, content) in chunk {
-                        if let Some(c) = content {
-                            self.update_ast(uri, c);
-                        } else if let Some(c) = self.get_file_content(uri) {
-                            self.update_ast(uri, &c);
+                let handle = std::thread::Builder::new()
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                    .spawn_scoped(s, move || {
+                        for (uri, content) in chunk {
+                            if let Some(c) = content {
+                                self.update_ast(uri, c);
+                            } else if let Some(c) = self.get_file_content(uri) {
+                                self.update_ast(uri, &c);
+                            }
                         }
-                    }
-                });
+                    });
                 if let Err(e) = handle {
                     tracing::error!("failed to spawn parse thread: {e}");
                 }
@@ -2326,13 +2328,15 @@ impl Backend {
 
         std::thread::scope(|s| {
             for chunk in &chunks {
-                let handle = std::thread::Builder::new().spawn_scoped(s, move || {
-                    for (uri, path) in *chunk {
-                        if let Ok(content) = std::fs::read_to_string(path) {
-                            self.update_ast(uri, &content);
+                let handle = std::thread::Builder::new()
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                    .spawn_scoped(s, move || {
+                        for (uri, path) in *chunk {
+                            if let Ok(content) = std::fs::read_to_string(path) {
+                                self.update_ast(uri, &content);
+                            }
                         }
-                    }
-                });
+                    });
                 if let Err(e) = handle {
                     tracing::error!("failed to spawn parse thread: {e}");
                 }

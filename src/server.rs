@@ -3055,6 +3055,7 @@ impl Backend {
             for _ in 0..n_threads {
                 std::thread::Builder::new()
                     .name("autoload-preload".into())
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
                         loop {
                             let i = next_idx.fetch_add(1, Ordering::Relaxed);

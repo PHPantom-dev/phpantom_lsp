@@ -123,6 +123,26 @@ pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
 /// many requests may be in flight.
 pub const LSP_CONCURRENCY: usize = 128;
 
+/// Stack size for threads that parse or walk PHP ASTs.
+///
+/// The `mago-syntax` parser is recursive descent: it recurses once per
+/// expression-nesting level (bounded by its own `MAX_RECURSION_DEPTH`,
+/// but that bound is calibrated for an 8 MB stack). Our AST consumers
+/// (`extract_symbol_map`, the forward walker, the diagnostic collectors)
+/// are likewise recursive and walk the same depth. A deeply nested
+/// expression — common in generated/bundled code such as WordPress'
+/// bundled getID3 library, whose codec tables nest hundreds of levels
+/// deep — exhausts the 2 MB default that spawned threads receive, and a
+/// stack overflow aborts the whole process (it is a `SIGSEGV`, not a
+/// catchable panic).
+///
+/// Rust only gives the *main* thread the 8 MB OS default; threads
+/// spawned via `std::thread` and the Tokio runtime default to 2 MB. Any
+/// thread that reaches [`update_ast`](Backend::update_ast) or the type
+/// resolver must therefore set this explicitly. 8 MB matches the stack
+/// `mago` itself uses for the same parser.
+pub const PARSE_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
+
 pub mod analyse;
 pub mod atom;
 pub mod blade;

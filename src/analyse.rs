@@ -217,6 +217,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                 let files = &files;
                 std::thread::Builder::new()
                     .name("index-worker".into())
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
                         let mut entries: Vec<(usize, String, String)> = Vec::new();
                         loop {
@@ -266,12 +267,27 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         let uri_classes_index = backend.uri_classes_index.read();
         crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
     };
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
-    crate::virtual_members::populate_from_sorted(
-        &sorted_fqns,
-        &backend.resolved_class_cache,
-        &class_loader,
-    );
+    // Run on a dedicated large-stack thread: `resolve_class_fully_inner`
+    // can nest deeply when the toposort misses dependencies (stubs,
+    // dynamically loaded classes), and this runs on a Tokio worker whose
+    // stack is the 2 MB default rather than the main thread's 8 MB.
+    std::thread::scope(|s| {
+        let backend = &backend;
+        let sorted_fqns = &sorted_fqns;
+        std::thread::Builder::new()
+            .name("eager-populate".into())
+            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+            .spawn_scoped(s, move || {
+                let class_loader =
+                    |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
+                crate::virtual_members::populate_from_sorted(
+                    sorted_fqns,
+                    &backend.resolved_class_cache,
+                    &class_loader,
+                );
+            })
+            .expect("failed to spawn eager-population thread");
+    });
     // ── Phase 2: Collect diagnostics (parallel) ─────────────────────
     // Call individual collectors directly (instead of the grouped
     // collect_slow_diagnostics) so we can time each one independently.
@@ -280,11 +296,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
 
     // Phase 2 diagnostic threads need large stacks because the forward
     // walker + type resolution pipeline can nest deeply on files with
-    // many class hierarchies and virtual members.
-    //
-    // `std::thread::scope` + `s.spawn()` ignores `RUST_MIN_STACK` and
-    // always uses the OS default (8 MB).  Use `std::thread::Builder`
-    // with an explicit 32 MB stack to avoid stack overflow.
+    // many class hierarchies and virtual members.  Spawned threads get a
+    // 2 MB stack by default (only the main thread gets the 8 MB OS
+    // default), so set it explicitly.
     let mut all_file_diagnostics: Vec<(String, Vec<FileDiagnostic>)> = std::thread::scope(|s| {
         let handles: Vec<_> =
             (0..n_threads)
@@ -297,6 +311,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                     let ignore_rules = &ignore_rules;
                     std::thread::Builder::new()
                     .name("diag-worker".into())
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
                     let mut results: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
                     loop {
