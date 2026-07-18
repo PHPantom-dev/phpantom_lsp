@@ -236,6 +236,21 @@ pub(super) fn is_type_compatible(
         return true;
     }
 
+    // ── Intersection argument handling ───────────────────────────
+    // A value of intersection type `A&B` satisfies *every* member, so
+    // it is compatible with the param when *any* member is.  This is
+    // the standard subtyping rule for intersections and covers common
+    // cases like PHPUnit's `MockObject&Foo` (a mock that is also a Foo)
+    // being returned where `Foo` (or a union containing `Foo`) is
+    // expected.
+    if let PhpType::Intersection(members) = arg_type
+        && members
+            .iter()
+            .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
+    {
+        return true;
+    }
+
     // ── Conservative union parameter handling ────────────────────
     // When the param is a union, accept if the arg is compatible
     // with *any* member.  This extends the structural check to use
@@ -245,6 +260,21 @@ pub(super) fn is_type_compatible(
         && members
             .iter()
             .any(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
+    {
+        return true;
+    }
+
+    // ── Conservative intersection parameter handling ─────────────
+    // When the param is an intersection `A&B`, the value must satisfy
+    // *every* member.  Stay silent unless the arg is definitely
+    // incompatible with at least one member — i.e. accept when the arg
+    // is compatible with all members we can check.  Combined with the
+    // conservative rules above, this avoids false positives on mock
+    // types like `MethodNode&MockObject`.
+    if let PhpType::Intersection(members) = param_type
+        && members
+            .iter()
+            .all(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
     {
         return true;
     }

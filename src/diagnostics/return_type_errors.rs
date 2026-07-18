@@ -760,29 +760,24 @@ fn process_class_member(
         return;
     }
 
-    // Resolve the declared return type's `self`/`static`/`parent` to
-    // concrete class names for accurate comparison.
-    let declared_return = declared_return.resolve_names(&|name: &str| {
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "self" | "static" | "$this" => current_class.fqn().to_string(),
-            "parent" => current_class
-                .parent_class
-                .as_ref()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| name.to_string()),
-            _ => {
-                if name.contains("__anonymous@") {
-                    return name.to_string();
-                }
-                if let Some(cls) = class_loader(name) {
-                    cls.fqn().to_string()
-                } else {
-                    name.to_string()
-                }
+    // Resolve the declared return type's `self`/`static`/`parent`/`$this`
+    // to concrete class names for accurate comparison, then expand any
+    // remaining short class names to their fully-qualified form.
+    let declared_return = declared_return
+        .resolve_self_refs(
+            current_class.fqn().as_str(),
+            current_class.parent_class.as_deref(),
+        )
+        .resolve_names(&|name: &str| {
+            if name.contains("__anonymous@") {
+                return name.to_string();
             }
-        }
-    });
+            if let Some(cls) = class_loader(name) {
+                cls.fqn().to_string()
+            } else {
+                name.to_string()
+            }
+        });
 
     let loaders = Loaders {
         function_loader: Some(function_loader),

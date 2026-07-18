@@ -320,28 +320,24 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         _ => return,
     };
 
-    // Resolve `self`/`static`/`parent` in the declared property type.
-    let declared_type = declared_type.resolve_names(&|name: &str| {
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "self" | "static" | "$this" => prop_class.fqn().to_string(),
-            "parent" => prop_class
-                .parent_class
-                .as_ref()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| name.to_string()),
-            _ => {
-                if name.contains("__anonymous@") {
-                    return name.to_string();
-                }
-                if let Some(cls) = (ctx.class_loader)(name) {
-                    cls.fqn().to_string()
-                } else {
-                    name.to_string()
-                }
+    // Resolve `self`/`static`/`parent`/`$this` in the declared property
+    // type, then expand any remaining short class names to their
+    // fully-qualified form.
+    let declared_type = declared_type
+        .resolve_self_refs(
+            prop_class.fqn().as_str(),
+            prop_class.parent_class.as_deref(),
+        )
+        .resolve_names(&|name: &str| {
+            if name.contains("__anonymous@") {
+                return name.to_string();
             }
-        }
-    });
+            if let Some(cls) = (ctx.class_loader)(name) {
+                cls.fqn().to_string()
+            } else {
+                name.to_string()
+            }
+        });
 
     // Resolve the RHS expression type.
     let rhs_span = assign.rhs.span();

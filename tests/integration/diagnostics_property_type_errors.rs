@@ -2201,3 +2201,52 @@ class Palette {
         "Should not flag backed enum ->value assigned to string property, got: {diags:?}"
     );
 }
+
+#[test]
+fn no_diagnostic_for_self_typed_property_assignment() {
+    // A property typed `self` (or an array of `self`) must resolve to the
+    // enclosing class so an assignment of the concrete type compares equal.
+    let php = r#"<?php
+namespace App\Models;
+class Node {
+    private ?self $next = null;
+
+    public function link(): void {
+        $this->next = new Node();
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_property_error(&diags),
+        "Should not flag Node assigned to self-typed property, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_intersection_assigned_to_property() {
+    // An intersection value `A&B` satisfies each member, so assigning it to
+    // a property typed `A` is compatible.
+    let php = r#"<?php
+interface Countable {}
+class Service {}
+
+class Test {
+    private Service $service;
+
+    /** @return Service&Countable */
+    private function mock() { return null; }
+
+    public function setUp(): void {
+        $this->service = $this->mock();
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_property_error(&diags),
+        "Should not flag Service&Countable assigned to Service property, got: {:?}",
+        property_error_messages(&diags)
+    );
+}

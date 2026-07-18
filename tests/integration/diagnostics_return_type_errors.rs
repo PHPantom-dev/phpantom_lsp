@@ -969,6 +969,70 @@ class Builder {
 }
 
 #[test]
+fn no_diagnostic_for_self_array_return() {
+    // `@return self[]` returning an array of the enclosing class. `self`
+    // inside the array element must resolve to the concrete class so the
+    // element types compare equal.
+    let php = r#"<?php
+namespace App\Models;
+class Category {
+    /** @return self[] */
+    public function children(): array {
+        return [new Category(), new Category()];
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "Should not flag Category[] returned from self[] method, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_static_array_return() {
+    let php = r#"<?php
+namespace App\Models;
+class Category {
+    /** @return static[] */
+    public function children(): array {
+        return [new Category()];
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "Should not flag Category[] returned from static[] method, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_intersection_return() {
+    // An intersection value `A&B` satisfies each member, so returning it
+    // where `A` (a member) is declared is compatible.
+    let php = r#"<?php
+interface HasCount {}
+class Node implements HasCount {}
+
+/** @return Node&HasCount */
+function make_node(): Node&HasCount { return new Node(); }
+
+function build(): Node {
+    return make_node();
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "Should not flag Node&HasCount returned where Node is declared, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
 fn no_diagnostic_for_self_return_in_method_chain() {
     let php = r#"<?php
 class Query {
