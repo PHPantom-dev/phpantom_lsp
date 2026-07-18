@@ -780,6 +780,26 @@ reuse the resolution already performed.
 
 ---
 
+## P28. `process_assert_narrowing` clones the top-level scope once per variable for every statement
+
+**Impact: Low-Medium · Effort: Low**
+
+The forward walker's assert-narrowing step runs for every statement
+and clones `ctx.top_level_scope` once per variable currently in
+scope, even when the statement is not a call expression and can
+therefore never be an `assert()` / custom type-guard call. On
+methods with many locals and many statements the clones add up to a
+measurable share of the walk.
+
+Add an early-out that skips the per-variable loop when the statement
+cannot be an assertion (not a call expression). This was confirmed
+as an independently worthwhile micro-fix while investigating the
+PclZip return-type-inference hang, but was reverted at the time
+because it did not address that hang's dominant cost (uncached
+body-return inference, since fixed by memoization).
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class

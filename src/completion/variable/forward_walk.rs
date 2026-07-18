@@ -2163,6 +2163,26 @@ impl ScopeState {
                             break;
                         }
                     }
+                } else if rt.type_string.is_array_shape() {
+                    // Fold an incoming array-shape variant into an
+                    // existing array-shape entry instead of accumulating
+                    // one variant per branch (`array{a: int}` merged with
+                    // `array{a: int, b: string}` becomes
+                    // `array{a: int, b?: string}`).  A variable written
+                    // key-by-key across hundreds of conditionals would
+                    // otherwise collect hundreds of near-identical shape
+                    // variants, and the pairwise subsumption pass below
+                    // makes every subsequent merge quadratic in that
+                    // variant count.
+                    for existing in entry.iter_mut() {
+                        if existing.class_info.is_none()
+                            && let Some(joined) = existing.type_string.join_shapes(&rt.type_string)
+                        {
+                            existing.type_string = joined;
+                            merged_into_existing = true;
+                            break;
+                        }
+                    }
                 }
                 if !merged_into_existing {
                     ResolvedType::push_unique(entry, rt.clone());

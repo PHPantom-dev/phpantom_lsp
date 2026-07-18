@@ -165,6 +165,7 @@ unlikely to move the needle for most users.
 | P20 | [Content-hash gated resolution cache persistence](todo/performance.md#p20-content-hash-gated-resolution-cache-persistence)                                                  | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Medium      |
 | P23 | [`workspace/symbol` lowercases every symbol name per request](todo/performance.md#p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request)          | Low-Medium  | Low         |
+| P28 | [`process_assert_narrowing` clones the scope per variable for every statement](todo/performance.md#p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement) | Low-Medium  | Low         |
 | P24 | [Per-file maps that survive `did_close`](todo/performance.md#p24-per-file-maps-that-survive-did_close-grow-for-the-whole-session)                                           | Low         | Low         |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X3  | Completion item detail on demand (`completionItem/resolve`)                                                                                                                 | Medium      | Medium      |

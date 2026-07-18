@@ -153,6 +153,19 @@ thread_local! {
     static BODY_INFER_VISITED: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
 
+    /// When `Some`, memoizes completed body return inference results by
+    /// `"FQN::method"`.  Activated together with [`BODY_RETURN_INFERRER`]
+    /// and cleared when the owning guard drops, so the memo lives exactly
+    /// as long as one request / one file's diagnostic pass.
+    ///
+    /// Without this memo, every call site that needs a method's inferred
+    /// return type re-walks the entire method body.  On large legacy
+    /// files where most methods lack declared return types, the repeated
+    /// walks compound into a multi-minute blowup (each walk itself
+    /// triggers inference for the callees it contains).
+    static BODY_INFER_MEMO: RefCell<Option<HashMap<String, Option<PhpType>>>> =
+        const { RefCell::new(None) };
+
     /// Current nesting depth of body return inference.  Caps the
     /// chain length so that A→B→C→D… doesn't trigger unbounded
     /// sequential body scans.  Each scan runs `resolve_variable_types`
@@ -221,6 +234,9 @@ impl Drop for BodyReturnInferrerGuard {
             BODY_RETURN_INFERRER.with(|cell| {
                 *cell.borrow_mut() = None;
             });
+            BODY_INFER_MEMO.with(|cell| {
+                *cell.borrow_mut() = None;
+            });
         }
     }
 }
@@ -242,6 +258,9 @@ pub(crate) fn with_body_return_inferrer(inferrer: BodyReturnInferrerFn) -> BodyR
     BODY_RETURN_INFERRER.with(|cell| {
         *cell.borrow_mut() = Some(inferrer);
     });
+    BODY_INFER_MEMO.with(|cell| {
+        *cell.borrow_mut() = Some(HashMap::new());
+    });
     BodyReturnInferrerGuard { owns: true }
 }
 
@@ -260,14 +279,23 @@ pub(crate) fn with_body_return_inferrer(inferrer: BodyReturnInferrerFn) -> BodyR
 const MAX_BODY_INFER_DEPTH: u8 = 3;
 
 pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -> Option<PhpType> {
+    // Build the memo / re-entry key.
+    let key = format!("{}::{}", class_fqn, method.name);
+
+    // Serve a memoized result from an earlier completed inference in
+    // this request.  Checked before the depth cap so that deep call
+    // chains still benefit from results computed at shallower depths.
+    let memoized =
+        BODY_INFER_MEMO.with(|cell| cell.borrow().as_ref().and_then(|m| m.get(&key).cloned()));
+    if let Some(cached) = memoized {
+        return cached;
+    }
+
     // Depth cap: avoid long chains of sequential body scans.
     let depth = BODY_INFER_DEPTH.with(|cell| cell.get());
     if depth >= MAX_BODY_INFER_DEPTH {
         return None;
     }
-
-    // Build a re-entry key.
-    let key = format!("{}::{}", class_fqn, method.name);
 
     // Check + insert into the visited set (re-entry guard).
     let already_visiting = BODY_INFER_VISITED.with(|cell| {
@@ -294,6 +322,18 @@ pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -
     BODY_INFER_DEPTH.with(|cell| cell.set(depth));
     BODY_INFER_VISITED.with(|cell| {
         cell.borrow_mut().remove(&key);
+    });
+
+    // Memoize only completed inferrer runs (the depth-cap and re-entry
+    // short-circuits above return early and are never stored, so a
+    // cut-off `None` cannot shadow a later real result).  A result
+    // computed mid-chain may itself have had its nested inference
+    // depth-capped; serving it to shallower callers trades a sliver of
+    // precision for never walking the same body twice in one request.
+    BODY_INFER_MEMO.with(|cell| {
+        if let Some(memo) = cell.borrow_mut().as_mut() {
+            memo.insert(key, result.clone());
+        }
     });
 
     result

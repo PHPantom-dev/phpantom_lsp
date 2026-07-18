@@ -26,8 +26,10 @@
 //! server, so the results match exactly what a user would see in their
 //! editor.
 //!
-//! Only single Composer projects (root `composer.json`) are supported
-//! for now.
+//! Composer projects (root `composer.json`) use their autoload
+//! configuration for file discovery; a plain PHP tree without one is
+//! analysed by scanning and walking the workspace root.  Multi-project
+//! monorepos are not supported.
 //!
 //! # Usage
 //!
@@ -80,7 +82,9 @@ pub enum OutputFormat {
 /// Options for the analyse command.
 #[derive(Debug)]
 pub struct AnalyseOptions {
-    /// Workspace root (project directory containing composer.json).
+    /// Workspace root.  Usually a Composer project directory; a plain
+    /// PHP tree without a composer.json is analysed by walking the
+    /// root.
     pub workspace_root: PathBuf,
     /// Optional path filter: only analyse files under this path.
     /// Can be a directory or a single file.
@@ -111,10 +115,16 @@ struct FileDiagnostic {
 pub async fn run(options: AnalyseOptions) -> i32 {
     let root = &options.workspace_root;
 
+    // A missing composer.json is not an error: plain PHP trees (a
+    // WordPress site, a legacy codebase) analyse fine — classes are
+    // indexed by scanning the tree and files are discovered by walking
+    // the root.  Note it on stderr so a mistyped --project-root does
+    // not silently analyse the wrong directory as a bare tree.
     if !root.join("composer.json").is_file() {
-        eprintln!("Error: no composer.json found in {}", root.display());
-        eprintln!("The analyse command currently only supports single Composer projects.");
-        return 1;
+        eprintln!(
+            "Note: no composer.json found in {} — analysing as a plain PHP project.",
+            root.display()
+        );
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
@@ -680,6 +690,15 @@ pub(crate) fn discover_user_files(
         .filter(|p| p.is_dir())
         .collect();
 
+    // Projects without PSR-4 mappings (no composer.json at all, or a
+    // classmap/files-only autoload section) still need a user-file
+    // set: walk the workspace root itself, the same tree the
+    // self-scan class indexing covers.  The walker below still
+    // honours ignore files and skips vendor directories.
+    if source_dirs.is_empty() {
+        source_dirs.push(workspace_root.to_path_buf());
+    }
+
     // Also scan Laravel Blade view directories (from config/view.php
     // or the conventional resources/views fallback).
     for view_dir in crate::blade::discover_view_paths(workspace_root) {
@@ -1202,5 +1221,57 @@ mod tests {
             s
         };
         assert_eq!(out, "{}");
+    }
+
+    /// Without PSR-4 mappings (no composer.json, or a classmap-only
+    /// autoload), file discovery falls back to walking the workspace
+    /// root, still skipping registered vendor directories.
+    #[test]
+    fn discover_user_files_walks_root_without_psr4() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("index.php"), "<?php\n").unwrap();
+        std::fs::create_dir_all(root.join("includes")).unwrap();
+        std::fs::write(root.join("includes/helper.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("readme.txt"), "not php\n").unwrap();
+        std::fs::create_dir_all(root.join("vendor/lib")).unwrap();
+        std::fs::write(root.join("vendor/lib/dep.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        backend.add_vendor_dir(&root.join("vendor"));
+
+        let files = discover_user_files(&backend, root, None);
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"index.php".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"includes/helper.php".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.starts_with("vendor")),
+            "vendor files must be skipped: {names:?}"
+        );
+        assert!(
+            !names.contains(&"readme.txt".to_string()),
+            "non-PHP files must be skipped: {names:?}"
+        );
+    }
+
+    /// A single-file path filter returns exactly that file even when
+    /// the project has no PSR-4 mappings.
+    #[test]
+    fn discover_user_files_single_file_filter_without_psr4() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("includes")).unwrap();
+        std::fs::write(root.join("includes/target.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("other.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, root, Some(Path::new("includes/target.php")));
+        assert_eq!(files, vec![root.join("includes/target.php")]);
     }
 }

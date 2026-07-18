@@ -1661,6 +1661,116 @@ impl PhpType {
         }
     }
 
+    /// Join two array shapes into a single shape that covers both
+    /// variants.
+    ///
+    /// This is the union of two shapes expressed as one shape:
+    /// `array{a: int}` joined with `array{a: int, b: string}` is
+    /// `array{a: int, b?: string}`.
+    ///
+    /// - A key present on both sides unions the two value types
+    ///   (recursively joining nested shapes) and stays required unless
+    ///   optional on either side.
+    /// - A key present on only one side becomes optional — the other
+    ///   variant does not guarantee it.
+    ///
+    /// Branch merging uses this to fold the shape a variable has after
+    /// one branch with the shape it has after another.  Folding keeps
+    /// the variable at a single tracked shape no matter how many
+    /// branches write to it; accumulating one variant per branch
+    /// instead makes every later merge compare all variants pairwise,
+    /// which turns large procedural methods with hundreds of
+    /// conditional writes into quadratic-and-worse walks.
+    ///
+    /// Handles `?array{…}` on either side (the join is nullable when
+    /// either side is).  Returns `None` when either side is not an
+    /// array shape or contains positional (unkeyed) entries — those are
+    /// list-style shapes where a per-key join is not meaningful.
+    pub fn join_shapes(&self, other: &PhpType) -> Option<PhpType> {
+        match (self, other) {
+            (PhpType::ArrayShape(a), PhpType::ArrayShape(b)) => {
+                Some(PhpType::ArrayShape(Self::join_shape_entries(a, b)?))
+            }
+            (PhpType::Nullable(a), PhpType::Nullable(b)) => {
+                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            }
+            (PhpType::Nullable(a), b @ PhpType::ArrayShape(_)) => {
+                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            }
+            (a @ PhpType::ArrayShape(_), PhpType::Nullable(b)) => {
+                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Join two keyed shape entry lists (see [`join_shapes`]).
+    ///
+    /// Keys from `a` keep their order; keys only in `b` follow in `b`'s
+    /// order.  Returns `None` when either side has positional (unkeyed)
+    /// entries.
+    ///
+    /// [`join_shapes`]: Self::join_shapes
+    fn join_shape_entries(a: &[ShapeEntry], b: &[ShapeEntry]) -> Option<Vec<ShapeEntry>> {
+        if a.iter().any(|e| e.key.is_none()) || b.iter().any(|e| e.key.is_none()) {
+            return None;
+        }
+        let mut joined: Vec<ShapeEntry> = Vec::with_capacity(a.len().max(b.len()));
+        for ea in a {
+            match b.iter().find(|eb| eb.key == ea.key) {
+                Some(eb) => joined.push(ShapeEntry {
+                    key: ea.key.clone(),
+                    value_type: Self::join_values(&ea.value_type, &eb.value_type),
+                    optional: ea.optional || eb.optional,
+                }),
+                None => joined.push(ShapeEntry {
+                    key: ea.key.clone(),
+                    value_type: ea.value_type.clone(),
+                    optional: true,
+                }),
+            }
+        }
+        for eb in b {
+            if !a.iter().any(|ea| ea.key == eb.key) {
+                joined.push(ShapeEntry {
+                    key: eb.key.clone(),
+                    value_type: eb.value_type.clone(),
+                    optional: true,
+                });
+            }
+        }
+        Some(joined)
+    }
+
+    /// Union two value types for a joined shape key.
+    ///
+    /// Equivalent members are kept once and nested shape members are
+    /// joined rather than accumulated, so repeated merges cannot grow
+    /// the value type without bound.
+    fn join_values(a: &PhpType, b: &PhpType) -> PhpType {
+        if a.equivalent(b) {
+            return a.clone();
+        }
+        let mut members: Vec<PhpType> = a.union_members().into_iter().cloned().collect();
+        'incoming: for m in b.union_members() {
+            for existing in members.iter_mut() {
+                if existing.equivalent(m) {
+                    continue 'incoming;
+                }
+                if let Some(joined) = existing.join_shapes(m) {
+                    *existing = joined;
+                    continue 'incoming;
+                }
+            }
+            members.push(m.clone());
+        }
+        if members.len() == 1 {
+            members.into_iter().next().unwrap()
+        } else {
+            PhpType::Union(members)
+        }
+    }
+
     /// Look up the value type for a specific property in an object shape.
     ///
     /// Given a parsed `object{name: string, user: User}` and key `"user"`,
@@ -5685,6 +5795,101 @@ mod tests {
         assert!(PhpType::parse("?object{name: string}").is_object_shape());
         assert!(!PhpType::parse("array{name: string}").is_object_shape());
         assert!(!PhpType::parse("string").is_object_shape());
+    }
+
+    #[test]
+    fn join_shapes_one_sided_key_becomes_optional() {
+        let a = PhpType::parse("array{a: int}");
+        let b = PhpType::parse("array{a: int, b: string}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{a: int, b?: string}"))
+        );
+        // Symmetric: the missing side still makes the key optional.
+        assert_eq!(
+            b.join_shapes(&a),
+            Some(PhpType::parse("array{a: int, b?: string}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_shared_key_unions_value_types() {
+        let a = PhpType::parse("array{a: int}");
+        let b = PhpType::parse("array{a: string}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{a: int|string}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_identical_values_stay_single() {
+        let a = PhpType::parse("array{a: int, b: string}");
+        let b = PhpType::parse("array{a: int, b: string}");
+        assert_eq!(a.join_shapes(&b), Some(a.clone()));
+    }
+
+    #[test]
+    fn join_shapes_optional_on_either_side_stays_optional() {
+        let a = PhpType::parse("array{a?: int}");
+        let b = PhpType::parse("array{a: int}");
+        assert_eq!(a.join_shapes(&b), Some(PhpType::parse("array{a?: int}")));
+    }
+
+    #[test]
+    fn join_shapes_nested_shapes_join_recursively() {
+        let a = PhpType::parse("array{data: array{x: int}}");
+        let b = PhpType::parse("array{data: array{x: int, y: string}}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{data: array{x: int, y?: string}}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_value_union_dedups_equivalent_members() {
+        // int|string joined with string|float keeps each member once.
+        let a = PhpType::parse("array{a: int|string}");
+        let b = PhpType::parse("array{a: string|float}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{a: int|string|float}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_nullable_side_makes_join_nullable() {
+        let a = PhpType::parse("?array{a: int}");
+        let b = PhpType::parse("array{a: int, b: string}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("?array{a: int, b?: string}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_rejects_positional_entries_and_non_shapes() {
+        // List-style shapes have no keys to join on.
+        let positional = PhpType::parse("array{int, string}");
+        let keyed = PhpType::parse("array{a: int}");
+        assert_eq!(positional.join_shapes(&keyed), None);
+        assert_eq!(keyed.join_shapes(&positional), None);
+        // Non-shape types never join.
+        assert_eq!(
+            keyed.join_shapes(&PhpType::parse("array<int, string>")),
+            None
+        );
+        assert_eq!(PhpType::string().join_shapes(&keyed), None);
+    }
+
+    #[test]
+    fn join_shapes_key_order_is_first_side_then_new_keys() {
+        let a = PhpType::parse("array{b: int, a: int}");
+        let b = PhpType::parse("array{c: int, a: int}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{b?: int, a: int, c?: int}"))
+        );
     }
 
     #[test]
