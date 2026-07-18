@@ -699,6 +699,17 @@ fn override_mixed_with_class() {
 }
 
 #[test]
+fn override_object_string_union_with_class_string_union() {
+    // The phpstorm-stubs `ReflectionClass::__construct` native hint resolves
+    // to `object|string`; its docblock `@param class-string<T>|T` must still
+    // refine that union so the class template `T` binds to the object type.
+    assert!(should_override_type_typed(
+        &PhpType::parse("class-string<T>|T"),
+        &PhpType::parse("object|string")
+    ));
+}
+
+#[test]
 fn override_class_with_subclass() {
     assert!(should_override_type_typed(
         &PhpType::parse("ConcreteSession"),
