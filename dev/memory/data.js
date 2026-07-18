@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784398518567,
+  "lastUpdate": 1784403512141,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16586,6 +16586,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 42.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "86301251759f0e67cbdad0064a626a60f1ccf32e",
+          "message": "fix: convert HTML list tags to markdown in hover rendering\n\nstrip_html_tags() was silently dropping <ul>, <ol>, <li> tags, losing\nall list structure. html_to_markdown() passed them through raw, rendering\nas literal HTML text in hover popups.\n\nBoth functions now emit markdown equivalents: <li> becomes '- ', </li>\nbecomes a newline, and <ul>/<ol> boundaries emit newlines. Also added\nhandling for <strong>, <em>, <dl>, <dt>, <dd>, and <span> tags in\nhtml_to_markdown().\n\nRefactored strip_html_tags() from a boolean is_html flag to a match\nwith per-tag replacement strings.",
+          "timestamp": "2026-07-18T14:24:12-05:00",
+          "tree_id": "eabb27f27992f3ab7d1ed10058b19904ca9d4739",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/86301251759f0e67cbdad0064a626a60f1ccf32e"
+        },
+        "date": 1784403509781,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.9,
             "unit": "MiB"
           },
           {
