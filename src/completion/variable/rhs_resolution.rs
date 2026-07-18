@@ -24,6 +24,7 @@
 /// [`check_expression_for_assignment`](super::resolution::check_expression_for_assignment)
 /// in `variable_resolution.rs`.
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -4491,7 +4492,28 @@ fn try_resolve_this_property_from_assignment(
     prop_name: &str,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    with_parsed_program(
+    // Self-referencing assignments such as
+    //   $this->prop = f($this->prop, ...);
+    // read the same property on their own RHS.  Resolving that inner
+    // read re-enters this function, whose "last assignment before the
+    // cursor" search still finds the *same* assignment (the inner read
+    // sits textually after the statement's start), producing unbounded
+    // recursion.  Guard against re-entry on the same property with a
+    // keyed visited-set: when the same `(class, prop)` is already being
+    // resolved, return empty so the caller falls back to the declared
+    // property type instead of recursing.
+    thread_local! {
+        static RESOLVING_THIS_PROP: std::cell::RefCell<HashSet<String>> =
+            std::cell::RefCell::new(HashSet::new());
+    }
+    let key = format!("{}::{}", ctx.current_class.name, prop_name);
+    let newly_inserted = RESOLVING_THIS_PROP.with(|set| set.borrow_mut().insert(key.clone()));
+    if !newly_inserted {
+        // Same property is already mid-resolution: break the cycle.
+        return Vec::new();
+    }
+
+    let result = with_parsed_program(
         ctx.content,
         "try_resolve_this_property_from_assignment",
         |program, _content| {
@@ -4512,7 +4534,12 @@ fn try_resolve_this_property_from_assignment(
             let rhs_ctx = ctx.with_cursor_offset(rhs_expr.span().start.offset);
             resolve_rhs_expression(rhs_expr, &rhs_ctx)
         },
-    )
+    );
+
+    RESOLVING_THIS_PROP.with(|set| {
+        set.borrow_mut().remove(&key);
+    });
+    result
 }
 
 /// Search class-like members for a concrete method body containing `cursor_offset`,

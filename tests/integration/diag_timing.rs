@@ -2286,3 +2286,43 @@ class Walker {
         relevant.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// Regression: a self-referencing property assignment
+/// (`$this->prop = f($this->prop, ...)`) must not recurse forever when
+/// diagnostics resolve the property's type.
+///
+/// `try_resolve_this_property_from_assignment` finds the last
+/// `$this->prop = <expr>` before the cursor and resolves `<expr>`.  When
+/// `<expr>` reads `$this->prop` on its own RHS (as an argument to
+/// `array_merge` here), resolving that inner read re-enters the same
+/// function, whose "last assignment before the cursor" search keeps
+/// finding the *same* assignment, producing unbounded recursion that
+/// overflowed the 32 MB `analyze` worker stack.  A keyed re-entry guard
+/// breaks the cycle so resolution falls back to the declared property
+/// type.  This test drives the same slow-diagnostics path `analyze` uses
+/// and asserts it completes instead of aborting on stack overflow.
+#[test]
+fn self_referencing_property_assignment_does_not_overflow() {
+    let php = r#"<?php
+class Router {
+    /** @var array<string> */
+    protected array $middleware = [];
+
+    public function middleware($middleware): self {
+        $middleware = (array) $middleware;
+        $this->middleware = array_unique(array_merge($this->middleware, $middleware));
+        return $this;
+    }
+}
+"#;
+
+    // Full stubs supply `array_unique`/`array_merge` signatures so the RHS
+    // resolution walks the same code path as the real `analyze` run.
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///self_ref_prop.php";
+    backend.update_ast(uri, php);
+
+    // The assertion is simply that this returns (no stack overflow).
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+}
