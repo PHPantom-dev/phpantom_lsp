@@ -28,36 +28,3 @@ table. The variable-assignment RHS resolver
 has no equivalent check, so `$var = resolve('blade.compiler');` loses
 the binding. Bladestan's `BladeCompilerFactory.php:17-18` is the only
 sample-project occurrence.
-
-## B111. `assertInstanceOf()` does not narrow when the expected class is list-destructured from a source array
-
-**Severity: Low (1 error, pdepend) · Reproduced with fixture**
-
-```php
-$items = [
-    ['null|int|float', '$number', ASTUnionType::class],
-];
-foreach ($items as $index => $expected) {
-    [$expectedType, $expectedVariable, $expectedTypeClass] = $expected;
-    [$type, $variable] = $declarations[$index];
-    static::assertInstanceOf($expectedTypeClass, $type);
-    $type->getImage(); // "type of '$type' could not be resolved"
-}
-```
-
-A variable assigned a `::class` value directly (`$cls = Foo::class;`)
-or via null-coalesce (`$cls = $arr[2] ?? Foo::class;`), including inside
-a braced loop body, now narrows the assert subject. The remaining case
-is when the expected-class variable is *list-destructured* out of a
-source array: `$expectedTypeClass` is the third element of each
-`$items` row, bound through the foreach value variable `$expected`.
-Resolving it requires matching the destructure position against the
-foreach source array's element at that index, which the class-string
-resolver (`completion/variable/class_string_resolution.rs`) does not do
-— it only recognizes direct assignments. The proper fix routes
-class-string-value resolution through the shared forward walker (which
-already tracks destructuring and foreach bindings) rather than
-extending the special-purpose resolver, to avoid a parallel resolution
-path (see CLAUDE.md performance anti-pattern #6). Accounts for the one
-remaining `getImage()` error in PDepend's
-`PHPParserVersion81Test.php` (the `testUnionTypesX` provider loop).

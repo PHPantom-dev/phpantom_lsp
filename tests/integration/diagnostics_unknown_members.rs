@@ -4374,6 +4374,64 @@ class ParserTest extends BaseAssert {
     );
 }
 
+/// The expected-class argument to `assertInstanceOf` may be list-destructured
+/// out of a foreach source array (the PHPUnit data-provider loop shape):
+/// `[$a, $b, $expectedTypeClass] = $expected;` where `$expected` iterates
+/// `$items = [[..., ..., Wanted::class]]`.  The destructured variable holds a
+/// `class-string<Wanted>` value, so the assert must narrow the subject to
+/// `Wanted` and calling a method on it must not emit an unresolved-member
+/// diagnostic.
+#[test]
+fn assert_narrows_via_variable_class_string_list_destructured_from_foreach() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, mixed $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testTypedProperties(array $declarations): void {
+        $items = [
+            ['null|int|float', '$number', Wanted::class],
+        ];
+        foreach ($items as $index => $expected) {
+            [$expectedType, $expectedVariable, $expectedTypeClass] = $expected;
+            [$type, $variable] = $declarations[$index];
+            static::assertInstanceOf(
+                $expectedTypeClass,
+                $type,
+                "message"
+            );
+            $type->getImage();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow via a variable list-destructured from a foreach \
+         source array, got: {diags:?}",
+    );
+}
+
 /// An exact-type assertion `@phpstan-assert =Type $x` must not emit a
 /// bogus `Class '=Type' not found` diagnostic on the docblock.
 #[test]
