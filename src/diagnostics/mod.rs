@@ -14,7 +14,9 @@
 //! 3. **`unknown_*`** — symbol could not be resolved (class, function,
 //!    member, variable).
 //! 4. **`unused_*`** — symbol is defined/imported but never referenced.
-//! 5. **`type_mismatch_*`** — a value's type doesn't satisfy a constraint.
+//! 5. **`type_mismatch_*`** — a value's type doesn't satisfy a constraint
+//!    (`type_mismatch_argument`, `type_mismatch_return`,
+//!    `type_mismatch_property`).
 //! 6. **`missing_*`** — a required declaration is absent (e.g.
 //!    `missing_implementation` for unimplemented interface methods).
 //! 7. **`invalid_*`** — a structural/syntactic violation (e.g.
@@ -175,6 +177,8 @@ pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod invalid_class_kind;
 pub(crate) mod namespace_mismatch;
+mod property_type_errors;
+mod return_type_errors;
 mod syntax_errors;
 mod type_errors;
 pub(crate) mod undefined_variables;
@@ -286,11 +290,28 @@ impl Backend {
         // inside collect_unknown_member_diagnostics (in the Untyped arm)
         // to avoid a second full walk with duplicate type resolution.
         self.collect_argument_count_diagnostics(uri_str, content, out);
-        self.collect_type_error_diagnostics(uri_str, content, out);
+        self.collect_type_mismatch_diagnostics(uri_str, content, out);
         self.collect_implementation_error_diagnostics(uri_str, content, out);
         self.collect_deprecated_diagnostics(uri_str, content, out);
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
         self.collect_invalid_class_kind_diagnostics(uri_str, content, out);
+    }
+
+    /// Collect all type mismatch diagnostics: argument types, return
+    /// types, and property assignment types.
+    ///
+    /// This is a convenience entry point that groups the three
+    /// `type_mismatch_*` collectors.  The individual methods remain
+    /// available for selective use (e.g. in `analyse.rs`).
+    pub fn collect_type_mismatch_diagnostics(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        self.collect_argument_type_diagnostics(uri_str, content, out);
+        self.collect_return_type_diagnostics(uri_str, content, out);
+        self.collect_property_type_diagnostics(uri_str, content, out);
     }
 }
 

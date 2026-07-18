@@ -68,7 +68,7 @@ fn is_bare_array(ty: &PhpType) -> bool {
 /// Returns `true` if the argument type can be passed to the parameter
 /// without a type error.  Conservative: returns `true` (compatible)
 /// when in doubt.
-fn is_type_compatible(
+pub(super) fn is_type_compatible(
     arg_type: &PhpType,
     param_type: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -776,7 +776,7 @@ fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
 /// `declare(strict_types=1)` directive.  In PHP this must appear as
 /// the very first statement (after `<?php`), but we check all
 /// top-level statements for robustness.
-fn has_strict_types(program: &Program<'_>) -> bool {
+pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
     for stmt in program.statements.iter() {
         if let Statement::Declare(declare) = stmt {
             for item in declare.items.iter() {
@@ -1433,7 +1433,7 @@ impl Backend {
     ///
     /// Appends diagnostics to `out`.  The caller is responsible for
     /// publishing them via `textDocument/publishDiagnostics`.
-    pub fn collect_type_error_diagnostics(
+    pub fn collect_argument_type_diagnostics(
         &self,
         uri: &str,
         content: &str,

@@ -11,7 +11,7 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -20,7 +20,7 @@ fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -29,7 +29,7 @@ fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -1707,7 +1707,7 @@ class ExplorerController {
     );
     let content = files[2].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     assert!(
         !has_type_error(&diags),
         "Should not flag a union of class-strings satisfying a template bound, got: {}",
@@ -4268,7 +4268,7 @@ class TestCase {
     let uri = format!("file://{}/src/TestCase.php", dir.path().display());
     let content = files[3].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     let msgs = type_error_messages(&diags);
     // The argument to ClassNode::__construct is the return value of
     // getNodeForCallingTestCase which returns ASTNode.  The diagnostic
@@ -4368,7 +4368,7 @@ class MyException extends NativeException {}
     backend.update_ast("file:///test.php", php);
 
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics("file:///test.php", php, &mut out);
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
     let msgs = type_error_messages(&out);
     assert!(
         msgs.is_empty(),
@@ -5971,7 +5971,7 @@ class Caller {
     let uri = format!("file://{}/src/Caller.php", dir.path().display());
     let content = files[2].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     assert!(
         !has_type_error(&diags),
         "Imported type alias parameter must not be treated as a class, got: {}",
