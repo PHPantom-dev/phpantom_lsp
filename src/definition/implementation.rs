@@ -761,11 +761,11 @@ impl Backend {
 
             // Cheap pre-filter: read the raw file and skip it if the
             // source doesn't mention the target name at all.
-            let raw = match std::fs::read_to_string(path) {
+            let raw = match crate::classmap_scanner::read_for_scan(path) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
-            if !raw.contains(target_short) {
+            if memchr::memmem::find(&raw, target_short.as_bytes()).is_none() {
                 continue;
             }
 

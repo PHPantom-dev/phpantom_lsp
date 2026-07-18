@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster repeat completions.** Member completion results are reused between keystrokes, so refining a completion by typing more characters returns instantly. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/118.
 - **No first-access delay on Eloquent completions.** Common Laravel builder types are prepared at startup, eliminating the pause the first time you complete on a query builder. Contributed by @MingJen in https://github.com/AJenbo/phpantom_lsp/pull/118.
 - **Faster code actions.** The lightbulb menu now appears more quickly, since all refactorings share a single parse of the file instead of re-parsing it for each one.
+- **Lower memory use while indexing.** Scanning a workspace for classes, functions, and constants now reads files through the operating system's page cache instead of copying each one into memory, reducing peak memory when indexing large projects and their vendor trees.
 
 ### Fixed
 

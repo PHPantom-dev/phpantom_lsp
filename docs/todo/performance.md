@@ -51,43 +51,6 @@ threshold (e.g. 8 files).
 
 ---
 
-## P5. `memmap2` for file reads during scanning
-
-**Impact: Low-Medium · Effort: Low**
-
-All file-scanning paths (`scan_files_parallel_classes`,
-`scan_files_parallel_psr4`, `scan_files_parallel_full`, and the
-`find_implementors` pre-filter) use `std::fs::read(path)` which
-copies the entire file into a heap-allocated `Vec<u8>`. When the OS
-page cache already has the file mapped, `memmap2` can provide a
-read-only view of the file's pages without any copy.
-
-### Fix
-
-Add `memmap2` as a dependency. In the parallel scan helpers, replace
-`std::fs::read(path)` with `unsafe { Mmap::map(&file) }`. The
-`find_classes` and `find_symbols` scanners already accept `&[u8]`,
-so the change is confined to the call sites.
-
-### Safety
-
-Memory-mapped reads are `unsafe` because another process could
-truncate the file while the map is live, causing a SIGBUS. In
-practice this does not happen during LSP initialization (the user is
-not deleting PHP files while the editor starts). A fallback to
-`fs::read` on map failure handles edge cases.
-
-### When to implement
-
-Profile first. On Linux with a warm page cache the difference
-between `read` and `mmap` is small for files under ~100 KB (which
-covers most PHP files). The benefit is more pronounced on macOS
-where `read` involves an extra kernel-to-userspace copy. If
-profiling shows that file I/O is no longer the bottleneck after
-parallelisation, this item can be dropped.
-
----
-
 ## P9. `resolved_class_cache` generic-arg specialisation
 
 **Impact: Medium · Effort: Medium**

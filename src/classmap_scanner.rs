@@ -62,9 +62,53 @@
 //! machine.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use memchr::{memchr, memmem};
+use memmap2::Mmap;
+
+// ─── File reading ────────────────────────────────────────────────────────────
+
+/// Bytes of a file made available to the byte-level scanners.
+///
+/// [`read_for_scan`] prefers a memory-mapped view so the OS page cache
+/// is shared without copying the file into the heap, falling back to a
+/// heap read when mapping is not possible (empty files cannot be mapped,
+/// and some filesystems do not support it).
+pub(crate) enum FileBytes {
+    /// A read-only memory map of the file's pages.
+    Mapped(Mmap),
+    /// A heap copy of the file's contents (mapping fallback).
+    Owned(Vec<u8>),
+}
+
+impl Deref for FileBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            FileBytes::Mapped(map) => map,
+            FileBytes::Owned(bytes) => bytes,
+        }
+    }
+}
+
+/// Read a file's bytes for scanning, preferring a memory-mapped view.
+///
+/// The scanners read the returned bytes synchronously and drop them
+/// before returning, so the map never outlives the scan.
+pub(crate) fn read_for_scan(path: &Path) -> std::io::Result<FileBytes> {
+    let file = std::fs::File::open(path)?;
+    // SAFETY: The map is read synchronously and dropped before this
+    // scan returns. A concurrent truncation could raise SIGBUS, but
+    // index scanning does not run while the user is deleting files; the
+    // heap-read fallback covers filesystems that reject mapping.
+    match unsafe { Mmap::map(&file) } {
+        Ok(map) => Ok(FileBytes::Mapped(map)),
+        Err(_) => std::fs::read(path).map(FileBytes::Owned),
+    }
+}
 
 // ─── Data structures ────────────────────────────────────────────────────────
 
@@ -110,7 +154,7 @@ pub struct WorkspaceScanResult {
 /// Returns an empty `Vec` when the file cannot be read, is empty, or
 /// contains no class-like declarations.
 pub fn scan_file(path: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read(path) else {
+    let Ok(content) = read_for_scan(path) else {
         return Vec::new();
     };
     if content.is_empty() {
@@ -137,7 +181,7 @@ pub fn scan_content(content: &[u8]) -> Vec<String> {
 /// Returns an empty [`ScanResult`] when the file cannot be read or is
 /// empty.
 pub fn scan_file_full(path: &Path) -> ScanResult {
-    let Ok(content) = std::fs::read(path) else {
+    let Ok(content) = read_for_scan(path) else {
         return ScanResult::default();
     };
     if content.is_empty() {
@@ -461,7 +505,7 @@ pub fn scan_vendor_packages_with_skip(
                     {
                         // Check if this file registers a custom autoloader.
                         if !has_custom_autoloader
-                            && let Ok(content) = std::fs::read(&file)
+                            && let Ok(content) = read_for_scan(&file)
                             && memmem::find(&content, b"spl_autoload_register").is_some()
                         {
                             has_custom_autoloader = true;
@@ -520,7 +564,7 @@ pub fn scan_vendor_packages_with_skip(
     let mut function_origins = HashMap::new();
     let mut constant_origins = HashMap::new();
     for (path, expected_fqn, origin) in psr4_files {
-        if let Ok(content) = std::fs::read(&path) {
+        if let Ok(content) = read_for_scan(&path) {
             for fqn in scan_content(&content) {
                 if fqn == expected_fqn {
                     class_origins.entry(fqn).or_insert(origin);
@@ -578,7 +622,7 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
     if files.len() <= 4 {
         let mut classmap = HashMap::new();
         for path in files {
-            if let Ok(content) = std::fs::read(path) {
+            if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     classmap.entry(fqcn).or_insert_with(|| path.clone());
                 }
@@ -597,7 +641,7 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
                     for path in chunk {
-                        if let Ok(content) = std::fs::read(path) {
+                        if let Ok(content) = read_for_scan(path) {
                             for fqcn in scan_content(&content) {
                                 local.push((fqcn, path.clone()));
                             }
@@ -642,7 +686,7 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
     if files.len() <= 4 {
         let mut classmap = HashMap::new();
         for (path, expected_fqn) in files {
-            if let Ok(content) = std::fs::read(path) {
+            if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     if &fqcn == expected_fqn {
                         classmap.entry(fqcn).or_insert_with(|| path.clone());
@@ -663,7 +707,7 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
                     for (path, expected_fqn) in chunk {
-                        if let Ok(content) = std::fs::read(path) {
+                        if let Ok(content) = read_for_scan(path) {
                             for fqcn in scan_content(&content) {
                                 if &fqcn == expected_fqn {
                                     local.push((fqcn, path.clone()));
@@ -707,7 +751,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
     if files.len() <= 4 {
         let mut result = WorkspaceScanResult::default();
         for path in files {
-            if let Ok(content) = std::fs::read(path) {
+            if let Ok(content) = read_for_scan(path) {
                 let scan = find_symbols(&content);
                 for fqcn in scan.classes {
                     let class_short_name = fqcn_short_name(&fqcn).to_owned();
@@ -751,7 +795,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
                 s.spawn(move || {
                     let mut local: Vec<(ScanResult, PathBuf)> = Vec::new();
                     for path in chunk {
-                        if let Ok(content) = std::fs::read(path) {
+                        if let Ok(content) = read_for_scan(path) {
                             let scan = find_symbols(&content);
                             if !scan.classes.is_empty()
                                 || !scan.functions.is_empty()
