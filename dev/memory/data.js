@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784336216971,
+  "lastUpdate": 1784355735046,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16489,6 +16489,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "85396fce560e67fb0c5543e030fd1d950c970041",
+          "message": "feat: add return type and property type mismatch diagnostics (#220)\n\nCo-authored-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-18T08:07:57+02:00",
+          "tree_id": "e7e9834b9c4f9c9824828dc1cc641b25f1b78a8a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/85396fce560e67fb0c5543e030fd1d950c970041"
+        },
+        "date": 1784355733435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.6,
             "unit": "MiB"
           }
         ]
