@@ -2250,3 +2250,55 @@ class Test {
         property_error_messages(&diags)
     );
 }
+
+// ─── Conditional return type narrows over a broad native union ──────────────
+
+#[test]
+fn conditional_return_over_union_assigned_to_array_property_no_error() {
+    // Assigning `X::collect([...])` to a `@var array<X>` property should
+    // resolve through the method's conditional `@return`, narrowing the
+    // literal-array argument to `array<static>` rather than the method's
+    // broad native union return type.  Mirrors Spatie LaravelData usage.
+    let php = r#"<?php
+/**
+ * @template TKey of array-key
+ */
+interface BaseDataContract {
+    /**
+     * @return ($into is 'array' ? array<TKey, static> : ($items is array ? array<TKey, static> : DataCollection))
+     */
+    public static function collect(mixed $items, ?string $into = null): array|DataCollection|Enumerable|Collection;
+}
+
+trait BaseDataTrait {
+    public static function collect(mixed $items, ?string $into = null): array|DataCollection|Enumerable|Collection {
+        return [];
+    }
+}
+
+class Data implements BaseDataContract {
+    use BaseDataTrait;
+}
+
+class AccordionData extends Data {}
+
+class DataCollection {}
+class Enumerable {}
+class Collection {}
+
+class Component {
+    /** @var array<AccordionData> */
+    public array $items;
+
+    public function __construct() {
+        $this->items = AccordionData::collect([1, 2, 3]);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_property_error(&diags),
+        "collect([...]) narrowed via conditional should satisfy array<AccordionData> property, got: {}",
+        property_error_messages(&diags).join("; ")
+    );
+}

@@ -2792,3 +2792,90 @@ class OrderService {
         "Should not flag any returns in complex service class, got: {diags:?}"
     );
 }
+
+// ─── Conditional return type narrows over a broad native union ──────────────
+
+#[test]
+fn conditional_return_over_union_narrows_array_literal_no_error() {
+    // A method whose PHPStan conditional `@return` narrows a literal-array
+    // argument to `array<static>` should be evaluated at the call site, and
+    // the narrowed branch must supersede the method's broad native union
+    // return type (which would otherwise drop the `array` member).  Mirrors
+    // Spatie LaravelData's `Data::collect()`, where the conditional lives on
+    // an interface while the concrete method comes from a trait.
+    let php = r#"<?php
+/**
+ * @template TKey of array-key
+ */
+interface BaseDataContract {
+    /**
+     * @return ($into is 'array' ? array<TKey, static> : ($items is array ? array<TKey, static> : DataCollection))
+     */
+    public static function collect(mixed $items, ?string $into = null): array|DataCollection|Enumerable|Collection;
+}
+
+trait BaseDataTrait {
+    public static function collect(mixed $items, ?string $into = null): array|DataCollection|Enumerable|Collection {
+        return [];
+    }
+}
+
+class Data implements BaseDataContract {
+    use BaseDataTrait;
+}
+
+class AccordionData extends Data {}
+
+class DataCollection {}
+class Enumerable {}
+class Collection {}
+
+class Factory {
+    /** @return array<AccordionData> */
+    public static function make(): array {
+        return AccordionData::collect([1, 2, 3]);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "collect([...]) narrowed via conditional should satisfy array<AccordionData>, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn conditional_return_over_union_on_instance_call_no_error() {
+    // The same authoritative-conditional behaviour must apply to instance
+    // method calls, not just static ones: `$factory->build([...])` whose
+    // conditional narrows a literal array to `list<Widget>` should supersede
+    // the method's broad native union return type.
+    let php = r#"<?php
+class Widget {}
+class WidgetCollection {}
+class WidgetBag {}
+
+class Factory {
+    /**
+     * @return ($items is array ? list<Widget> : WidgetCollection)
+     */
+    public function build(mixed $items): array|WidgetCollection|WidgetBag {
+        return [];
+    }
+}
+
+class Consumer {
+    /** @return list<Widget> */
+    public function run(Factory $factory): array {
+        return $factory->build([1, 2, 3]);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "instance build([...]) narrowed via conditional should satisfy list<Widget>, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
