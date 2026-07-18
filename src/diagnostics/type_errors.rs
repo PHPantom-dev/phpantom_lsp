@@ -602,12 +602,16 @@ pub(super) fn is_type_compatible(
     // is a strict YES handled by the `is_subtype_of_typed` fallback
     // at the end of this function.  No need to duplicate it here.
     //
-    // Direction 2 (param <: arg, e.g. `CarbonInterface` passed to
-    // `Carbon` where `Carbon implements CarbonInterface`) is a MAYBE:
+    // Direction 2 (param <: arg, e.g. `Carbon\Carbon` passed where a
+    // `Illuminate\Support\Carbon` subclass is expected) is a MAYBE:
     // the argument is a *broader* type but the value *might* be the
     // narrower concrete at runtime (the developer may have checked
     // with instanceof, or the API always returns the concrete type
-    // despite being typed as the interface).
+    // despite being typed as the parent).  This also covers cases the
+    // resolver still under-narrows, such as an Eloquent relation typed
+    // as the base `Collection` where a custom collection subclass is
+    // declared — dropping this rule turns those into false positives
+    // that PHPStan does not report.
     //
     // However, if the arg's class is **final**, the value cannot be
     // any subtype — it is exactly that class.  So `final class Jack`

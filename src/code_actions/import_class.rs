@@ -1254,8 +1254,8 @@ mod tests {
 <?php
 namespace App\\Http\\Data;
 
-use Luxplus\\Core\\Data\\DecimalCast;
-use Luxplus\\Decimal\\Decimal;
+use Acme\\Core\\Data\\DecimalCast;
+use Acme\\Decimal\\Decimal;
 use Spatie\\LaravelData\\Data;
 
 final class Foo extends Data

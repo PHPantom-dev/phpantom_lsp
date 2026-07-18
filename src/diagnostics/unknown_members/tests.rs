@@ -4320,7 +4320,7 @@ fn no_false_positive_when_variable_reassigned_inside_try_block() {
     // after the reassignment (still inside the try) should resolve
     // against the new type, not the original.
     let php = r#"<?php
-class LuxplusCustomer {
+class AppCustomer {
 public function getName(): string { return ''; }
 }
 class MollieCustomer {
@@ -4330,10 +4330,10 @@ class MolliePayment {
 public function getCheckoutUrl(): string { return ''; }
 }
 class MollieClient {
-public function getOrCreateCustomer(LuxplusCustomer $c): MollieCustomer { return new MollieCustomer(); }
+public function getOrCreateCustomer(AppCustomer $c): MollieCustomer { return new MollieCustomer(); }
 }
 class Gateway {
-public function charge(LuxplusCustomer $customer): void {
+public function charge(AppCustomer $customer): void {
     $client = new MollieClient();
     try {
         $customer = $client->getOrCreateCustomer($customer);

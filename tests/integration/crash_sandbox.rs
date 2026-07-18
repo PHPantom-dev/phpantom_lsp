@@ -27,15 +27,15 @@ fn sandbox_exact_content_update_ast_does_not_crash() {
 namespace App\Http\Controllers\Economy;
 
 use App\Http\Controllers\Controller;
-use EchoEcho\Shared\Common\Convert;
-use EchoEcho\Shared\Common\ConvertException;
+use Vendor\Shared\Common\Convert;
+use Vendor\Shared\Common\ConvertException;
 use Exception;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
-use Luxplus\Core\Enums\Country;
-use Luxplus\Core\Enums\OrderStatus;
-use Luxplus\Decimal\Decimal;
+use Acme\Core\Enums\Country;
+use Acme\Core\Enums\OrderStatus;
+use Acme\Decimal\Decimal;
 use stdClass;
 
 final class ExtractionToolController extends Controller

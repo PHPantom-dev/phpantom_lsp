@@ -3491,7 +3491,7 @@ async fn test_use_import_context_does_not_shorten() {
 }
 
 /// A `use` statement that imports a namespace (not a class) should NOT
-/// produce a phantom class completion item.  E.g. `use Luxplus\Core\Enums as LCE;`
+/// produce a phantom class completion item.  E.g. `use Acme\Core\Enums as LCE;`
 /// where `Enums` is a namespace containing enum classes, not a class itself.
 #[tokio::test]
 async fn test_namespace_alias_import_not_shown_as_class() {
@@ -3501,27 +3501,27 @@ async fn test_namespace_alias_import_not_shown_as_class() {
     {
         let mut idx = backend.fqn_uri_index().write();
         idx.insert(
-            "Luxplus\\Core\\Enums\\Status".to_string(),
-            "file:///vendor/luxplus/enums/Status.php".to_string(),
+            "Acme\\Core\\Enums\\Status".to_string(),
+            "file:///vendor/acme/enums/Status.php".to_string(),
         );
         idx.insert(
-            "Luxplus\\Core\\Enums\\Color".to_string(),
-            "file:///vendor/luxplus/enums/Color.php".to_string(),
+            "Acme\\Core\\Enums\\Color".to_string(),
+            "file:///vendor/acme/enums/Color.php".to_string(),
         );
     }
 
     // Use prefix "LCE" which matches the alias for the namespace import.
     let uri = Url::parse("file:///ns_alias.php").unwrap();
-    let text = concat!("<?php\n", "use Luxplus\\Core\\Enums as LCE;\n", "new LCE\n",);
+    let text = concat!("<?php\n", "use Acme\\Core\\Enums as LCE;\n", "new LCE\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
     let cls = class_items(&items);
 
-    // `Luxplus\Core\Enums` is a namespace, not a class — it should NOT
+    // `Acme\Core\Enums` is a namespace, not a class — it should NOT
     // appear as a completion item.
     let phantom = cls
         .iter()
-        .find(|i| i.detail.as_deref() == Some("Luxplus\\Core\\Enums"));
+        .find(|i| i.detail.as_deref() == Some("Acme\\Core\\Enums"));
     assert!(
         phantom.is_none(),
         "Namespace alias should not appear as a class completion, got: {:?}",
@@ -3538,24 +3538,20 @@ async fn test_classes_under_namespace_alias_still_available() {
     {
         let mut idx = backend.fqn_uri_index().write();
         idx.insert(
-            "Luxplus\\Core\\Enums\\Status".to_string(),
-            "file:///vendor/luxplus/enums/Status.php".to_string(),
+            "Acme\\Core\\Enums\\Status".to_string(),
+            "file:///vendor/acme/enums/Status.php".to_string(),
         );
     }
 
     let uri = Url::parse("file:///ns_alias_child.php").unwrap();
-    let text = concat!(
-        "<?php\n",
-        "use Luxplus\\Core\\Enums as LCE;\n",
-        "new Stat\n",
-    );
+    let text = concat!("<?php\n", "use Acme\\Core\\Enums as LCE;\n", "new Stat\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 8).await;
     let cls = class_items(&items);
 
     let status = cls
         .iter()
-        .find(|i| i.detail.as_deref() == Some("Luxplus\\Core\\Enums\\Status"));
+        .find(|i| i.detail.as_deref() == Some("Acme\\Core\\Enums\\Status"));
     assert!(
         status.is_some(),
         "Classes under the namespace should still appear in completions"
@@ -5373,18 +5369,18 @@ async fn test_namespace_inferred_multiple_matches_longest_first() {
     );
 }
 
-/// The real-world Luxplus composer.json scenario: a file in
-/// `src/core/Brands/Services/` should infer `Luxplus\Core\Brands\Services`.
+/// A real-world multi-mapping composer.json scenario: a file in
+/// `src/core/Brands/Services/` should infer `Acme\Core\Brands\Services`.
 #[tokio::test]
-async fn test_namespace_inferred_luxplus_real_world() {
+async fn test_namespace_inferred_multi_mapping_real_world() {
     let (backend, dir) = create_psr4_workspace(
         r#"{
             "autoload": {
                 "psr-4": {
-                    "Luxplus\\Core\\": "src/core/",
-                    "Luxplus\\Core\\Database\\": "src/database/",
-                    "Luxplus\\Core\\Tasks\\": "src/tasks/",
-                    "Luxplus\\Web\\": "src/web/"
+                    "Acme\\Core\\": "src/core/",
+                    "Acme\\Core\\Database\\": "src/database/",
+                    "Acme\\Core\\Tasks\\": "src/tasks/",
+                    "Acme\\Web\\": "src/web/"
                 }
             }
         }"#,
@@ -5400,17 +5396,17 @@ async fn test_namespace_inferred_luxplus_real_world() {
 
     let inferred = items
         .iter()
-        .find(|i| i.label == "Luxplus\\Core\\Brands\\Services")
-        .expect("Should suggest Luxplus\\Core\\Brands\\Services from file path");
+        .find(|i| i.label == "Acme\\Core\\Brands\\Services")
+        .expect("Should suggest Acme\\Core\\Brands\\Services from file path");
 
     assert_eq!(inferred.detail.as_deref(), Some("(from file path)"),);
 
     assert_eq!(inferred.preselect, Some(true),);
 
-    // Should NOT infer Luxplus\Core\Database even though that prefix
+    // Should NOT infer Acme\Core\Database even though that prefix
     // exists — the file is not under src/database/.
     let db_inferred = items.iter().find(|i| {
-        i.label == "Luxplus\\Core\\Database\\Brands\\Services"
+        i.label == "Acme\\Core\\Database\\Brands\\Services"
             && i.detail.as_deref() == Some("(from file path)")
     });
     assert!(

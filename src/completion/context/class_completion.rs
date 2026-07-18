@@ -1212,7 +1212,7 @@ impl ClassItemCtx<'_> {
     ///
     /// ```text
     ///   Order            App\Models
-    ///   Order            Luxplus\Database\Model\Orders
+    ///   Order            Acme\Database\Model\Orders
     /// ```
     ///
     /// The `filter_text` is also the short name so the editor's fuzzy
@@ -1280,7 +1280,7 @@ impl ClassItemCtx<'_> {
         // This gives a clean two-column layout in the editor popup:
         //
         //   Order            App\Models
-        //   Order            Luxplus\Database\Model\Orders
+        //   Order            Acme\Database\Model\Orders
         //
         // so users can distinguish same-named classes without the
         // label being a long FQN that the editor truncates.

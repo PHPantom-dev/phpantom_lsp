@@ -2820,6 +2820,30 @@ fn resolve_rhs_function_call<'b>(
                 return ResolvedType::from_classes(vec![cls]);
             }
         }
+
+        // ── now() / today() → Illuminate\Support\Carbon ─────
+        // Laravel's `now()`/`today()` helpers are declared to return
+        // `CarbonInterface`, but they instantiate the concrete
+        // `Illuminate\Support\Carbon` (which extends `\DateTime`).
+        // Resolving to the interface loses the concrete type and
+        // produces spurious mismatches when the value flows into a
+        // `DateTime`/`DateTimeImmutable` declaration.  Map both to the
+        // concrete class.
+        //
+        // This is not strictly sound (the helpers' declared type is the
+        // interface), but it mirrors Larastan's `NowAndTodayExtension`.
+        // The Laravel/Carbon ecosystem is written against that model, so
+        // real codebases assume the concrete type; matching it avoids a
+        // flood of mismatches that only exist because the declared types
+        // are looser than reality.
+        if matches!(
+            normalized_func,
+            "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
+        ) && let Some(cls) =
+            (ctx.class_loader)(crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
+        {
+            return ResolvedType::from_classes(vec![cls]);
+        }
     }
 
     // ── Known array functions ────────────────────────

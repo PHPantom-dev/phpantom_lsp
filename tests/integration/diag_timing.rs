@@ -651,11 +651,12 @@ function describe(Base $item): string {
 /// Verify that `assert($data instanceof stdClass)` narrowing survives
 /// through multiple intervening `if` blocks with early returns.
 ///
-/// Regression test for Luxplus Shared `RefundCallback`: after the assert
-/// on line 33, several `if (!$refund)` / `if (!$payment) { return; }`
-/// blocks follow.  The forward walker must preserve the `stdClass`
-/// narrowing across all of them so that `$data->status` on a later line
-/// does not produce an `unresolved_member_access` diagnostic.
+/// Regression test seen in a real project's `RefundCallback` handler:
+/// after the assert on line 33, several `if (!$refund)` /
+/// `if (!$payment) { return; }` blocks follow.  The forward walker must
+/// preserve the `stdClass` narrowing across all of them so that
+/// `$data->status` on a later line does not produce an
+/// `unresolved_member_access` diagnostic.
 #[test]
 fn assert_instanceof_survives_intervening_if_blocks() {
     let php = r#"<?php

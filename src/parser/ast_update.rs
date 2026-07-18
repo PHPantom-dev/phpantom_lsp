@@ -1101,8 +1101,8 @@ impl Backend {
             // Resolve class-like names in method return types and property
             // type hints so that cross-file resolution works correctly.
             // For example, if a method returns `Country` and the file has
-            // `use Luxplus\Core\Enums\Country`, the return type becomes
-            // the FQN `Luxplus\Core\Enums\Country`.
+            // `use Acme\Core\Enums\Country`, the return type becomes
+            // the FQN `Acme\Core\Enums\Country`.
             //
             // Template params and type alias names are excluded to avoid
             // mangling generic types and locally-defined type aliases.

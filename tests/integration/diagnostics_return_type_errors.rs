@@ -2879,3 +2879,58 @@ class Consumer {
         return_error_messages(&diags).join("; ")
     );
 }
+
+// ─── Laravel now()/today() resolve to the concrete Carbon class ─────────────
+
+/// Shared Carbon-family scaffolding: the concrete `Illuminate\Support\Carbon`
+/// extends `Carbon\Carbon`, which extends the built-in `\DateTime`, plus the
+/// `now()`/`today()` helpers declared to return the looser `CarbonInterface`.
+const CARBON_SCAFFOLD: &str = r#"
+namespace {
+    interface DateTimeInterface {}
+    class DateTime implements DateTimeInterface {}
+}
+namespace Carbon {
+    interface CarbonInterface extends \DateTimeInterface {}
+    class Carbon extends \DateTime implements CarbonInterface {
+        public function addHours(int $value = 1): static { return $this; }
+    }
+}
+namespace Illuminate\Support {
+    class Carbon extends \Carbon\Carbon {}
+}
+namespace {
+    function now($tz = null): \Carbon\CarbonInterface { return new \Illuminate\Support\Carbon(); }
+    function today($tz = null): \Carbon\CarbonInterface { return new \Illuminate\Support\Carbon(); }
+}
+"#;
+
+#[test]
+fn now_and_today_satisfy_datetime_return() {
+    let php = format!(
+        "<?php\n{CARBON_SCAFFOLD}\nnamespace App {{\n    class Job {{\n        public function a(): \\DateTime {{ return now(); }}\n        public function b(): \\DateTime {{ return today(); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "now()/today() resolve to Illuminate\\Support\\Carbon (a \\DateTime), so returning them \
+         from a :DateTime method must not flag, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn now_chain_narrows_to_concrete_carbon() {
+    // now() resolves to the concrete class, so a fluent `$this`-returning
+    // method chained off it stays concrete rather than degrading to the
+    // interface — `now()->addHours(1)` is still a `\DateTime`.
+    let php = format!(
+        "<?php\n{CARBON_SCAFFOLD}\nnamespace App {{\n    class Job {{\n        public function retryUntil(): \\DateTime {{ return now()->addHours(1); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "now()->addHours(1) should resolve to the concrete Carbon (a \\DateTime), got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}

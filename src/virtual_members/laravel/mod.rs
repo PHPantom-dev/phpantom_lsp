@@ -262,6 +262,10 @@ pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Mod
 /// The fully-qualified name of the Eloquent Builder class.
 pub const ELOQUENT_BUILDER_FQN: &str = "Illuminate\\Database\\Eloquent\\Builder";
 
+/// The fully-qualified name of Laravel's concrete Carbon subclass, which
+/// the `now()` and `today()` helpers actually instantiate.
+pub const SUPPORT_CARBON_FQN: &str = "Illuminate\\Support\\Carbon";
+
 /// Build a substitution map that replaces `static`, `$this`, and `self`
 /// with the given type.
 ///

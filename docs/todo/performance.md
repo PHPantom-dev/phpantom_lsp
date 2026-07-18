@@ -553,7 +553,7 @@ isn't needed.
 
 **References:**
 - Psalm: `ClassLikeStorageCacheProvider` in
-  `references/psalm/src/Psalm/Internal/Provider/ClassLikeStorageCacheProvider.php`
+  `Psalm\Internal\Provider\ClassLikeStorageCacheProvider`
 - Psalm: `FileStorageCacheProvider` for the content-hash invalidation
   pattern
 - php-lsp: persists `FileIndex` entries under `~/.cache/php-lsp/`
@@ -563,7 +563,7 @@ isn't needed.
   content hashing. Confirms the content-hash-as-authority choice
   above; never trust mtime for correctness, at most as a cheap
   pre-filter to skip hashing unchanged files.
-- php-lsp: `references/php-lsp/docs/salsa-migration.md` (Phases K1-K4)
+- php-lsp: `docs/salsa-migration.md` in its own repo (Phases K1-K4)
   documents their cache-size cap, reset-on-overflow, and
   LRU-by-mtime eviction plans — useful pitfall list if P20 ships.
 
@@ -609,7 +609,7 @@ diagnostic layer.
 
 **References:**
 - Psalm: `FileDiffer` and `FileStatementsDiffer` in
-  `references/psalm/src/Psalm/Internal/Diff/`
+  `Psalm\Internal\Diff`
 - Psalm: `Analyzer::shiftFileOffsets()` for the offset-shifting logic
 
 ---

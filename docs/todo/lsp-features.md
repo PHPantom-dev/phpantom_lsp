@@ -181,12 +181,12 @@ Consider implementing after X4 (full background indexing) ships, or
 accept the same scan-based latency that Find References currently has.
 
 **References:**
-- php-lsp: `references/php-lsp/src/navigation/call_hierarchy.rs` — a
+- php-lsp: `src/navigation/call_hierarchy.rs` in its own repo — a
   working Rust implementation (prepare/incoming/outgoing, cross-file)
   built on the same "wrap Find References + walk the body" shape
-  described above. Their wire-protocol tests
-  (`references/php-lsp/tests/`, call-hierarchy cases in the Symfony
-  suite) show the expected item/range semantics editors rely on.
+  described above. Their wire-protocol tests (`tests/`, call-hierarchy
+  cases in the Symfony suite) show the expected item/range semantics
+  editors rely on.
 - Phpactor: call hierarchy via its references index.
 
 ## F7. Evaluatable expression support (DAP integration)
@@ -560,9 +560,9 @@ F18's namespace computation).
 **References:**
 - Phpactor: `MoveClass` refactoring in the class-mover package.
 - php-lsp: `handle_will_rename_files` in
-  `references/php-lsp/src/backend/handlers/workspace.rs` (updates
-  `use` imports workspace-wide on file rename) and their
-  `willCreateFiles` PSR-4 stub insertion.
+  `src/backend/handlers/workspace.rs` in its own repo (updates `use`
+  imports workspace-wide on file rename) and their `willCreateFiles`
+  PSR-4 stub insertion.
 
 ## F18. Fix namespace/class name from PSR-4
 
