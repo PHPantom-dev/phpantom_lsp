@@ -423,7 +423,7 @@ prefer source builds (common for Rust projects).
 
 ### Formula contents
 
-- **Homepage:** `https://github.com/AJenbo/phpantom_lsp`
+- **Homepage:** `https://github.com/PHPantom-dev/phpantom_lsp`
 - **Source:** GitHub Releases tarball or `cargo install` from crates.io.
 - **Binary:** `phpantom_lsp`
 - **Test block:** `system bin/"phpantom_lsp", "--version"`

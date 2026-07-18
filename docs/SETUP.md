@@ -18,7 +18,7 @@ See [phpantom_lsp on crates.io](https://crates.io/crates/phpantom_lsp).
 
 ### Pre-built Binaries
 
-Download the latest binary for your platform from [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest). Available for:
+Download the latest binary for your platform from [GitHub Releases](https://github.com/PHPantom-dev/phpantom_lsp/releases/latest). Available for:
 
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
@@ -100,7 +100,7 @@ Install the [PHPantom extension](https://marketplace.visualstudio.com/items?item
 
 1. **Download PHPantom LSP binary**
 
-   * Get it from [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest)
+   * Get it from [GitHub Releases](https://github.com/PHPantom-dev/phpantom_lsp/releases/latest)
    * Extract the binary to a preferred location
 
 2. **Install and configure LSP plugin**
@@ -210,7 +210,7 @@ Kate (KDE) has built-in LSP support. Open **Settings → Configure Kate → LSP 
   "servers": {
     "php": {
       "command": ["/path/to/phpantom_lsp"],
-      "url": "https://github.com/AJenbo/phpantom_lsp"
+      "url": "https://github.com/PHPantom-dev/phpantom_lsp"
     }
   }
 }

@@ -2291,7 +2291,7 @@ async fn test_completion_method_conditional_return_class_string_chain() {
 
 // ── Symfony-style conditional return with @psalm-return coexisting ───────────
 
-/// Reproduces https://github.com/AJenbo/phpantom_lsp/issues/41
+/// Reproduces https://github.com/PHPantom-dev/phpantom_lsp/issues/41
 ///
 /// When a method has both `@phpstan-return` and `@psalm-return` conditional
 /// annotations and the class-string parameter is not at index 0, the resolved

@@ -4,7 +4,7 @@ description = "PHP language support powered by PHPantom LSP, a fast and lightwei
 version = "0.8.0"
 schema_version = 1
 authors = ["Anders Jenbo <anders@jenbo.dk>"]
-repository = "https://github.com/AJenbo/phpantom_lsp"
+repository = "https://github.com/PHPantom-dev/phpantom_lsp"
 
 [language_servers.phpantom_lsp]
 name = "PHPantom"

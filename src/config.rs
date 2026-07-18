@@ -438,7 +438,7 @@ pub const CONFIG_FILE_NAME: &str = ".phpantom.toml";
 const CONFIG_APP_DIR: &str = "phpantom_lsp";
 
 /// Default content for a newly created `.phpantom.toml` file.
-pub const DEFAULT_CONFIG_CONTENT: &str = r#"# $schema: https://github.com/AJenbo/phpantom_lsp/raw/main/config-schema.json
+pub const DEFAULT_CONFIG_CONTENT: &str = r#"# $schema: https://github.com/PHPantom-dev/phpantom_lsp/raw/main/config-schema.json
 "#;
 
 /// Return the path to the global config file, if the platform's config

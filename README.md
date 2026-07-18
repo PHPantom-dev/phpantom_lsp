@@ -4,8 +4,8 @@
   <img src="docs/assets/spookaphant.svg" alt="Spookaphant" width="316" height="230" />
 </p>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/AJenbo/phpantom_lsp/ci.yml?logo=github&label=CI)](https://github.com/AJenbo/phpantom_lsp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/AJenbo/phpantom_lsp/graph/badge.svg?token=UH5RFA3AR9)](https://codecov.io/gh/AJenbo/phpantom_lsp)
+[![CI](https://img.shields.io/github/actions/workflow/status/PHPantom-dev/phpantom_lsp/ci.yml?logo=github&label=CI)](https://github.com/PHPantom-dev/phpantom_lsp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/PHPantom-dev/phpantom_lsp/graph/badge.svg?token=UH5RFA3AR9)](https://codecov.io/gh/PHPantom-dev/phpantom_lsp)
 [![crates](https://img.shields.io/crates/v/phpantom_lsp?logo=rust)](https://crates.io/crates/phpantom_lsp)
 
 A fast, lightweight PHP language server written in Rust. Ready in seconds, uses a fraction of the RAM other language servers need, and stays responsive throughout. No indexing phase, no waiting.

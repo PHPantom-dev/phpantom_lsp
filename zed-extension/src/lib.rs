@@ -29,7 +29,7 @@ impl PHPantomExtension {
         );
 
         let release = zed::latest_github_release(
-            "AJenbo/phpantom_lsp",
+            "PHPantom-dev/phpantom_lsp",
             zed::GithubReleaseOptions {
                 require_assets: true,
                 pre_release: false,
