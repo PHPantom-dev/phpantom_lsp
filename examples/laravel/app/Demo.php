@@ -418,4 +418,17 @@ class Demo
         // The bare `Redis` short name still resolves to the imported facade.
         Redis::connection();              // Facades\Redis static method
     }
+
+    public function dateHelpers(): \DateTime
+    {
+        // now()/today() are declared to return CarbonInterface, but they
+        // instantiate the concrete Illuminate\Support\Carbon (a \DateTime),
+        // so member access resolves and a chained fluent call stays concrete.
+        now()->addHours(1);               // → Illuminate\Support\Carbon
+        today()->startOfDay();            // → Illuminate\Support\Carbon
+
+        // Returning the chain from a :DateTime method is not a mismatch,
+        // because Illuminate\Support\Carbon extends \DateTime.
+        return now()->addHours(1);
+    }
 }

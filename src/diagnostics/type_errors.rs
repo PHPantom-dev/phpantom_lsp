@@ -68,7 +68,7 @@ fn is_bare_array(ty: &PhpType) -> bool {
 /// Returns `true` if the argument type can be passed to the parameter
 /// without a type error.  Conservative: returns `true` (compatible)
 /// when in doubt.
-fn is_type_compatible(
+pub(super) fn is_type_compatible(
     arg_type: &PhpType,
     param_type: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -236,6 +236,21 @@ fn is_type_compatible(
         return true;
     }
 
+    // ── Intersection argument handling ───────────────────────────
+    // A value of intersection type `A&B` satisfies *every* member, so
+    // it is compatible with the param when *any* member is.  This is
+    // the standard subtyping rule for intersections and covers common
+    // cases like PHPUnit's `MockObject&Foo` (a mock that is also a Foo)
+    // being returned where `Foo` (or a union containing `Foo`) is
+    // expected.
+    if let PhpType::Intersection(members) = arg_type
+        && members
+            .iter()
+            .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
+    {
+        return true;
+    }
+
     // ── Conservative union parameter handling ────────────────────
     // When the param is a union, accept if the arg is compatible
     // with *any* member.  This extends the structural check to use
@@ -245,6 +260,21 @@ fn is_type_compatible(
         && members
             .iter()
             .any(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
+    {
+        return true;
+    }
+
+    // ── Conservative intersection parameter handling ─────────────
+    // When the param is an intersection `A&B`, the value must satisfy
+    // *every* member.  Stay silent unless the arg is definitely
+    // incompatible with at least one member — i.e. accept when the arg
+    // is compatible with all members we can check.  Combined with the
+    // conservative rules above, this avoids false positives on mock
+    // types like `MethodNode&MockObject`.
+    if let PhpType::Intersection(members) = param_type
+        && members
+            .iter()
+            .all(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
     {
         return true;
     }
@@ -572,12 +602,16 @@ fn is_type_compatible(
     // is a strict YES handled by the `is_subtype_of_typed` fallback
     // at the end of this function.  No need to duplicate it here.
     //
-    // Direction 2 (param <: arg, e.g. `CarbonInterface` passed to
-    // `Carbon` where `Carbon implements CarbonInterface`) is a MAYBE:
+    // Direction 2 (param <: arg, e.g. `Carbon\Carbon` passed where a
+    // `Illuminate\Support\Carbon` subclass is expected) is a MAYBE:
     // the argument is a *broader* type but the value *might* be the
     // narrower concrete at runtime (the developer may have checked
     // with instanceof, or the API always returns the concrete type
-    // despite being typed as the interface).
+    // despite being typed as the parent).  This also covers cases the
+    // resolver still under-narrows, such as an Eloquent relation typed
+    // as the base `Collection` where a custom collection subclass is
+    // declared — dropping this rule turns those into false positives
+    // that PHPStan does not report.
     //
     // However, if the arg's class is **final**, the value cannot be
     // any subtype — it is exactly that class.  So `final class Jack`
@@ -776,7 +810,7 @@ fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
 /// `declare(strict_types=1)` directive.  In PHP this must appear as
 /// the very first statement (after `<?php`), but we check all
 /// top-level statements for robustness.
-fn has_strict_types(program: &Program<'_>) -> bool {
+pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
     for stmt in program.statements.iter() {
         if let Statement::Declare(declare) = stmt {
             for item in declare.items.iter() {
@@ -1433,7 +1467,7 @@ impl Backend {
     ///
     /// Appends diagnostics to `out`.  The caller is responsible for
     /// publishing them via `textDocument/publishDiagnostics`.
-    pub fn collect_type_error_diagnostics(
+    pub fn collect_argument_type_diagnostics(
         &self,
         uri: &str,
         content: &str,

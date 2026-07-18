@@ -11,7 +11,7 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -20,7 +20,7 @@ fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -29,7 +29,7 @@ fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -1707,7 +1707,7 @@ class ExplorerController {
     );
     let content = files[2].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     assert!(
         !has_type_error(&diags),
         "Should not flag a union of class-strings satisfying a template bound, got: {}",
@@ -4268,7 +4268,7 @@ class TestCase {
     let uri = format!("file://{}/src/TestCase.php", dir.path().display());
     let content = files[3].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     let msgs = type_error_messages(&diags);
     // The argument to ClassNode::__construct is the return value of
     // getNodeForCallingTestCase which returns ASTNode.  The diagnostic
@@ -4368,7 +4368,7 @@ class MyException extends NativeException {}
     backend.update_ast("file:///test.php", php);
 
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics("file:///test.php", php, &mut out);
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
     let msgs = type_error_messages(&out);
     assert!(
         msgs.is_empty(),
@@ -5971,10 +5971,67 @@ class Caller {
     let uri = format!("file://{}/src/Caller.php", dir.path().display());
     let content = files[2].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     assert!(
         !has_type_error(&diags),
         "Imported type alias parameter must not be treated as a class, got: {}",
         type_error_messages(&diags).join(", ")
+    );
+}
+
+/// A `new ReflectionClass($classString)` where the argument is a
+/// `class-string<T>` binds the class template parameter `T` to the object
+/// type, not the class-string itself.  The phpstorm-stubs constructor is
+/// annotated `@param class-string<T>|T $objectOrClass` but its native hint
+/// comes from a `#[LanguageLevelTypeAware]` attribute resolving to
+/// `object|string`.  The docblock type must still refine that native union
+/// so `$reflection->newInstanceArgs(...)` resolves to `T|null` (the
+/// instance), not `class-string<T>|null`.
+#[test]
+fn no_false_positive_for_reflection_class_new_instance_args() {
+    const REFLECTION_STUB: &str = r#"<?php
+/**
+ * @template T of object
+ */
+class ReflectionClass {
+    /** @param class-string<T>|T $objectOrClass */
+    public function __construct(#[LanguageLevelTypeAware(['8.0' => 'object|string'], default: '')] $objectOrClass) {}
+    /** @return T|null */
+    public function newInstanceArgs(array $args = []): ?object {}
+}
+"#;
+    let mut class_stubs: std::collections::HashMap<&'static str, &'static str> =
+        std::collections::HashMap::new();
+    class_stubs.insert("ReflectionClass", REFLECTION_STUB);
+    let backend = phpantom_lsp::Backend::new_test_with_all_stubs(
+        class_stubs,
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+    );
+    let uri = "file:///reflection.php";
+    let content = r#"<?php
+class AbstractASTNode {}
+class ASTAnonymousClass {}
+
+class Test {
+    protected function createNodeInstance(): AbstractASTNode|ASTAnonymousClass
+    {
+        /** @var class-string<AbstractASTNode|ASTAnonymousClass> */
+        $class = substr(static::class, 0, -4);
+
+        $reflection = new ReflectionClass($class);
+
+        return $reflection->newInstanceArgs([__METHOD__]);
+    }
+}
+"#;
+
+    backend.update_ast(uri, content);
+    let mut out = Vec::new();
+    backend.collect_return_type_diagnostics(uri, content, &mut out);
+    assert!(
+        out.is_empty(),
+        "newInstanceArgs on ReflectionClass<T> should resolve to the instance type, \
+         not a class-string, got: {out:?}"
     );
 }

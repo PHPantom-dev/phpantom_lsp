@@ -4267,8 +4267,37 @@ trait MocksServiceDemo
     }
 }
 
+// ── ReflectionClass<T> instantiation ────────────────────────────────────────
+// `new ReflectionClass($classString)` binds the reflected type from a
+// `class-string<T>`.  `newInstance()` returns `T` and `newInstanceArgs()`
+// returns `T|null`, even though the constructor's native hint is the broad
+// `object|string`.
+
+class ReflectionInstantiationDemo
+{
+    /**
+     * @param class-string<ReflectedWidget> $class
+     */
+    public function build(string $class): ReflectedWidget
+    {
+        // Fully-qualified `\ReflectionClass` so the unused-import demo above
+        // keeps its `use ReflectionClass;` dimmed.
+        $reflection = new \ReflectionClass($class);
+
+        // newInstance() → ReflectedWidget (not class-string<ReflectedWidget>)
+        return $reflection->newInstance();
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
+
+// ── ReflectionClass<T> instantiation scaffolding ────────────────────────────
+
+class ReflectedWidget
+{
+    public function label(): string { return 'widget'; }
+}
 
 // ── @phpstan-require-extends scaffolding ────────────────────────────────────
 
@@ -6647,6 +6676,10 @@ function runDemoAssertions(): void
     $cfd = new ClassFilteringDemo();
     assert($cfd instanceof Model, 'ClassFilteringDemo must extend Model');
     assert($cfd instanceof Renderable, 'ClassFilteringDemo must implement Renderable');
+
+    // ── ReflectionClass<T> instantiation ────────────────────────────────
+    $widget = (new ReflectionInstantiationDemo())->build(ReflectedWidget::class);
+    assert($widget instanceof ReflectedWidget, 'ReflectionClass::newInstance() must be ReflectedWidget');
 
     // ── Inline new chaining ─────────────────────────────────────────────
     $fromNew = (new Canvas())->getBrush();

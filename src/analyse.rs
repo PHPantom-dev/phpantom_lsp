@@ -424,7 +424,13 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                     b.collect_argument_count_diagnostics(u, c, o)
                                 }),
                                 ("type_mismatch_argument", &|b, u, c, o| {
-                                    b.collect_type_error_diagnostics(u, c, o)
+                                    b.collect_argument_type_diagnostics(u, c, o)
+                                }),
+                                ("type_mismatch_return", &|b, u, c, o| {
+                                    b.collect_return_type_diagnostics(u, c, o)
+                                }),
+                                ("type_mismatch_property", &|b, u, c, o| {
+                                    b.collect_property_type_diagnostics(u, c, o)
                                 }),
                                 ("missing_implementation", &|b, u, c, o| {
                                     b.collect_implementation_error_diagnostics(u, c, o)

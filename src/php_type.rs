@@ -1894,6 +1894,32 @@ impl PhpType {
         self.replace_self_with_type(&PhpType::Named(class_name.to_string()))
     }
 
+    /// Resolve relative class-reference keywords to concrete class names,
+    /// walking the entire type tree (including array elements and generic
+    /// arguments).
+    ///
+    /// `self`, `static`, and `$this` become `class_name`; `parent` becomes
+    /// `parent_class` when it is `Some`.  Unlike [`resolve_names`], which
+    /// treats these keywords as non-class types and leaves them untouched,
+    /// this resolves them so a declared type can be compared against a
+    /// resolved value type.
+    ///
+    /// [`resolve_names`]: PhpType::resolve_names
+    pub fn resolve_self_refs(&self, class_name: &str, parent_class: Option<&str>) -> PhpType {
+        // self / static / $this — case-insensitive, whole-tree walk.
+        let replaced = self.replace_self(class_name);
+        match parent_class {
+            Some(parent) => {
+                let subs = std::collections::HashMap::from([(
+                    "parent".to_string(),
+                    PhpType::Named(parent.to_string()),
+                )]);
+                replaced.substitute(&subs)
+            }
+            None => replaced,
+        }
+    }
+
     /// Replace only the `self` keyword (not `static` or `$this`) with a
     /// concrete class name.  Used during inheritance merging so that
     /// inherited methods carry the declaring class's identity for `self`
@@ -6538,6 +6564,54 @@ mod tests {
         let ty = PhpType::parse("self&JsonSerializable");
         let replaced = ty.replace_self("App\\User");
         assert_eq!(replaced.to_string(), "App\\User&JsonSerializable");
+    }
+
+    // ── resolve_self_refs ───────────────────────────────────────
+
+    #[test]
+    fn resolve_self_refs_bare() {
+        let ty = PhpType::parse("self");
+        assert_eq!(
+            ty.resolve_self_refs("App\\Cat", None).to_string(),
+            "App\\Cat"
+        );
+    }
+
+    #[test]
+    fn resolve_self_refs_in_array_element() {
+        // `self[]` inside an array must be resolved to the concrete class.
+        // Regression: `resolve_names` treats `self` as a keyword and skips
+        // it, so array/generic element `self` was left unresolved.
+        let ty = PhpType::parse("self[]");
+        let resolved = ty.resolve_self_refs("App\\Cat", None);
+        assert_eq!(resolved, PhpType::parse("App\\Cat[]"));
+    }
+
+    #[test]
+    fn resolve_self_refs_static_in_generic() {
+        let ty = PhpType::parse("array<static>");
+        let resolved = ty.resolve_self_refs("App\\Cat", None);
+        assert_eq!(resolved, PhpType::parse("array<App\\Cat>"));
+    }
+
+    #[test]
+    fn resolve_self_refs_parent() {
+        let ty = PhpType::parse("parent[]");
+        let resolved = ty.resolve_self_refs("App\\Cat", Some("App\\Animal"));
+        assert_eq!(resolved, PhpType::parse("App\\Animal[]"));
+    }
+
+    #[test]
+    fn resolve_self_refs_parent_without_parent_class_unchanged() {
+        let ty = PhpType::parse("parent");
+        assert_eq!(ty.resolve_self_refs("App\\Cat", None).to_string(), "parent");
+    }
+
+    #[test]
+    fn resolve_self_refs_leaves_other_classes_alone() {
+        let ty = PhpType::parse("Other[]");
+        let resolved = ty.resolve_self_refs("App\\Cat", None);
+        assert_eq!(resolved, PhpType::parse("Other[]"));
     }
 
     // ── extract_class_names (recursive) ─────────────────────────

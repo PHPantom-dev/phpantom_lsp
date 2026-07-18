@@ -1461,6 +1461,29 @@ impl Backend {
                     return vec![cls];
                 }
 
+                // ── now() / today() → Illuminate\Support\Carbon ─────
+                // The global `now()`/`today()` helpers are declared to
+                // return `CarbonInterface`, but they actually instantiate
+                // the concrete `Illuminate\Support\Carbon` (which extends
+                // `\DateTime`).  Resolving to the interface loses the
+                // concrete type and produces spurious mismatches when a
+                // chained call is assigned to a `DateTime`/`DateTimeImmutable`
+                // declaration.  Map both to the concrete class.  Only applies
+                // when the class is loadable (i.e. inside a Laravel project).
+                //
+                // Not strictly sound (the declared type is the interface),
+                // but it mirrors Larastan's `NowAndTodayExtension`, which the
+                // ecosystem is written against.  See the matching note in
+                // `rhs_resolution.rs`.
+                if matches!(
+                    normalized_func,
+                    "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
+                ) && let Some(cls) =
+                    (ctx.class_loader)(crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
+                {
+                    return vec![cls];
+                }
+
                 // Check for array element/preserving functions first.
                 let is_array_element_func = ARRAY_ELEMENT_FUNCS
                     .iter()

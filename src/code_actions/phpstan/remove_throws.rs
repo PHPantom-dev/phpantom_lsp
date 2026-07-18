@@ -416,9 +416,9 @@ mod tests {
 
     #[test]
     fn extracts_unused_type_from_method_message() {
-        let msg = "Method App\\Controllers\\Foo::bar() has Luxplus\\Decimal\\Decimal in PHPDoc @throws tag but it's not thrown.";
+        let msg = "Method App\\Controllers\\Foo::bar() has Acme\\Decimal\\Decimal in PHPDoc @throws tag but it's not thrown.";
         let t = extract_throws_type(msg, UNUSED_TYPE_ID).unwrap();
-        assert_eq!(t.to_string(), "Luxplus\\Decimal\\Decimal");
+        assert_eq!(t.to_string(), "Acme\\Decimal\\Decimal");
     }
 
     #[test]
@@ -558,14 +558,12 @@ class Foo {
     public function bar(): void {}
 }
 ";
-        let use_map: HashMap<String, String> = HashMap::from([(
-            "Decimal".to_string(),
-            "Luxplus\\Decimal\\Decimal".to_string(),
-        )]);
+        let use_map: HashMap<String, String> =
+            HashMap::from([("Decimal".to_string(), "Acme\\Decimal\\Decimal".to_string())]);
         let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 7).unwrap();
         let edit =
-            build_remove_throws_edit(php, &db, "Luxplus\\Decimal\\Decimal", &use_map, &ns).unwrap();
+            build_remove_throws_edit(php, &db, "Acme\\Decimal\\Decimal", &use_map, &ns).unwrap();
         assert!(
             !edit.new_text.contains("@throws"),
             "should remove @throws: {:?}",

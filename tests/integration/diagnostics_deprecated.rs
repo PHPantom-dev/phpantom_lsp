@@ -2441,13 +2441,13 @@ fn class_in_var_docblock_on_promoted_property_not_flagged() {
     let text = r#"<?php
 namespace App\Features\Mobilepay;
 
-use Luxplus\Core\Database\Model\Subscriptions\Subscription;
+use Acme\Core\Database\Model\Subscriptions\Subscription;
 
 final class SubscriptionInfo
 {
     public function __construct(
         /** @var list<Subscription> */
-        public array $luxplusSubscriptions,
+        public array $subscriptions,
     ) {}
 }
 "#;

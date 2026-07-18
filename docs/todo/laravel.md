@@ -697,3 +697,52 @@ recoverable signature).
 Larastan reference: it boots the app and reflects the runtime `$macros`
 static, so it gets `mixin()` for free; we recover the common literal shape
 from source instead.
+
+#### L21. Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)
+
+**Impact: Medium (a whole class of genuine mismatches goes unreported)
+· Effort: High (blocked on two precision gaps below)**
+
+The argument/return compatibility check has a deliberate "reverse
+direction MAYBE" escape hatch: when the resolved value is a *broader*
+supertype and the declared type is a *narrower* subtype (a downcast),
+we accept it rather than flag a mismatch. This is intentionally
+over-generous. It hides real errors such as returning a base type
+where a specific subclass is declared.
+
+We would like to drop this escape hatch to catch those genuine
+mismatches. We cannot yet, because doing so surfaces ~250 diagnostics
+across real Laravel codebases. These are *not* classic false
+positives: the code is correct against the model Larastan presents,
+and Larastan hacks around Carbon and Eloquent rather than modelling
+them precisely. Because the entire ecosystem (and therefore
+application code) is written against that looser model, tightening the
+check drowns real projects in mismatches that only PHPantom would
+report. PHPStan/Larastan report zero on the same lines.
+
+Two resolver-precision gaps produce the bulk of them; both must be
+closed before the escape hatch can go:
+
+1. **Eloquent custom collection classes.** A relation or query typed
+   as the base `Illuminate\Database\Eloquent\Collection<int, Model>`
+   where the method declares a custom `ModelCollection` subclass. We
+   do not yet resolve a model's `$collectionClass` / `newCollection()`
+   override, so the base type leaks and looks like a downcast. This is
+   the largest chunk and is not Carbon-specific.
+
+2. **Carbon parent/child typing.** A value typed `Carbon\Carbon` where
+   `Illuminate\Support\Carbon` is declared (for example a datetime-cast
+   property chained through a fluent method). The runtime value is the
+   concrete Laravel subclass, but our cast/property typing lands on the
+   parent. Related to the `now()`/`today()` handling already in place,
+   which maps those helpers to `Illuminate\Support\Carbon`.
+
+Note the `now()`/`today()` mapping itself is part of the same looser
+model: it is not strictly sound (the helpers' declared return type is
+the interface) but mirrors Larastan so real code does not drown in
+mismatches. Any tightening here has to preserve that.
+
+Where to look: the reverse-direction hierarchy block in the argument
+type compatibility layer, and the two resolution paths named above.
+Reproducible in real projects (a production Laravel codebase surfaces
+all ~250 when the escape hatch is removed).

@@ -1370,7 +1370,7 @@ async fn test_chained_static_call_closure_param_inference_with_namespace() {
     let uri = Url::parse("file:///test/chained_static_closure_ns.php").unwrap();
 
     // Line 0:  <?php
-    // Line 1:  namespace Luxplus\Core\Database\Model\Products\Filters;
+    // Line 1:  namespace Acme\Core\Database\Model\Products\Filters;
     // Line 2:  class Model {
     // ...
     // Line 12: }
@@ -1382,7 +1382,7 @@ async fn test_chained_static_call_closure_param_inference_with_namespace() {
     // Line 18:     });
     let src = concat!(
         "<?php\n",
-        "namespace Luxplus\\Core\\Database\\Model\\Products\\Filters;\n",
+        "namespace Acme\\Core\\Database\\Model\\Products\\Filters;\n",
         "class Model {\n",
         "    /**\n",
         "     * @param (\\Closure(static): mixed)|string|array $column\n",
@@ -1427,7 +1427,7 @@ async fn test_split_chain_closure_param_inference_with_namespace() {
 
     let src = concat!(
         "<?php\n",
-        "namespace Luxplus\\Core\\Database\\Model;\n",
+        "namespace Acme\\Core\\Database\\Model;\n",
         "class Model {\n",
         "    /**\n",
         "     * @param (\\Closure(static): mixed)|string|array $column\n",
@@ -1562,7 +1562,7 @@ async fn test_closure_param_inference_child_class_static_chain_with_namespace() 
     let uri = Url::parse("file:///test/closure_child_static_ns.php").unwrap();
 
     // Line 0:  <?php
-    // Line 1:  namespace Luxplus\Core\Database\Model;
+    // Line 1:  namespace Acme\Core\Database\Model;
     // Line 2:  class Model {
     // Line 3:      /**
     // Line 4:       * @param (\Closure(static): mixed)|string|array $column
@@ -1582,7 +1582,7 @@ async fn test_closure_param_inference_child_class_static_chain_with_namespace() 
     // Line 18: });
     let src = concat!(
         "<?php\n",
-        "namespace Luxplus\\Core\\Database\\Model;\n",
+        "namespace Acme\\Core\\Database\\Model;\n",
         "class Model {\n",
         "    /**\n",
         "     * @param (\\Closure(static): mixed)|string|array $column\n",
@@ -1988,7 +1988,7 @@ async fn test_cross_file_closure_param_inference_without_namespace() {
 ///
 /// ```php
 /// namespace App\Http\Controllers;
-/// use Luxplus\Core\Database\Model\EmailGenerator;
+/// use Acme\Core\Database\Model\EmailGenerator;
 /// $query = EmailGenerator::orderBy('id');
 /// $query->where(function ($q): void {
 ///     $q->where('domain', 'like', '%b%');  // $q should resolve
@@ -2005,7 +2005,7 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
         "autoload": {
             "psr-4": {
                 "App\\": "src/",
-                "Luxplus\\Core\\Database\\Model\\": "src/Models/",
+                "Acme\\Core\\Database\\Model\\": "src/Models/",
                 "Illuminate\\Database\\Eloquent\\": "vendor/laravel/framework/src/Illuminate/Database/Eloquent/",
                 "Illuminate\\Database\\Query\\": "vendor/laravel/framework/src/Illuminate/Database/Query/"
             }
@@ -2062,7 +2062,7 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
     // User's model class
     let email_generator_file = concat!(
         "<?php\n",
-        "namespace Luxplus\\Core\\Database\\Model;\n",
+        "namespace Acme\\Core\\Database\\Model;\n",
         "\n",
         "use Illuminate\\Database\\Eloquent\\Model;\n",
         "\n",
@@ -2073,7 +2073,7 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
     // The script file — exact pattern from the bug report
     // Line 0: <?php
     // Line 1: namespace App\Http\Controllers;
-    // Line 2: use Luxplus\Core\Database\Model\EmailGenerator;
+    // Line 2: use Acme\Core\Database\Model\EmailGenerator;
     // Line 3: $query = EmailGenerator::orderBy('id');
     // Line 4: $query->where(function ($q): void {
     // Line 5:     $q->
@@ -2081,7 +2081,7 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
     let script_file = concat!(
         "<?php\n",
         "namespace App\\Http\\Controllers;\n",
-        "use Luxplus\\Core\\Database\\Model\\EmailGenerator;\n",
+        "use Acme\\Core\\Database\\Model\\EmailGenerator;\n",
         "$query = EmailGenerator::orderBy('id');\n",
         "$query->where(function ($q): void {\n",
         "    $q->\n",
