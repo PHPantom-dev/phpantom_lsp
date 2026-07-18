@@ -750,6 +750,36 @@ passes so the receiver type is computed once.
 
 ---
 
+## P27. `object`/`?object` call-return check re-resolves the subject a second time
+
+**Impact: Medium · Effort: Low**
+
+`resolve_subject_outcome` resolves the whole subject up front (the
+`resolve_target_classes(subject, …)` call at the top). When that
+yields no concrete class, the `object`/`?object` escape-hatch branch
+then calls `resolve_call_raw_return_type(callee, "", ctx)` purely to
+peek at `is_object()`, and that helper re-resolves the callee's base
+chain from scratch. So every method/function call whose result has
+no concrete class pays a second full return-type resolution.
+
+This is exactly the shape of the `diagnostics/fixture/lots_of_missing_methods`
+benchmark (many calls whose results have missing members), and it
+regressed that fixture by ~29% (54ms → 70ms) when the branch was
+added, with a matching drift on hover and go-to-definition, which
+share this path.
+
+### Fix
+
+Fold the `object` detection into the primary resolution pass instead
+of running a separate re-resolution: when `resolve_target_classes`
+is about to return empty for a call subject, check whether the raw
+return type was `object`/`?object` at that point (the base chain is
+already resolved there) and emit the synthetic `stdClass` from the
+same pass. Do not pass `""` for the argument text on a second call;
+reuse the resolution already performed.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class

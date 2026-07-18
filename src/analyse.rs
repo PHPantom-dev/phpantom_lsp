@@ -207,7 +207,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                 let files = &files;
                 std::thread::Builder::new()
                     .name("index-worker".into())
-                    .stack_size(32 * 1024 * 1024)
                     .spawn_scoped(s, move || {
                         let mut entries: Vec<(usize, String, String)> = Vec::new();
                         loop {
@@ -257,27 +256,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         let uri_classes_index = backend.uri_classes_index.read();
         crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
     };
-    // Run eager population on a large-stack thread.  `resolve_class_fully_inner`
-    // can nest deeply when the toposort misses dependencies (stubs, dynamically
-    // loaded classes) and the recursion guard kicks in.  The default 8 MB thread
-    // stack is not enough for very large codebases.
-    std::thread::scope(|s| {
-        let backend = &backend;
-        let sorted_fqns = &sorted_fqns;
-        std::thread::Builder::new()
-            .name("eager-populate".into())
-            .stack_size(32 * 1024 * 1024)
-            .spawn_scoped(s, move || {
-                let class_loader =
-                    |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
-                crate::virtual_members::populate_from_sorted(
-                    sorted_fqns,
-                    &backend.resolved_class_cache,
-                    &class_loader,
-                );
-            })
-            .expect("failed to spawn eager-population thread");
-    });
+    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
+    crate::virtual_members::populate_from_sorted(
+        &sorted_fqns,
+        &backend.resolved_class_cache,
+        &class_loader,
+    );
     // ── Phase 2: Collect diagnostics (parallel) ─────────────────────
     // Call individual collectors directly (instead of the grouped
     // collect_slow_diagnostics) so we can time each one independently.
