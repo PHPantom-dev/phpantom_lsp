@@ -2302,3 +2302,102 @@ class Component {
         property_error_messages(&diags).join("; ")
     );
 }
+
+// ─── Mockery/Laravel mocks assigned to a concretely-typed property ─────────
+
+#[test]
+fn mock_conditional_return_assigned_to_concrete_property() {
+    // Mirrors Laravel's `InteractsWithContainer::mock()`: assigning
+    // `$this->mock(Concrete::class)` to a property typed as the concrete
+    // class must not flag, since the resolved type is `Concrete&MockInterface`.
+    let php = r#"<?php
+namespace Mockery {
+    interface MockInterface {}
+}
+
+namespace App {
+    class EpaymentService {}
+
+    trait InteractsWithContainer
+    {
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function mock($abstract) {}
+    }
+
+    class TestCase
+    {
+        use InteractsWithContainer;
+    }
+
+    class EpaymentTest extends TestCase
+    {
+        private EpaymentService $epaymentService;
+
+        protected function setUp(): void
+        {
+            $this->epaymentService = $this->mock(EpaymentService::class);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_property_error(&diags),
+        "$this->mock(EpaymentService::class) should satisfy an EpaymentService-typed property, got: {}",
+        property_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn mockery_static_mock_variadic_template_assigned_to_concrete_property() {
+    // Mirrors Mockery's own `Mockery::mock()`: the template param (`TMock`)
+    // is inferred from a `class-string<TMock>` alternative buried inside a
+    // union nested in a variadic array parameter, and the intersection
+    // `LegacyMockInterface&MockInterface&TMock` must keep the concrete class.
+    let php = r#"<?php
+namespace Mockery {
+    interface MockInterface {}
+    interface LegacyMockInterface {}
+
+    class Mockery
+    {
+        /**
+         * Static shortcut to Container::mock().
+         *
+         * @template TMock of object
+         *
+         * @param array<class-string<TMock>|TMock|Closure(LegacyMockInterface&MockInterface&TMock):LegacyMockInterface&MockInterface&TMock|array<TMock>> $args
+         *
+         * @return LegacyMockInterface&MockInterface&TMock
+         */
+        public static function mock(...$args) {}
+    }
+}
+
+namespace App {
+    class EpaymentService {}
+
+    class EpaymentTest
+    {
+        private EpaymentService $epaymentService;
+
+        protected function setUp(): void
+        {
+            $mock = \Mockery\Mockery::mock(EpaymentService::class);
+            $this->epaymentService = $mock;
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_property_error(&diags),
+        "Mockery::mock(EpaymentService::class) should satisfy an EpaymentService-typed property, got: {}",
+        property_error_messages(&diags).join("; ")
+    );
+}

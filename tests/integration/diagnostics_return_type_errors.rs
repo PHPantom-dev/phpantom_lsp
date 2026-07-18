@@ -2934,3 +2934,54 @@ fn now_chain_narrows_to_concrete_carbon() {
         return_error_messages(&diags).join("; ")
     );
 }
+
+// ─── Conditional return type intersecting a template param with a fixed
+//     interface (Laravel's `TestCase::mock()`/`partialMock()`/`spy()`) ──────
+
+#[test]
+fn mock_conditional_return_preserves_interface_intersection() {
+    // Mirrors Laravel's `InteractsWithContainer::mock()`:
+    // `@return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)`.
+    // The template param (`TInstance`) must be substituted with the
+    // resolved class while keeping the `&MockInterface` intersection,
+    // not collapsed down to the template alone.
+    let php = r#"<?php
+namespace Mockery {
+    interface MockInterface {}
+}
+
+namespace App {
+    class Client {}
+
+    trait InteractsWithContainer
+    {
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function mock($abstract) {}
+    }
+
+    class TestCase
+    {
+        use InteractsWithContainer;
+    }
+
+    class MyTest extends TestCase
+    {
+        private function mockClient(): Client&\Mockery\MockInterface
+        {
+            return $this->mock(Client::class);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "$this->mock(Client::class) should resolve to Client&MockInterface, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
