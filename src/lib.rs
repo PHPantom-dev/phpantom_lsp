@@ -489,6 +489,11 @@ pub struct Backend {
     /// references triggers a full index rebuild; every other edit takes the
     /// cheap single-file refresh path.
     pub(crate) laravel_macro_seeds: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Concrete date class selected by the project's `Date::use()` call.
+    ///
+    /// The outer option is `None` until startup discovery completes; the inner
+    /// option is `None` when discovery found no project override.
+    pub(crate) laravel_date_class: Arc<RwLock<Option<Option<String>>>>,
     /// Per-target member completion cache.
     ///
     /// Typing `$model->wh...` triggers a completion request for each
@@ -910,6 +915,7 @@ impl Backend {
             )),
             laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
+            laravel_date_class: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1005,6 +1011,7 @@ impl Backend {
             )),
             laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
+            laravel_date_class: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1599,6 +1606,7 @@ impl Backend {
             laravel_macros: Arc::clone(&self.laravel_macros),
             laravel_has_macros: Arc::clone(&self.laravel_has_macros),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
+            laravel_date_class: Arc::clone(&self.laravel_date_class),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),

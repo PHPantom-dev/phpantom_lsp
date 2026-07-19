@@ -674,6 +674,17 @@ impl Backend {
 
                     let hover = match member_result {
                         Some(HoverMemberHit::Method(ref method)) => {
+                            let mut method = method.clone();
+                            if let Some((_date_class, date_return_type)) =
+                                Self::configured_laravel_date_return(
+                                    &owner,
+                                    member_name,
+                                    &class_loader,
+                                )
+                            {
+                                method.return_type = Some(date_return_type);
+                                method.is_inferred_return = true;
+                            }
                             let declaring = find_declaring_class(
                                 &owner,
                                 member_name,
@@ -683,7 +694,7 @@ impl Backend {
                             Some((
                                 declaring.name.to_string(),
                                 self.hover_for_method(
-                                    method,
+                                    &method,
                                     &declaring,
                                     &class_loader,
                                     uri,
@@ -1140,10 +1151,26 @@ impl Backend {
         _ctx: &FileContext,
         function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
     ) -> Option<Hover> {
-        if let Some(func) = function_loader(name) {
+        if let Some(mut func) = function_loader(name) {
+            let is_configured_date_helper = matches!(
+                name.trim_start_matches('\\').rsplit('\\').next(),
+                Some("now" | "today")
+            );
+            if is_configured_date_helper
+                && let Some(date_class) = self
+                    .find_or_load_class(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+            {
+                let date_type = crate::php_type::PhpType::Named(date_class.name.to_string());
+                func.return_type = Some(date_type);
+            }
             let resolved_see = self.resolve_see_refs(&func.see_refs, uri, content);
             let provenance = self.provenance_line_for_function(name);
-            Some(hover_for_function(&func, Some(&resolved_see), provenance))
+            Some(hover_for_function(
+                &func,
+                Some(&resolved_see),
+                provenance,
+                is_configured_date_helper,
+            ))
         } else {
             None
         }

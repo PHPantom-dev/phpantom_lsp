@@ -482,7 +482,54 @@ fn first_string_literal_arg(args_text: &str) -> Option<String> {
     crate::util::unquote_php_string(first.trim()).map(str::to_string)
 }
 
+fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option<PhpType> {
+    match ty {
+        PhpType::Named(name) => (name.trim_start_matches('\\')
+            == crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
+            .then(|| PhpType::Named(configured_class.to_string())),
+        PhpType::Nullable(inner) => replace_support_carbon_return(inner, configured_class)
+            .map(|inner| PhpType::Nullable(Box::new(inner))),
+        PhpType::Union(members) => {
+            let mut replaced = false;
+            let members = members
+                .iter()
+                .map(
+                    |member| match replace_support_carbon_return(member, configured_class) {
+                        Some(member) => {
+                            replaced = true;
+                            member
+                        }
+                        None => member.clone(),
+                    },
+                )
+                .collect();
+            replaced.then_some(PhpType::Union(members))
+        }
+        _ => None,
+    }
+}
+
 impl Backend {
+    pub(crate) fn configured_laravel_date_return(
+        owner: &ClassInfo,
+        method_name: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<(Arc<ClassInfo>, PhpType)> {
+        if !matches!(
+            owner.fqn().as_str(),
+            "Illuminate\\Support\\Facades\\Date" | "Illuminate\\Support\\DateFactory"
+        ) {
+            return None;
+        }
+        let return_type = owner
+            .get_method_ci(method_name)
+            .and_then(|method| method.return_type.as_ref())?;
+        let date_class = class_loader(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)?;
+        let return_type = replace_support_carbon_return(return_type, date_class.fqn().as_str())?;
+
+        Some((date_class, return_type))
+    }
+
     /// Build and activate the thread-local guard-aware auth user model
     /// resolver.
     ///
@@ -1356,12 +1403,21 @@ impl Backend {
                         calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                         is_static: false,
                     };
-                    results.extend(Self::resolve_method_return_types_with_args(
-                        &owner,
-                        method_name,
-                        text_args,
-                        &mr_ctx,
-                    ));
+                    if let Some((date_class, date_return_type)) =
+                        Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
+                    {
+                        results.push(date_class);
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(date_return_type);
+                        }
+                    } else {
+                        results.extend(Self::resolve_method_return_types_with_args(
+                            &owner,
+                            method_name,
+                            text_args,
+                            &mr_ctx,
+                        ));
+                    }
                 }
                 results
             }
@@ -1472,6 +1528,14 @@ impl Backend {
                         calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                         is_static: true,
                     };
+                    if let Some((date_class, date_return_type)) =
+                        Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
+                    {
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(date_return_type);
+                        }
+                        return vec![date_class];
+                    }
                     return Self::resolve_method_return_types_with_args(
                         &merged,
                         method_name,
@@ -1501,11 +1565,11 @@ impl Backend {
                     return vec![cls];
                 }
 
-                // ── now() / today() → Illuminate\Support\Carbon ─────
+                // ── now() / today() → configured Laravel date class ──
                 // The global `now()`/`today()` helpers are declared to
-                // return `CarbonInterface`, but they actually instantiate
-                // the concrete `Illuminate\Support\Carbon` (which extends
-                // `\DateTime`).  Resolving to the interface loses the
+                // return `CarbonInterface`, but they actually instantiate the
+                // concrete class selected by Laravel's date factory. Resolving
+                // to the interface loses the
                 // concrete type and produces spurious mismatches when a
                 // chained call is assigned to a `DateTime`/`DateTimeImmutable`
                 // declaration.  Map both to the concrete class.  Only applies
@@ -1519,7 +1583,7 @@ impl Backend {
                     normalized_func,
                     "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
                 ) && let Some(cls) =
-                    (ctx.class_loader)(crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
+                    (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
                 {
                     return vec![cls];
                 }
@@ -3642,8 +3706,13 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
 
 #[cfg(test)]
 mod auth_guard_tests {
-    use super::{auth_guard_name, first_string_literal_arg};
+    use super::{auth_guard_name, first_string_literal_arg, replace_support_carbon_return};
+    use crate::Backend;
+    use crate::atom::atom;
+    use crate::php_type::PhpType;
     use crate::subject_expr::SubjectExpr;
+    use crate::test_fixtures::{make_class, make_method};
+    use std::sync::Arc;
 
     #[test]
     fn first_arg_reads_string_literals() {
@@ -3667,6 +3736,60 @@ mod auth_guard_tests {
         assert_eq!(first_string_literal_arg(""), None);
         assert_eq!(first_string_literal_arg("$guard"), None);
         assert_eq!(first_string_literal_arg("GUARD_NAME"), None);
+    }
+
+    #[test]
+    fn replaces_support_carbon_inside_nullable_union() {
+        assert_eq!(
+            replace_support_carbon_return(
+                &PhpType::parse("Illuminate\\Support\\Carbon|null"),
+                "Carbon\\CarbonImmutable",
+            ),
+            Some(PhpType::parse("Carbon\\CarbonImmutable|null"))
+        );
+    }
+
+    #[test]
+    fn date_factory_instance_return_uses_configured_class() {
+        let mut factory = make_class("DateFactory");
+        factory.file_namespace = Some(atom("Illuminate\\Support"));
+        factory.methods.push(Arc::new(make_method(
+            "now",
+            Some("Illuminate\\Support\\Carbon"),
+        )));
+        factory.rebuild_method_index();
+
+        let immutable = Arc::new(make_class("Carbon\\CarbonImmutable"));
+        let loader = |name: &str| {
+            (name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+                .then(|| Arc::clone(&immutable))
+        };
+        let (class, ty) = Backend::configured_laravel_date_return(&factory, "now", &loader)
+            .expect("DateFactory::now should use the configured class");
+
+        assert_eq!(class.name, atom("Carbon\\CarbonImmutable"));
+        assert_eq!(ty, PhpType::parse("Carbon\\CarbonImmutable"));
+    }
+
+    #[test]
+    fn date_facade_return_preserves_null_when_configured() {
+        let mut facade = make_class("Date");
+        facade.file_namespace = Some(atom("Illuminate\\Support\\Facades"));
+        facade.methods.push(Arc::new(make_method(
+            "create",
+            Some("Illuminate\\Support\\Carbon|null"),
+        )));
+        facade.rebuild_method_index();
+
+        let immutable = Arc::new(make_class("Carbon\\CarbonImmutable"));
+        let loader = |name: &str| {
+            (name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+                .then(|| Arc::clone(&immutable))
+        };
+        let (_, ty) = Backend::configured_laravel_date_return(&facade, "create", &loader)
+            .expect("Date::create should use the configured class");
+
+        assert_eq!(ty, PhpType::parse("Carbon\\CarbonImmutable|null"));
     }
 
     /// The guard name is recovered from every call-site form.

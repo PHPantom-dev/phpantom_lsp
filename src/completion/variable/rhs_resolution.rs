@@ -2821,10 +2821,10 @@ fn resolve_rhs_function_call<'b>(
             }
         }
 
-        // ── now() / today() → Illuminate\Support\Carbon ─────
+        // ── now() / today() → configured Laravel date class ──
         // Laravel's `now()`/`today()` helpers are declared to return
-        // `CarbonInterface`, but they instantiate the concrete
-        // `Illuminate\Support\Carbon` (which extends `\DateTime`).
+        // `CarbonInterface`, but they instantiate the concrete class selected
+        // by Laravel's date factory.
         // Resolving to the interface loses the concrete type and
         // produces spurious mismatches when the value flows into a
         // `DateTime`/`DateTimeImmutable` declaration.  Map both to the
@@ -2840,7 +2840,7 @@ fn resolve_rhs_function_call<'b>(
             normalized_func,
             "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
         ) && let Some(cls) =
-            (ctx.class_loader)(crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
+            (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
         {
             return ResolvedType::from_classes(vec![cls]);
         }
@@ -3378,6 +3378,17 @@ fn resolve_rhs_method_call_inner<'b>(
             ctx.class_loader,
             ctx.resolved_class_cache,
         );
+        if let Some((date_class, date_return_type)) =
+            Backend::configured_laravel_date_return(&merged, &method_name, ctx.class_loader)
+        {
+            let owner_results =
+                ResolvedType::from_classes_with_hint(vec![date_class], date_return_type);
+            if !is_union {
+                return owner_results;
+            }
+            ResolvedType::extend_unique(&mut union_results, owner_results);
+            continue;
+        }
         let owner_method = owner.get_method_ci(&method_name);
         let merged_method = merged.get_method_ci(&method_name);
         // Prefer the merged method's return type when the owner's method
@@ -4046,6 +4057,11 @@ fn resolve_rhs_static_call(
             let method_ref = owner
                 .get_method_ci(&method_name)
                 .or_else(|| merged.get_method_ci(&method_name));
+            if let Some((date_class, date_return_type)) =
+                Backend::configured_laravel_date_return(&merged, &method_name, ctx.class_loader)
+            {
+                return ResolvedType::from_classes_with_hint(vec![date_class], date_return_type);
+            }
             let native_ret_type_string =
                 method_ref.and_then(|m| m.return_type.as_ref()).map(|ret| {
                     let substituted = if !template_subs.is_empty() {

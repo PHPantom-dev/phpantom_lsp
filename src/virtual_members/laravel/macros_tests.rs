@@ -3,6 +3,65 @@
 use super::*;
 
 #[test]
+fn extracts_date_factory_class_from_provider() {
+    let content = r#"<?php
+namespace App\Providers;
+
+use Carbon\CarbonImmutable;
+use Illuminate\Support\DateFactory;
+
+class AppServiceProvider {
+    public function register(): void {
+        DateFactory::use(CarbonImmutable::class);
+    }
+}
+"#;
+
+    assert_eq!(
+        extract_date_factory_class(content).as_deref(),
+        Some("Carbon\\CarbonImmutable")
+    );
+}
+
+#[test]
+fn extracts_date_factory_class_from_use_class() {
+    let content = r#"<?php
+use Carbon\CarbonImmutable;
+use Illuminate\Support\DateFactory;
+
+DateFactory::useClass(CarbonImmutable::class);
+"#;
+
+    assert_eq!(
+        extract_date_factory_class(content).as_deref(),
+        Some("Carbon\\CarbonImmutable")
+    );
+}
+
+#[test]
+fn extracts_date_factory_class_through_facade() {
+    let content = r#"<?php
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Date;
+
+Date::use(CarbonImmutable::class);
+"#;
+
+    assert_eq!(
+        extract_date_factory_class(content).as_deref(),
+        Some("Carbon\\CarbonImmutable")
+    );
+}
+
+#[test]
+fn ignores_unrelated_use_calls() {
+    assert_eq!(
+        extract_date_factory_class("<?php Foo::use(Bar::class);"),
+        None
+    );
+}
+
+#[test]
 fn extracts_closure_macro_with_signature() {
     let content = r#"<?php
 namespace App\Providers;

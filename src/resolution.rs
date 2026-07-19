@@ -166,6 +166,12 @@ impl Backend {
     ///
     /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
     pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
+        if class_name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN {
+            let configured = self.laravel_date_class.read().clone()?;
+            let configured = configured
+                .unwrap_or_else(|| crate::virtual_members::laravel::SUPPORT_CARBON_FQN.to_string());
+            return self.find_or_load_class(&configured);
+        }
         // Defensively strip nullable prefix (`?Foo` → `Foo`) and generic
         // parameters (`Collection<int, User>` → `Collection`) so that
         // callers don't need to normalise before lookup.

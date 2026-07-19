@@ -354,6 +354,7 @@ pub(crate) fn hover_for_function(
     func: &FunctionInfo,
     resolved_see: Option<&[ResolvedSeeRef]>,
     provenance: Option<String>,
+    is_inferred_return: bool,
 ) -> Hover {
     let native_params = format_native_params(&func.parameters);
 
@@ -402,7 +403,7 @@ pub(crate) fn hover_for_function(
         func.return_type.as_ref(),
         func.native_return_type.as_ref(),
         func.return_description.as_deref(),
-        false,
+        is_inferred_return,
     ) {
         lines.push(section);
     }

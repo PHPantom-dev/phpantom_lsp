@@ -508,6 +508,7 @@ impl LanguageServer for Backend {
         // after the cache clear above so injected macros are never shadowed
         // by a stale merge.
         if self.resolved_class_cache.read().is_laravel() {
+            self.build_laravel_date_class();
             self.build_laravel_macro_index();
         }
 
@@ -2030,6 +2031,37 @@ impl Backend {
         );
     }
 
+    /// Find the date class selected by project service providers. Laravel's
+    /// helpers use this factory, so `now()` and `today()` return this class
+    /// rather than their broad `CarbonInterface` declaration.
+    fn build_laravel_date_class(&self) {
+        let mut configured = None;
+        let providers = self.laravel_provider_fqns();
+        for fqn in providers {
+            let Some(uri) = self.resolve_class_uri(&fqn) else {
+                continue;
+            };
+            let Ok(url) = tower_lsp::lsp_types::Url::parse(&uri) else {
+                continue;
+            };
+            let Ok(path) = url.to_file_path() else {
+                continue;
+            };
+            if self.is_in_vendor_dir(&path) {
+                continue;
+            }
+            let Some(content) = self.get_file_content(&uri) else {
+                continue;
+            };
+            if let Some(class) =
+                crate::virtual_members::laravel::extract_date_factory_class(&content)
+            {
+                configured = Some(class);
+            }
+        }
+        *self.laravel_date_class.write() = Some(configured);
+    }
+
     /// Collect the FQNs of every Laravel service provider that could register a
     /// macro: those installed vendor packages auto-discover (via
     /// `extra.laravel.providers` in each vendor's `installed.json`) plus those
@@ -2091,6 +2123,12 @@ impl Backend {
     pub(crate) fn refresh_laravel_macros(&self, uri: &str, content: &str) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
+        }
+        if content.contains("::use")
+            && let Some(class) =
+                crate::virtual_members::laravel::extract_date_factory_class(content)
+        {
+            *self.laravel_date_class.write() = Some(Some(class));
         }
         // An edit to a seed file (a service provider or the app's provider
         // registration files) that changes its class references alters which

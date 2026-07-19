@@ -97,6 +97,51 @@ pub(crate) fn extract_macro_registrations(
     out
 }
 
+/// Extract the concrete date class selected by `Date::use()` or
+/// `Date::useClass()`, through either the facade or date factory.
+pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
+    if !content.contains("::use") {
+        return None;
+    }
+
+    let arena = Bump::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, content.as_bytes());
+    let resolved = NameResolver::new(&arena).resolve(program);
+    let owned = OwnedResolvedNames::from_resolved(&resolved);
+    let mut configured = None;
+
+    fn collect(node: Node<'_, '_>, resolved: &OwnedResolvedNames, configured: &mut Option<String>) {
+        if let Node::StaticMethodCall(call) = node
+            && let ClassLikeMemberSelector::Identifier(method) = &call.method
+            && matches!(
+                bytes_to_str(method.value).to_ascii_lowercase().as_str(),
+                "use" | "useclass"
+            )
+            && resolve_target_fqn(call.class, resolved).is_some_and(|target| {
+                matches!(
+                    target.as_str(),
+                    "Illuminate\\Support\\Facades\\Date" | "Illuminate\\Support\\DateFactory"
+                )
+            })
+            && let Some(arg) = call.argument_list.arguments.first()
+            && let Expression::Access(Access::ClassConstant(access)) = arg.value()
+            && matches!(
+                &access.constant,
+                ClassLikeConstantSelector::Identifier(constant)
+                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
+            )
+            && let Some(class) = resolve_target_fqn(access.class, resolved)
+        {
+            *configured = Some(class);
+        }
+        node.visit_children(|child| collect(child, resolved, configured));
+    }
+
+    collect(Node::Program(program), &owned, &mut configured);
+    configured
+}
+
 /// Project-wide index of Laravel macro registrations, keyed by the FQN of
 /// the class each macro attaches to.
 ///

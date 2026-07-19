@@ -103,8 +103,9 @@ pub(crate) use config_keys::{
 };
 pub(crate) use env_vars::resolve_env_definition;
 pub(crate) use macros::{
-    LaravelMacroIndex, MacroRegistration, extract_macro_registrations, inject_macros,
-    parse_installed_providers, parse_provider_class_list, parse_provider_referenced_classes,
+    LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
+    inject_macros, parse_installed_providers, parse_provider_class_list,
+    parse_provider_referenced_classes,
 };
 
 /// Unified go-to-definition entry point for all Laravel string-key spans.
@@ -265,6 +266,9 @@ pub const ELOQUENT_BUILDER_FQN: &str = "Illuminate\\Database\\Eloquent\\Builder"
 /// The fully-qualified name of Laravel's concrete Carbon subclass, which
 /// the `now()` and `today()` helpers actually instantiate.
 pub const SUPPORT_CARBON_FQN: &str = "Illuminate\\Support\\Carbon";
+
+/// Internal class-loader key for the class selected through `Date::use()`.
+pub const CONFIGURED_DATE_CLASS_FQN: &str = "phpantom-configured-laravel-date-class";
 
 /// Build a substitution map that replaces `static`, `$this`, and `self`
 /// with the given type.
