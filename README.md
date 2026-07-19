@@ -37,9 +37,9 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | PHPStan types                   | ✅       | ❌           | 🚧         | 🚧          | 🚧          |
 | Conditional return types        | ✅       | ❌           | ✅         | 🚧          | ❌          |
 | Closure parameter inference     | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
-| Laravel                         | ✅       | ❌           | 🚧         | ❌          | 🧩          |
+| Laravel                         | ✅       | ❌           | 🚧         | ❌          | 🚧          |
 | Blade templates                 | 🚧       | ❌           | ✅         | ❌          | ✅          |
-| Other frameworks<sup>4</sup>    | 🚧       | 🚧           | 🚧         | 🚧          | ✅          |
+| Other frameworks<sup>4</sup>    | 🚧       | 🚧           | 🚧         | 🚧          | 🧩          |
 | **Refactoring**                 |          |              |            |             |             |
 | Rename                          | ✅       | 💰           | 💰         | ✅          | ✅          |
 | Common refactorings<sup>3</sup> | ✅       | ❌           | 💰         | ✅          | ✅          |

@@ -10,11 +10,19 @@ For general architecture see `ARCHITECTURE.md`.
 
 - **No application booting.** Consistent with `laravel.md`. We
   never run PHP or boot a Laravel application.
-- **No call-site scanning.** We do not scan controllers, mailers, or
-  other PHP files for `view()` calls to infer template variable types.
-  Variable types come from explicit `@var` PHPDoc in `@php` blocks
-  (compatible with Bladestan's `@bladestan-signature`), `@props`
-  directives, or component class constructors.
+- **Signatures over call-site scanning.** A template's variable types
+  come from its declared contract: the Bladestan-compatible signature
+  chain — `@bladestan-signature` docblock, first docblock before
+  template code, `@props`, component class constructors (item 21). The
+  template declares what it expects; call sites are then *validated*
+  against that contract (item 24), exactly as a function signature
+  works. Inferring types *from* call sites inverts the contract and
+  produces "true for one caller" types, so it is not the foundation —
+  but a best-effort call-site inference fallback for unannotated
+  projects is planned as a late addition (item 25), layered strictly
+  below every declared source. Projects running Bladestan (a PHPStan
+  extension for Blade template analysis) get the full contract model
+  in both the editor and CI from the same annotations.
 - **Discovery is just directory walks.** Scanning `resources/views/`
   and `app/View/Components/` (plus `app/Livewire/`) at init time is
   the full extent of external Blade file discovery. Paths are converted
@@ -431,6 +439,101 @@ Extend `tests/completion_blade.rs`:
 
 ---
 
+## Phase 5: Template Contracts and Cross-File Flow
+
+This phase aligns PHPantom's Blade understanding with Bladestan (a
+PHPStan extension for statically analyzing Blade templates). The two
+tools share one contract model: the same annotation gives autocomplete
+and hover in the editor (PHPantom) and type checking in CI (Bladestan).
+Where Bladestan defines a concept (signature chain, covariant merging,
+call-site validation), we implement the same semantics so the
+ecosystem converges on one way to type a template.
+
+### 21. Template signature resolution chain
+
+Implement a signature resolution priority, matching Bladestan's model,
+as the source of a template's variable types:
+
+1. **Backed component class** — public properties and constructor
+   parameters (item 17), merged with the blade-side signature.
+2. **`@bladestan-signature` docblock** — the canonical contract. The
+   marker tag is recognized and the `@var` tags in that docblock
+   become the template's declared variables.
+3. **First docblock before template code** — treated as an implicit
+   signature when no marker is present (zero-change migration for
+   codebases that already carry `@var` blocks).
+4. **`@props`** — default-value type inference for anonymous
+   components (item 12).
+5. **`mixed`** — otherwise.
+
+The `@var` parsing itself already works through the preprocessor;
+the work is the chain, the one-signature-per-file rule, and treating
+the signature as a *declaration set* rather than scattered
+assertions. Nullable-not-optional semantics follow Bladestan: a
+variable that may be absent is declared `?Type`, not omitted.
+
+### 22. Cross-file `@section` / `@stack` name intelligence
+
+`@section`/`@hasSection`/`@sectionMissing`/`@yield` and
+`@push`/`@prepend`/`@stack` name arguments are cross-file string
+keys: yields and stacks are declared in layouts, filled in children.
+Index section and stack names per template (alongside the discovery
+maps of item 9, recording the `@extends` target), then provide:
+
+- completion of section/stack names inside child templates from the
+  resolved layout chain, and vice versa in layouts from known
+  children;
+- go-to-definition between `@section('x')` and its `@yield('x')`;
+- an unknown-section diagnostic when a child fills a section its
+  layout chain never yields (dynamic names skip, as always).
+
+### 23. Custom directive discovery
+
+`Blade::directive('datetime', …)`, `Blade::if('env', …)`, and
+component namespace registrations (`Blade::componentNamespace()`,
+`Blade::anonymousComponentPath()`) in app and package service
+providers declare project-specific directives. Scan literal
+registrations — the same provider-scanning shape as the macro
+scanner — so that:
+
+- known custom directives stop degrading to comments in the
+  preprocessor and instead map to expression-preserving PHP (their
+  argument is still type-checked);
+- `Blade::if('admin')` synthesizes the full family (`@admin`,
+  `@elseadmin`, `@endadmin`, `@unlessadmin`);
+- directive name completion (item 19) includes them;
+- registered component namespaces/paths extend the discovery maps of
+  item 9.
+
+### 24. `view()` call-site validation
+
+The diagnostics counterpart of item 21, matching Bladestan's
+call-site validation rule: where a template has a
+declared signature, a `view('name', [...])` call (and
+`View::make()`, mailable content, `Route::view()` data,
+`@include('name', [...])` inside templates) with a literal array
+argument is checked against the merged signature as an array shape —
+missing required variables, unknown extras, and type mismatches each
+get a diagnostic. Templates without a signature produce no call-site
+diagnostics. This gives the editor the same errors Bladestan reports
+in CI, live while typing, from one annotation.
+
+### 25. Call-site variable inference (late addition)
+
+For projects using neither signatures nor Bladestan: infer a
+template's variable types from the `view()` call sites that
+reference it (literal array keys, `compact()`, `->with()` chains),
+as the **lowest-priority** source in the item 21 chain — any
+declared source shadows it entirely, and multiple call sites union
+per variable. This is deliberately last: it is the inverted-contract
+model and inherits its weaknesses (types are "true for the callers
+we found", dynamic view names contribute nothing). It exists so a
+completely unannotated project still gets useful completion inside
+`{{ $user-> }}`, and as a nudge path — hover can suggest promoting
+the inferred types into a signature docblock.
+
+---
+
 ## Implementation Sequence
 
 Phase 1 is complete (steps 1-3): the preprocessor, LSP pipeline
@@ -482,6 +585,17 @@ template variable typing.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file. Parent layout variables are available in child templates.
 
+### Step 9: Template contracts (items 21-25)
+
+Implement the signature resolution chain, then call-site validation
+on top of it. Section/stack intelligence and custom directive
+discovery are independent and can land in either order. Call-site
+inference (item 25) comes last, after every declared source works.
+
+**Deliverable:** A template with a `@bladestan-signature` docblock
+gets typed completion for its declared variables, and a `view()`
+call missing a required variable gets a diagnostic.
+
 ---
 
 ## Editor Integration Notes
@@ -495,12 +609,11 @@ The server activates Blade preprocessing when:
 ### Zed extension
 
 The Zed extension (`zed-extension/extension.toml`) currently
-registers `languages = ["PHP"]`. To support Blade files, it will
-need an additional language registration. This may require Zed to
-have a Blade language definition (grammar, file associations), or
-the extension can register `.blade.php` as a PHP variant. This is
-an editor-side concern and may need a separate Zed extension or an
-update to the existing one.
+registers `languages = ["PHP"]` and is planned to merge into the
+official Zed PHP extension, so it will not grow Blade support. The
+Blade language registration (tree-sitter grammar, `.blade.php`
+association, `languageId: "blade"` wiring) belongs to the separate
+`zed-laravel` extension — see `zed-laravel/todo.md` items Z2/Z3.
 
 ### Other editors
 
