@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.9.0] - 2026-07-20
+
+### Added
+
 - **Macro hover shows origin and inferred return types.** Hovering on a macro method call now displays a "macro" indicator instead of the generic "virtual" label, distinguishing `::macro()` registrations from `@method`/`@mixin` synthesized members. When the closure has no explicit return type hint, the return type is inferred from the closure body and shown with an "(inferred)" annotation. Bare `$this` / `self` / `static` returns preserve their keyword form, and method chains like `$this->transform(...)` use the last method's declared return type directly, preserving `$this`, `static`, and generic parameters that the general resolver would flatten to a bare class name. Regular (non-macro) methods with inferred return types also show the "(inferred)" annotation on hover. Contributed by @calebdw.
 - **Return type mismatch diagnostics (`type_mismatch_return`).** Functions and methods with a declared return type are now checked against their `return` statements. Incompatible return values are flagged as errors. Void functions returning a value and bare `return;` in non-void functions are also flagged. Generators (functions using `yield`) are skipped. Uses the same conservative `is_type_compatible` policy as argument type checking to avoid false positives. Contributed by @calebdw.
 - **Property type assignment diagnostics (`type_mismatch_property`).** Assignments to typed properties (`$this->prop = expr` and `self::$prop = expr`) are checked against the declared property type. Incompatible values are flagged as errors. Only plain `=` assignments are checked; compound operators (`+=`, `.=`, etc.) are skipped. Untyped and `mixed` properties are not flagged. Contributed by @calebdw.
