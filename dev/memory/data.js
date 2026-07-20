@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784510362180,
+  "lastUpdate": 1784521051999,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17101,6 +17101,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1dbbcdd4fd5317c322a67fa99ab600df57d2aaa5",
+          "message": "feat: discover package resources from service providers\n\nScan service providers for mergeConfigFrom(), loadViewsFrom(),\nloadTranslationsFrom(), loadJsonTranslationsFrom(), and\nloadRoutesFrom() calls. Resolve __DIR__-relative paths to the\nactual package files on disk and feed the results into the\nexisting string key infrastructure.\n\nThis enables completion, go-to-definition, and hover for config\nkeys, view templates, translation keys, and named routes that\nare registered by installed packages rather than defined in the\napp itself. For example, config(\"horizon.environments\") now\ncompletes and jumps to the key in vendor/laravel/horizon/config/\nhorizon.php, and view(\"horizon::layout\") resolves to the\npackage view directory.\n\nThe scanner reuses the same provider list and one-level-deep\nhelper class traversal already used by macro discovery.\nDiscovered resources are cached on Backend and invalidate the\nstring key caches when populated.\n\nKey changes:\n- New provider_resources.rs with ProviderResource,\n  ProviderResources, and extract_provider_resources()\n- extract_dir_concat_path() moved from route_names.rs to\n  helpers.rs for shared use\n- build_provider_resources() in server.rs walks providers\n  and their referenced classes\n- enumerate_all_{config_keys,view_names,trans_keys}() and\n  enumerate_all_route_names() extended to include package\n  resources\n- resolve_{config_key,view,trans,route}_definitions() extended\n  to handle namespaced package keys (ns::key, ns.key)",
+          "timestamp": "2026-07-20T06:02:59+02:00",
+          "tree_id": "e4d48f830e2bb453f3ff86e92ed173e79d4a847c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1dbbcdd4fd5317c322a67fa99ab600df57d2aaa5"
+        },
+        "date": 1784521050362,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.2,
             "unit": "MiB"
           }
         ]
