@@ -752,7 +752,7 @@ impl Backend {
 
                 for func_info in std::mem::take(&mut update.functions) {
                     let fqn = if let Some(ref ns) = func_info.namespace {
-                        format!("{}\\{}", ns, &func_info.name)
+                        format!("{}\\{}", ns, func_info.name)
                     } else {
                         func_info.name.to_string()
                     };

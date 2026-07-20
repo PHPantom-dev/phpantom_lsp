@@ -572,9 +572,10 @@ Relatedly, `references/mod.rs` hosts `ensure_workspace_indexed`,
 indexing, not reference finding. They should land in the same new
 module.
 
-**Why it matters.** X4 (full background indexing) is scheduled for
-Sprint 6; starting that feature against init logic scattered across
-`server.rs` and `references/mod.rs` guarantees more sprawl.
+**Why it matters.** Full background indexing has already shipped on
+top of init logic scattered across `server.rs` and
+`references/mod.rs`; leaving that logic unconsolidated guarantees more
+sprawl as the feature continues to grow.
 
 ---
 

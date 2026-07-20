@@ -641,9 +641,9 @@ the tiering logic needs real substring search. Note B25
 available on the index side anyway — implementing that first
 makes this nearly free.
 
-Related: X4 (full background indexing) plans a dedicated
+Related: full background indexing already populates a dedicated
 workspace-symbol index; this fix is independent and worth taking
-early since it is a few lines.
+regardless since it is a few lines.
 
 ---
 

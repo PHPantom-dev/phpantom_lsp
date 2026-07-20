@@ -174,11 +174,10 @@ name, kind, URI, range, and selection range.
 
 Call hierarchy benefits significantly from a full project index.
 Without an index, incoming calls can only be found via the existing
-classmap + PSR-4 scan approach (same as Find References). With a full
-index (X4), the lookup becomes a simple index query.
-
-Consider implementing after X4 (full background indexing) ships, or
-accept the same scan-based latency that Find References currently has.
+classmap + PSR-4 scan approach (same as Find References). Now that
+full background indexing is available, the lookup can become a
+simple index query instead of relying on the scan-based approach that
+Find References uses on its own.
 
 **References:**
 - php-lsp: `src/navigation/call_hierarchy.rs` in its own repo — a
@@ -266,8 +265,9 @@ for the annotation. Two approaches:
   files matching `*Test.php` in the project for `@covers` / `#[CoversClass]`
   referencing the current class FQN. This is O(n) in test file count
   but test directories are typically small.
-- **Indexed**: If full background indexing (X4) ships, index `@covers`
-  annotations during the indexing pass and look them up in O(1).
+- **Indexed**: Now that full background indexing is available,
+  `@covers` annotations can be indexed during the indexing pass and
+  looked up in O(1).
 
 The lazy approach is fine for most projects. Test directories rarely
 exceed a few hundred files, and a simple `memchr`-based string
@@ -285,8 +285,9 @@ pre-filter on the class name before parsing keeps it fast.
 ### Dependencies
 
 No hard dependencies. Works with the existing class loader for the
-test → subject direction. The subject → test direction benefits from
-but does not require full indexing (X4).
+test → subject direction. The subject → test direction benefits from,
+but does not require, the full background indexing that is now
+available.
 
 ---
 

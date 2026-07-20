@@ -33,7 +33,6 @@ within the same impact tier.
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |
 | L18 | [`Macroable::mixin()` registrations](todo/laravel.md#l18-macroablemixin-registrations)                                                                          | Low         | Medium      |
-| X4  | [Full background indexing](todo/indexing.md#x4-full-background-indexing) (workspace symbols, fast find-references)                                              | Medium      | High        |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion--upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 
@@ -224,7 +223,6 @@ unlikely to move the needle for most users.
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium      |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium      |
 | X5  | Granular progress reporting for indexing, GTI, and Find References                                                                                                          | Low-Medium  | Medium      |
-| X8  | [Inverted reference index for O(k) find-references](todo/indexing.md#x8-inverted-reference-index-for-ok-find-references)                                                    | Medium-High | Medium      |
 | X9  | [Honor editor file excludes and PHP associations during indexing](todo/indexing.md#x9-honor-editor-file-excludes-and-php-associations-during-indexing)                      | Low-Medium  | Medium      |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | High        |
 |     | **[Inline Completion](todo/inline-completion.md)**                                                                                                                          |             |             |

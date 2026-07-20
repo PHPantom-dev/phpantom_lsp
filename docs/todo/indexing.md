@@ -236,98 +236,6 @@ is a nice-to-have, not a requirement.
 
 ---
 
-## X4. Full background indexing
-
-**Goal:** Parse every PHP file in the project in the background,
-enabling workspace symbols, fast find-references without on-demand
-scanning, and complete completion item detail.
-
-**Prerequisites (from [performance.md](performance.md)):**
-
-- **`Arc<ClassInfo>` (P1).** Full indexing stores a `ClassInfo` for
-  every class in the project. Without `Arc`, every resolution clones
-  the entire struct out of the map. With `Arc`, retrieval is a
-  reference-count increment. This is the difference between full
-  indexing using ~200 MB vs. ~500 MB for a large project.
-
-### Trigger
-
-By default. Users can opt out with `strategy = "composer"`, `"self"`, or
-`"none"` in `.phpantom.toml`.
-
-### Design: self + second pass
-
-Full mode is not a separate discovery system. It works exactly like
-`"self"` mode (self-scan) and then schedules a second pass:
-
-1. **First pass (same as self):** Build the classmap via byte-level
-   scanning. This completes in about a second and gives us class
-   name completion and O(1) file lookup.
-2. **Second pass:** Iterate every file path in the now-populated
-   in-memory classmap and call `update_ast` on each one at Low
-   priority. This populates uri_classes_index, symbol_maps, fqn_uri_index,
-   global_functions, and global_defines.
-
-No new file discovery logic is needed. The classmap from the first
-pass already contains every relevant file path. The second pass just
-enriches it.
-
-When `composer.json` does not exist (e.g. the user opened a monorepo
-root or a non-Composer project), the first pass falls back to walking
-all PHP files under the workspace root, so the second pass still has
-a complete file list to work from.
-
-### Progressive enrichment
-
-The user experiences three stages:
-
-1. **Immediate:** LSP requests are up and running. Completion, hover,
-   and go-to-definition work via on-demand resolution and stubs.
-2. **Seconds:** Classmap is ready. Class name completion covers the
-   full project. Cross-file resolution is O(1).
-3. **Under a minute:** Full AST parse complete. Workspace symbols,
-   fast find-references (no on-demand scanning), rich hover on
-   completion items.
-
-Each stage improves on the last without blocking the previous one.
-
-### Behaviour
-
-1. Respect the priority system from X2: pause the second pass
-   when higher-priority work arrives.
-2. Process user code first, then vendor.
-3. Report progress via `$/progress` tokens so the editor can show
-   "Indexing: 1,234 / 5,678 files". The `$/progress` infrastructure
-   (token creation, begin/report/end helpers) is already in place and
-   used during workspace initialization. The second pass just needs
-   to call `progress_report` as it processes each file.
-
-### Memory
-
-Currently we store `ClassInfo`, `FunctionInfo`, and `SymbolMap`
-structs that are not as lean as they could be. For a 21K-file
-codebase, full indexing will use meaningful RAM. Since full indexing is
-the default, we should profile and trim struct sizes over time. The aim
-is to stay under 512 MB for a full project.
-
-The performance prerequisites above (P1 `Arc<ClassInfo>`,
-`Arc<String>`, `Arc<SymbolMap>`) directly reduce memory usage by
-sharing data across the uri_classes_index, caches, and snapshot copies instead
-of deep-cloning each. These should be measured before and after to
-validate the 512 MB target.
-
-### Workspace symbols
-
-With the full index populated, `workspace/symbol` becomes a simple
-filter over the uri_classes_index and global_functions maps. No additional
-infrastructure needed.
-
-When full indexing is disabled, workspace symbols still works but only returns results
-from already-parsed files (opened files, on-demand resolutions, stubs).
-Complete coverage requires the default `strategy = "full"`.
-
----
-
 ## X5. Granular progress reporting
 
 **Impact: Medium · Effort: Medium**
@@ -427,7 +335,7 @@ require a full rescan.
 
 ### When to consider
 
-Only if X4 background indexing is slow enough on cold start that
+Only if full background indexing is slow enough on cold start that
 users complain. Given that:
 
 - Mago can lint 45K files in 2 seconds.
@@ -493,14 +401,15 @@ cross-file interactions (go-to-definition, hover, or completion that
 triggered a load).
 
 This implicit signal works because unloaded classes are in a separate
-bucket (classmap/stubs, tier 2) with lower priority. If the project
-moves to eager indexing (X4, parsing all files at startup), every class
-would appear equally "loaded" and the tier distinction would collapse.
-The same-namespace tier would contain every class in the namespace, not
+bucket (classmap/stubs, tier 2) with lower priority. Now that full
+indexing is the default (parsing all files at startup), every class
+appears equally "loaded" and the tier distinction has collapsed. The
+same-namespace tier now contains every class in the namespace, not
 just the ones the developer recently touched.
 
-**When to implement:** Only when eager loading (X4) ships. Until then,
-the implicit signal is sufficient and no explicit tracking is needed.
+**When to implement:** Eager/full indexing is now the default, so the
+tier distinction has already collapsed as described above — this is
+ready to implement.
 
 **Design sketch:**
 
@@ -528,70 +437,6 @@ the implicit signal is sufficient and no explicit tracking is needed.
    ordering.
 
 ---
-
-## X8. Inverted reference index for O(k) find-references
-
-**Impact: Medium-High · Effort: Medium**
-
-Find-references currently scans every span in every file's `SymbolMap`
-— O(total\_spans\_in\_project) per request. For a 10K-file project
-with ~500 spans/file that is ~5 million comparisons, each involving a
-`resolved_names` lookup and string comparison. The result set is
-typically tiny (tens of locations), so almost all work is wasted.
-
-php-lsp builds a background reference index (Phase 3) that maps each
-symbol's FQN to its reference locations, giving O(k) lookups where
-k = number of actual references.
-
-### Data structure
-
-A new inverted index on `Backend`:
-
-```
-ref_index: HashMap<String, Vec<(String, u32, u32)>>
-```
-
-Key: target FQN (e.g. `App\Models\User`, `App\Models\User::save`).
-Value: list of `(file_uri, span_start, span_end)` tuples.
-
-### Maintenance
-
-- **Bulk build.** `ensure_workspace_indexed` already parses every
-  file and builds `SymbolMap` entries with resolved names. After that
-  loop completes, a second pass over all symbol maps populates the
-  inverted index. This is the same work find-references does today,
-  but done once instead of on every request.
-
-- **Incremental update.** `update_ast_inner` already rebuilds a
-  file's `SymbolMap`. After replacing the symbol map entry, remove
-  the old file's contributions from the inverted index and insert the
-  new ones. Since entries are keyed by FQN, this is a scan of the
-  old/new symbol map for the single changed file — negligible cost.
-
-### Query
-
-`find_class_references`, `find_member_references`, and
-`find_function_references` look up the target FQN in the inverted
-index. If the index is populated, return the stored locations
-directly (converting span offsets to LSP ranges via the file content).
-If the index is not yet built (workspace not indexed), fall back to
-the current full-scan approach.
-
-### Dependencies
-
-Benefits from X4 (full background indexing) — if the workspace is
-indexed eagerly, the inverted index is always warm. Without X4, the
-index is built lazily on first find-references and kept warm
-afterward.
-
-### When to implement
-
-After X4 ships (the index is most valuable when the workspace is
-fully indexed). Can also land independently — the lazy-build fallback
-makes it safe to ship without X4.
-
-
-
 
 ## X9. Honor editor file excludes and PHP associations during indexing
 

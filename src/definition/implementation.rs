@@ -658,14 +658,12 @@ impl Backend {
         let mut result: Vec<ClassInfo> = Vec::new();
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
-        let workspace_index_ready = if self.config().indexing.strategy() == IndexingStrategy::Full {
-            if !self.workspace_indexed.load(Ordering::Acquire) {
-                self.ensure_workspace_indexed();
-            }
-            self.workspace_indexed.load(Ordering::Acquire)
-        } else {
-            self.workspace_indexed.load(Ordering::Acquire)
-        };
+        if self.config().indexing.strategy() == IndexingStrategy::Full
+            && !self.workspace_indexed.load(Ordering::Acquire)
+        {
+            self.ensure_workspace_indexed();
+        }
+        let workspace_index_ready = self.workspace_indexed.load(Ordering::Acquire);
 
         // ── Phase 1: GTI index lookup ───────────────────────────────────
         // Use the reverse inheritance index for O(1) lookup of classes
