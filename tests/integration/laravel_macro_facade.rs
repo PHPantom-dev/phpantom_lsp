@@ -119,6 +119,14 @@ async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
         .await;
 }
 
+fn position_after(src: &str, needle: &str) -> Position {
+    let offset = src.find(needle).expect("needle should exist") + needle.len();
+    let prefix = &src[..offset];
+    let line = prefix.bytes().filter(|b| *b == b'\n').count() as u32;
+    let character = prefix.rsplit('\n').next().unwrap_or(prefix).len() as u32;
+    Position { line, character }
+}
+
 #[tokio::test]
 async fn facade_macro_resolves_on_concrete_instance() {
     let consumer = "\
@@ -266,5 +274,61 @@ class Consumer {
     assert!(
         members.is_empty(),
         "static facade macro call should resolve, got: {members:?}"
+    );
+}
+
+#[tokio::test]
+async fn facade_macro_closure_this_resolves_to_concrete_class() {
+    let provider = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Support\\Facades\\View;
+class ViewServiceProvider
+{
+    public function boot(): void
+    {
+        View::macro('withLayout', function (): void {
+            $this->
+        });
+    }
+}
+";
+    let mut files = base_files();
+    files.push(("src/Providers/ViewServiceProvider.php", provider));
+    let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = "file:///src/Providers/ViewServiceProvider.php";
+    open(&backend, uri, provider).await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse(uri).unwrap(),
+                },
+                position: position_after(provider, "$this->"),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result.expect("completion should return results") {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"make"),
+        "facade macro callback $this should resolve to the concrete factory, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"boot"),
+        "facade macro callback $this should not resolve to the provider, got: {names:?}"
     );
 }

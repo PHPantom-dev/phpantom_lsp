@@ -97,6 +97,27 @@ pub(crate) fn extract_macro_registrations(
     out
 }
 
+/// Return the resolved target of a `Target::macro('name', closure)` call when
+/// `cursor_offset` is inside the closure body.
+pub(crate) fn macro_closure_this_target(content: &str, cursor_offset: u32) -> Option<String> {
+    memchr::memmem::find(content.as_bytes(), b"macro(")?;
+
+    let arena = mago_allocator::LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, content.as_bytes());
+    let resolved = NameResolver::new(&arena).resolve(program);
+    let owned = OwnedResolvedNames::from_resolved(&resolved);
+
+    let mut calls: Vec<&StaticMethodCall<'_>> = Vec::new();
+    collect_macro_calls(Node::Program(program), &mut calls);
+
+    calls.into_iter().find_map(|call| {
+        let target = resolve_target_fqn(call.class, &owned)?;
+        let closure_expr = call.argument_list.arguments.iter().nth(1)?.value();
+        cursor_inside_closure_body(closure_expr, cursor_offset).then_some(target)
+    })
+}
+
 /// Extract the concrete date class selected by `Date::use()` or
 /// `Date::useClass()`, through either the facade or date factory.
 pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
@@ -960,6 +981,20 @@ fn closure_signature<'ast, 'arena>(
         Expression::Closure(c) => Some((&c.parameter_list, c.return_type_hint.as_ref())),
         Expression::ArrowFunction(a) => Some((&a.parameter_list, a.return_type_hint.as_ref())),
         _ => None,
+    }
+}
+
+fn cursor_inside_closure_body(expr: &Expression<'_>, cursor_offset: u32) -> bool {
+    match expr {
+        Expression::Closure(closure) => {
+            cursor_offset >= closure.body.left_brace.start.offset
+                && cursor_offset <= closure.body.right_brace.end.offset
+        }
+        Expression::ArrowFunction(arrow) => {
+            let body = arrow.expression.span();
+            cursor_offset >= arrow.arrow.start.offset && cursor_offset <= body.end.offset
+        }
+        _ => false,
     }
 }
 

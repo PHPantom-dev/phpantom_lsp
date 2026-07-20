@@ -106,7 +106,7 @@ pub(crate) use config_keys::{
 pub(crate) use env_vars::resolve_env_definition;
 pub(crate) use macros::{
     LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
-    inject_macros, parse_installed_providers, parse_provider_class_list,
+    inject_macros, macro_closure_this_target, parse_installed_providers, parse_provider_class_list,
     parse_provider_referenced_classes,
 };
 pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};

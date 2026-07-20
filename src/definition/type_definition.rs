@@ -90,6 +90,7 @@ impl Backend {
                     content,
                     cursor_offset: offset,
                     class_loader: &class_loader,
+                    laravel_macro_this_resolver: None,
                     resolved_class_cache: Some(&self.resolved_class_cache),
                     function_loader: Some(
                         &function_loader as &dyn Fn(&str) -> Option<FunctionInfo>,

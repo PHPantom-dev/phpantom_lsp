@@ -1174,6 +1174,21 @@ impl Backend {
         use crate::util::find_class_at_offset;
 
         let ctx = self.file_context_at(uri, cursor_offset);
+        if let Some(target) =
+            crate::virtual_members::laravel::macro_closure_this_target(content, cursor_offset)
+        {
+            let target = self.facade_macro_concrete(&target).unwrap_or(target);
+            if let Some(class) = self.find_or_load_class(&target) {
+                let class_loader = self.class_loader(&ctx);
+                return Some(Arc::unwrap_or_clone(
+                    crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &class,
+                        &class_loader,
+                        Some(&self.resolved_class_cache),
+                    ),
+                ));
+            }
+        }
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
@@ -1183,6 +1198,7 @@ impl Backend {
             content,
             cursor_offset,
             class_loader: &class_loader,
+            laravel_macro_this_resolver: None,
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader),
             scope_var_resolver: None,

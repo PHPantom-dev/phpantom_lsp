@@ -119,6 +119,9 @@ pub(crate) type ConstantLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<Option<
 pub(crate) type ScopeVarResolverFn<'a> =
     Option<&'a dyn Fn(&str) -> Vec<crate::types::ResolvedType>>;
 
+/// Optional Laravel macro callback `$this` resolver.
+pub(crate) type LaravelMacroThisResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
+
 /// Bundles optional cross-file loader callbacks so they can be threaded
 /// through the resolution chain as a single argument instead of one
 /// parameter per loader.
@@ -162,6 +165,8 @@ pub(crate) struct ResolutionCtx<'a> {
     pub cursor_offset: u32,
     /// Cross-file class resolution callback.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Optional Laravel macro callback `$this` resolver.
+    pub laravel_macro_this_resolver: LaravelMacroThisResolverFn<'a>,
     /// Shared cache of fully-resolved classes, keyed by FQN.
     ///
     /// When `Some`, [`resolve_class_fully_cached`](crate::virtual_members::resolve_class_fully_cached)
@@ -253,6 +258,7 @@ impl<'a> VarResolutionCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            laravel_macro_this_resolver: None,
             function_loader: self.loaders.function_loader,
             resolved_class_cache: self.resolved_class_cache,
             scope_var_resolver: self.scope_var_resolver,

@@ -554,6 +554,20 @@ fn closure_this_from_static_receiver(
         _ => None,
     }?;
 
+    if method_name.eq_ignore_ascii_case("macro")
+        && arg_idx == 1
+        && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
+        && let Some(owner) = resolve_macro_this(&class_name)
+    {
+        return Some(Arc::unwrap_or_clone(
+            crate::virtual_members::resolve_class_fully_maybe_cached(
+                &owner,
+                ctx.class_loader,
+                ctx.resolved_class_cache,
+            ),
+        ));
+    }
+
     let owner = ctx
         .all_classes
         .iter()

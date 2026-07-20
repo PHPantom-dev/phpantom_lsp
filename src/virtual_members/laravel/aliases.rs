@@ -129,7 +129,7 @@ impl Backend {
     /// `::class` return resolves directly to that FQN. A string accessor that
     /// is not in the container table (a binding registered only at runtime by a
     /// service provider) yields `None`.
-    fn facade_macro_concrete(&self, target: &str) -> Option<String> {
+    pub(crate) fn facade_macro_concrete(&self, target: &str) -> Option<String> {
         let aliases = self.laravel_aliases();
         // Gate on the facade table so only real facades trigger a source read.
         if !aliases.facade.values().any(|fqn| fqn == target) {
