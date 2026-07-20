@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784529546165,
+  "lastUpdate": 1784562061211,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17271,6 +17271,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "31686a75cb2d6519f61320678c9563516b0ef647",
+          "message": "feat: propagate by-reference closure capture types\n\nTrack assignments made inside closures that capture variables by reference\nwhen the closure is passed to an immediately-invoked callable. This updates\nthe outer variable scope so diagnostics do not keep the pre-call type, such\nas null, after the closure assigns a concrete value.\n\nFollow PHPStan's callable invocation defaults: standalone function callable\nparameters are treated as immediately invoked unless marked with\n@param-later-invoked-callable, while method callable parameters are treated\nas later invoked unless marked with @param-immediately-invoked-callable.\n\nAlso process assignments embedded in return expressions so patterns like\nreturn $foo = 1; update scope the same way as a standalone $foo = 1;\nstatement.\n\nFixes #246.",
+          "timestamp": "2026-07-20T10:26:15-05:00",
+          "tree_id": "b8ce1fdf0c0d6a08a21525953327c5a2e7f03c06",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/31686a75cb2d6519f61320678c9563516b0ef647"
+        },
+        "date": 1784562058766,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.6,
             "unit": "MiB"
           }
         ]
