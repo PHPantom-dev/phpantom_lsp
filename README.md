@@ -20,7 +20,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 |                                 | PHPantom | Intelephense | PHP Tools  | Phpactor    | PHPStorm    |
 | ------------------------------- | -------- | ------------ | ---------- | ----------- | ----------- |
 | Common LSP features<sup>1</sup> | ✅       | ✅           | ✅         | ✅          | ✅          |
-| Workspace symbols               | 🚧       | ✅           | ✅         | ✅          | ✅          |
+| Workspace symbols               | ✅       | ✅           | ✅         | ✅          | ✅          |
 | Call hierarchy                  | ❌       | ❌           | ❌         | ❌          | ✅          |
 | Semantic tokens                 | ✅       | ❌           | ✅         | ❌          | ✅          |
 | Linked editing                  | ✅       | ❌           | ✅         | ❌          | ✅          |
@@ -87,6 +87,7 @@ PHPantom understands Composer projects out of the box, but works without setup o
 - **Drupal project support.** Detects Drupal projects via `composer.json`, resolves the web root, and indexes Drupal-specific directories and PHP extensions (`.module`, `.install`, `.theme`, etc.) with `.gitignore` bypassed so that Composer-managed core and contrib code is always available.
 - **`require_once` discovery.** Functions from required files are available for completion.
 - **Go-to-implementation.** Jump from an interface or abstract class to all concrete implementations. Scans open files, classmap, PSR-4 directories, and embedded stubs.
+- **Workspace-wide diagnostics.** After startup, diagnostics run in the background across every file in the project, not just the ones you have open, so problems are already visible when you navigate to a file. Configured external tools (PHPStan, PHPCS, Mago) run project-wide too, once the background pass finishes. Both are deferred until after startup so they never slow down time to ready.
 
 ## Documentation
 

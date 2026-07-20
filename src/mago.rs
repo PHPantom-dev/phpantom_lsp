@@ -275,6 +275,154 @@ pub(crate) fn run_mago_analyze(
     }
 }
 
+/// Project-wide runs multiply the per-file timeout by this factor.
+const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
+
+/// Run `mago lint` once over the whole project and return diagnostics
+/// grouped by file path.
+///
+/// No `--stdin-input` and no path argument: Mago scans the source
+/// paths from `mago.toml` (the caller checks for `mago.toml` first).
+pub(crate) fn run_mago_lint_workspace(
+    resolved: &ResolvedMago,
+    workspace_root: &Path,
+    config: &MagoConfig,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    run_mago_workspace(
+        resolved,
+        workspace_root,
+        "lint",
+        config.lint_timeout_ms(),
+        "mago-lint",
+        cancelled,
+    )
+}
+
+/// Run `mago analyze` once over the whole project and return
+/// diagnostics grouped by file path.
+pub(crate) fn run_mago_analyze_workspace(
+    resolved: &ResolvedMago,
+    workspace_root: &Path,
+    config: &MagoConfig,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    run_mago_workspace(
+        resolved,
+        workspace_root,
+        "analyze",
+        config.analyze_timeout_ms(),
+        "mago-analyze",
+        cancelled,
+    )
+}
+
+/// Shared implementation for project-wide `mago lint` / `mago analyze`.
+fn run_mago_workspace(
+    resolved: &ResolvedMago,
+    workspace_root: &Path,
+    subcommand: &str,
+    base_timeout_ms: u64,
+    source_name: &str,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    let timeout = Duration::from_millis(base_timeout_ms.saturating_mul(WORKSPACE_TIMEOUT_FACTOR));
+
+    let mut cmd = Command::new(&resolved.path);
+    cmd.arg(subcommand)
+        .arg("--reporting-format")
+        .arg("json")
+        .current_dir(workspace_root);
+
+    let tool_name = format!("Mago {} (workspace)", subcommand);
+    let result =
+        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
+
+    match result.code {
+        0 => {
+            if result.stdout.trim().is_empty() {
+                Ok(std::collections::HashMap::new())
+            } else {
+                parse_mago_json_workspace(&result.stdout, workspace_root, source_name)
+                    .or_else(|_| Ok(std::collections::HashMap::new()))
+            }
+        }
+        1 => parse_mago_json_workspace(&result.stdout, workspace_root, source_name),
+        _ => match parse_mago_json_workspace(&result.stdout, workspace_root, source_name) {
+            Ok(map) if !map.is_empty() => Ok(map),
+            _ => Err(format!(
+                "{} exited with code {} (stderr: {})",
+                tool_name,
+                result.code,
+                result.stderr.trim()
+            )),
+        },
+    }
+}
+
+/// Parse Mago's JSON output into diagnostics grouped by file path.
+///
+/// Issues are attributed to the file of their first `Primary`
+/// annotation.  Byte offsets are converted to positions using the
+/// on-disk file content, read once per file and cached.  Issues whose
+/// file cannot be read (deleted since the run started) are dropped.
+fn parse_mago_json_workspace(
+    json_str: &str,
+    workspace_root: &Path,
+    source_name: &str,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    let output: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| format!("Failed to parse Mago JSON: {}", e))?;
+
+    let mut by_file: std::collections::HashMap<PathBuf, Vec<Diagnostic>> =
+        std::collections::HashMap::new();
+    let mut content_cache: std::collections::HashMap<PathBuf, Option<String>> =
+        std::collections::HashMap::new();
+
+    if let Some(issues) = output.get("issues").and_then(|i| i.as_array()) {
+        for issue in issues {
+            let Some(path_str) = issue_primary_path(issue) else {
+                continue;
+            };
+            let mut file_path = PathBuf::from(&path_str);
+            if file_path.is_relative() {
+                file_path = workspace_root.join(file_path);
+            }
+
+            let content = content_cache
+                .entry(file_path.clone())
+                .or_insert_with(|| std::fs::read_to_string(&file_path).ok());
+            let Some(content) = content else {
+                continue;
+            };
+
+            if let Some(diag) = parse_mago_issue(issue, content, &path_str, source_name) {
+                by_file.entry(file_path).or_default().push(diag);
+            }
+        }
+    }
+
+    Ok(by_file)
+}
+
+/// The file path of an issue's first `Primary` annotation.
+fn issue_primary_path(issue: &serde_json::Value) -> Option<String> {
+    issue
+        .get("annotations")?
+        .as_array()?
+        .iter()
+        .find_map(|ann| {
+            if ann.get("kind").and_then(|k| k.as_str()) != Some("Primary") {
+                return None;
+            }
+            ann.get("span")?
+                .get("file_id")?
+                .get("path")?
+                .as_str()
+                .map(str::to_string)
+        })
+}
+
 // ── JSON output parsing ─────────────────────────────────────────────
 
 /// Parse Mago's JSON output into LSP diagnostics.
@@ -534,6 +682,47 @@ fn paths_match(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── parse_mago_json_workspace ───────────────────────────────────
+
+    #[test]
+    fn parse_workspace_json_reads_file_content_for_positions() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("A.php");
+        std::fs::write(&file, "<?php\n$x = 1;\n").unwrap();
+
+        let json = format!(
+            r#"{{"issues": [
+                {{"level": "Warning", "code": "some-rule", "message": "Msg",
+                  "annotations": [{{"kind": "Primary", "span": {{
+                      "file_id": {{"name": "A.php", "path": "{}"}},
+                      "start": {{"offset": 6, "line": 2}},
+                      "end": {{"offset": 8, "line": 2}}}}}}]}},
+                {{"level": "Error", "code": "other-rule", "message": "Gone",
+                  "annotations": [{{"kind": "Primary", "span": {{
+                      "file_id": {{"name": "Missing.php", "path": "{}/Missing.php"}},
+                      "start": {{"offset": 0, "line": 1}},
+                      "end": {{"offset": 1, "line": 1}}}}}}]}}
+            ]}}"#,
+            file.display(),
+            dir.path().display(),
+        );
+
+        let map = parse_mago_json_workspace(&json, dir.path(), "mago-lint").unwrap();
+        // The issue for the deleted file is dropped.
+        assert_eq!(map.len(), 1);
+        let diags = &map[&file];
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "Msg");
+        // Offset 6 is the start of line 2 in the on-disk content.
+        assert_eq!(diags[0].range.start.line, 1);
+        assert_eq!(diags[0].range.start.character, 0);
+        assert_eq!(
+            diags[0].source.as_deref(),
+            Some("mago-lint"),
+            "workspace results carry the same source as per-file runs"
+        );
+    }
 
     // ── paths_match ─────────────────────────────────────────────────
 

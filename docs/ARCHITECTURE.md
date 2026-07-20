@@ -1114,6 +1114,10 @@ Each worker is created during `initialized` via `clone_for_diagnostic_worker`, w
 
 Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, `vendor_dir_paths`, and `config`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds hot-reloading of `.phpantom.toml` or runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
 
+### Workspace diagnostics (files that are not open)
+
+Everything above diagnoses files the user has opened. `src/diagnostics/workspace.rs` covers the rest of the project: after the full background index finishes (which itself only starts after startup indexing completes), it runs the same fast/slow collectors over every unopened user file on a throttled worker pool, then runs each configured external tool once over the whole project (only when that tool has its own project-level config file, e.g. `phpstan.neon`). Results are stored in `Backend::workspace_diags` and reported through `workspace/diagnostic` (or pushed directly for non-pull clients). This pass never runs before the server is usable — it is chained onto the tail of the full-index task, so it can never compete with startup for CPU. Toggle with `[diagnostics] workspace` / `workspace-external` in `.phpantom.toml`.
+
 ## Forward Walker
 
 The forward walker (`src/completion/variable/forward_walk.rs`) walks

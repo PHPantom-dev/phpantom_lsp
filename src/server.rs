@@ -255,12 +255,11 @@ impl LanguageServer for Backend {
                     Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                         identifier: Some("phpantom".to_string()),
                         inter_file_dependencies: true,
-                        // Set to `true` only when the server can report
-                        // diagnostics for files the user has not opened
-                        // (e.g. project-wide PHPStan analysis).  Currently
-                        // the workspace/diagnostic handler just mirrors
-                        // per-file results, so `false` is accurate.
-                        workspace_diagnostics: false,
+                        // The workspace/diagnostic handler reports both
+                        // per-open-file results and the background
+                        // workspace diagnostics computed for files the
+                        // user has not opened.
+                        workspace_diagnostics: true,
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
@@ -1704,6 +1703,60 @@ impl LanguageServer for Backend {
             ));
         }
 
+        // ── Background workspace diagnostics (unopened files) ────────
+        // Files the user has not opened are diagnosed by the background
+        // workspace pass; report its cached results here.  Open files
+        // are skipped — the live per-file pipeline above owns them.
+        let open_uris: HashSet<&str> = open_uris.iter().map(|u| u.as_str()).collect();
+        let workspace_items: Vec<(String, String, Option<Vec<Diagnostic>>)> = {
+            let ws = self.workspace_diags.lock();
+            ws.tracked_uris()
+                .into_iter()
+                .filter(|uri| !open_uris.contains(uri.as_str()))
+                .filter_map(|uri| {
+                    let result_id = ws.result_id(&uri)?;
+                    // Only clone the merged set when the client's
+                    // previous result id is stale; unchanged files
+                    // are answered without touching the diagnostics.
+                    let diags = if previous.get(uri.as_str()) == Some(&result_id.as_str()) {
+                        None
+                    } else {
+                        Some(ws.merged(&uri))
+                    };
+                    Some((uri, result_id, diags))
+                })
+                .collect()
+        };
+
+        for (uri_str, result_id, diagnostics) in workspace_items {
+            let Ok(uri) = uri_str.parse::<Url>() else {
+                continue;
+            };
+
+            match diagnostics {
+                // The client already has this exact result set.
+                None => items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
+                    WorkspaceUnchangedDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                            result_id,
+                        },
+                    },
+                )),
+                Some(diags) => items.push(WorkspaceDocumentDiagnosticReport::Full(
+                    WorkspaceFullDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                            result_id: Some(result_id),
+                            items: diags,
+                        },
+                    },
+                )),
+            }
+        }
+
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
         ))
@@ -1844,6 +1897,13 @@ impl Backend {
             {
                 let _ = client.workspace_diagnostic_refresh().await;
             }
+
+            // With the whole workspace parsed, run the background
+            // workspace diagnostics pass (native collectors over every
+            // unopened user file, then project-wide external tools).
+            // Deliberately chained after the index so it never competes
+            // with startup for CPU.
+            progress_backend.run_workspace_diagnostics().await;
         });
     }
 

@@ -34,6 +34,16 @@
           "type": "boolean",
           "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
           "default": false
+        },
+        "workspace": {
+          "type": "boolean",
+          "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Requires the default \"full\" indexing strategy.",
+          "default": true
+        },
+        "workspace-external": {
+          "type": "boolean",
+          "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
+          "default": true
         }
       }
     },

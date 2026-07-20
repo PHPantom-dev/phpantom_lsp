@@ -215,6 +215,113 @@ pub(crate) fn run_phpstan(
     }
 }
 
+/// Project-wide runs multiply the per-file timeout by this factor:
+/// analysing a whole codebase legitimately takes far longer than the
+/// single-file editor-mode run the base timeout is calibrated for.
+const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
+
+/// Whether the project has its own PHPStan configuration file.
+///
+/// A project-wide run is only attempted when one exists: without it,
+/// PHPStan has no `paths` setting and we would have to guess which
+/// directories to analyse (risking a full vendor scan).
+pub(crate) fn has_project_config(workspace_root: &Path) -> bool {
+    ["phpstan.neon", "phpstan.neon.dist", "phpstan.dist.neon"]
+        .iter()
+        .any(|name| workspace_root.join(name).is_file())
+}
+
+/// Run PHPStan once over the whole project and return diagnostics
+/// grouped by file path.
+///
+/// No path argument is passed, so PHPStan analyses the `paths`
+/// configured in its own configuration file (the caller checks
+/// [`has_project_config`] first).  Runs with an extended timeout
+/// ([`WORKSPACE_TIMEOUT_FACTOR`] × the per-file timeout).
+pub(crate) fn run_phpstan_workspace(
+    resolved: &ResolvedPhpStan,
+    workspace_root: &Path,
+    config: &PhpStanConfig,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    let timeout_ms = config
+        .timeout
+        .unwrap_or(DEFAULT_TIMEOUT_MS)
+        .saturating_mul(WORKSPACE_TIMEOUT_FACTOR);
+    let timeout = Duration::from_millis(timeout_ms);
+    let memory_limit = config.memory_limit.as_deref().unwrap_or("1G");
+
+    let mut cmd = Command::new(&resolved.path);
+    cmd.arg("analyse")
+        .arg("--error-format=json")
+        .arg("--no-progress")
+        .arg("--no-ansi")
+        .arg(format!("--memory-limit={}", memory_limit))
+        .current_dir(workspace_root);
+
+    let output = crate::util::run_command_with_timeout(
+        &mut cmd,
+        timeout,
+        cancelled,
+        "PHPStan (workspace)",
+        None,
+    )?;
+
+    match output.code {
+        0 => Ok(std::collections::HashMap::new()),
+        1 => parse_phpstan_json_workspace(&output.stdout, workspace_root),
+        _ => match parse_phpstan_json_workspace(&output.stdout, workspace_root) {
+            Ok(map) if !map.is_empty() => Ok(map),
+            _ => Err(format!(
+                "PHPStan exited with code {} (stderr: {})",
+                output.code,
+                output.stderr.trim()
+            )),
+        },
+    }
+}
+
+/// Parse PHPStan's JSON output into diagnostics grouped by file path.
+///
+/// Same message format as [`parse_phpstan_json`], but instead of
+/// filtering to one file, every file entry is kept.  Relative paths
+/// are resolved against the workspace root.  Top-level errors
+/// (configuration issues) have no file to attach to and are dropped.
+fn parse_phpstan_json_workspace(
+    json_str: &str,
+    workspace_root: &Path,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    let output: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| format!("Failed to parse PHPStan JSON: {}", e))?;
+
+    let mut by_file: std::collections::HashMap<PathBuf, Vec<Diagnostic>> =
+        std::collections::HashMap::new();
+
+    if let Some(files) = output.get("files").and_then(|f| f.as_object()) {
+        for (path, file_data) in files {
+            // PHPStan may append a trait context to the key, e.g.
+            // "/path/File.php (in context of class App\\Foo)".
+            let clean_path = path.split(" (in context of").next().unwrap_or(path);
+            let mut file_path = PathBuf::from(clean_path);
+            if file_path.is_relative() {
+                file_path = workspace_root.join(file_path);
+            }
+
+            if let Some(messages) = file_data.get("messages").and_then(|m| m.as_array()) {
+                let diags = by_file.entry(file_path).or_default();
+                for msg in messages {
+                    if let Some(diag) = parse_phpstan_message(msg) {
+                        diags.push(diag);
+                    }
+                }
+            }
+        }
+    }
+
+    by_file.retain(|_, diags| !diags.is_empty());
+    Ok(by_file)
+}
+
 // ── JSON output parsing ─────────────────────────────────────────────
 
 /// Parse PHPStan's JSON output into LSP diagnostics.
@@ -429,6 +536,47 @@ fn write_temp_file(_original: &Path, content: &str) -> Result<NamedTempFile, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── parse_phpstan_json_workspace ────────────────────────────────
+
+    #[test]
+    fn parse_workspace_json_groups_by_file() {
+        let json = r#"{
+            "totals": {"errors": 1, "file_errors": 3},
+            "files": {
+                "/proj/src/A.php": {"errors": 1, "messages": [
+                    {"message": "Error A", "line": 5, "ignorable": true, "identifier": "argument.type"}
+                ]},
+                "src/B.php": {"errors": 1, "messages": [
+                    {"message": "Error B", "line": 2}
+                ]},
+                "/proj/src/C.php (in context of class App\\C)": {"errors": 1, "messages": [
+                    {"message": "Error C", "line": 9}
+                ]}
+            },
+            "errors": ["config warning without a file"]
+        }"#;
+
+        let map = parse_phpstan_json_workspace(json, Path::new("/proj")).unwrap();
+        assert_eq!(map.len(), 3);
+
+        let a = &map[Path::new("/proj/src/A.php")];
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0].message, "Error A");
+        assert_eq!(a[0].range.start.line, 4);
+
+        // Relative paths resolve against the workspace root.
+        assert!(map.contains_key(Path::new("/proj/src/B.php")));
+        // Trait-context suffixes are stripped from the key.
+        assert!(map.contains_key(Path::new("/proj/src/C.php")));
+    }
+
+    #[test]
+    fn parse_workspace_json_empty_files() {
+        let json = r#"{"totals": {"errors": 0, "file_errors": 0}, "files": {}, "errors": []}"#;
+        let map = parse_phpstan_json_workspace(json, Path::new("/proj")).unwrap();
+        assert!(map.is_empty());
+    }
 
     // ── paths_match ─────────────────────────────────────────────────
 

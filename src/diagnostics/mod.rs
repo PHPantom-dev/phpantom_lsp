@@ -167,6 +167,12 @@
 //!
 //! External tool workers (PHPStan, PHPCS, Mago) use their own
 //! debounce timers in both modes because they are expensive.
+//!
+//! ## Files that are not open
+//!
+//! Everything above covers the files the user has open.  Diagnostics
+//! for the rest of the workspace are computed by a separate background
+//! pass described in [`workspace`].
 
 mod argument_count;
 pub(crate) mod class_case_mismatch;
@@ -188,6 +194,7 @@ pub(crate) mod unknown_members;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
+pub(crate) mod workspace;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -1876,6 +1883,52 @@ impl Backend {
 
     /// Clear diagnostics for a file (e.g. on `did_close`).
     pub(crate) async fn clear_diagnostics_for_file(&self, uri_str: &str) {
+        // Migrate the live external tool results into the workspace
+        // diagnostics store before purging, so a closed file keeps its
+        // PHPStan/PHPCS/Mago findings instead of losing them until the
+        // next project-wide run.  Only meaningful once the background
+        // workspace pass has started.
+        if self.workspace_diag_pass_started.load(Ordering::Acquire) {
+            let migrations: [(&'static str, Vec<Diagnostic>); 4] = [
+                (
+                    "phpstan",
+                    self.phpstan_last_diags
+                        .lock()
+                        .get(uri_str)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+                (
+                    "phpcs",
+                    self.phpcs_last_diags
+                        .lock()
+                        .get(uri_str)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+                (
+                    "mago-lint",
+                    self.mago_lint_last_diags
+                        .lock()
+                        .get(uri_str)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+                (
+                    "mago-analyze",
+                    self.mago_analyze_last_diags
+                        .lock()
+                        .get(uri_str)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+            ];
+            let mut ws = self.workspace_diags.lock();
+            for (source, diags) in migrations {
+                ws.set_external_for_uri(source, uri_str, diags);
+            }
+        }
+
         // Remove all per-source caches so we don't leak memory.
         self.diag_last_fast.lock().remove(uri_str);
         self.diag_last_slow.lock().remove(uri_str);
@@ -1913,6 +1966,19 @@ impl Backend {
             let client = client.clone();
             tokio::spawn(async move {
                 let _ = client.workspace_diagnostic_refresh().await;
+            });
+        }
+
+        // Recompute the file's workspace diagnostics from disk so the
+        // closed file's entry reflects the saved state (the startup
+        // snapshot may be stale after in-editor edits).
+        if self.workspace_diag_pass_started.load(Ordering::Acquire) {
+            let backend = self.clone_for_diagnostic_worker();
+            let uri = uri_str.to_string();
+            tokio::spawn(async move {
+                backend
+                    .recompute_workspace_diags_for_closed_file(&uri)
+                    .await;
             });
         }
     }

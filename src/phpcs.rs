@@ -203,6 +203,111 @@ pub(crate) fn run_phpcs(
     }
 }
 
+/// Project-wide runs multiply the per-file timeout by this factor.
+const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
+
+/// Whether the project has its own PHPCS ruleset file.
+///
+/// A project-wide run is only attempted when one exists: PHPCS needs
+/// the ruleset's `<file>` entries to know which paths to scan (we pass
+/// no path argument, so without them PHPCS exits with a usage error).
+pub(crate) fn has_project_config(workspace_root: &Path) -> bool {
+    [
+        "phpcs.xml",
+        "phpcs.xml.dist",
+        ".phpcs.xml",
+        ".phpcs.xml.dist",
+    ]
+    .iter()
+    .any(|name| workspace_root.join(name).is_file())
+}
+
+/// Run PHPCS once over the whole project and return diagnostics
+/// grouped by file path.
+///
+/// No path argument is passed, so PHPCS scans the `<file>` entries
+/// from its own ruleset (the caller checks [`has_project_config`]
+/// first).  Runs with an extended timeout.
+pub(crate) fn run_phpcs_workspace(
+    resolved: &ResolvedPhpcs,
+    workspace_root: &Path,
+    config: &PhpcsConfig,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    let timeout_ms = config
+        .timeout
+        .unwrap_or(DEFAULT_TIMEOUT_MS)
+        .saturating_mul(WORKSPACE_TIMEOUT_FACTOR);
+    let timeout = Duration::from_millis(timeout_ms);
+
+    let mut cmd = Command::new(&resolved.path);
+    cmd.arg("--report=json")
+        .arg("--no-colors")
+        .arg("-q")
+        .current_dir(workspace_root);
+
+    if let Some(ref standard) = config.standard {
+        cmd.arg(format!("--standard={}", standard));
+    }
+
+    let output = crate::util::run_command_with_timeout(
+        &mut cmd,
+        timeout,
+        cancelled,
+        "PHPCS (workspace)",
+        None,
+    )?;
+
+    match output.code {
+        0 => Ok(std::collections::HashMap::new()),
+        1 | 2 => parse_phpcs_json_workspace(&output.stdout, workspace_root),
+        _ => match parse_phpcs_json_workspace(&output.stdout, workspace_root) {
+            Ok(map) if !map.is_empty() => Ok(map),
+            _ => Err(format!(
+                "PHPCS exited with code {} (stderr: {})",
+                output.code,
+                output.stderr.trim()
+            )),
+        },
+    }
+}
+
+/// Parse PHPCS's JSON output into diagnostics grouped by file path.
+///
+/// Same message format as [`parse_phpcs_json`], but every file entry
+/// is kept.  Relative paths are resolved against the workspace root.
+fn parse_phpcs_json_workspace(
+    json_str: &str,
+    workspace_root: &Path,
+) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
+    let output: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| format!("Failed to parse PHPCS JSON: {}", e))?;
+
+    let mut by_file: std::collections::HashMap<PathBuf, Vec<Diagnostic>> =
+        std::collections::HashMap::new();
+
+    if let Some(files) = output.get("files").and_then(|f| f.as_object()) {
+        for (path, file_data) in files {
+            let mut file_path = PathBuf::from(path);
+            if file_path.is_relative() {
+                file_path = workspace_root.join(file_path);
+            }
+
+            if let Some(messages) = file_data.get("messages").and_then(|m| m.as_array()) {
+                let diags = by_file.entry(file_path).or_default();
+                for msg in messages {
+                    if let Some(diag) = parse_phpcs_message(msg) {
+                        diags.push(diag);
+                    }
+                }
+            }
+        }
+    }
+
+    by_file.retain(|_, diags| !diags.is_empty());
+    Ok(by_file)
+}
+
 // ── JSON output parsing ─────────────────────────────────────────────
 
 /// Parse PHPCS's JSON output into LSP diagnostics.
@@ -354,6 +459,32 @@ fn paths_match(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── parse_phpcs_json_workspace ──────────────────────────────────
+
+    #[test]
+    fn parse_workspace_json_groups_by_file() {
+        let json = r#"{
+            "totals": {"errors": 1, "warnings": 1, "fixable": 0},
+            "files": {
+                "/proj/src/A.php": {"errors": 1, "warnings": 0, "messages": [
+                    {"message": "Bad indent", "source": "PSR12.Files.X", "severity": 5,
+                     "fixable": false, "type": "ERROR", "line": 3, "column": 1}
+                ]},
+                "src/B.php": {"errors": 0, "warnings": 1, "messages": [
+                    {"message": "Long line", "source": "Generic.Files.Y", "severity": 5,
+                     "fixable": false, "type": "WARNING", "line": 8, "column": 120}
+                ]},
+                "/proj/src/Clean.php": {"errors": 0, "warnings": 0, "messages": []}
+            }
+        }"#;
+
+        let map = parse_phpcs_json_workspace(json, Path::new("/proj")).unwrap();
+        // Clean files are dropped; relative paths resolve against the root.
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[Path::new("/proj/src/A.php")][0].message, "Bad indent");
+        assert_eq!(map[Path::new("/proj/src/B.php")][0].range.start.line, 7);
+    }
 
     // ── paths_match ─────────────────────────────────────────────────
 

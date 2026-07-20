@@ -80,6 +80,27 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "report-magic-properties")]
     pub report_magic_properties: Option<bool>,
 
+    /// Compute diagnostics for the whole workspace in the background.
+    ///
+    /// On by default (requires the default `full` indexing strategy).
+    /// After the initial startup and the full background index finish,
+    /// PHPantom runs its native diagnostic collectors over every user
+    /// file in the workspace — not just the files open in the editor —
+    /// so project-wide problems appear in the editor's problems panel.
+    /// The pass is throttled to leave CPU headroom for interactive
+    /// requests. Set to `false` to only diagnose open files.
+    pub workspace: Option<bool>,
+
+    /// Run configured external tools (PHPStan, PHPCS, Mago) once over
+    /// the whole project after workspace diagnostics finish.
+    ///
+    /// On by default. Each tool only runs when it is enabled, resolvable,
+    /// and has its own project-level configuration file (`phpstan.neon`,
+    /// `phpcs.xml`, `mago.toml`) so the tool itself decides which paths
+    /// to analyse. Set to `false` to keep external tools per-file only.
+    #[serde(rename = "workspace-external")]
+    pub workspace_external: Option<bool>,
+
     /// Rules that suppress matching diagnostics, similar to PHPStan's
     /// `ignoreErrors`.
     ///
@@ -139,6 +160,20 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn report_magic_properties_enabled(&self) -> bool {
         self.report_magic_properties.unwrap_or(false)
+    }
+
+    /// Whether background workspace diagnostics are enabled.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn workspace_enabled(&self) -> bool {
+        self.workspace.unwrap_or(true)
+    }
+
+    /// Whether project-wide external tool runs are enabled.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn workspace_external_enabled(&self) -> bool {
+        self.workspace_external.unwrap_or(true)
     }
 }
 

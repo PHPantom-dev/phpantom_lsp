@@ -740,6 +740,19 @@ pub struct Backend {
     /// returns this cached set.  Updated by the background diagnostic
     /// worker after each pass and by the PHPStan worker after each run.
     pub(crate) diag_last_full: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+    /// Diagnostics for files that are not open in the editor, computed
+    /// by the background workspace diagnostics pass.
+    ///
+    /// Populated after the full background index finishes: the native
+    /// collectors run over every user file, and project-wide external
+    /// tool runs (PHPStan, PHPCS, Mago) add their results per source.
+    /// The `workspace/diagnostic` pull handler reports these for files
+    /// the user has not opened; in push mode they are published
+    /// directly.  When a file closes, its live per-file results are
+    /// migrated here so closed files keep accurate diagnostics.
+    pub(crate) workspace_diags: Arc<Mutex<diagnostics::workspace::WorkspaceDiagnostics>>,
+    /// Prevents duplicate background workspace diagnostics passes.
+    pub(crate) workspace_diag_pass_started: Arc<std::sync::atomic::AtomicBool>,
     /// Diagnostics to suppress from the next publish cycle.
     ///
     /// When a `codeAction/resolve` handler eagerly clears a diagnostic
@@ -1009,6 +1022,10 @@ impl Backend {
             mago_analyze_last_diags: Arc::new(Mutex::new(HashMap::new())),
             diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
             diag_last_full: Arc::new(Mutex::new(HashMap::new())),
+            workspace_diags: Arc::new(Mutex::new(
+                diagnostics::workspace::WorkspaceDiagnostics::default(),
+            )),
+            workspace_diag_pass_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
             diag_suppressed: Arc::new(Mutex::new(Vec::new())),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1114,6 +1131,10 @@ impl Backend {
             mago_analyze_last_diags: Arc::new(Mutex::new(HashMap::new())),
             diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
             diag_last_full: Arc::new(Mutex::new(HashMap::new())),
+            workspace_diags: Arc::new(Mutex::new(
+                diagnostics::workspace::WorkspaceDiagnostics::default(),
+            )),
+            workspace_diag_pass_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             diag_suppressed: Arc::new(Mutex::new(Vec::new())),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1743,6 +1764,8 @@ impl Backend {
             mago_analyze_last_diags: Arc::clone(&self.mago_analyze_last_diags),
             diag_result_ids: Arc::clone(&self.diag_result_ids),
             diag_last_full: Arc::clone(&self.diag_last_full),
+            workspace_diags: Arc::clone(&self.workspace_diags),
+            workspace_diag_pass_started: Arc::clone(&self.workspace_diag_pass_started),
 
             diag_suppressed: Arc::clone(&self.diag_suppressed),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
