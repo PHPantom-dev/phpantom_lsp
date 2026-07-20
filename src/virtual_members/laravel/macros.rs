@@ -274,6 +274,30 @@ impl LaravelMacroIndex {
         self.merged.keys().cloned().collect()
     }
 
+    /// Return the closure source text of every macro registered on
+    /// `Illuminate\Database\Schema\Blueprint`.  The migration scanner uses
+    /// this to expand custom Blueprint macros when processing migrations.
+    pub(crate) fn blueprint_macro_closures(&self) -> HashMap<String, String> {
+        const BLUEPRINT_FQNS: &[&str] = &[
+            "Illuminate\\Database\\Schema\\Blueprint",
+            "Illuminate\\Database\\Schema\\Builder",
+        ];
+        let mut map = HashMap::new();
+        for regs in self.by_uri.values() {
+            for reg in regs {
+                if BLUEPRINT_FQNS
+                    .iter()
+                    .any(|fqn| reg.target.eq_ignore_ascii_case(fqn))
+                    && let Some(text) = &reg.closure_text
+                {
+                    map.entry(reg.method.name.to_string())
+                        .or_insert_with(|| text.clone());
+                }
+            }
+        }
+        map
+    }
+
     /// Rebuild `merged` from `by_uri`.  For each registration the macro is
     /// added as both a static and an instance method; duplicates
     /// (same name + staticness on the same target) keep the first seen.
