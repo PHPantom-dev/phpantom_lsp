@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784586475451,
+  "lastUpdate": 1784588544850,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17475,6 +17475,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 111.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "f93c1e22e47f79a66de41d764c1094974bbd5fbb",
+          "message": "fix(laravel): resolve facade macro callback this\n\nResolve Laravel macro callback $this through the facade accessor so callbacks\nregistered on facades use the concrete container-bound class instead of the\nsurrounding provider.\n\nCloses #250",
+          "timestamp": "2026-07-20T17:47:37-05:00",
+          "tree_id": "2f304c36092cf4eb078bca6ffac8bfe0500fe4fe",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f93c1e22e47f79a66de41d764c1094974bbd5fbb"
+        },
+        "date": 1784588543217,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 52.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 109.4,
             "unit": "MiB"
           }
         ]
