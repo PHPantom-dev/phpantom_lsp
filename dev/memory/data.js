@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784576510787,
+  "lastUpdate": 1784577391467,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17339,6 +17339,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6e301787ddb81763d640577795e68a3bfba0eb74",
+          "message": "Fix namespaced propagate by-reference closure capture types",
+          "timestamp": "2026-07-20T21:43:03+02:00",
+          "tree_id": "c8a95a9a1e4c36be00a7119f911485fe75f71374",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6e301787ddb81763d640577795e68a3bfba0eb74"
+        },
+        "date": 1784577388678,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 49.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.4,
             "unit": "MiB"
           }
         ]
