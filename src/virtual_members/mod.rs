@@ -65,6 +65,7 @@ use crate::inheritance::{
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo};
 use crate::util::short_name;
+use crate::virtual_members::laravel::database_schema::SchemaIndex;
 use crate::virtual_members::laravel::patches::apply_laravel_patches;
 
 /// Cache key for [`ResolvedClassCache`]: fully-qualified class name
@@ -119,6 +120,7 @@ pub struct ResolvedCacheInner {
     /// Not touched by [`Self::clear`] — it reflects the project, not the
     /// per-edit cache contents.
     is_laravel: bool,
+    schema_index: SchemaIndex,
 }
 
 impl Default for ResolvedCacheInner {
@@ -128,6 +130,7 @@ impl Default for ResolvedCacheInner {
             fqn_keys: HashMap::new(),
             reverse_deps: HashMap::new(),
             is_laravel: true,
+            schema_index: SchemaIndex::default(),
         }
     }
 }
@@ -156,6 +159,14 @@ impl ResolvedCacheInner {
     /// does not lose the project classification.
     pub fn set_laravel(&mut self, is_laravel: bool) {
         self.is_laravel = is_laravel;
+    }
+
+    pub fn schema_index(&self) -> &SchemaIndex {
+        &self.schema_index
+    }
+
+    pub fn set_schema_index(&mut self, schema_index: SchemaIndex) {
+        self.schema_index = schema_index;
     }
 
     /// Number of cached entries (used by eviction tests).

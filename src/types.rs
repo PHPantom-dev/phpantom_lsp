@@ -831,6 +831,56 @@ pub struct PropertyInfo {
     /// providers; set to `false` by the parser for real declared
     /// properties.
     pub is_virtual: bool,
+    /// Structured source for synthesized/model properties.
+    pub source: Option<PropertySource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatabaseColumnSource {
+    pub connection: String,
+    pub table: String,
+    pub column: String,
+    pub database_type: String,
+    pub nullable: bool,
+    pub default: Option<String>,
+    pub generated_expression: Option<String>,
+    pub generated_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributeDefaultSource {
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PropertySource {
+    DatabaseColumn {
+        column: DatabaseColumnSource,
+        attribute_default: Option<AttributeDefaultSource>,
+    },
+    Cast {
+        cast: String,
+        column: Option<DatabaseColumnSource>,
+        attribute_default: Option<AttributeDefaultSource>,
+    },
+    Accessor {
+        method: String,
+        column: Option<DatabaseColumnSource>,
+    },
+    AttributeDefault {
+        default: AttributeDefaultSource,
+        column: Option<DatabaseColumnSource>,
+    },
+    ComputedProperty {
+        method: String,
+    },
+    Relationship {
+        method: String,
+        kind: String,
+    },
+    RelationshipCount {
+        relationship: String,
+    },
 }
 
 impl PropertyInfo {
@@ -848,6 +898,7 @@ impl PropertyInfo {
             && self.deprecation_message == other.deprecation_message
             && self.deprecated_replacement == other.deprecated_replacement
             && self.is_virtual == other.is_virtual
+            && self.source == other.source
     }
 
     /// Return the type hint as a string, if present.
@@ -894,6 +945,7 @@ impl PropertyInfo {
             deprecated_replacement: None,
             see_refs: Vec::new(),
             is_virtual: true,
+            source: None,
         }
     }
 }
@@ -1479,6 +1531,8 @@ pub struct LaravelMetadata {
     /// The `LaravelModelProvider` uses these as a fallback when no
     /// `$casts` entry exists for the same column.
     pub attributes_definitions: Vec<(String, PhpType)>,
+    /// Literal Eloquent app-level defaults extracted from `$attributes`.
+    pub attribute_defaults: Vec<(String, String)>,
     /// Column names extracted from `$fillable`, `$guarded`, `$hidden`,
     /// and `$appends` property arrays.
     ///
@@ -1487,6 +1541,14 @@ pub struct LaravelMetadata {
     /// properties as a last-resort fallback when a column is not
     /// already covered by `$casts` or `$attributes`.
     pub column_names: Vec<String>,
+    /// Explicit Eloquent `$connection` property.
+    pub connection_name: Option<String>,
+    /// Explicit Eloquent `$table` property.
+    pub table_name: Option<String>,
+    /// Whether the model declares `getConnectionName()`.
+    pub has_get_connection_name_method: bool,
+    /// Whether the model declares `getTable()`.
+    pub has_get_table_method: bool,
     /// Whether `$timestamps` is explicitly set on the model.
     ///
     /// - `None` — not declared (inherits the default, which is `true`

@@ -81,7 +81,8 @@ mod auth;
 mod builder;
 mod casts;
 mod config_keys;
-mod config_values;
+pub(crate) mod config_values;
+pub(crate) mod database_schema;
 mod env_vars;
 mod factory;
 mod helpers;
@@ -258,9 +259,12 @@ pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{factory_to_model_fqn, model_to_factory_fqn};
 
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, PropertyInfo};
+use crate::types::{
+    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, PropertyInfo, PropertySource,
+};
 
 use super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
+use database_schema::SchemaTable;
 
 /// The fully-qualified name of the Eloquent base model.
 pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Model";
@@ -716,9 +720,133 @@ fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'
 /// `\Illuminate\Database\Eloquent\Collection<Post>`.
 pub struct LaravelModelProvider;
 
-/// Pre-built `Carbon\Carbon` type used for date-related virtual properties.
+/// Laravel date type used for date-related virtual properties.
 fn carbon_type() -> PhpType {
-    PhpType::Named("Carbon\\Carbon".to_owned())
+    PhpType::Named(CONFIGURED_DATE_CLASS_FQN.to_owned())
+}
+
+fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {
+    if !laravel.timestamps.unwrap_or(true) {
+        return Vec::new();
+    }
+    let mut columns = Vec::new();
+    if let Some(col) = match &laravel.created_at_name {
+        Some(Some(name)) => Some(name.clone()),
+        Some(None) => None,
+        None => Some("created_at".to_string()),
+    } {
+        columns.push(col);
+    }
+    if let Some(col) = match &laravel.updated_at_name {
+        Some(Some(name)) => Some(name.clone()),
+        Some(None) => None,
+        None => Some("updated_at".to_string()),
+    } {
+        columns.push(col);
+    }
+    columns
+}
+
+fn model_connection_and_table(
+    class: &ClassInfo,
+    cache: Option<&ResolvedClassCache>,
+) -> Option<(String, String)> {
+    let laravel = class.laravel()?;
+    let cache_read = cache?.read();
+    let schema = cache_read.schema_index();
+    let connection = if let Some(connection) = laravel.connection_name.clone() {
+        connection
+    } else if laravel.has_get_connection_name_method {
+        return None;
+    } else {
+        schema.default_connection.clone()?
+    };
+    let table = if let Some(table) = laravel.table_name.clone() {
+        table
+    } else if laravel.has_get_table_method {
+        return None;
+    } else {
+        default_table_name(&class.name)
+    };
+    Some((connection, table))
+}
+
+fn model_schema_table(
+    class: &ClassInfo,
+    cache: Option<&ResolvedClassCache>,
+) -> Option<SchemaTable> {
+    let (connection, table) = model_connection_and_table(class, cache)?;
+    cache?
+        .read()
+        .schema_index()
+        .table(&connection, &table)
+        .cloned()
+}
+
+fn default_table_name(class_name: &str) -> String {
+    let short = class_name
+        .rsplit('\\')
+        .next()
+        .unwrap_or(class_name)
+        .rsplit('/')
+        .next()
+        .unwrap_or(class_name);
+    pluralize_snake_table_name(&camel_to_snake(short))
+}
+
+fn pluralize_snake_table_name(name: &str) -> String {
+    if let Some((prefix, last)) = name.rsplit_once('_') {
+        return format!("{}_{}", prefix, pluralize_english_word(last));
+    }
+    pluralize_english_word(name)
+}
+
+fn pluralize_english_word(word: &str) -> String {
+    if word.ends_with('y')
+        && !matches!(word.chars().rev().nth(1), Some('a' | 'e' | 'i' | 'o' | 'u'))
+    {
+        format!("{}ies", &word[..word.len() - 1])
+    } else if word.ends_with('s')
+        || word.ends_with('x')
+        || word.ends_with('z')
+        || word.ends_with("ch")
+        || word.ends_with("sh")
+    {
+        format!("{}es", word)
+    } else {
+        format!("{}s", word)
+    }
+}
+
+fn schema_column_source(table: Option<&SchemaTable>, column: &str) -> Option<DatabaseColumnSource> {
+    table?.column_source(column)
+}
+
+fn attribute_default_source(class: &ClassInfo, column: &str) -> Option<AttributeDefaultSource> {
+    class
+        .laravel()?
+        .attribute_defaults
+        .iter()
+        .find(|(name, _)| name == column)
+        .map(|(_, value)| AttributeDefaultSource {
+            value: value.clone(),
+        })
+}
+
+fn relationship_kind_name(kind: RelationshipKind) -> &'static str {
+    match kind {
+        RelationshipKind::Singular => "singular",
+        RelationshipKind::Collection => "collection",
+        RelationshipKind::MorphTo => "morphTo",
+    }
+}
+
+fn push_or_replace_property(properties: &mut Vec<PropertyInfo>, property: PropertyInfo) {
+    if let Some(existing) = properties.iter_mut().find(|p| p.name == property.name) {
+        *existing = property;
+    } else {
+        properties.push(property);
+    }
 }
 
 impl VirtualMemberProvider for LaravelModelProvider {
@@ -744,16 +872,21 @@ impl VirtualMemberProvider for LaravelModelProvider {
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut seen_props: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let schema_table = model_schema_table(class, cache);
 
         // ── Cast properties ─────────────────────────────────────────
         if let Some(laravel) = class.laravel() {
             for (column, cast_type) in &laravel.casts_definitions {
                 let php_type = cast_type_to_php_type(cast_type, class_loader);
                 seen_props.insert(column.clone());
-                properties.push(PropertyInfo::virtual_property_typed(
-                    column,
-                    Some(&php_type),
-                ));
+                properties.push(PropertyInfo {
+                    source: Some(PropertySource::Cast {
+                        cast: cast_type.clone(),
+                        column: schema_column_source(schema_table.as_ref(), column),
+                        attribute_default: attribute_default_source(class, column),
+                    }),
+                    ..PropertyInfo::virtual_property_typed(column, Some(&php_type))
+                });
             }
 
             // ── $dates properties (deprecated, lower priority than $casts) ──
@@ -763,10 +896,14 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 if !seen_props.insert(column.clone()) {
                     continue;
                 }
-                properties.push(PropertyInfo::virtual_property_typed(
-                    column,
-                    Some(&carbon_type()),
-                ));
+                properties.push(PropertyInfo {
+                    source: Some(PropertySource::Cast {
+                        cast: "date".to_string(),
+                        column: schema_column_source(schema_table.as_ref(), column),
+                        attribute_default: attribute_default_source(class, column),
+                    }),
+                    ..PropertyInfo::virtual_property_typed(column, Some(&carbon_type()))
+                });
             }
 
             // ── Attribute default properties (fallback) ─────────────
@@ -776,7 +913,60 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 if !seen_props.insert(column.clone()) {
                     continue;
                 }
-                properties.push(PropertyInfo::virtual_property_typed(column, Some(php_type)));
+                properties.push(PropertyInfo {
+                    source: attribute_default_source(class, column).map(|default| {
+                        PropertySource::AttributeDefault {
+                            default,
+                            column: schema_column_source(schema_table.as_ref(), column),
+                        }
+                    }),
+                    ..PropertyInfo::virtual_property_typed(column, Some(php_type))
+                });
+            }
+
+            let timestamp_columns = timestamp_columns(laravel);
+
+            if let Some(schema_table) = &schema_table {
+                for column in &schema_table.columns {
+                    if !seen_props.insert(column.name.clone()) {
+                        continue;
+                    }
+                    let php_type = if timestamp_columns.contains(&column.name) {
+                        carbon_type()
+                    } else {
+                        column.php_type.clone()
+                    };
+                    properties.push(PropertyInfo {
+                        source: Some(PropertySource::DatabaseColumn {
+                            column: DatabaseColumnSource {
+                                connection: schema_table.connection.clone(),
+                                table: schema_table.name.clone(),
+                                column: column.name.clone(),
+                                database_type: column.database_type.clone(),
+                                nullable: column.nullable,
+                                default: column.default.clone(),
+                                generated_expression: column.generated_expression.clone(),
+                                generated_mode: column.generated_mode.clone(),
+                            },
+                            attribute_default: attribute_default_source(class, &column.name),
+                        }),
+                        ..PropertyInfo::virtual_property_typed(&column.name, Some(&php_type))
+                    });
+                }
+            }
+
+            // ── Timestamp properties ────────────────────────────────
+            // Add timestamp properties only when schema/casts/attributes did
+            // not already provide the column. Schema-backed timestamp columns
+            // keep their database source and use the configured Laravel date
+            // class above.
+            for column in timestamp_columns {
+                if seen_props.insert(column.clone()) {
+                    properties.push(PropertyInfo::virtual_property_typed(
+                        &column,
+                        Some(&carbon_type()),
+                    ));
+                }
             }
 
             // ── Column name properties (last-resort fallback) ───────
@@ -790,34 +980,6 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     column,
                     Some(&PhpType::mixed()),
                 ));
-            }
-
-            // ── Timestamp properties ────────────────────────────────
-            // When $timestamps is true (the default), synthesize
-            // created_at and updated_at as Carbon\Carbon.  The column
-            // names can be overridden via CREATED_AT / UPDATED_AT
-            // constants, and either can be disabled by setting the
-            // constant to null.
-            let timestamps_enabled = laravel.timestamps.unwrap_or(true);
-            if timestamps_enabled {
-                let created_col = match &laravel.created_at_name {
-                    Some(Some(name)) => Some(name.as_str()),
-                    Some(None) => None,         // explicitly null
-                    None => Some("created_at"), // default
-                };
-                let updated_col = match &laravel.updated_at_name {
-                    Some(Some(name)) => Some(name.as_str()),
-                    Some(None) => None,         // explicitly null
-                    None => Some("updated_at"), // default
-                };
-                for col in [created_col, updated_col].into_iter().flatten() {
-                    if seen_props.insert(col.to_string()) {
-                        properties.push(PropertyInfo::virtual_property_typed(
-                            col,
-                            Some(&carbon_type()),
-                        ));
-                    }
-                }
             }
         }
 
@@ -836,10 +998,28 @@ impl VirtualMemberProvider for LaravelModelProvider {
             // ── Legacy accessors (getXAttribute) ────────────────────
             if is_legacy_accessor(method) {
                 let prop_name = legacy_accessor_property_name(&method.name);
-                properties.push(PropertyInfo {
-                    deprecation_message: method.deprecation_message.clone(),
-                    ..PropertyInfo::virtual_property_typed(&prop_name, method.return_type.as_ref())
-                });
+                let column = schema_column_source(schema_table.as_ref(), &prop_name);
+                let source = if column.is_some() {
+                    PropertySource::Accessor {
+                        method: method.name.to_string(),
+                        column,
+                    }
+                } else {
+                    PropertySource::ComputedProperty {
+                        method: method.name.to_string(),
+                    }
+                };
+                push_or_replace_property(
+                    &mut properties,
+                    PropertyInfo {
+                        deprecation_message: method.deprecation_message.clone(),
+                        source: Some(source),
+                        ..PropertyInfo::virtual_property_typed(
+                            &prop_name,
+                            method.return_type.as_ref(),
+                        )
+                    },
+                );
                 continue;
             }
 
@@ -847,10 +1027,25 @@ impl VirtualMemberProvider for LaravelModelProvider {
             if is_modern_accessor(method) {
                 let prop_name = camel_to_snake(&method.name);
                 let accessor_type = extract_modern_accessor_type(method);
-                properties.push(PropertyInfo {
-                    deprecation_message: method.deprecation_message.clone(),
-                    ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))
-                });
+                let column = schema_column_source(schema_table.as_ref(), &prop_name);
+                let source = if column.is_some() {
+                    PropertySource::Accessor {
+                        method: method.name.to_string(),
+                        column,
+                    }
+                } else {
+                    PropertySource::ComputedProperty {
+                        method: method.name.to_string(),
+                    }
+                };
+                push_or_replace_property(
+                    &mut properties,
+                    PropertyInfo {
+                        deprecation_message: method.deprecation_message.clone(),
+                        source: Some(source),
+                        ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))
+                    },
+                );
                 continue;
             }
 
@@ -890,7 +1085,13 @@ impl VirtualMemberProvider for LaravelModelProvider {
             let type_hint = build_property_type(kind, related_type, custom_collection.as_deref());
 
             if let Some(ref th) = type_hint {
-                properties.push(PropertyInfo::virtual_property_typed(&method.name, Some(th)));
+                properties.push(PropertyInfo {
+                    source: Some(PropertySource::Relationship {
+                        method: method.name.to_string(),
+                        kind: relationship_kind_name(kind).to_string(),
+                    }),
+                    ..PropertyInfo::virtual_property_typed(&method.name, Some(th))
+                });
             }
         }
 
@@ -912,10 +1113,12 @@ impl VirtualMemberProvider for LaravelModelProvider {
             if !seen_props.insert(count_name.clone()) {
                 continue;
             }
-            properties.push(PropertyInfo::virtual_property_typed(
-                &count_name,
-                Some(&PhpType::int()),
-            ));
+            properties.push(PropertyInfo {
+                source: Some(PropertySource::RelationshipCount {
+                    relationship: method.name.to_string(),
+                }),
+                ..PropertyInfo::virtual_property_typed(&count_name, Some(&PhpType::int()))
+            });
         }
 
         // ── Builder-as-static forwarding ────────────────────────────

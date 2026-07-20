@@ -86,6 +86,33 @@
         }
       }
     },
+    "laravel": {
+      "type": "object",
+      "description": "Laravel-specific analysis settings.",
+      "properties": {
+        "schema": {
+          "type": "object",
+          "description": "Controls Laravel database schema dump scanning for Eloquent model property inference.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable Laravel schema dump scanning. When enabled, PHPantom scans database/schema by default.",
+              "default": true
+            },
+            "paths": {
+              "type": "array",
+              "description": "Schema dump files or directories to scan, relative to the workspace root unless absolute. Defaults to [\"database/schema\"].",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "database/schema"
+              ]
+            }
+          }
+        }
+      }
+    },
     "formatting": {
       "type": "object",
       "description": "Controls the formatting strategy. PHPantom ships a built-in formatter (PER-CS 2.0 style). Projects with php-cs-fixer or PHP_CodeSniffer in composer.json require-dev automatically use those tools instead. Explicit configuration here always takes priority.",

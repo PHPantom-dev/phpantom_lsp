@@ -42,6 +42,88 @@ enum MemberOrigin {
     Macro,
 }
 
+fn format_database_column_details(source: &DatabaseColumnSource) -> Vec<String> {
+    let nullable = if source.nullable { "yes" } else { "no" };
+    let mut lines = vec![
+        "database:".to_string(),
+        format!("  type: `{}`", source.database_type),
+        format!("  nullable: `{}`", nullable),
+    ];
+    if let Some(default) = &source.default {
+        lines.push(format!("  default: `{}`", default));
+    }
+    if let Some(mode) = &source.generated_mode {
+        lines.push(format!("  generated: `{}`", mode));
+    } else if source.generated_expression.is_some() {
+        lines.push("  generated: `virtual`".to_string());
+    }
+    if let Some(expression) = &source.generated_expression {
+        lines.push(format!("  expression: `{}`", expression));
+    }
+    lines
+}
+
+fn format_attribute_default_details(source: &AttributeDefaultSource) -> Vec<String> {
+    vec![
+        "application:".to_string(),
+        format!("  default: `{}`", source.value),
+    ]
+}
+
+fn format_property_source(source: &PropertySource) -> Vec<String> {
+    match source {
+        PropertySource::DatabaseColumn {
+            column,
+            attribute_default,
+        } => {
+            let mut lines = vec!["source: database column".to_string()];
+            lines.extend(format_database_column_details(column));
+            if let Some(default) = attribute_default {
+                lines.extend(format_attribute_default_details(default));
+            }
+            lines
+        }
+        PropertySource::Cast {
+            cast,
+            column,
+            attribute_default,
+        } => {
+            let mut lines = vec![format!("source: cast `{}`", cast)];
+            if let Some(column) = column {
+                lines.extend(format_database_column_details(column));
+            }
+            if let Some(default) = attribute_default {
+                lines.extend(format_attribute_default_details(default));
+            }
+            lines
+        }
+        PropertySource::Accessor { method, column } => {
+            let mut lines = vec![format!("source: accessor `{}`", method)];
+            if let Some(column) = column {
+                lines.extend(format_database_column_details(column));
+            }
+            lines
+        }
+        PropertySource::AttributeDefault { default, column } => {
+            let mut lines = vec!["source: attribute default".to_string()];
+            if let Some(column) = column {
+                lines.extend(format_database_column_details(column));
+            }
+            lines.extend(format_attribute_default_details(default));
+            lines
+        }
+        PropertySource::ComputedProperty { method } => {
+            vec![format!("source: computed property `{}`", method)]
+        }
+        PropertySource::Relationship { method, kind } => {
+            vec![format!("source: relationship `{}` ({})", method, kind)]
+        }
+        PropertySource::RelationshipCount { relationship } => {
+            vec![format!("source: relationship count `{}`", relationship)]
+        }
+    }
+}
+
 /// Check whether the **raw** (unmerged) class declares a member with the
 /// given name and kind.
 ///
@@ -1449,6 +1531,10 @@ impl Backend {
 
         if let Some(section) = var_section {
             lines.push(section);
+        }
+
+        if let Some(ref source) = property.source {
+            lines.push(format_property_source(source).join("\n"));
         }
 
         if let Some(ref msg) = property.deprecation_message {

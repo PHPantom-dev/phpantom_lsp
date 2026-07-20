@@ -33,6 +33,29 @@ pub struct Config {
     pub phpcs: PhpcsConfig,
     /// Mago proxy settings.
     pub mago: MagoConfig,
+    /// Laravel-specific analysis settings.
+    pub laravel: LaravelConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct LaravelConfig {
+    pub schema: LaravelSchemaConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct LaravelSchemaConfig {
+    /// Enable schema dump scanning. Defaults to enabled.
+    pub enabled: Option<bool>,
+    /// Optional files or directories to scan. Defaults to `database/schema`.
+    pub paths: Vec<String>,
+}
+
+impl LaravelSchemaConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
 }
 
 /// `[php]` section — PHP version override.
@@ -982,6 +1005,27 @@ analyze-timeout = 45000
         std::fs::write(&path, "[indexing]\nstrategy = \"composer\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Composer));
+    }
+
+    #[test]
+    fn parses_laravel_schema_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"
+[laravel.schema]
+enabled = false
+paths = ["database/schema", "extra/schema.sql"]
+"#,
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(!config.laravel.schema.enabled());
+        assert_eq!(
+            config.laravel.schema.paths,
+            ["database/schema", "extra/schema.sql"]
+        );
     }
 
     #[test]

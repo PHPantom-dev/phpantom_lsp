@@ -579,7 +579,11 @@ pub(crate) fn shorten_php_type(ty: &PhpType) -> String {
     if matches!(ty, PhpType::Raw(_)) {
         return shorten_type_string_fallback(&ty.to_string());
     }
-    ty.shorten().to_string()
+    let shortened = ty.shorten().to_string();
+    shortened.replace(
+        crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN,
+        "Carbon",
+    )
 }
 
 /// Fallback character-by-character shortener for type strings that
