@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Continuous progress reporting.** The indexing progress bar now advances file by file with live counts (e.g. "Scanning vendor packages (3201/8544 files)") instead of jumping between a few fixed milestones. This covers single-project, monorepo, and non-Composer workspaces. Go to Implementation, Find References, and Type Hierarchy show the same live progress while they scan, including when one of them triggers the first full workspace index.
+- **Property hover now shows effective types as a `var` detail line.** Property hovers now mirror method hovers by displaying the resolved/effective property type above the PHP snippet as `**var**`, while the snippet itself shows only the native PHP property declaration. This keeps docblock-inferred, virtual, and schema-derived property types out of the generated signature block. Contributed by @calebdw.
 - **Updated the bundled mago toolchain to 1.43.0.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @enwi in https://github.com/PHPantom-dev/phpantom_lsp/pull/234.
 
 ### Removed

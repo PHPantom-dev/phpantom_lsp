@@ -1989,8 +1989,8 @@ class Zoo {
         text
     );
     assert!(
-        text.contains("@var list<string>"),
-        "should show effective docblock type as @var annotation: {}",
+        text.contains("**var** `list<string>`"),
+        "should show effective docblock type as var detail line: {}",
         text
     );
 }
@@ -2072,10 +2072,10 @@ class ScaffoldingIteration {
     let hover = hover_at(&backend, uri, content, 9, 22).expect("expected hover on batch");
     let text = hover_text(&hover);
 
-    // The effective (docblock) type should appear as a @var annotation with short names
+    // The effective (docblock) type should appear as a var detail line with short names
     assert!(
-        text.contains("@var list<Pen>"),
-        "should show effective docblock type as @var annotation with short names: {}",
+        text.contains("**var** `list<Pen>`"),
+        "should show effective docblock type as var detail line with short names: {}",
         text
     );
     // The description should appear
@@ -3186,8 +3186,8 @@ class Drawer {
     let text = hover_text(&hover);
     // The effective type `list<Demo\Pen>` genuinely differs from the native `array`.
     assert!(
-        text.contains("@var list<Pen>"),
-        "should show @var with short names when effective type genuinely differs from native: {}",
+        text.contains("**var** `list<Pen>`"),
+        "should show var detail line with short names when effective type genuinely differs from native: {}",
         text
     );
 }
