@@ -28,8 +28,14 @@ const CASTS_ATTRIBUTES_FQN: &str = "Illuminate\\Contracts\\Database\\Eloquent\\C
 /// covers all built-in Laravel cast types.
 static CAST_TYPE_MAP: LazyLock<HashMap<&'static str, PhpType>> = LazyLock::new(|| {
     HashMap::from([
-        ("datetime", PhpType::Named("Carbon\\Carbon".to_owned())),
-        ("date", PhpType::Named("Carbon\\Carbon".to_owned())),
+        (
+            "datetime",
+            PhpType::Named(super::CONFIGURED_DATE_CLASS_FQN.to_owned()),
+        ),
+        (
+            "date",
+            PhpType::Named(super::CONFIGURED_DATE_CLASS_FQN.to_owned()),
+        ),
         ("timestamp", PhpType::int()),
         (
             "immutable_datetime",
@@ -65,9 +71,9 @@ static CAST_TYPE_MAP: LazyLock<HashMap<&'static str, PhpType>> = LazyLock::new(|
     ])
 });
 
-/// Pre-built `PhpType` for `\Carbon\Carbon`, used by date/datetime casts.
+/// Laravel configured date type used by date/datetime casts.
 fn carbon_type() -> PhpType {
-    PhpType::Named("Carbon\\Carbon".to_owned())
+    PhpType::Named(super::CONFIGURED_DATE_CLASS_FQN.to_owned())
 }
 
 /// Pre-built `PhpType` for `\Carbon\CarbonImmutable`, used by immutable date casts.

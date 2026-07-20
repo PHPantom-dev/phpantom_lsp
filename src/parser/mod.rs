@@ -1200,6 +1200,7 @@ pub(crate) fn extract_property_info(property: &Property) -> Vec<PropertyInfo> {
                 deprecated_replacement: None,
                 see_refs: Vec::new(),
                 is_virtual: false,
+                source: None,
             }
         })
         .collect()

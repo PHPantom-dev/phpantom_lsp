@@ -4,7 +4,8 @@ use crate::php_type::PhpType;
 use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
 };
-use crate::types::{MethodInfo, Visibility};
+use crate::types::{MethodInfo, PropertySource, Visibility};
+use crate::virtual_members::laravel::database_schema::{SchemaIndex, parse_schema_dump};
 use std::sync::Arc;
 
 // ── applies_to ──────────────────────────────────────────────────────
@@ -61,10 +62,200 @@ fn synthesizes_has_many_property() {
 }
 
 #[test]
+fn synthesizes_schema_columns_with_cast_source_precedence() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().casts_definitions = vec![("active".to_string(), "boolean".to_string())];
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE users (id bigint NOT NULL, email varchar(255), active tinyint NOT NULL);",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let email = result
+        .properties
+        .iter()
+        .find(|p| p.name == "email")
+        .unwrap();
+    assert_eq!(email.type_hint_str().as_deref(), Some("string|null"));
+    assert!(matches!(
+        email.source,
+        Some(PropertySource::DatabaseColumn { .. })
+    ));
+
+    let active = result
+        .properties
+        .iter()
+        .find(|p| p.name == "active")
+        .unwrap();
+    assert_eq!(active.type_hint_str().as_deref(), Some("bool"));
+    match &active.source {
+        Some(PropertySource::Cast {
+            cast,
+            column: Some(column),
+            ..
+        }) => {
+            assert_eq!(cast, "boolean");
+            assert_eq!(column.database_type, "TINYINT");
+        }
+        other => panic!("unexpected source: {other:?}"),
+    }
+}
+
+#[test]
+fn cast_source_includes_attribute_default() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().casts_definitions = vec![("active".to_string(), "boolean".to_string())];
+    user.laravel_mut().attributes_definitions = vec![("active".to_string(), PhpType::bool())];
+    user.laravel_mut().attribute_defaults = vec![("active".to_string(), "true".to_string())];
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE users (id bigint NOT NULL, active boolean DEFAULT false NOT NULL);",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let active = result
+        .properties
+        .iter()
+        .find(|p| p.name == "active")
+        .unwrap();
+
+    match &active.source {
+        Some(PropertySource::Cast {
+            column: Some(column),
+            attribute_default: Some(default),
+            ..
+        }) => {
+            assert_eq!(column.default.as_deref(), Some("false"));
+            assert_eq!(default.value, "true");
+        }
+        other => panic!("unexpected source: {other:?}"),
+    }
+}
+
+#[test]
+fn schema_timestamp_columns_keep_database_source_and_configured_date_type() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut();
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE users (id bigint NOT NULL, created_at timestamp DEFAULT now() NOT NULL);",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let created_at = result
+        .properties
+        .iter()
+        .find(|p| p.name == "created_at")
+        .unwrap();
+
+    assert_eq!(
+        created_at.type_hint_str().as_deref(),
+        Some(CONFIGURED_DATE_CLASS_FQN)
+    );
+    match &created_at.source {
+        Some(PropertySource::DatabaseColumn { column, .. }) => {
+            assert_eq!(column.database_type, "TIMESTAMP");
+            assert!(!column.nullable);
+            assert_eq!(column.default.as_deref(), Some("now()"));
+        }
+        other => panic!("unexpected source: {other:?}"),
+    }
+}
+
+#[test]
+fn schema_lookup_uses_snake_plural_table_convention() {
+    let provider = LaravelModelProvider;
+    let mut category = make_class("App\\Models\\BusinessCategory");
+    category.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    category.laravel_mut();
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE business_categories (id bigint NOT NULL, label varchar(255));",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&category, &no_loader, Some(&cache));
+    assert!(result.properties.iter().any(|p| p.name == "label"));
+}
+
+#[test]
+fn schema_lookup_skips_convention_when_get_table_is_overridden() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().has_get_table_method = true;
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE users (id bigint NOT NULL, email varchar(255));",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    assert!(!result.properties.iter().any(|p| p.name == "email"));
+}
+
+#[test]
+fn explicit_table_still_allows_schema_lookup_when_get_table_exists() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().table_name = Some("people".to_string());
+    user.laravel_mut().has_get_table_method = true;
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE people (id bigint NOT NULL, email varchar(255));",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    assert!(result.properties.iter().any(|p| p.name == "email"));
+}
+
+#[test]
 fn synthesizes_has_one_property() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut();
     user.methods.push(Arc::new(make_method(
         "profile",
         Some("HasOne<Profile, $this>"),
@@ -131,6 +322,7 @@ fn synthesizes_belongs_to_many_property() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut();
     user.methods.push(Arc::new(make_method(
         "roles",
         Some("BelongsToMany<Role, $this>"),
@@ -893,6 +1085,48 @@ fn synthesizes_modern_accessor_property_with_generic_type() {
 }
 
 #[test]
+fn schema_backed_modern_accessor_keeps_accessor_source() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut();
+    user.methods.push(Arc::new(make_method(
+        "name",
+        Some("Illuminate\\Database\\Eloquent\\Casts\\Attribute<string, never>"),
+    )));
+
+    let tables = parse_schema_dump(
+        "primary",
+        "CREATE TABLE users (first_name text NOT NULL, last_name text NOT NULL, name varchar(255) GENERATED ALWAYS AS (((first_name || ' '::text) || last_name)) NOT NULL);",
+    );
+    assert_eq!(tables.len(), 1);
+    assert!(tables[0].column("name").is_some());
+    let schema = SchemaIndex::from_tables(Some("primary".to_string()), tables);
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let prop = result
+        .properties
+        .iter()
+        .find(|p| p.name == "name")
+        .expect("name property");
+
+    match &prop.source {
+        Some(PropertySource::Accessor {
+            method,
+            column: Some(column),
+            ..
+        }) => {
+            assert_eq!(method, "name");
+            assert_eq!(column.column, "name");
+            assert_eq!(column.generated_mode.as_deref(), Some("virtual"));
+        }
+        other => panic!("unexpected source: {other:?}"),
+    }
+}
+
+#[test]
 fn synthesizes_modern_accessor_property_short_name_generic() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");
@@ -1144,7 +1378,7 @@ fn synthesizes_cast_properties() {
     assert!(created_at.is_some(), "should produce created_at property");
     assert_eq!(
         created_at.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 
     let options = result.properties.iter().find(|p| p.name == "options");
@@ -1280,14 +1514,14 @@ fn synthesizes_dates_properties_as_carbon() {
     assert!(deleted_at.is_some(), "should produce deleted_at property");
     assert_eq!(
         deleted_at.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 
     let trial = result.properties.iter().find(|p| p.name == "trial_ends_at");
     assert!(trial.is_some(), "should produce trial_ends_at property");
     assert_eq!(
         trial.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 }
 
@@ -1372,7 +1606,7 @@ fn dates_coexist_with_casts_for_different_columns() {
             .unwrap()
             .type_hint_str()
             .as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 }
 
@@ -1398,7 +1632,7 @@ fn dates_take_priority_over_attribute_defaults() {
     assert_eq!(matching.len(), 1, "should not duplicate the property");
     assert_eq!(
         matching[0].type_hint_str().as_deref(),
-        Some("Carbon\\Carbon"),
+        Some(CONFIGURED_DATE_CLASS_FQN),
         "$dates type should win over $attributes"
     );
 }
@@ -1422,7 +1656,7 @@ fn dates_take_priority_over_column_names() {
     assert_eq!(matching.len(), 1, "should not duplicate the property");
     assert_eq!(
         matching[0].type_hint_str().as_deref(),
-        Some("Carbon\\Carbon"),
+        Some(CONFIGURED_DATE_CLASS_FQN),
         "$dates type should win over column_names"
     );
 
@@ -1884,14 +2118,14 @@ fn default_model_gets_timestamp_properties() {
     assert!(created.is_some(), "should produce created_at property");
     assert_eq!(
         created.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 
     let updated = result.properties.iter().find(|p| p.name == "updated_at");
     assert!(updated.is_some(), "should produce updated_at property");
     assert_eq!(
         updated.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 }
 
@@ -1956,7 +2190,7 @@ fn custom_created_at_column_name() {
     );
     assert_eq!(
         created.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
     assert!(
         result.properties.iter().any(|p| p.name == "updated_at"),
@@ -1989,7 +2223,7 @@ fn custom_updated_at_column_name() {
     );
     assert_eq!(
         modified.unwrap().type_hint_str().as_deref(),
-        Some("Carbon\\Carbon")
+        Some(CONFIGURED_DATE_CLASS_FQN)
     );
 }
 

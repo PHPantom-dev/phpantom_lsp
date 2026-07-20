@@ -298,6 +298,28 @@ impl LanguageServer for Backend {
                 }
             }
 
+            let schema_config = self.config().laravel.schema;
+            if schema_config.enabled() {
+                match crate::virtual_members::laravel::database_schema::load_schema_index(
+                    &root,
+                    &schema_config,
+                ) {
+                    Ok(index) => {
+                        self.resolved_class_cache
+                            .write()
+                            .set_schema_index(index.clone());
+                        *self.schema_index.write() = index;
+                    }
+                    Err(e) => {
+                        self.log(
+                            MessageType::WARNING,
+                            format!("Failed to load Laravel schema dumps: {}", e),
+                        )
+                        .await;
+                    }
+                }
+            }
+
             // Parse composer.json once up front.  The result is used for
             // PHP version detection and passed into init_single_project
             // so the file is never re-read during startup.
@@ -457,6 +479,18 @@ impl LanguageServer for Backend {
                         FileSystemWatcher {
                             glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
                             kind: Some(WatchKind::Change),
+                        },
+                        FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/*.sql".to_string()),
+                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                        },
+                        FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
+                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                        },
+                        FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
+                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
                         },
                     ],
                 })
@@ -3018,6 +3052,7 @@ impl Backend {
         root: &std::path::Path,
     ) -> bool {
         let mut composer_changed = false;
+        let mut schema_changed = false;
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         {
             let open = self.open_files.read();
@@ -3026,6 +3061,16 @@ impl Backend {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
                     composer_changed = true;
+                    continue;
+                }
+                if let Ok(file_path) = change.uri.to_file_path()
+                    && crate::virtual_members::laravel::database_schema::SchemaIndex::watched_path_affects_schema(
+                        root,
+                        &self.config().laravel.schema,
+                        &file_path,
+                    )
+                {
+                    schema_changed = true;
                     continue;
                 }
                 if !path_str.ends_with(".php") {
@@ -3057,7 +3102,7 @@ impl Backend {
             }
         }
 
-        if php_changes.is_empty() && !composer_changed {
+        if php_changes.is_empty() && !composer_changed && !schema_changed {
             return false;
         }
 
@@ -3082,7 +3127,41 @@ impl Backend {
             self.rescan_composer_indexes(root);
         }
 
+        if schema_changed {
+            tracing::info!("PHPantom: Laravel schema files changed, reloading schema index");
+            self.reload_laravel_schema_index(root);
+        }
+
         true
+    }
+
+    fn reload_laravel_schema_index(&self, root: &std::path::Path) {
+        if let Ok(cfg) = crate::config::load_config(root) {
+            *self.config.lock() = cfg;
+        }
+
+        let schema_config = self.config().laravel.schema;
+        let index = if schema_config.enabled() {
+            match crate::virtual_members::laravel::database_schema::load_schema_index(
+                root,
+                &schema_config,
+            ) {
+                Ok(index) => index,
+                Err(err) => {
+                    tracing::warn!("Failed to reload Laravel schema dumps: {}", err);
+                    return;
+                }
+            }
+        } else {
+            crate::virtual_members::laravel::database_schema::SchemaIndex::default()
+        };
+
+        self.resolved_class_cache
+            .write()
+            .set_schema_index(index.clone());
+        *self.schema_index.write() = index;
+        self.resolved_class_cache.write().clear();
+        self.member_completion_cache.lock().clear();
     }
 
     /// Rebuild the vendor-derived indexes after a `composer.json` /

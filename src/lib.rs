@@ -543,6 +543,7 @@ pub struct Backend {
     /// or `lang/` is updated.
     pub(crate) laravel_provider_resources: Arc<RwLock<virtual_members::laravel::ProviderResources>>,
     pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
+    pub(crate) schema_index: Arc<RwLock<virtual_members::laravel::database_schema::SchemaIndex>>,
     /// Per-target member completion cache.
     ///
     /// Typing `$model->wh...` triggers a completion request for each
@@ -999,6 +1000,9 @@ impl Backend {
                 virtual_members::laravel::ProviderResources::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
+            schema_index: Arc::new(RwLock::new(
+                virtual_members::laravel::database_schema::SchemaIndex::default(),
+            )),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1108,6 +1112,9 @@ impl Backend {
                 virtual_members::laravel::ProviderResources::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
+            schema_index: Arc::new(RwLock::new(
+                virtual_members::laravel::database_schema::SchemaIndex::default(),
+            )),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1736,6 +1743,7 @@ impl Backend {
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
+            schema_index: Arc::clone(&self.schema_index),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),

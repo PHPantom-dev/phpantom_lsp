@@ -321,6 +321,75 @@ fn extract_use_eloquent_builder_attribute(
     None
 }
 
+fn extract_laravel_model_string_attribute(
+    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+    content: &str,
+    doc_ctx: Option<&DocblockCtx<'_>>,
+    fqns: &[&str],
+) -> Option<String> {
+    for attr_list in attribute_lists.iter() {
+        for attr in attr_list.attributes.iter() {
+            let attr_fqn = resolve_attribute_fqn(bytes_to_str(attr.name.value()), doc_ctx);
+            if !fqns.iter().any(|fqn| attr_fqn == *fqn) {
+                continue;
+            }
+            let arg_list = attr.argument_list.as_ref()?;
+            let first_arg = arg_list.arguments.first()?;
+            let span = first_arg.span();
+            let start = span.start.offset as usize;
+            let end = span.end.offset as usize;
+            let text = content.get(start..end)?.trim();
+            if let Some(value) = extract_string_literal(text) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn resolve_attribute_fqn(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
+    let name = name.trim_start_matches('\\');
+    if name.contains('\\') {
+        return name.to_string();
+    }
+    let Some(ctx) = doc_ctx else {
+        return name.to_string();
+    };
+    if let Some(imported) = ctx.use_map.get(name) {
+        return imported.trim_start_matches('\\').to_string();
+    }
+    if let Some(ns) = &ctx.namespace {
+        return format!("{}\\{}", ns, name);
+    }
+    name.to_string()
+}
+
+fn extract_laravel_connection_attribute(
+    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+    content: &str,
+    doc_ctx: Option<&DocblockCtx<'_>>,
+) -> Option<String> {
+    extract_laravel_model_string_attribute(
+        attribute_lists,
+        content,
+        doc_ctx,
+        &["Illuminate\\Database\\Eloquent\\Attributes\\Connection"],
+    )
+}
+
+fn extract_laravel_table_attribute(
+    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+    content: &str,
+    doc_ctx: Option<&DocblockCtx<'_>>,
+) -> Option<String> {
+    extract_laravel_model_string_attribute(
+        attribute_lists,
+        content,
+        doc_ctx,
+        &["Illuminate\\Database\\Eloquent\\Attributes\\Table"],
+    )
+}
+
 /// Determine the custom builder class for an Eloquent model.
 ///
 /// Checks three sources in priority order:
@@ -597,6 +666,26 @@ fn extract_attributes_definitions<'a>(
     members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
     content: &str,
 ) -> Vec<(String, PhpType)> {
+    extract_attributes(members, content)
+        .into_iter()
+        .map(|(key, php_type, _)| (key, php_type))
+        .collect()
+}
+
+fn extract_attribute_defaults<'a>(
+    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    content: &str,
+) -> Vec<(String, String)> {
+    extract_attributes(members, content)
+        .into_iter()
+        .map(|(key, _, value)| (key, value))
+        .collect()
+}
+
+fn extract_attributes<'a>(
+    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    content: &str,
+) -> Vec<(String, PhpType, String)> {
     for member in members {
         if let ClassLikeMember::Property(Property::Plain(plain)) = member {
             for item in plain.items.iter() {
@@ -627,7 +716,7 @@ fn extract_attributes_definitions<'a>(
 /// float, or string).
 ///
 /// Returns a list of `(column_name, php_type)` pairs.
-fn parse_attributes_array(text: &str) -> Vec<(String, PhpType)> {
+fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
     let mut results = Vec::new();
     let trimmed = text.trim();
 
@@ -658,7 +747,7 @@ fn parse_attributes_array(text: &str) -> Vec<(String, PhpType)> {
         }
 
         if let Some(php_type) = crate::util::infer_type_from_literal(value_part) {
-            results.push((key, php_type));
+            results.push((key, php_type, value_part.to_string()));
         }
     }
 
@@ -818,6 +907,35 @@ fn extract_dates_definitions<'a>(
     }
 
     names
+}
+
+fn extract_string_property<'a>(
+    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    content: &str,
+    target: &str,
+) -> Option<String> {
+    for member in members {
+        if let ClassLikeMember::Property(Property::Plain(plain)) = member {
+            for item in plain.items.iter() {
+                let var_name = bytes_to_str(item.variable().name).to_string();
+                let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
+                if stripped != target {
+                    continue;
+                }
+                if let PropertyItem::Concrete(concrete) = item {
+                    let span = concrete.value.span();
+                    let start = span.start.offset as usize;
+                    let end = span.end.offset as usize;
+                    if let Some(text) = content.get(start..end)
+                        && let Some(value) = extract_string_literal(text.trim())
+                    {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Parse a PHP array literal containing only string values.
@@ -988,8 +1106,32 @@ impl Backend {
 
                     let attributes_definitions =
                         extract_attributes_definitions(class.members.iter(), content);
+                    let attribute_defaults =
+                        extract_attribute_defaults(class.members.iter(), content);
 
                     let column_names = extract_column_names(class.members.iter(), content);
+
+                    let connection_name = extract_laravel_connection_attribute(
+                        &class.attribute_lists,
+                        content,
+                        doc_ctx,
+                    )
+                    .or_else(|| {
+                        extract_string_property(class.members.iter(), content, "connection")
+                    });
+
+                    let table_name =
+                        extract_laravel_table_attribute(&class.attribute_lists, content, doc_ctx)
+                            .or_else(|| {
+                                extract_string_property(class.members.iter(), content, "table")
+                            });
+
+                    let has_get_connection_name_method = methods
+                        .iter()
+                        .any(|m| m.name.eq_ignore_ascii_case("getConnectionName"));
+                    let has_get_table_method = methods
+                        .iter()
+                        .any(|m| m.name.eq_ignore_ascii_case("getTable"));
 
                     let dates_definitions =
                         extract_dates_definitions(class.members.iter(), content);
@@ -1046,7 +1188,12 @@ impl Backend {
                             casts_definitions,
                             dates_definitions,
                             attributes_definitions,
+                            attribute_defaults,
                             column_names,
+                            connection_name,
+                            table_name,
+                            has_get_connection_name_method,
+                            has_get_table_method,
                             timestamps,
                             created_at_name,
                             updated_at_name,
@@ -2335,6 +2482,7 @@ impl Backend {
                                     deprecated_replacement: None,
                                     see_refs: Vec::new(),
                                     is_virtual: false,
+                                    source: None,
                                 });
                             }
                         }
@@ -2906,6 +3054,66 @@ if (\PHP_VERSION_ID >= 80000) {
             "conditional class should carry its `@extends Repo<Entity>` generics, got {:?}",
             conditional.extends_generics,
         );
+    }
+
+    #[test]
+    fn laravel_model_table_and_connection_attributes_are_extracted() {
+        let src = r#"<?php
+use Illuminate\Database\Eloquent\Attributes\Connection;
+use Illuminate\Database\Eloquent\Attributes\Table;
+
+#[Connection('analytics')]
+#[Table('event_records')]
+class EventRecord {}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let class = classes
+            .iter()
+            .find(|(c, _)| c.name == atom("EventRecord"))
+            .map(|(c, _)| c)
+            .unwrap();
+        let laravel = class.laravel().unwrap();
+        assert_eq!(laravel.connection_name.as_deref(), Some("analytics"));
+        assert_eq!(laravel.table_name.as_deref(), Some("event_records"));
+    }
+
+    #[test]
+    fn local_connection_and_table_attributes_are_ignored() {
+        let src = r#"<?php
+namespace App\Models;
+
+#[Connection('analytics')]
+#[Table('event_records')]
+class EventRecord {}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let class = classes
+            .iter()
+            .find(|(c, _)| c.name == atom("EventRecord"))
+            .map(|(c, _)| c)
+            .unwrap();
+        let laravel = class.laravel().unwrap();
+        assert_eq!(laravel.connection_name, None);
+        assert_eq!(laravel.table_name, None);
+    }
+
+    #[test]
+    fn laravel_model_get_table_override_is_detected() {
+        let src = r#"<?php
+class ReportRow {
+    public function getTable(): string { return 'dynamic_' . date('Y'); }
+    public function getConnectionName(): string { return tenant_connection(); }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let class = classes
+            .iter()
+            .find(|(c, _)| c.name == atom("ReportRow"))
+            .map(|(c, _)| c)
+            .unwrap();
+        let laravel = class.laravel().unwrap();
+        assert!(laravel.has_get_table_method);
+        assert!(laravel.has_get_connection_name_method);
     }
 
     /// When the same class name is declared in both branches of a conditional

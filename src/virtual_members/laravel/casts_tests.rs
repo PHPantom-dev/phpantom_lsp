@@ -2,6 +2,7 @@ use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, no_loader};
+use crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN;
 use std::sync::Arc;
 
 // ── cast_type_to_php_type: built-in types ───────────────────────────
@@ -10,7 +11,7 @@ use std::sync::Arc;
 fn cast_datetime_maps_to_carbon() {
     assert_eq!(
         cast_type_to_php_type("datetime", &no_loader).to_string(),
-        "Carbon\\Carbon"
+        CONFIGURED_DATE_CLASS_FQN
     );
 }
 
@@ -18,7 +19,7 @@ fn cast_datetime_maps_to_carbon() {
 fn cast_date_maps_to_carbon() {
     assert_eq!(
         cast_type_to_php_type("date", &no_loader).to_string(),
-        "Carbon\\Carbon"
+        CONFIGURED_DATE_CLASS_FQN
     );
 }
 
@@ -203,7 +204,7 @@ fn cast_decimal_bare_maps_to_float() {
 fn cast_datetime_with_format_maps_to_carbon() {
     assert_eq!(
         cast_type_to_php_type("datetime:Y-m-d", &no_loader).to_string(),
-        "Carbon\\Carbon"
+        CONFIGURED_DATE_CLASS_FQN
     );
 }
 
@@ -211,7 +212,7 @@ fn cast_datetime_with_format_maps_to_carbon() {
 fn cast_date_with_format_maps_to_carbon() {
     assert_eq!(
         cast_type_to_php_type("date:Y-m-d", &no_loader).to_string(),
-        "Carbon\\Carbon"
+        CONFIGURED_DATE_CLASS_FQN
     );
 }
 
@@ -241,7 +242,7 @@ fn cast_case_insensitive() {
     );
     assert_eq!(
         cast_type_to_php_type("DATETIME", &no_loader).to_string(),
-        "Carbon\\Carbon"
+        CONFIGURED_DATE_CLASS_FQN
     );
     assert_eq!(
         cast_type_to_php_type("Integer", &no_loader).to_string(),

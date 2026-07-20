@@ -270,6 +270,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                     deprecated_replacement: None,
                     see_refs: Vec::new(),
                     is_virtual: true,
+                    source: None,
                 });
             }
         }
@@ -311,6 +312,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                             deprecated_replacement: None,
                             see_refs: Vec::new(),
                             is_virtual: true,
+                            source: None,
                         });
                     }
                 }
@@ -386,6 +388,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                                 deprecated_replacement: None,
                                 see_refs: Vec::new(),
                                 is_virtual: true,
+                                source: None,
                             });
                         }
                     }
@@ -461,6 +464,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                                 deprecated_replacement: None,
                                 see_refs: Vec::new(),
                                 is_virtual: true,
+                                source: None,
                             });
                         }
                     }
@@ -857,6 +861,7 @@ fn collect_mixin_members(
                     deprecated_replacement: None,
                     see_refs: Vec::new(),
                     is_virtual: true,
+                    source: None,
                 });
             }
         }
