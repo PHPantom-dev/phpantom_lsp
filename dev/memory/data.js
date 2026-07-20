@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784577391467,
+  "lastUpdate": 1784579798100,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17373,6 +17373,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7786f56db7b834bedfe6358bb924cee240447942",
+          "message": "Better intergrate full indexing",
+          "timestamp": "2026-07-20T22:22:35+02:00",
+          "tree_id": "db37fc44eac86d773fab08e6071f170e6c072d13",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7786f56db7b834bedfe6358bb924cee240447942"
+        },
+        "date": 1784579795595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 51.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.9,
             "unit": "MiB"
           }
         ]
