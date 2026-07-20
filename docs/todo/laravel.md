@@ -21,7 +21,7 @@ within the same impact tier.
 | Container bindings registered dynamically or conditionally | Binding names or targets computed at runtime (variables, environment switches, loops) cannot be recovered statically. Literal `bind('name', Target::class)`-style registrations in app and package service providers **are** in scope — see L36. Names in the framework's own `registerCoreContainerAliases()` and the app's alias config already resolve via parsing. |
 | Facade `getFacadeAccessor()` with string aliases | Requires booting the application. `@method static` tags provide a workable fallback. |
 | Blade templates | Separate project. See `blade.md` for the implementation plan. |
-| Model column types from a live database connection | Requires a reachable, migrated database plus credentials, and answers "true for that database" rather than "true for this code". Committed schema artifacts (migration files, `database/schema/*.sql` dumps) are ordinary static files and **are** in scope as a fallback source — see L34/L35. |
+| Model column types from a live database connection | Requires a reachable, migrated database plus credentials, and answers "true for that database" rather than "true for this code". Committed schema artifacts (migration files, `database/schema/*.sql` dumps) are now parsed statically (schema dump + migration scanning). |
 | Legacy Laravel versions | We target current Larastan-style annotations. Older code may degrade gracefully. |
 | Application provider scanning | Low-value, high-complexity. |
 | Macro discovery (`Macroable` trait) | Requires booting the application to inspect runtime `$macros` static property. `@method` tags provide a workable fallback. |
@@ -48,10 +48,9 @@ within the same impact tier.
 - **Code-declared types win.** Column types declared in code (casts,
   accessors, `@property` tags, attribute defaults) are the most accurate
   source and always take precedence. Committed schema artifacts
-  (migration files, `database/schema/*.sql` dumps) are ordinary static
-  files we can parse without booting anything; they serve as a fallback
-  for models with no code-declared column information (L34/L35). A live
-  database connection remains out of scope.
+  (migration files, `database/schema/*.sql` dumps) are now parsed
+  statically via schema dump and migration scanning. A live database
+  connection remains out of scope.
 - **Larastan-style hints preferred.** We expect relationship methods to be
   annotated in the style that Larastan expects. Fallback heuristics
   are best-effort.
@@ -562,53 +561,6 @@ virtual-property synthesis, `where{Column}` generation, attribute-array
 key completion (L30), and column-string completion — one new source,
 every existing consumer benefits.
 
-#### L34. Schema dump parsing (`database/schema/*.sql`)
-
-**Impact: Medium · Effort: Medium**
-
-Projects using `php artisan schema:dump` commit a plain SQL DDL file
-per connection. Parse `CREATE TABLE` statements (column name, SQL
-type, `NOT NULL`) into the table model. SQL-type → PHP-type mapping is
-a small fixed table (`varchar`/`text` → `string`, `int`/`bigint` →
-`int`, `tinyint(1)` → `bool`, `decimal` → `string`, `datetime`/
-`timestamp` → the model's date class, `json` → `array`, unknown →
-`mixed`). The dump reflects the squashed baseline; migrations created
-after the dump (L35) replay on top of it. This is the cheaper of the
-two items and covers the projects that squash away their migration
-history — exactly the ones where migration parsing alone would see
-nothing.
-
-#### L35. Migration file parsing
-
-**Impact: Medium-High · Effort: High**
-
-Parse `database/migrations/*.php` for `Schema::create` /
-`Schema::table` / `Schema::rename` / `Schema::drop*` calls and the
-`Blueprint` column methods inside them, replaying files in filename
-(timestamp) order to arrive at the final table state. Scope for the
-first iteration:
-
-- **Column methods** incl. the integer family, string/text family,
-  date/time family, `boolean`, `decimal`/`float`, `json`, `uuid`/
-  `ulid`, `enum`, `foreignId`/`foreignIdFor`, and composite helpers
-  (`timestamps`, `softDeletes`, `rememberToken`, `morphs` and
-  variants expanding to their real columns).
-- **Chained modifiers** that affect types: `->nullable()` (with
-  optional bool argument) and `->change()` (re-declared column method
-  wins).
-- **Drops and renames**: `dropColumn` (string and array forms),
-  `renameColumn`, `dropTimestamps`, `dropSoftDeletes`, `dropMorphs`,
-  table-level rename/drop.
-- **Literal names only.** Column/table names built from variables,
-  loops, or config lookups are skipped silently — same rule as every
-  other scanner in this document. No heuristic guessing.
-
-Vendor-package migrations participate (they create real columns), at
-lower priority than app migrations. Go-to-definition on a
-schema-derived virtual property jumps to the column's declaration in
-the migration file. Cache per file with mtime invalidation, matching
-the other project-fact scanners.
-
 ---
 
 ## Laravel string-context intelligence (completion, hover, diagnostics)
@@ -719,7 +671,7 @@ that are statically recoverable (no booting):
   method of `FormRequest` / `Livewire\Form` subclasses.
   **Rule parameters are references too:** `exists:users,email` and
   `unique:users` name a table and column (resolve to the model/column
-  via the table map from L34/L35 or the model's own column sources);
+  via the schema/migration table map or the model's own column sources);
   `same:password`, `different:`, `required_with:`, `gt/gte/lt/lte:`,
   `after:`/`before:` name *other fields* in the same rules array
   (complete and navigate to the sibling key); `in:`/`Rule::in()` values

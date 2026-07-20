@@ -110,6 +110,24 @@
               ]
             }
           }
+        },
+        "migrations": {
+          "type": "object",
+          "description": "Controls Laravel migration scanning for Eloquent model property inference.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable Laravel migration scanning. When enabled, PHPantom scans direct PHP files in non-vendor database/migrations directories by default.",
+              "default": true
+            },
+            "paths": {
+              "type": "array",
+              "description": "Migration files or directories to scan, relative to the workspace root unless absolute. Direct PHP files in directories are scanned; subdirectories are not scanned.",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

@@ -298,11 +298,13 @@ impl LanguageServer for Backend {
                 }
             }
 
-            let schema_config = self.config().laravel.schema;
-            if schema_config.enabled() {
+            let laravel_config = self.config().laravel;
+            if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
+                let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
                 match crate::virtual_members::laravel::database_schema::load_schema_index(
                     &root,
-                    &schema_config,
+                    &laravel_config,
+                    &bp_macros,
                 ) {
                     Ok(index) => {
                         self.resolved_class_cache
@@ -3052,11 +3054,13 @@ impl Backend {
         root: &std::path::Path,
     ) -> bool {
         let mut composer_changed = false;
-        let mut schema_changed = false;
+        let mut schema_full_rebuild = false;
+        let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
+            let laravel_config = self.config().laravel;
             for change in &params.changes {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -3066,11 +3070,21 @@ impl Backend {
                 if let Ok(file_path) = change.uri.to_file_path()
                     && crate::virtual_members::laravel::database_schema::SchemaIndex::watched_path_affects_schema(
                         root,
-                        &self.config().laravel.schema,
+                        &laravel_config,
                         &file_path,
                     )
                 {
-                    schema_changed = true;
+                    if laravel_config.migrations.enabled()
+                        && crate::virtual_members::laravel::database_schema::is_migration_php_file(
+                            root,
+                            &laravel_config.migrations,
+                            &file_path,
+                        )
+                    {
+                        migration_changes.push((file_path, change.typ));
+                    } else {
+                        schema_full_rebuild = true;
+                    }
                     continue;
                 }
                 if !path_str.ends_with(".php") {
@@ -3102,7 +3116,11 @@ impl Backend {
             }
         }
 
-        if php_changes.is_empty() && !composer_changed && !schema_changed {
+        if php_changes.is_empty()
+            && !composer_changed
+            && !schema_full_rebuild
+            && migration_changes.is_empty()
+        {
             return false;
         }
 
@@ -3127,9 +3145,15 @@ impl Backend {
             self.rescan_composer_indexes(root);
         }
 
-        if schema_changed {
+        if schema_full_rebuild {
             tracing::info!("PHPantom: Laravel schema files changed, reloading schema index");
             self.reload_laravel_schema_index(root);
+        } else if !migration_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} migration file(s) changed, incremental schema update",
+                migration_changes.len()
+            );
+            self.update_laravel_migrations(&migration_changes);
         }
 
         true
@@ -3140,11 +3164,13 @@ impl Backend {
             *self.config.lock() = cfg;
         }
 
-        let schema_config = self.config().laravel.schema;
-        let index = if schema_config.enabled() {
+        let laravel_config = self.config().laravel;
+        let index = if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
+            let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
             match crate::virtual_members::laravel::database_schema::load_schema_index(
                 root,
-                &schema_config,
+                &laravel_config,
+                &bp_macros,
             ) {
                 Ok(index) => index,
                 Err(err) => {
@@ -3162,6 +3188,35 @@ impl Backend {
         *self.schema_index.write() = index;
         self.resolved_class_cache.write().clear();
         self.member_completion_cache.lock().clear();
+    }
+
+    fn update_laravel_migrations(&self, changes: &[(PathBuf, FileChangeType)]) {
+        let mut index = self.schema_index.write();
+        let mut any_changed = false;
+        for (path, change_type) in changes {
+            if *change_type == FileChangeType::DELETED {
+                if index.remove_migration_file(path) {
+                    any_changed = true;
+                }
+            } else {
+                match std::fs::read_to_string(path) {
+                    Ok(content) => {
+                        index.update_migration_file(path, content);
+                        any_changed = true;
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to read migration file {}: {}", path.display(), err);
+                    }
+                }
+            }
+        }
+        if any_changed {
+            self.resolved_class_cache
+                .write()
+                .set_schema_index(index.clone());
+            self.resolved_class_cache.write().clear();
+            self.member_completion_cache.lock().clear();
+        }
     }
 
     /// Rebuild the vendor-derived indexes after a `composer.json` /
