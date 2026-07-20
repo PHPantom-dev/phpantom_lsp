@@ -3419,6 +3419,8 @@ fn process_statement<'b>(
         }
         Statement::Return(ret) => {
             if let Some(val) = ret.value {
+                process_assignment_expr(val, scope, ctx);
+
                 // Record `&&` chain snapshots so that member accesses
                 // after an instanceof/null guard see the narrowed type.
                 // E.g. `return $x instanceof Foo && $x->bar()`
@@ -3486,6 +3488,8 @@ fn process_expression_statement<'b>(
     // Process assignments.
     process_assignment_expr(expr, scope, ctx);
 
+    process_by_ref_closure_captures(expr, scope, ctx);
+
     // Process pass-by-reference parameter type inference.
     process_pass_by_ref(expr, scope, ctx);
 
@@ -3494,6 +3498,367 @@ fn process_expression_statement<'b>(
 
     // Process increment/decrement: $a++, ++$a, $a--, --$a.
     process_increment_decrement(expr, scope, ctx);
+}
+
+fn process_by_ref_closure_captures<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match expr {
+        Expression::Call(Call::Function(fc)) => {
+            let Some(func_name) = (match fc.function {
+                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+                _ => None,
+            }) else {
+                return;
+            };
+
+            for (arg_idx, arg) in fc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && function_invokes_callable_arg_immediately(&func_name, arg_idx, ctx)
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Call(Call::Method(mc)) => {
+            let Some(method_name) = (match &mc.method {
+                ClassLikeMemberSelector::Identifier(ident) => {
+                    Some(bytes_to_str(ident.value).to_string())
+                }
+                _ => None,
+            }) else {
+                return;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            if receiver_names.is_empty() {
+                return;
+            }
+
+            for (arg_idx, arg) in mc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && method_invokes_callable_arg_immediately(
+                        &receiver_names,
+                        &method_name,
+                        arg_idx,
+                        ctx,
+                    )
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Call(Call::NullSafeMethod(mc)) => {
+            let Some(method_name) = (match &mc.method {
+                ClassLikeMemberSelector::Identifier(ident) => {
+                    Some(bytes_to_str(ident.value).to_string())
+                }
+                _ => None,
+            }) else {
+                return;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            if receiver_names.is_empty() {
+                return;
+            }
+
+            for (arg_idx, arg) in mc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && method_invokes_callable_arg_immediately(
+                        &receiver_names,
+                        &method_name,
+                        arg_idx,
+                        ctx,
+                    )
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let Some(method_name) = (match &sc.method {
+                ClassLikeMemberSelector::Identifier(ident) => {
+                    Some(bytes_to_str(ident.value).to_string())
+                }
+                _ => None,
+            }) else {
+                return;
+            };
+            let receiver_names = static_receiver_class_names(sc.class, ctx);
+            if receiver_names.is_empty() {
+                return;
+            }
+
+            for (arg_idx, arg) in sc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && method_invokes_callable_arg_immediately(
+                        &receiver_names,
+                        &method_name,
+                        arg_idx,
+                        ctx,
+                    )
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Parenthesized(inner) => {
+            process_by_ref_closure_captures(inner.expression, scope, ctx);
+        }
+        Expression::Assignment(assignment) => {
+            process_by_ref_closure_captures(assignment.rhs, scope, ctx);
+        }
+        _ => {}
+    }
+}
+
+fn function_invokes_callable_arg_immediately(
+    func_name: &str,
+    arg_idx: usize,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    with_parsed_program(
+        ctx.content,
+        "function_invokes_callable_arg",
+        |program, _| {
+            program.statements.iter().any(|stmt| {
+                if let Statement::Function(func) = stmt
+                    && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
+                {
+                    let Some(param) = func.parameter_list.parameters.iter().nth(arg_idx) else {
+                        return false;
+                    };
+                    return !function_param_has_invocation_tag(
+                        func.name.span.start.offset as usize,
+                        ctx.content,
+                        bytes_to_str(param.variable.name),
+                        "param-later-invoked-callable",
+                    );
+                }
+                false
+            })
+        },
+    )
+}
+
+fn receiver_class_names(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<String> {
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => {
+            let var_name = bytes_to_str(dv.name);
+            if var_name == "$this" && !ctx.current_class.name.is_empty() {
+                return vec![
+                    ctx.current_class.name.to_string(),
+                    ctx.current_class.fqn().to_string(),
+                ];
+            }
+            scope
+                .get(var_name)
+                .iter()
+                .filter_map(|rt| rt.class_info.as_ref())
+                .flat_map(|cls| [cls.name.to_string(), cls.fqn().to_string()])
+                .collect()
+        }
+        Expression::Parenthesized(inner) => receiver_class_names(inner.expression, scope, ctx),
+        _ => Vec::new(),
+    }
+}
+
+fn static_receiver_class_names(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Vec<String> {
+    match expr {
+        Expression::Self_(_) | Expression::Static(_) if !ctx.current_class.name.is_empty() => {
+            vec![
+                ctx.current_class.name.to_string(),
+                ctx.current_class.fqn().to_string(),
+            ]
+        }
+        Expression::Parent(_) => ctx
+            .current_class
+            .parent_class
+            .map(|name| vec![name.to_string()])
+            .unwrap_or_default(),
+        Expression::Identifier(ident) => vec![bytes_to_str(ident.value()).to_string()],
+        Expression::Parenthesized(inner) => static_receiver_class_names(inner.expression, ctx),
+        _ => Vec::new(),
+    }
+}
+
+fn method_invokes_callable_arg_immediately(
+    receiver_names: &[String],
+    method_name: &str,
+    arg_idx: usize,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    with_parsed_program(ctx.content, "method_invokes_callable_arg", |program, _| {
+        program.statements.iter().any(|stmt| {
+            let members = match stmt {
+                Statement::Class(class)
+                    if class_name_matches_receiver(class.name.value, receiver_names) =>
+                {
+                    Some(class.members.iter())
+                }
+                _ => None,
+            };
+
+            let Some(members) = members else {
+                return false;
+            };
+
+            members.into_iter().any(|member| {
+                if let ClassLikeMember::Method(method) = member
+                    && bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name)
+                {
+                    let Some(param) = method.parameter_list.parameters.iter().nth(arg_idx) else {
+                        return false;
+                    };
+                    return node_param_has_invocation_tag(
+                        method.name.span.start.offset as usize,
+                        ctx.content,
+                        bytes_to_str(param.variable.name),
+                        "param-immediately-invoked-callable",
+                    );
+                }
+                false
+            })
+        })
+    })
+}
+
+fn class_name_matches_receiver(name: &[u8], receiver_names: &[String]) -> bool {
+    let class_name = bytes_to_str(name);
+    receiver_names.iter().any(|receiver| {
+        receiver.eq_ignore_ascii_case(class_name)
+            || crate::util::short_name(receiver).eq_ignore_ascii_case(class_name)
+    })
+}
+
+fn function_param_has_invocation_tag(
+    node_start: usize,
+    content: &str,
+    param_name: &str,
+    tag_name: &str,
+) -> bool {
+    node_param_has_invocation_tag(node_start, content, param_name, tag_name)
+}
+
+fn node_param_has_invocation_tag(
+    node_start: usize,
+    content: &str,
+    param_name: &str,
+    tag_name: &str,
+) -> bool {
+    let Some(docblock) = preceding_docblock_text(content, node_start) else {
+        return false;
+    };
+    docblock.lines().any(|line| {
+        let line = line
+            .trim()
+            .trim_start_matches("/**")
+            .trim_start_matches('*')
+            .trim_end_matches("*/")
+            .trim();
+        line.starts_with(&format!("@{tag_name}"))
+            && line
+                .split_whitespace()
+                .any(|part| part.trim_matches(',') == param_name)
+    })
+}
+
+fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
+    let before = content.get(..node_start)?;
+    let doc_end = before.rfind("*/")? + 2;
+    let between = &before[doc_end..];
+    if between.contains(';') || between.contains('{') || between.contains('}') {
+        return None;
+    }
+    let doc_start = before[..doc_end].rfind("/**")?;
+    Some(&before[doc_start..doc_end])
+}
+
+fn process_by_ref_closure_capture<'b>(
+    closure: &'b Closure<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let captured: Vec<String> = closure
+        .use_clause
+        .as_ref()
+        .map(|use_clause| {
+            use_clause
+                .variables
+                .iter()
+                .filter(|use_var| use_var.ampersand.is_some())
+                .map(|use_var| bytes_to_str(use_var.variable.name).to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    if captured.is_empty() {
+        return;
+    }
+
+    let full_ctx = ctx.with_cursor_offset(u32::MAX);
+    let mut closure_scope = ScopeState::new();
+
+    let this_types = scope.get("$this");
+    if !this_types.is_empty() {
+        closure_scope.set("$this", this_types.to_vec());
+    }
+
+    if let Some(ref use_clause) = closure.use_clause {
+        for use_var in use_clause.variables.iter() {
+            let var_name = bytes_to_str(use_var.variable.name).to_string();
+            let from_outer = scope.get(&var_name);
+            if !from_outer.is_empty() {
+                closure_scope.set(&var_name, from_outer.to_vec());
+            } else if scope.contains(&var_name) {
+                closure_scope.set_empty(&var_name);
+            }
+        }
+    }
+
+    seed_closure_params(
+        &mut closure_scope,
+        &closure.parameter_list,
+        closure.span().start.offset,
+        &[],
+        &full_ctx,
+    );
+
+    walk_body_forward(
+        closure.body.statements.iter(),
+        &mut closure_scope,
+        &full_ctx,
+    );
+
+    for var_name in captured {
+        scope.invalidate_dependent_keys(&var_name);
+        let types = closure_scope.get(&var_name).to_vec();
+        if !types.is_empty() {
+            scope.set(&var_name, types);
+        } else if closure_scope.contains(&var_name) {
+            scope.set_empty(&var_name);
+        }
+    }
 }
 
 /// Process increment/decrement expressions (`$a++`, `++$a`, `$a--`, `--$a`).
