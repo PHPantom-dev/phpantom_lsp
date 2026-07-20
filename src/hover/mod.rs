@@ -75,8 +75,13 @@ fn format_property_source(source: &PropertySource) -> Vec<String> {
         PropertySource::DatabaseColumn {
             column,
             attribute_default,
+            mutator,
         } => {
-            let mut lines = vec!["source: database column".to_string()];
+            let mut lines = vec![if mutator.is_some() {
+                "source: database column and mutator".to_string()
+            } else {
+                "source: database column".to_string()
+            }];
             lines.extend(format_database_column_details(column));
             if let Some(default) = attribute_default {
                 lines.extend(format_attribute_default_details(default));
@@ -87,8 +92,13 @@ fn format_property_source(source: &PropertySource) -> Vec<String> {
             cast,
             column,
             attribute_default,
+            mutator,
         } => {
-            let mut lines = vec![format!("source: cast `{}`", cast)];
+            let mut lines = vec![if mutator.is_some() {
+                format!("source: cast `{}` and mutator", cast)
+            } else {
+                format!("source: cast `{}`", cast)
+            }];
             if let Some(column) = column {
                 lines.extend(format_database_column_details(column));
             }
@@ -97,24 +107,40 @@ fn format_property_source(source: &PropertySource) -> Vec<String> {
             }
             lines
         }
-        PropertySource::Accessor { method, column } => {
-            let mut lines = vec![format!("source: accessor `{}`", method)];
+        PropertySource::Accessor {
+            column, mutator, ..
+        } => {
+            let mut lines = vec![if mutator.is_some() {
+                "source: accessor and mutator".to_string()
+            } else {
+                "source: accessor".to_string()
+            }];
             if let Some(column) = column {
                 lines.extend(format_database_column_details(column));
             }
             lines
         }
-        PropertySource::AttributeDefault { default, column } => {
-            let mut lines = vec!["source: attribute default".to_string()];
+        PropertySource::AttributeDefault {
+            default,
+            column,
+            mutator,
+        } => {
+            let mut lines = vec![if mutator.is_some() {
+                "source: attribute default and mutator".to_string()
+            } else {
+                "source: attribute default".to_string()
+            }];
             if let Some(column) = column {
                 lines.extend(format_database_column_details(column));
             }
             lines.extend(format_attribute_default_details(default));
             lines
         }
-        PropertySource::ComputedProperty { method } => {
-            vec![format!("source: computed property `{}`", method)]
-        }
+        PropertySource::ComputedProperty { mutator, .. } => vec![if mutator.is_some() {
+            "source: computed property and mutator".to_string()
+        } else {
+            "source: computed property".to_string()
+        }],
         PropertySource::Relationship { method, kind } => {
             vec![format!("source: relationship `{}` ({})", method, kind)]
         }
@@ -396,8 +422,8 @@ pub(crate) use formatting::{
 /// lookup logic.
 enum HoverMemberHit {
     Method(Box<MethodInfo>),
-    Property(PropertyInfo),
-    Constant(ConstantInfo),
+    Property(Box<PropertyInfo>),
+    Constant(Box<ConstantInfo>),
 }
 
 impl Backend {
@@ -517,10 +543,10 @@ impl Backend {
                 .map(|m| HoverMemberHit::Method(Box::new(m.clone())))
         } else {
             if let Some(prop) = class.properties.iter().find(|p| p.name == member_name) {
-                return Some(HoverMemberHit::Property(prop.clone()));
+                return Some(HoverMemberHit::Property(Box::new(prop.clone())));
             }
             if let Some(constant) = class.constants.iter().find(|c| c.name == member_name) {
-                return Some(HoverMemberHit::Constant(constant.clone()));
+                return Some(HoverMemberHit::Constant(Box::new(constant.clone())));
             }
             class
                 .get_method_ci(member_name)

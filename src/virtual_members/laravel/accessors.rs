@@ -34,6 +34,15 @@ pub(super) fn is_legacy_accessor(method: &MethodInfo) -> bool {
     middle.starts_with(|c: char| c.is_uppercase())
 }
 
+pub(super) fn is_legacy_mutator(method: &MethodInfo) -> bool {
+    let name = &method.name;
+    if !name.starts_with("set") || !name.ends_with("Attribute") {
+        return false;
+    }
+    let middle = &name[3..name.len() - 9];
+    !middle.is_empty() && middle.starts_with(|c: char| c.is_uppercase())
+}
+
 /// Extract the virtual property name from a legacy accessor method name.
 ///
 /// Strips `get` prefix and `Attribute` suffix, then converts the
@@ -42,6 +51,11 @@ pub(super) fn is_legacy_accessor(method: &MethodInfo) -> bool {
 /// `getFullNameAttribute` → `full_name`
 /// `getNameAttribute` → `name`
 pub(super) fn legacy_accessor_property_name(method_name: &str) -> String {
+    let middle = &method_name[3..method_name.len() - 9];
+    camel_to_snake(middle)
+}
+
+pub(super) fn legacy_mutator_property_name(method_name: &str) -> String {
     let middle = &method_name[3..method_name.len() - 9];
     camel_to_snake(middle)
 }
@@ -91,12 +105,12 @@ pub(super) fn extract_modern_accessor_type(method: &MethodInfo) -> PhpType {
 /// that happens to share the camelCase name.  For example,
 /// `masterRecipe()` returning `BelongsToMany` is NOT an accessor even
 /// though `snake_to_camel("master_recipe")` produces `"masterRecipe"`.
-pub(crate) fn is_accessor_method(class: &ClassInfo, method_name: &str) -> bool {
+pub(crate) fn is_accessor_or_mutator_method(class: &ClassInfo, method_name: &str) -> bool {
     let method = match class.get_method(method_name) {
         Some(m) => m,
         None => return false,
     };
-    is_legacy_accessor(method) || is_modern_accessor(method)
+    is_legacy_accessor(method) || is_legacy_mutator(method) || is_modern_accessor(method)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

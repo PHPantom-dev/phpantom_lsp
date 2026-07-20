@@ -186,6 +186,11 @@ pub(crate) fn legacy_accessor_method_name(property_name: &str) -> String {
     format!("get{pascal}Attribute")
 }
 
+pub(crate) fn legacy_mutator_method_name(property_name: &str) -> String {
+    let pascal = snake_to_pascal(property_name);
+    format!("set{pascal}Attribute")
+}
+
 /// Return candidate accessor method names for a virtual property name.
 ///
 /// Go-to-definition uses this to map a snake_case virtual property back
@@ -195,6 +200,7 @@ pub(crate) fn legacy_accessor_method_name(property_name: &str) -> String {
 pub(crate) fn accessor_method_candidates(property_name: &str) -> Vec<String> {
     vec![
         legacy_accessor_method_name(property_name),
+        legacy_mutator_method_name(property_name),
         snake_to_camel(property_name),
     ]
 }

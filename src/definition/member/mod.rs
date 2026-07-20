@@ -41,7 +41,7 @@ use crate::types::*;
 use crate::util::{find_class_at_offset, position_to_offset};
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, accessor_method_candidates, count_property_to_relationship_method,
-    extends_eloquent_model, is_accessor_method, where_property_method_to_column,
+    extends_eloquent_model, is_accessor_or_mutator_method, where_property_method_to_column,
 };
 
 /// Pre-extracted context for a member definition lookup.
@@ -262,7 +262,9 @@ impl Backend {
                                                         &class_loader,
                                                     )
                                                     .filter(|(cls, _)| {
-                                                        is_accessor_method(cls, &candidate)
+                                                        is_accessor_or_mutator_method(
+                                                            cls, &candidate,
+                                                        )
                                                     })
                                                     .map(|(cls, fqn)| (candidate, cls, fqn))
                                                 });
@@ -315,6 +317,21 @@ impl Backend {
                         }
                     }
                 };
+
+            if access_hint == MemberAccessHint::PropertyAccess
+                && is_accessor_or_mutator_method(&declaring_class, &search_name)
+                && let Some((class_uri, class_content)) =
+                    self.find_class_file_content(&declaring_fqn, uri, content)
+                && let Some(member_position) = Self::find_member_position(
+                    &class_content,
+                    &search_name,
+                    MemberKind::Method,
+                    declaring_class.member_name_offset(&search_name, "method"),
+                )
+                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            {
+                return Some(point_location(parsed_uri, member_position));
+            }
 
             // ── Eloquent array entry fallback (pre-classify) ─────────────────
             // Virtual properties synthesised from $casts, $dates, $attributes,
@@ -486,7 +503,9 @@ impl Backend {
                                             &candidate,
                                             &class_loader,
                                         )
-                                        .filter(|(cls, _)| is_accessor_method(cls, &candidate))
+                                        .filter(|(cls, _)| {
+                                            is_accessor_or_mutator_method(cls, &candidate)
+                                        })
                                         .map(|(cls, fqn)| (candidate, cls, fqn))
                                     });
                                 match accessor_match {

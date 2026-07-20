@@ -179,7 +179,10 @@ fn accessor_method_legacy() {
         "getFullNameAttribute",
         Some("string"),
     )));
-    assert!(is_accessor_method(&class, "getFullNameAttribute"));
+    assert!(is_accessor_or_mutator_method(
+        &class,
+        "getFullNameAttribute"
+    ));
 }
 
 #[test]
@@ -189,13 +192,13 @@ fn accessor_method_modern() {
         "fullName",
         Some("Illuminate\\Database\\Eloquent\\Casts\\Attribute"),
     )));
-    assert!(is_accessor_method(&class, "fullName"));
+    assert!(is_accessor_or_mutator_method(&class, "fullName"));
 }
 
 #[test]
 fn accessor_method_not_found() {
     let class = make_class("App\\Models\\User");
-    assert!(!is_accessor_method(&class, "nonexistent"));
+    assert!(!is_accessor_or_mutator_method(&class, "nonexistent"));
 }
 
 #[test]
@@ -204,5 +207,5 @@ fn accessor_method_non_accessor() {
     class
         .methods
         .push(Arc::new(make_method("posts", Some("HasMany<Post>"))));
-    assert!(!is_accessor_method(&class, "posts"));
+    assert!(!is_accessor_or_mutator_method(&class, "posts"));
 }
