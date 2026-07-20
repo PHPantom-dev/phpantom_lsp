@@ -1582,16 +1582,30 @@ impl Backend {
             .write()
             .retain(|_, d| !uri_set.contains(d.file_uri.as_str()));
 
-        // Per-URI keyed removals are cheap (no full scan).
-        for (uri_str, _, _) in changes {
-            self.clear_file_maps(uri_str);
-            self.uri_classes_index.write().remove(uri_str);
-            self.parsed_uris.write().remove(uri_str);
-            // The global_functions/global_defines entries for these URIs were
-            // just retained out above; drop the per-URI tracking record too so
-            // deleted files don't leave a stale entry behind.  Created/changed
-            // files rebuild it when re-parsed below.
-            self.uri_globals_index.write().remove(uri_str);
+        // Per-URI keyed removals are cheap (no full scan).  Like the
+        // retain-based purges above, clear both URI spellings: the editor
+        // URI from the watcher event and the canonical `file://` URI the
+        // background indexer stores.  Missing the canonical spelling would
+        // leave a stale symbol map that also blocks re-parsing (the
+        // workspace-index walk skips files that already have one).
+        for (uri_str, path, _) in changes {
+            let canonical_uri = crate::util::path_to_uri(path);
+            let spellings = if canonical_uri == *uri_str {
+                vec![uri_str.as_str()]
+            } else {
+                vec![uri_str.as_str(), canonical_uri.as_str()]
+            };
+            for uri in spellings {
+                self.clear_file_maps(uri);
+                self.uri_classes_index.write().remove(uri);
+                self.parsed_uris.write().remove(uri);
+                // The global_functions/global_defines entries for these URIs
+                // were just retained out above; drop the per-URI tracking
+                // record too so deleted files don't leave a stale entry
+                // behind.  Created/changed files rebuild it when re-parsed
+                // below.
+                self.uri_globals_index.write().remove(uri);
+            }
         }
 
         // Re-add current symbols for created/changed files.  Deleted files

@@ -415,7 +415,19 @@ impl Backend {
 
         let hierarchy = self.collect_hierarchy_for_fqns(&targets);
 
-        let snapshot = self.user_file_symbol_maps();
+        // Macros are invoked both statically (`Widget::shine()`) and on
+        // instances (`$widget->shine()`), so prune candidate files with
+        // both member-key variants.
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&[
+            ReferenceIndexKey::Member {
+                name: name.to_string(),
+                is_static: false,
+            },
+            ReferenceIndexKey::Member {
+                name: name.to_string(),
+                is_static: true,
+            },
+        ]);
         let mut locations = Vec::new();
         for (file_uri, symbol_map) in &snapshot {
             if symbol_map.member_access_indices(name).is_empty() {
@@ -2600,8 +2612,10 @@ impl Backend {
                 );
             }
             report_workspace_index_progress(progress, 99, "Finalizing workspace index");
+            // Release pairs with the Acquire loads in
+            // `reference_candidate_uris_for_keys` and `find_implementors`.
             self.workspace_indexed
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+                .store(true, std::sync::atomic::Ordering::Release);
         }
         report_workspace_index_progress(progress, 100, "Workspace index ready");
         tracing::info!("ensure_workspace_indexed: total time {:?}", start.elapsed());

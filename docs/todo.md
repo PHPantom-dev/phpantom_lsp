@@ -21,16 +21,13 @@ within the same impact tier.
 
 # Scheduled Sprints
 
-## Sprint 5 — 0.9.0 release
-
-| #   | Item                                                                                                                  | Impact     | Effort |
-| --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-
-## Sprint 6 — 0.10.0 release, editor plugins & type intelligence
+## Sprint 6 — 0.10.0 release, full indexing
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| P31 | [Reference index stores per-span entries when consumers only read distinct URIs](todo/performance.md#p31-reference-index-stores-per-span-entries-when-consumers-only-read-distinct-uris)          | Medium      | Low-Medium  |
+| X10 | [Interactive requests block on the workspace index lock during initial indexing](todo/indexing.md#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing) | Medium      | Medium      |
 | L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |
 | L18 | [`Macroable::mixin()` registrations](todo/laravel.md#l18-macroablemixin-registrations)                                                                          | Low         | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion--upstream-method-template-improvement)                                                                 | High        | High        |

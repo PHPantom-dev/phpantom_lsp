@@ -76,9 +76,15 @@ strategy = "full"
 
 ### `"full"` (default)
 
-Background-parse user PHP files for rich intelligence after discovery.
-This is the zero-config experience and populates the symbol/reference
-indexes used by workspace-wide navigation.
+Background-parse every user PHP file in the workspace after discovery.
+Uses Composer data to guide file discovery when available, falls back
+to scanning all PHP files in the workspace when it is not. Populates
+the uri_classes_index, symbol_maps, the cross-file reference index,
+and all derived indices. Enables workspace symbols, fast
+find-references without on-demand scanning, and rich hover on
+completion items. Vendor files are not background-parsed; they are
+still resolved lazily on demand. Memory usage grows proportionally to
+project size. This is the zero-config experience.
 
 ### `"composer"`
 
@@ -94,15 +100,6 @@ Always build the classmap ourselves. Ignores `autoload_classmap.php`
 entirely. Equivalent to the merged approach with an empty skip set.
 For users who prefer PHPantom's own scanner or who are actively
 editing `composer.json` dependencies.
-
-### `"full"`
-
-Background-parse every PHP file in the project. Uses Composer data to
-guide file discovery when available, falls back to scanning all PHP
-files in the workspace when it is not. Populates the uri_classes_index,
-symbol_maps, and all derived indices. Enables workspace symbols, fast
-find-references without on-demand scanning, and rich hover on
-completion items. Memory usage grows proportionally to project size.
 
 ### `"none"`
 
@@ -435,6 +432,50 @@ ready to implement.
    server restart). Cross-session persistence is a nice-to-have but
    not essential; the affinity table already provides a good cold-start
    ordering.
+
+---
+
+## X10. Interactive requests block on the workspace index lock during initial indexing
+
+**Impact: Medium · Effort: Medium**
+
+The full background index holds `workspace_index_lock` for its entire
+run. Any request that reaches `ensure_workspace_indexed` during that
+window parks on the lock until the whole workspace parse finishes
+(tens of seconds on large projects):
+
+- **Laravel string-key completion** (`config('`, `route('`, `view('`,
+  `__('`): the key enumerations call `user_file_symbol_maps()`, so
+  the first such completion during startup stalls instead of
+  returning what is already parsed. Same for the invalid-string-key
+  diagnostics pass on open files.
+- **Find References / Rename**: these need complete data, so waiting
+  is semantically right, but the user gets no signal that the wait is
+  the index (the request's own progress token stays at "Resolving…").
+- **Go to Implementation** (full strategy, index not yet ready):
+  blocks the same way.
+
+Core completion, hover, and go-to-definition are unaffected (they use
+lazy per-class loading and never touch the index lock), which is the
+main responsiveness guarantee to preserve.
+
+### Direction
+
+Completeness-critical consumers (references, rename, GTI) should keep
+waiting but report "waiting for workspace index" through their
+progress token. Best-effort consumers (string-key completion, the
+string-key diagnostics pass) should not call
+`ensure_workspace_indexed` while `full_index_in_progress` is set;
+they should serve partial results from the current `symbol_maps`
+snapshot and rely on the post-index `workspace/diagnostic/refresh`
+to correct anything that was missing. Additionally, the config /
+view / translation enumerations are directory-scoped (`config/`,
+`resources/views/`, `lang/`) and could be fed by targeted scans that
+do not depend on the full workspace parse at all.
+
+Related but separate: the deferred X2 priority-aware scheduling
+covers the CPU-contention side (index workers saturating all cores);
+this item covers the lock-blocking side.
 
 ---
 

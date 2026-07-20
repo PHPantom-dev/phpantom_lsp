@@ -2083,6 +2083,59 @@ async fn test_macro_registration_string_references_include_call_sites() {
 }
 
 #[tokio::test]
+async fn test_macro_registration_string_references_use_reference_index_candidates() {
+    let backend = Backend::new_test();
+    let class_uri = Url::parse("file:///Widget.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+    let unrelated_uri = Url::parse("file:///Unrelated.php").unwrap();
+
+    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "function demo(Widget $widget): void {\n",
+        "    Widget::shine();\n",
+        "    $widget->shine();\n",
+        "}\n",
+    );
+    let unrelated_text = concat!("<?php\n", "namespace App;\n", "class Unrelated {}\n",);
+
+    open_file(&backend, &class_uri, class_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    open_file(&backend, &unrelated_uri, unrelated_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    // With the workspace marked indexed, the macro search prunes the
+    // snapshot to reference-index candidates instead of scanning every
+    // file; both the static and the instance call must survive pruning.
+    backend.workspace_indexed.store(true, Ordering::Release);
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let locs = find_references(&backend, &provider_uri, line, character, true).await;
+    assert_eq!(
+        locs.len(),
+        3,
+        "expected declaration + static + instance call via candidate pruning: {locs:?}"
+    );
+    assert!(locs.iter().any(|loc| loc.uri == provider_uri));
+    assert!(locs.iter().any(|loc| {
+        loc.uri == caller_uri && loc.range.start.line == 4 && loc.range.start.character == 12
+    }));
+    assert!(locs.iter().any(|loc| {
+        loc.uri == caller_uri && loc.range.start.line == 5 && loc.range.start.character == 13
+    }));
+}
+
+#[tokio::test]
 async fn test_macro_references_from_descendant_call_include_ancestor_and_sibling_calls() {
     let backend = Backend::new_test();
     let base_uri = Url::parse("file:///BaseCollection.php").unwrap();

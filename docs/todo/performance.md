@@ -835,6 +835,42 @@ waiting on the triggers above.
 
 ---
 
+## P31. Reference index stores per-span entries when consumers only read distinct URIs
+
+**Impact: Medium · Effort: Low-Medium**
+
+The cross-file reference candidate index (`reference_index`) stores
+one entry per matching span, each with its own cloned URI `String`
+plus `start`/`end` offsets and an `is_declaration` flag. The only
+consumer (`reference_candidate_uris_for_keys`) reads nothing but the
+distinct URIs per key; the offsets and the declaration flag are never
+read anywhere. Class and function spans additionally fan out into up
+to three name keys each (FQN, source spelling, short name), each with
+its own entry copy. On a large project this multiplies out to
+millions of heap-allocated URI strings held for the whole session —
+against the full-index memory aim — and the index is built on every
+`update_ast` in *all* indexing strategies and in the headless
+`analyze` pipeline, where it is never queried.
+
+Two directions, pick one:
+
+1. **Shrink to what is consumed.** Store deduplicated URIs per key
+   (e.g. `HashMap<Key, HashSet<Arc<str>>>` with per-file URI interning
+   so each file's URI is allocated once). Drop the unused fields.
+   Smallest change, keeps the current candidate-pruning design.
+2. **Make the spans pay for themselves.** Keep the per-span entries
+   but have find-references consume them directly (the original
+   O(k)-lookup goal), skipping the per-file symbol-map re-scan for
+   keys that cannot produce false positives (constants, Laravel
+   string keys). More work, bigger payoff.
+
+Also worth fixing while in there: building entries calls
+`file_context_at` (which clones the file's full use map) once per
+`self`/`static`/`parent` span; only the enclosing class and namespace
+are needed.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class
