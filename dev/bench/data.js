@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784529292892,
+  "lastUpdate": 1784561792308,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -97535,6 +97535,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.695,
             "range": "± 0.012",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "31686a75cb2d6519f61320678c9563516b0ef647",
+          "message": "feat: propagate by-reference closure capture types\n\nTrack assignments made inside closures that capture variables by reference\nwhen the closure is passed to an immediately-invoked callable. This updates\nthe outer variable scope so diagnostics do not keep the pre-call type, such\nas null, after the closure assigns a concrete value.\n\nFollow PHPStan's callable invocation defaults: standalone function callable\nparameters are treated as immediately invoked unless marked with\n@param-later-invoked-callable, while method callable parameters are treated\nas later invoked unless marked with @param-immediately-invoked-callable.\n\nAlso process assignments embedded in return expressions so patterns like\nreturn $foo = 1; update scope the same way as a standalone $foo = 1;\nstatement.\n\nFixes #246.",
+          "timestamp": "2026-07-20T10:26:15-05:00",
+          "tree_id": "b8ce1fdf0c0d6a08a21525953327c5a2e7f03c06",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/31686a75cb2d6519f61320678c9563516b0ef647"
+        },
+        "date": 1784561788453,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 6.823,
+            "range": "± 0.172",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.039,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.101,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.147,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.241,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.243,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.002,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.917,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.101,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.047,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.045,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.055,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 4.378,
+            "range": "± 0.023",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.205,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.264,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.064,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.046,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.11,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.097,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.081,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.18,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.047,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.741,
+            "range": "± 0.142",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.06,
+            "range": "± 0.048",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.037,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.035,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 70.674,
+            "range": "± 0.23",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.57,
+            "range": "± 0.021",
             "unit": "ms"
           }
         ]
