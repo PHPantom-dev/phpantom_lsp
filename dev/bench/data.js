@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784510061581,
+  "lastUpdate": 1784520800272,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -96575,6 +96575,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.37,
             "range": "± 0.086",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1dbbcdd4fd5317c322a67fa99ab600df57d2aaa5",
+          "message": "feat: discover package resources from service providers\n\nScan service providers for mergeConfigFrom(), loadViewsFrom(),\nloadTranslationsFrom(), loadJsonTranslationsFrom(), and\nloadRoutesFrom() calls. Resolve __DIR__-relative paths to the\nactual package files on disk and feed the results into the\nexisting string key infrastructure.\n\nThis enables completion, go-to-definition, and hover for config\nkeys, view templates, translation keys, and named routes that\nare registered by installed packages rather than defined in the\napp itself. For example, config(\"horizon.environments\") now\ncompletes and jumps to the key in vendor/laravel/horizon/config/\nhorizon.php, and view(\"horizon::layout\") resolves to the\npackage view directory.\n\nThe scanner reuses the same provider list and one-level-deep\nhelper class traversal already used by macro discovery.\nDiscovered resources are cached on Backend and invalidate the\nstring key caches when populated.\n\nKey changes:\n- New provider_resources.rs with ProviderResource,\n  ProviderResources, and extract_provider_resources()\n- extract_dir_concat_path() moved from route_names.rs to\n  helpers.rs for shared use\n- build_provider_resources() in server.rs walks providers\n  and their referenced classes\n- enumerate_all_{config_keys,view_names,trans_keys}() and\n  enumerate_all_route_names() extended to include package\n  resources\n- resolve_{config_key,view,trans,route}_definitions() extended\n  to handle namespaced package keys (ns::key, ns.key)",
+          "timestamp": "2026-07-20T06:02:59+02:00",
+          "tree_id": "e4d48f830e2bb453f3ff86e92ed173e79d4a847c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1dbbcdd4fd5317c322a67fa99ab600df57d2aaa5"
+        },
+        "date": 1784520797713,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 7.09,
+            "range": "± 0.395",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.046,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.125,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.164,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.254,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.262,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.961,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.888,
+            "range": "± 0.076",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.134,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.058,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.051,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.077,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 4.129,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.235,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.255,
+            "range": "± 0.015",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.084,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.054,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.129,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.128,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.104,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.201,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.096,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 6,
+            "range": "± 0.115",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.103,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.038,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.036,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 70.964,
+            "range": "± 0.364",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.774,
+            "range": "± 0.019",
             "unit": "ms"
           }
         ]
