@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784579798100,
+  "lastUpdate": 1784582742466,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17407,6 +17407,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4b0efe437a4fc48ee2a95e064cc70166ec6e96b5",
+          "message": "Implement granular progress indication",
+          "timestamp": "2026-07-20T23:11:17+02:00",
+          "tree_id": "00d502bb512c1463d637ab1d674b47900a401ab4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4b0efe437a4fc48ee2a95e064cc70166ec6e96b5"
+        },
+        "date": 1784582740235,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 54.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.2,
             "unit": "MiB"
           }
         ]
