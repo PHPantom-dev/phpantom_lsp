@@ -1413,9 +1413,7 @@ impl Backend {
             visibility, static_kw, native_type, property.name
         );
 
-        // Build the docblock annotation showing the effective type
-        // when it differs from the native one.
-        let var_annotation = build_var_annotation(
+        let var_section = build_var_section(
             property.type_hint.as_ref(),
             property.native_type_hint.as_ref(),
         );
@@ -1449,16 +1447,19 @@ impl Backend {
             lines.push(desc.clone());
         }
 
+        if let Some(section) = var_section {
+            lines.push(section);
+        }
+
         if let Some(ref msg) = property.deprecation_message {
             lines.push(format_deprecation_line(msg));
         }
 
-        let code = build_class_member_block_with_var(
+        let code = build_class_member_block(
             &owner.name,
             owner.file_namespace.as_deref(),
             owner_kind_keyword(owner),
             &owner_name_suffix(owner),
-            &var_annotation,
             &member_line,
         );
         lines.push(code);

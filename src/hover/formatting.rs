@@ -139,10 +139,9 @@ pub(super) fn namespace_line(namespace: Option<&str>) -> String {
     }
 }
 
-/// Build a `@var` docblock annotation when the effective type differs from
-/// the native type.  Returns `None` when they are identical or when there
-/// is no effective type.
-pub(super) fn build_var_annotation(
+/// Build a readable property type section when the effective type differs
+/// from the native type.
+pub(super) fn build_var_section(
     effective: Option<&PhpType>,
     native: Option<&PhpType>,
 ) -> Option<String> {
@@ -157,7 +156,7 @@ pub(super) fn build_var_annotation(
     {
         return None;
     }
-    Some(format!("@var {}", shorten_php_type(eff)))
+    Some(format!("**var** `{}`", shorten_php_type(eff)))
 }
 
 /// Build a readable markdown section showing parameter and return type
@@ -314,39 +313,6 @@ pub(super) fn owner_name_suffix(owner: &ClassInfo) -> String {
     } else {
         String::new()
     }
-}
-
-/// Build a PHP code block wrapping a member inside its owning class,
-/// with an optional single-line `/** @var ... */` annotation above it.
-///
-/// Used for properties where the effective (docblock) type differs from
-/// the native PHP type hint.
-pub(super) fn build_class_member_block_with_var(
-    owner_name: &str,
-    owner_namespace: Option<&str>,
-    kind_keyword: &str,
-    name_suffix: &str,
-    var_annotation: &Option<String>,
-    member_line: &str,
-) -> String {
-    let mut body = String::new();
-    let ns_line = namespace_line(owner_namespace);
-    body.push_str("```php\n<?php\n");
-    body.push_str(&ns_line);
-    body.push_str(kind_keyword);
-    body.push(' ');
-    body.push_str(owner_name);
-    body.push_str(name_suffix);
-    body.push_str(" {\n");
-    if let Some(annotation) = var_annotation {
-        body.push_str("    /** ");
-        body.push_str(annotation);
-        body.push_str(" */\n");
-    }
-    body.push_str("    ");
-    body.push_str(member_line);
-    body.push_str("\n}\n```");
-    body
 }
 
 /// Build hover content for a standalone function.
