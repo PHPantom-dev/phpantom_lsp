@@ -895,6 +895,68 @@ and delete the second pass entirely.
 
 ---
 
+## P33. Workspace diagnostics leaves the whole project fully resolved in memory
+
+**Impact: High · Effort: Medium-High**
+
+Enabling background workspace diagnostics raises resident memory
+several-fold over a full index alone. Measured on a mid-size Laravel
+project (~1,200 indexed user files, ~3,000 resolved classes) the live
+set after the pass is ~1.16 GB, of which the resolved-class cache is
+**~748 MB — about 65%**. Ranked by the RSS each structure releases
+when dropped: resolved-class cache ~748 MB, class indexes
+(`method_store` + `fqn_class_index` + `uri_classes_index`) ~99 MB,
+`symbol_maps` ~26 MB, `reference_index` ~14 MB (see P31). The cache
+holds ~247 KB per resolved class.
+
+Two compounding causes:
+
+1. **Inheritance flattening deep-clones methods.** Each fully-resolved
+   class stores the complete flattened member set (own + trait + parent
+   + interface + mixin). On the measured project that is 648 K method
+   slots across 3 K classes (~214 methods/class), and **82% of them are
+   distinct `MethodInfo` allocations** even though only ~20 K unique
+   methods exist in `method_store`. The driver is
+   `resolve_class_with_inheritance` (`inheritance.rs`): when a class has
+   generic parameters (`level_subs` non-empty, i.e. nearly every
+   Eloquent subclass) it deep-clones **every** inherited parent method
+   and runs `apply_substitution_to_method` on it, regardless of whether
+   the method body actually references the substituted template
+   parameter. A method that never mentions the template param is cloned
+   for no reason.
+
+2. **The cache is retained for the whole session, unbounded.** Eager
+   population plus lazy resolution during the pass fill the cache with
+   every class in the project, and nothing evicts it afterwards.
+   Interactive requests only ever touch a small working set, so the bulk
+   sits resident for nothing. (Disabling eager population does not help:
+   the per-file diagnostic pass refills the cache to the same size.)
+
+Fixes, cheapest first (each stands alone):
+
+1. **Copy-on-write substitution.** In the generic-substitution branch of
+   the inheritance merge, keep the original `Arc<MethodInfo>`
+   (`Arc::clone`) when the method references no key in `level_subs`;
+   only deep-clone + substitute the methods that actually mention a
+   template param. This collapses most of the 530 K distinct clones back
+   to shared `Arc`s and cuts both memory and merge CPU. Property and
+   constant merges have the same shape. **Medium.**
+2. **Bound the resolved-class cache.** After the workspace pass, the
+   fully-flattened metadata for every project class does not need to stay
+   resident. Either drop the cache when the pass finishes (interactive
+   requests re-resolve lazily) or make it an LRU with a size cap. Care is
+   needed not to reintroduce the re-entrant class-resolution recursion
+   that eager population (ER5) exists to prevent: a wholesale clear is
+   safe only once resolution can no longer recurse unboundedly, so an LRU
+   with a generous cap is the safer interim. **Low-Medium.**
+3. **Separated metadata (ER5 Phase 4).** The structural fix: store method
+   identifier `Atom`s per class and keep a single global `MethodInfo`
+   store, resolving members on demand instead of flattening a cloned copy
+   into every class (Mago's model). Eliminates the flattening entirely.
+   Tracked in `eager-resolution.md`. **High.**
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class
