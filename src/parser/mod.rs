@@ -22,7 +22,7 @@ mod use_statements;
 use crate::atom::{atom, bytes_to_str, last_segment};
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::php_type::PhpType;
 use crate::types::*;
@@ -218,7 +218,7 @@ fn extract_version_availability(
 
             for arg in arg_list.arguments.iter() {
                 match arg {
-                    argument::Argument::Named(named) => {
+                    argument::PartialArgument::Named(named) => {
                         let name = bytes_to_str(named.name.value).to_string();
                         let value = extract_string_literal_value(named.value, ctx.content);
                         if let Some(ver_str) = value {
@@ -230,13 +230,14 @@ fn extract_version_availability(
                             }
                         }
                     }
-                    argument::Argument::Positional(positional) => {
+                    argument::PartialArgument::Positional(positional) => {
                         // Positional argument is treated as `from`.
                         let value = extract_string_literal_value(positional.value, ctx.content);
                         if let Some(ver_str) = value {
                             from = PhpVersion::from_composer_constraint(&ver_str);
                         }
                     }
+                    _ => {}
                 }
             }
 
@@ -277,16 +278,17 @@ pub(crate) fn extract_language_level_type(
 
             for arg in arg_list.arguments.iter() {
                 match arg {
-                    argument::Argument::Named(named) => {
+                    argument::PartialArgument::Named(named) => {
                         let name = bytes_to_str(named.name.value).to_string();
                         if name == "default" {
                             default_type = extract_string_literal_value(named.value, ctx.content);
                         }
                     }
-                    argument::Argument::Positional(positional) => {
+                    argument::PartialArgument::Positional(positional) => {
                         // The positional argument is the version → type array.
                         extract_version_type_pairs(positional.value, ctx.content, &mut version_map);
                     }
+                    _ => {}
                 }
             }
 
@@ -358,8 +360,9 @@ pub(crate) fn extract_array_shape_type(
             // an associative array literal ["key" => "type", ...].
             let first_arg = arg_list.arguments.first()?;
             let expr = match first_arg {
-                argument::Argument::Positional(p) => p.value,
-                argument::Argument::Named(n) => n.value,
+                argument::PartialArgument::Positional(p) => p.value,
+                argument::PartialArgument::Named(n) => n.value,
+                _ => return None,
             };
 
             let elements: Box<dyn Iterator<Item = &ArrayElement<'_>>> = match expr {
@@ -607,7 +610,7 @@ pub(crate) fn extract_deprecated_attribute(
 
             for arg in arg_list.arguments.iter() {
                 match arg {
-                    argument::Argument::Named(named) => {
+                    argument::PartialArgument::Named(named) => {
                         let name = bytes_to_str(named.name.value).to_string();
                         let value = extract_string_literal_value(named.value, ctx.content);
                         match name.as_str() {
@@ -620,12 +623,11 @@ pub(crate) fn extract_deprecated_attribute(
                             _ => {}
                         }
                     }
-                    argument::Argument::Positional(positional) => {
-                        // First positional argument is the reason/message.
-                        if reason.is_none() {
-                            reason = extract_string_literal_value(positional.value, ctx.content);
-                        }
+                    // First positional argument is the reason/message.
+                    argument::PartialArgument::Positional(positional) if reason.is_none() => {
+                        reason = extract_string_literal_value(positional.value, ctx.content);
                     }
+                    _ => {}
                 }
             }
 
@@ -724,13 +726,13 @@ fn extract_string_literal_value(
 // During a single diagnostic pass the file content is immutable and
 // `with_parsed_program` may be called dozens of times for the same
 // content string (once per unique variable subject, plus secondary
-// helpers).  Each call allocates a fresh `Bump` arena and re-parses the
+// helpers).  Each call allocates a fresh `LocalArena` arena and re-parses the
 // entire file from scratch.
 //
 // The cache below eliminates that redundancy.  [`with_parse_cache`]
 // stores only the content `String` (cheap allocation, no parsing).
 // The first [`with_parsed_program`] call whose content matches then
-// lazily parses the file, storing the `Bump` arena and a raw pointer
+// lazily parses the file, storing the `LocalArena` arena and a raw pointer
 // to the resulting `Program`.  Subsequent calls reuse the cached AST.
 //
 // This lazy approach avoids paying the parse cost when the cache is
@@ -744,7 +746,7 @@ fn extract_string_literal_value(
 //
 // ## Safety
 //
-// The `Program<'arena>` borrows from the `Bump` arena.  Both live
+// The `Program<'arena>` borrows from the `LocalArena` arena.  Both live
 // inside the `Option<ParseCacheEntry>` stored in the thread-local
 // `RefCell`.  The raw pointer is reconstituted to a reference only
 // while the `RefCell` borrow is held and the entry is `Some`, so the
@@ -760,9 +762,9 @@ fn extract_string_literal_value(
 struct ParseCacheEntry {
     /// Owned copy of the source text.  Must outlive `program_ptr`.
     content: String,
-    /// Bump arena that owns all AST nodes.  `None` until the first
+    /// LocalArena that owns all AST nodes.  `None` until the first
     /// `with_parsed_program` call triggers a lazy parse.
-    arena: Option<bumpalo::Bump>,
+    arena: Option<mago_allocator::LocalArena>,
     /// Raw pointer to the `Program` allocated in `arena`.
     /// `None` until the first `with_parsed_program` call.
     /// Reconstituted to `&Program<'_>` only while the `RefCell` borrow
@@ -842,7 +844,7 @@ pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
 /// `Program` (plus the content string) to `f`.
 ///
 /// Handles the boilerplate that every parse entry-point needs:
-/// allocating a `Bump` arena, creating a `FileId`, calling
+/// allocating a `LocalArena` arena, creating a `FileId`, calling
 /// `parse_file_content`, and wrapping the whole thing in
 /// `catch_unwind` so that a parser panic doesn't crash the LSP
 /// server.  On panic the error is logged (using `method_name` for
@@ -873,45 +875,69 @@ pub(crate) fn with_parsed_program<T: Default>(
         }
     });
 
-    // Lazily parse on first access and populate the cache entry.
-    if cache_state == 1 {
-        PARSE_CACHE.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            let entry = borrow.as_mut().unwrap();
-            let arena = bumpalo::Bump::new();
-            let file_id = mago_database::file::FileId::new(b"input.php");
-            // SAFETY: `program` borrows from `arena` and `entry.content`.
-            // The arena is moved into `entry.arena` immediately after
-            // extracting the raw pointer — the heap-allocated chunks do
-            // not move, so the pointer stays valid.  `entry.content` lives
-            // inside the `RefCell` until the guard is dropped.
-            let program =
-                mago_syntax::parser::parse_file_content(&arena, file_id, entry.content.as_bytes());
-            let program_ptr: *const () = (program as *const Program<'_>).cast();
-            entry.program_ptr = Some(program_ptr);
-            entry.arena = Some(arena);
-        });
-    }
-
     if cache_state >= 1 {
-        return PARSE_CACHE.with(|cell| {
-            let borrow = cell.borrow();
-            let entry = borrow.as_ref().unwrap();
-            // SAFETY: `program_ptr` was created from a valid `&Program`
-            // whose backing arena and content string are still alive
-            // inside `entry`.  We hold a `Ref` borrow on the `RefCell`,
-            // so the entry cannot be mutated or dropped while we use
-            // the reference.
-            let program: &Program<'_> =
-                unsafe { &*(entry.program_ptr.unwrap().cast::<Program<'_>>()) };
-            f(program, &entry.content)
-        });
+        // The fast path runs both the lazy mago parse and the extraction
+        // closure `f`.  Wrap them in `catch_unwind` — like the slow path
+        // below — so a parser or extraction panic doesn't escape and
+        // violate this function's "a parser panic doesn't crash the LSP
+        // server" contract.  On panic the poisoned cache entry is evicted
+        // so the next call re-parses from scratch.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Lazily parse on first access and populate the cache entry.
+            if cache_state == 1 {
+                PARSE_CACHE.with(|cell| {
+                    let mut borrow = cell.borrow_mut();
+                    let entry = borrow.as_mut().unwrap();
+                    let arena = mago_allocator::LocalArena::new();
+                    let file_id = mago_database::file::FileId::new(b"input.php");
+                    // SAFETY: `program` borrows from `arena` and
+                    // `entry.content`.  The arena is moved into
+                    // `entry.arena` immediately after extracting the raw
+                    // pointer — the heap-allocated chunks do not move, so
+                    // the pointer stays valid.  `entry.content` lives
+                    // inside the `RefCell` until the guard is dropped.
+                    let program = mago_syntax::parser::parse_file_content(
+                        &arena,
+                        file_id,
+                        entry.content.as_bytes(),
+                    );
+                    let program_ptr: *const () = (program as *const Program<'_>).cast();
+                    entry.program_ptr = Some(program_ptr);
+                    entry.arena = Some(arena);
+                });
+            }
+
+            PARSE_CACHE.with(|cell| {
+                let borrow = cell.borrow();
+                let entry = borrow.as_ref().unwrap();
+                // SAFETY: `program_ptr` was created from a valid `&Program`
+                // whose backing arena and content string are still alive
+                // inside `entry`.  We hold a `Ref` borrow on the `RefCell`,
+                // so the entry cannot be mutated or dropped while we use
+                // the reference.
+                let program: &Program<'_> =
+                    unsafe { &*(entry.program_ptr.unwrap().cast::<Program<'_>>()) };
+                f(program, &entry.content)
+            })
+        }));
+
+        match outcome {
+            Ok(value) => return value,
+            Err(_) => {
+                // Evict the poisoned cache entry so the next call re-parses.
+                PARSE_CACHE.with(|cell| {
+                    *cell.borrow_mut() = None;
+                });
+                tracing::error!("PHPantom: parser panicked in {}", method_name);
+                return T::default();
+            }
+        }
     }
 
     // ── Slow path: parse from scratch ───────────────────────────
     let content_owned = content.to_string();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let arena = bumpalo::Bump::new();
+        let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program =
             mago_syntax::parser::parse_file_content(&arena, file_id, content_owned.as_bytes());
@@ -1033,7 +1059,7 @@ pub(crate) fn extract_parameters(
             // Check for a #[LanguageLevelTypeAware] override on the
             // parameter.  When present, it replaces the native type hint
             // with the version-appropriate type string.
-            let type_hint = if let Some(ver) = php_version
+            let mut type_hint = if let Some(ver) = php_version
                 && let Some(ctx) = doc_ctx
             {
                 extract_language_level_type_for_param(param, ctx, ver)
@@ -1041,6 +1067,16 @@ pub(crate) fn extract_parameters(
             } else {
                 native_type_hint.clone()
             };
+
+            // A parameter with a literal `null` default accepts null
+            // regardless of its type hint. This covers the pre-8.4
+            // implicit-nullable form `Type $x = null`, which PHP treats
+            // as `?Type`. Fold null into the effective type so callers
+            // passing null are not flagged. Re-applied after any docblock
+            // `@param` merge overwrites `type_hint` (see the callers).
+            if param_default_is_null(param) {
+                type_hint = type_hint.map(PhpType::or_null);
+            }
 
             let default_value = content.and_then(|src| {
                 let dv = param.default_value.as_ref()?;
@@ -1071,6 +1107,17 @@ pub(crate) fn extract_parameters(
             }
         })
         .collect()
+}
+
+/// Whether a parameter's default value is the literal `null`.
+///
+/// Used to detect the implicit-nullable form `Type $x = null`, which PHP
+/// treats as `?Type` (mandatory before 8.4, still permitted after).
+fn param_default_is_null(param: &function_like::parameter::FunctionLikeParameter<'_>) -> bool {
+    let Some(dv) = param.default_value.as_ref() else {
+        return false;
+    };
+    matches!(dv.value, Expression::Literal(Literal::Null(_)))
 }
 
 /// Resolve a class name from a parameter default (`Foo::class`) to its FQN
@@ -1351,5 +1398,56 @@ impl Backend {
         with_parsed_program(content, "parse_namespace", |program, _content| {
             Self::extract_namespace_from_statements(program.statements.iter())
         })
+    }
+}
+
+#[cfg(test)]
+mod with_parsed_program_tests {
+    //! A panic in the parser or extraction closure must be caught on the
+    //! thread-local-cache fast path too (not just the slow path), and the
+    //! poisoned cache entry must be evicted so the next call re-parses.
+
+    use super::{with_parse_cache, with_parsed_program};
+
+    #[test]
+    fn fast_path_lazy_parse_recovers_from_panic() {
+        let content = "<?php class Foo {}";
+        let _guard = with_parse_cache(content);
+
+        // First matching call lazily parses, then the closure panics.
+        // The fast path must catch it and return the default.
+        let caught: bool =
+            with_parsed_program(content, "test", |_program, _content| panic!("boom"));
+        assert!(
+            !caught,
+            "fast-path panic should be caught and default returned"
+        );
+
+        // The poisoned entry was evicted, so a later call re-parses and
+        // runs the closure normally.
+        let ok: bool = with_parsed_program(content, "test", |_program, _content| true);
+        assert!(ok, "after eviction the next call must re-parse and succeed");
+    }
+
+    #[test]
+    fn fast_path_ready_cache_recovers_from_panic() {
+        let content = "<?php class Bar {}";
+        let _guard = with_parse_cache(content);
+
+        // Prime the cache so the program is already parsed (ready state).
+        let primed: bool = with_parsed_program(content, "test", |_program, _content| true);
+        assert!(primed);
+
+        // A panic on the ready fast path is also caught.
+        let caught: bool =
+            with_parsed_program(content, "test", |_program, _content| panic!("boom"));
+        assert!(
+            !caught,
+            "ready-cache panic should be caught and default returned"
+        );
+
+        // And the entry is evicted so subsequent calls still work.
+        let ok: bool = with_parsed_program(content, "test", |_program, _content| true);
+        assert!(ok, "after eviction the next call must re-parse and succeed");
     }
 }

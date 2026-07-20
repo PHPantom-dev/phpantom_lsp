@@ -94,6 +94,48 @@
           "minimum": 0
         }
       }
+    },
+    "phpcs": {
+      "type": "object",
+      "description": "PHP_CodeSniffer proxy settings. PHPantom can run PHPCS on each file save and surface its findings as LSP diagnostics.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command or path to run PHPCS. Unset: auto-detect via vendor/bin/phpcs then $PATH. Empty string: disable PHPCS integration. Any other value: use as the command."
+        },
+        "standard": {
+          "type": "string",
+          "description": "Coding standard to enforce (e.g. \"PSR12\"). Unset: PHPCS uses its own default detection (phpcs.xml / phpcs.xml.dist in the project root, then its built-in default)."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Maximum runtime in milliseconds before PHPCS is killed.",
+          "default": 30000,
+          "minimum": 0
+        }
+      }
+    },
+    "mago": {
+      "type": "object",
+      "description": "Mago proxy settings. Mago is only activated when mago.toml exists at the workspace root. PHPantom can run mago lint and mago analyze on each file save and surface their findings as LSP diagnostics.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command or path to run Mago. Unset: auto-detect via vendor/bin/mago then $PATH. Empty string: disable Mago integration. Any other value: use as the command."
+        },
+        "lint-timeout": {
+          "type": "integer",
+          "description": "Maximum runtime in milliseconds before mago lint is killed.",
+          "default": 30000,
+          "minimum": 0
+        },
+        "analyze-timeout": {
+          "type": "integer",
+          "description": "Maximum runtime in milliseconds before mago analyze is killed.",
+          "default": 60000,
+          "minimum": 0
+        }
+      }
     }
   }
 }

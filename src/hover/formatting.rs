@@ -43,6 +43,32 @@ pub(super) fn format_deprecation_line(msg: &str) -> String {
     }
 }
 
+/// Format a provenance line showing where a symbol comes from.
+///
+/// Returns a short Markdown line with an emoji indicator:
+/// - `🟢 laravel/framework` — direct Composer dependency
+/// - `🟠 phpstan/phpstan` — transitive dependency
+/// - `🟣 PHP` — core/stub (built-in PHP class or extension)
+/// - `None` — project code (no badge needed)
+pub(super) fn format_provenance_line(
+    origin: crate::ClassCompletionOrigin,
+    package_name: Option<&str>,
+) -> Option<String> {
+    use crate::ClassCompletionOrigin;
+    match origin {
+        ClassCompletionOrigin::Project => None,
+        ClassCompletionOrigin::CoreStub => Some("🟣 `PHP`".to_string()),
+        ClassCompletionOrigin::VendorExplicit => {
+            let name = package_name.unwrap_or("vendor");
+            Some(format!("🟢 `{}`", name))
+        }
+        ClassCompletionOrigin::VendorTransitive => {
+            let name = package_name.unwrap_or("vendor");
+            Some(format!("🟠 `{}` *(transitive)*", name))
+        }
+    }
+}
+
 /// Format a visibility keyword.
 pub(super) fn format_visibility(vis: Visibility) -> &'static str {
     match vis {
@@ -166,6 +192,7 @@ pub(super) fn build_param_return_section(
     effective_return: Option<&PhpType>,
     native_return: Option<&PhpType>,
     return_description: Option<&str>,
+    is_inferred_return: bool,
 ) -> Option<String> {
     let mut entries = Vec::new();
 
@@ -209,11 +236,14 @@ pub(super) fn build_param_return_section(
     };
     let has_ret_desc = return_description.is_some_and(|d| !d.is_empty());
 
-    if ret_type_differs || has_ret_desc {
+    if ret_type_differs || has_ret_desc || (is_inferred_return && effective_return.is_some()) {
         let mut entry = String::from("**return**");
-        if ret_type_differs {
+        if ret_type_differs || (is_inferred_return && effective_return.is_some()) {
             if let Some(eff) = effective_return {
                 entry.push_str(&format!(" `{}`", shorten_php_type(eff)));
+            }
+            if is_inferred_return {
+                entry.push_str(" *(inferred)*");
             }
             if has_ret_desc {
                 entry.push_str("  \n\u{00a0}\u{00a0}\u{00a0}\u{00a0}");
@@ -323,6 +353,8 @@ pub(super) fn build_class_member_block_with_var(
 pub(crate) fn hover_for_function(
     func: &FunctionInfo,
     resolved_see: Option<&[ResolvedSeeRef]>,
+    provenance: Option<String>,
+    is_inferred_return: bool,
 ) -> Hover {
     let native_params = format_native_params(&func.parameters);
 
@@ -371,6 +403,7 @@ pub(crate) fn hover_for_function(
         func.return_type.as_ref(),
         func.native_return_type.as_ref(),
         func.return_description.as_deref(),
+        is_inferred_return,
     ) {
         lines.push(section);
     }
@@ -378,6 +411,10 @@ pub(crate) fn hover_for_function(
     // Build a clean code block with just the signature.
     let code = format!("```php\n<?php\n{}{};\n```", ns_line, signature);
     lines.push(code);
+
+    if let Some(prov) = provenance {
+        lines.push(prov);
+    }
 
     make_hover(lines.join("\n\n"))
 }
@@ -483,13 +520,20 @@ fn skip_type_token(s: &str) -> &str {
 
 /// Convert basic HTML markup in docblock text to Markdown equivalents.
 ///
-/// Handles `<b>`, `<i>`, `<code>`, `<br>`, and `<p>` tags.  This is a
-/// simple string-replacement pass, not a full HTML parser.
+/// Handles inline formatting (`<b>`/`<strong>`, `<i>`/`<em>`, `<code>`),
+/// line breaks (`<br>`, `<p>`), lists (`<ul>`/`<ol>`/`<li>`), and
+/// definition lists (`<dl>`/`<dt>`/`<dd>`); `<span>` is unwrapped. This is
+/// a simple string-replacement pass, not a full HTML parser, so tag
+/// matching is case-sensitive and attributes are not recognised.
 pub(crate) fn html_to_markdown(text: &str) -> String {
     text.replace("<b>", "**")
         .replace("</b>", "**")
+        .replace("<strong>", "**")
+        .replace("</strong>", "**")
         .replace("<i>", "*")
         .replace("</i>", "*")
+        .replace("<em>", "*")
+        .replace("</em>", "*")
         .replace("<code>", "`")
         .replace("</code>", "`")
         .replace("<br />", "\n")
@@ -497,6 +541,20 @@ pub(crate) fn html_to_markdown(text: &str) -> String {
         .replace("<br>", "\n")
         .replace("<p>", "\n\n")
         .replace("</p>", "")
+        .replace("<ul>", "\n")
+        .replace("</ul>", "\n")
+        .replace("<ol>", "\n")
+        .replace("</ol>", "\n")
+        .replace("<li>", "- ")
+        .replace("</li>", "\n")
+        .replace("<dl>", "\n")
+        .replace("</dl>", "\n")
+        .replace("<dt>", "\n**")
+        .replace("</dt>", "**")
+        .replace("<dd>", "\n  ")
+        .replace("</dd>", "")
+        .replace("<span>", "")
+        .replace("</span>", "")
 }
 
 /// Extract the description from a pre-parsed [`DocblockInfo`], applying

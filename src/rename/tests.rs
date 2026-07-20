@@ -1,6 +1,8 @@
 #![cfg(test)]
 
 use crate::Backend;
+use crate::virtual_members::laravel::extract_macro_registrations;
+use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -50,6 +52,27 @@ async fn rename(
     };
 
     backend.rename(params).await.unwrap()
+}
+
+fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
+    let mut index = backend.laravel_macros.write();
+    index.set_file(
+        uri.to_string(),
+        extract_macro_registrations(text, Some(*backend.php_version.lock())),
+    );
+    index.rebuild();
+    backend
+        .laravel_has_macros
+        .store(!index.is_empty(), Ordering::Relaxed);
+}
+
+fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
+    for (line_idx, line) in haystack.lines().enumerate() {
+        if let Some(char_idx) = line.find(needle) {
+            return (line_idx as u32, char_idx as u32);
+        }
+    }
+    panic!("needle not found: {needle}");
 }
 
 /// Collect all text edits for a given URI from a WorkspaceEdit.
@@ -1337,16 +1360,16 @@ async fn rename_class_updates_use_import() {
 
     let text_decl = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Resources;\n",
+        "namespace Acme\\Tasks\\Resources;\n",
         "\n",
         "class TaskResource {}\n",
     );
 
     let text_usage = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks;\n",
+        "namespace Acme\\Tasks;\n",
         "\n",
-        "use Eagle\\Tasks\\Resources\\TaskResource;\n",
+        "use Acme\\Tasks\\Resources\\TaskResource;\n",
         "\n",
         "class Task {\n",
         "    protected static string $service = TaskResource::class;\n",
@@ -1368,7 +1391,7 @@ async fn rename_class_updates_use_import() {
 
     // The use statement should have the FQN last segment updated.
     assert!(
-        result.contains("use Eagle\\Tasks\\Resources\\TaskResourceService;"),
+        result.contains("use Acme\\Tasks\\Resources\\TaskResourceService;"),
         "Use statement should be updated; got:\n{}",
         result
     );
@@ -1398,16 +1421,16 @@ async fn rename_class_preserves_explicit_alias() {
 
     let text_decl = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Resources;\n",
+        "namespace Acme\\Tasks\\Resources;\n",
         "\n",
         "class TaskResource {}\n",
     );
 
     let text_usage = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Http;\n",
+        "namespace Acme\\Tasks\\Http;\n",
         "\n",
-        "use Eagle\\Tasks\\Resources\\TaskResource as ResourceService;\n",
+        "use Acme\\Tasks\\Resources\\TaskResource as ResourceService;\n",
         "\n",
         "class Controller {\n",
         "    private ResourceService $service;\n",
@@ -1431,7 +1454,7 @@ async fn rename_class_preserves_explicit_alias() {
 
     // The use statement FQN should be updated, but the alias kept.
     assert!(
-        result.contains("use Eagle\\Tasks\\Resources\\TaskResourceService as ResourceService;"),
+        result.contains("use Acme\\Tasks\\Resources\\TaskResourceService as ResourceService;"),
         "Use statement FQN should update, alias preserved; got:\n{}",
         result
     );
@@ -2044,16 +2067,16 @@ async fn rename_class_cross_file_with_file_rename() {
 
     let text_decl = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks\\Resources;\n",
+        "namespace Acme\\Tasks\\Resources;\n",
         "\n",
         "class TaskResource {}\n",
     );
 
     let text_usage = concat!(
         "<?php\n",
-        "namespace Eagle\\Tasks;\n",
+        "namespace Acme\\Tasks;\n",
         "\n",
-        "use Eagle\\Tasks\\Resources\\TaskResource;\n",
+        "use Acme\\Tasks\\Resources\\TaskResource;\n",
         "\n",
         "class Task {\n",
         "    public function resource(): TaskResource {\n",
@@ -2088,7 +2111,7 @@ async fn rename_class_cross_file_with_file_rename() {
     // Apply edits to verify correctness.
     let result_usage = apply_edits(text_usage, &usage_edits);
     assert!(
-        result_usage.contains("use Eagle\\Tasks\\Resources\\TaskDto;"),
+        result_usage.contains("use Acme\\Tasks\\Resources\\TaskDto;"),
         "Use statement should be updated; got:\n{}",
         result_usage
     );
@@ -2807,6 +2830,154 @@ async fn rename_parameter_multiple_docblock_params() {
 }
 
 #[tokio::test]
+async fn rename_parameter_includes_conditional_return_type() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @param bool $strict\n",
+        " * @return ($strict is true ? Result : ?Result)\n",
+        " */\n",
+        "function findUser(bool $strict = true): ?Result {\n",
+        "    if ($strict) {\n",
+        "        throw new \\Exception('not found');\n",
+        "    }\n",
+        "    return null;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on `$strict` in the parameter list (line 5, col 23).
+    let edit = rename(&backend, &uri, 5, 23, "$mustExist").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for parameter rename with conditional return"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("@param bool $mustExist"),
+        "Docblock @param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("($mustExist is true"),
+        "Conditional return type param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("bool $mustExist ="),
+        "Parameter not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("if ($mustExist)"),
+        "Body usage not renamed: {}",
+        result
+    );
+    assert!(
+        !result.contains("$strict"),
+        "Old variable name still present: {}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_parameter_includes_nested_conditional_return_type() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @return ($strict is true ? Result : ($fallback is true ? Result : ?Result))\n",
+        " */\n",
+        "function findUser(bool $strict = true, bool $fallback = false): ?Result {\n",
+        "    return null;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename $fallback (line 4, col 45).
+    let edit = rename(&backend, &uri, 4, 45, "$useFallback").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for nested conditional return rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("($useFallback is true"),
+        "Nested conditional return type param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("bool $useFallback ="),
+        "Parameter not renamed: {}",
+        result
+    );
+    // $strict should remain untouched.
+    assert!(
+        result.contains("($strict is true"),
+        "$strict was wrongly renamed: {}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_parameter_conditional_return_from_body_usage() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @param bool $strict\n",
+        " * @return ($strict is true ? Result : ?Result)\n",
+        " */\n",
+        "function findUser(bool $strict = true): ?Result {\n",
+        "    if ($strict) {\n",
+        "        throw new \\Exception('not found');\n",
+        "    }\n",
+        "    return null;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on `$strict` in the function body (line 6, col 8).
+    let edit = rename(&backend, &uri, 6, 8, "$mustExist").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for rename from body with conditional return"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("@param bool $mustExist"),
+        "Docblock @param not renamed: {}",
+        result
+    );
+    assert!(
+        result.contains("($mustExist is true"),
+        "Conditional return type param not renamed from body: {}",
+        result
+    );
+    assert!(
+        !result.contains("$strict"),
+        "Old variable name still present: {}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn rename_arrow_function_parameter() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test.php").unwrap();
@@ -2947,20 +3118,19 @@ async fn rename_function_param_propagates_into_closure_use_and_arrow() {
 // ─── Namespace rename tests ─────────────────────────────────────────────────
 
 #[tokio::test]
-async fn prepare_rename_namespace_returns_segment_range() {
+async fn prepare_rename_namespace_returns_full_range() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///a.php").unwrap();
     let text = "<?php\nnamespace App\\Models\\User;\nclass User {}\n";
     open_file(&backend, &uri, text).await;
 
-    // Cursor on "Models" (line 1, char 14 is inside "Models").
+    // Cursor on "Models" (line 1, char 14 is inside the namespace).
     let resp = prepare_rename(&backend, &uri, 1, 14).await;
     assert!(resp.is_some(), "Expected prepare rename to succeed");
     if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
-        assert_eq!(placeholder, "Models");
-        // "Models" starts at char 14 in "namespace App\Models\User;"
-        assert_eq!(range.start.character, 14);
-        assert_eq!(range.end.character, 20);
+        assert_eq!(placeholder, "App\\Models\\User");
+        assert_eq!(range.start.character, 10);
+        assert_eq!(range.end.character, 25);
     } else {
         panic!("Expected RangeWithPlaceholder");
     }
@@ -2977,15 +3147,55 @@ async fn prepare_rename_namespace_first_segment() {
     let resp = prepare_rename(&backend, &uri, 1, 11).await;
     assert!(
         resp.is_some(),
-        "Expected prepare rename to succeed for first segment"
+        "Expected prepare rename to succeed for namespace"
     );
     if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
-        assert_eq!(placeholder, "App");
+        assert_eq!(placeholder, "App\\Models");
         assert_eq!(range.start.character, 10);
-        assert_eq!(range.end.character, 13);
+        assert_eq!(range.end.character, 20);
     } else {
         panic!("Expected RangeWithPlaceholder");
     }
+}
+
+#[tokio::test]
+async fn rename_namespace_full_placeholder_can_replace_multiple_segments() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services\\Billing;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\Billing\\PaymentService;\n",
+        "function demo(PaymentService $p): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 11, "App\\Handlers\\Payments").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let result_a = apply_edits(text_a, &edits_for_uri(&edit, &uri_a));
+    assert!(
+        result_a.contains("namespace App\\Handlers\\Payments;"),
+        "Namespace declaration should be updated: {}",
+        result_a
+    );
+
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    assert!(
+        result_b.contains("use App\\Handlers\\Payments\\PaymentService;"),
+        "Use statement should be updated: {}",
+        result_b
+    );
 }
 
 #[tokio::test]
@@ -3062,6 +3272,108 @@ async fn rename_namespace_updates_use_statements_cross_file() {
         "Use statement should be updated: {}",
         result_b
     );
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_use_statements_in_indexed_unopened_file() {
+    use std::path::PathBuf;
+
+    let workspace = PathBuf::from("/tmp/test_workspace_ns_indexed_unopened");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
+    let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
+    let uri_b = Url::from_file_path(workspace.join("b.php")).unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\PaymentService;\n",
+        "class BillingController {\n",
+        "    public function handle(PaymentService $p): void {}\n",
+        "}\n",
+    );
+
+    std::fs::write(workspace.join("a.php"), text_a).unwrap();
+    std::fs::write(workspace.join("b.php"), text_b).unwrap();
+
+    open_file(&backend, &uri_a, text_a).await;
+
+    // Index b.php without opening it. This simulates a workspace-scanned file
+    // that has class metadata available but no live file_imports/symbol_map.
+    backend.parse_and_cache_content(text_b, uri_b.as_str());
+
+    let edit = rename(&backend, &uri_a, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    assert!(
+        !edits_b.is_empty(),
+        "Expected edits in indexed unopened file b"
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("use App\\Handlers\\PaymentService;"),
+        "Use statement should be updated in indexed unopened file: {}",
+        result_b
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
+    use std::path::PathBuf;
+
+    let workspace = PathBuf::from("/tmp/test_workspace_ns_usage_only");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
+    let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
+    let uri_b = Url::from_file_path(workspace.join("b.php")).unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\PaymentService;\n",
+        "function demo(PaymentService $p): void {}\n",
+    );
+
+    std::fs::write(workspace.join("a.php"), text_a).unwrap();
+    std::fs::write(workspace.join("b.php"), text_b).unwrap();
+
+    open_file(&backend, &uri_a, text_a).await;
+
+    let edit = rename(&backend, &uri_a, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    assert!(
+        !edits_b.is_empty(),
+        "Expected edits in unopened usage-only file b"
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("use App\\Handlers\\PaymentService;"),
+        "Use statement should be updated in unopened usage-only file: {}",
+        result_b
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[tokio::test]
@@ -3678,4 +3990,331 @@ async fn rename_function_param_propagates_mixed_closure_arrow_nesting() {
     assert!(result2.contains("function demo($renamed2)"));
     assert!(result2.contains("use ($renamed2)"));
     assert!(result2.contains("fn () => fn () => $renamed2;"));
+}
+
+#[tokio::test]
+async fn prepare_rename_class_declaration_returns_fqcn_placeholder() {
+    // A class declaration offers the full FQCN as the rename placeholder,
+    // so the user can change the namespace to move the class in one edit.
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///src/User.php").unwrap();
+    let text = "<?php\nnamespace App\\Models;\nclass User {}\n";
+    open_file(&backend, &uri, text).await;
+
+    let response = prepare_rename(&backend, &uri, 2, 6).await;
+    assert!(response.is_some(), "Expected prepare rename to succeed");
+    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, range }) = response {
+        assert_eq!(placeholder, "App\\Models\\User");
+        // The editable range still covers only the short name in source.
+        assert_eq!(range.start.line, 2);
+        assert_eq!(range.start.character, 6);
+        assert_eq!(range.end.character, 10);
+    } else {
+        panic!("Expected RangeWithPlaceholder, got {:?}", response);
+    }
+}
+
+#[tokio::test]
+async fn rename_class_move_updates_cross_file_usage() {
+    // Renaming a class to a new FQN (namespace + short name change) updates
+    // both the `use` statement and inline references in a separate file.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\TaskResource;\n",
+        "\n",
+        "class Task {\n",
+        "    public function resource(): TaskResource {\n",
+        "        return new TaskResource();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "Acme\\Domain\\TaskDto").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for the class move"
+    );
+    let ws = edit.unwrap();
+
+    let usage_edits = edits_for_uri(&ws, &uri_usage);
+    assert!(
+        !usage_edits.is_empty(),
+        "Expected edits in the usage file, got: {:?}",
+        ws
+    );
+    let result_usage = apply_edits(text_usage, &usage_edits);
+    assert!(
+        result_usage.contains("use Acme\\Domain\\TaskDto;"),
+        "Use statement should point at the new FQN; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new TaskDto()"),
+        "Inline references should use the new short name; got:\n{}",
+        result_usage
+    );
+    assert!(
+        !result_usage.contains("TaskResource"),
+        "No stale references should remain; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_registration_string_updates_call_sites() {
+    let backend = Backend::new_test();
+    let class_uri = Url::parse("file:///Widget.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "function demo(Widget $widget): void {\n",
+        "    Widget::shine();\n",
+        "    $widget->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &class_uri, class_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let edit = rename(&backend, &provider_uri, line, character, "glow").await;
+    assert!(edit.is_some(), "expected macro rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(provider_result.contains("macro('glow'"));
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(caller_result.contains("Widget::glow();"), "{caller_result}");
+    assert!(
+        caller_result.contains("$widget->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_call_site_updates_registration_string() {
+    let backend = Backend::new_test();
+    let class_uri = Url::parse("file:///Widget.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "Widget::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Widget;\n",
+        "function demo(Widget $widget): void {\n",
+        "    Widget::shine();\n",
+        "    $widget->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &class_uri, class_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let edit = rename(&backend, &caller_uri, 4, 14, "glow").await;
+    assert!(edit.is_some(), "expected macro rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(
+        provider_result.contains("macro('glow'"),
+        "{provider_result}"
+    );
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(caller_result.contains("Widget::glow();"), "{caller_result}");
+    assert!(
+        caller_result.contains("$widget->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_from_descendant_call_updates_ancestor_and_sibling_calls() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let child_uri = Url::parse("file:///EloquentCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let child_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class EloquentCollection extends BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "use App\\Support\\EloquentCollection;\n",
+        "function demo(BaseCollection $base, EloquentCollection $eloquent): void {\n",
+        "    $base->shine();\n",
+        "    $eloquent->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &child_uri, child_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let edit = rename(&backend, &caller_uri, 6, 16, "glow").await;
+    assert!(edit.is_some(), "expected descendant macro rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(
+        provider_result.contains("macro('glow'"),
+        "{provider_result}"
+    );
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(caller_result.contains("$base->glow();"), "{caller_result}");
+    assert!(
+        caller_result.contains("$eloquent->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_registration_string_updates_unresolved_chain_call() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "function demo($query): void {\n",
+        "    $query->pluck('name', 'id')->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let (line, character) = line_char_of(provider_text, "shine");
+    let edit = rename(&backend, &provider_uri, line, character, "glow").await;
+    assert!(edit.is_some(), "expected macro rename edit");
+    let edit = edit.unwrap();
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(
+        caller_result.contains("$query->pluck('name', 'id')->glow();"),
+        "{caller_result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_macro_chain_call_updates_registration_string() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class BaseCollection {}\n",
+    );
+    let provider_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\BaseCollection;\n",
+        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
+    );
+    let caller_text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "function demo($query): void {\n",
+        "    $query->pluck('name', 'id')->shine();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &provider_uri, provider_text).await;
+    open_file(&backend, &caller_uri, caller_text).await;
+    seed_macro_index(&backend, &provider_uri, provider_text);
+
+    let edit = rename(&backend, &caller_uri, 3, 33, "glow").await;
+    assert!(edit.is_some(), "expected macro chain rename edit");
+    let edit = edit.unwrap();
+
+    let provider_result = apply_edits(provider_text, &edits_for_uri(&edit, &provider_uri));
+    assert!(
+        provider_result.contains("macro('glow'"),
+        "{provider_result}"
+    );
+
+    let caller_result = apply_edits(caller_text, &edits_for_uri(&edit, &caller_uri));
+    assert!(
+        caller_result.contains("$query->pluck('name', 'id')->glow();"),
+        "{caller_result}"
+    );
 }

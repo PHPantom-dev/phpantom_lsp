@@ -166,6 +166,32 @@ fn returns_none_without_generics() {
     assert_eq!(extract_related_type_typed(&PhpType::parse("HasMany")), None);
 }
 
+// ── class_has_relation_method_ci ────────────────────────────────────
+
+#[test]
+fn relation_method_matches_case_insensitively() {
+    let mut class = make_class("Order");
+    class.methods.push(std::sync::Arc::new(make_method(
+        "orderProducts",
+        Some("HasMany<Product, $this>"),
+    )));
+
+    assert!(class_has_relation_method_ci(&class, "orderProducts"));
+    assert!(class_has_relation_method_ci(&class, "orderproducts"));
+    assert!(class_has_relation_method_ci(&class, "ORDERPRODUCTS"));
+}
+
+#[test]
+fn non_relation_method_is_not_matched() {
+    let mut class = make_class("Order");
+    class
+        .methods
+        .push(std::sync::Arc::new(make_method("total", Some("int"))));
+
+    assert!(!class_has_relation_method_ci(&class, "total"));
+    assert!(!class_has_relation_method_ci(&class, "missing"));
+}
+
 // ── build_property_type ─────────────────────────────────────────────
 
 #[test]

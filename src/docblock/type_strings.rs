@@ -143,6 +143,7 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
                 // that `Collection<int, User>|null` stays one token.
                 if angle_depth == 0 && brace_depth == 0 && paren_depth == 0 {
                     let end = i + c.len_utf8();
+                    let end = consume_array_suffix(s, end);
                     let end = consume_union_intersection_suffix(s, end);
                     return (&s[..end], &s[end..]);
                 }
@@ -156,6 +157,7 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
                 // that `array{id: int}|null` stays one token.
                 if brace_depth == 0 && angle_depth == 0 && paren_depth == 0 {
                     let end = i + c.len_utf8();
+                    let end = consume_array_suffix(s, end);
                     let end = consume_union_intersection_suffix(s, end);
                     return (&s[..end], &s[end..]);
                 }
@@ -186,20 +188,23 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
                             let mut end = ret_start_in_s + ret_tok.len();
 
                             // After a callable return type, continue
-                            // consuming union/intersection suffixes so
+                            // consuming array suffixes and
+                            // union/intersection suffixes so
                             // that `(Closure(Builder): mixed)|null`
                             // is kept as one token.
+                            end = consume_array_suffix(s, end);
                             end = consume_union_intersection_suffix(s, end);
 
                             return (&s[..end], &s[end..]);
                         }
                     }
                     // After a bare parenthesized group (no callable
-                    // return type), continue consuming any
-                    // union/intersection suffix.  This handles DNF
-                    // types like `(A&B)|C` and grouped callables
-                    // like `(Closure(X): Y)|null`.
-                    let end = consume_union_intersection_suffix(s, after_paren);
+                    // return type), continue consuming any array
+                    // suffixes and union/intersection suffix.  This
+                    // handles DNF types like `(A&B)|C` and grouped
+                    // callables like `(Closure(X): Y)|null`.
+                    let end = consume_array_suffix(s, after_paren);
+                    let end = consume_union_intersection_suffix(s, end);
                     return (&s[..end], &s[end..]);
                 }
             }
@@ -211,6 +216,19 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
         prev_char = c;
     }
     (s, "")
+}
+
+/// Consume trailing `[]` array suffixes (zero or more).  PHP docblock
+/// types use `[]` to denote "array of", and they can be stacked:
+/// `int[][]` means `array<array<int>>`.  This must be called before
+/// `consume_union_intersection_suffix` so that `Generic<T>[]|null`
+/// keeps the `[]` attached to the type.
+fn consume_array_suffix(s: &str, pos: usize) -> usize {
+    let mut end = pos;
+    while s[end..].starts_with("[]") {
+        end += 2;
+    }
+    end
 }
 
 /// After a parenthesized type group or callable return type, consume

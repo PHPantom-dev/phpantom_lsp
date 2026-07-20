@@ -166,6 +166,26 @@ pub(in crate::completion) fn extract_closure_return_type_from_assignment(
 ///
 /// Returns `None` if the text is not a closure/arrow-function or if
 /// there is no return type hint.
+/// Check whether text is a closure or arrow-function literal, optionally
+/// prefixed with `static` — e.g. `fn($x) => …`, `function ($x) use (…) { … }`,
+/// `static fn($x) => …`.
+pub(in crate::completion) fn is_closure_like_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    let trimmed = trimmed
+        .strip_prefix("static")
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let is_arrow = trimmed.starts_with("fn")
+        && trimmed
+            .get(2..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+    let is_closure = trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+    is_arrow || is_closure
+}
+
 pub(in crate::completion) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
     let trimmed = text.trim();
 
@@ -246,6 +266,404 @@ pub(in crate::completion) fn extract_closure_return_type_from_text(text: &str) -
     Some(PhpType::parse(ret_type))
 }
 
+/// Infer a `Generator<TKey, TValue>` return type from yield expressions
+/// in a closure or function literal that has no explicit return type.
+///
+/// Scans the closure body for `yield` statements (at the top brace
+/// depth, not inside nested closures/functions) and infers:
+/// - **Value type**: from PHP casts like `(string)`, literal types, or
+///   falls back to `mixed`.
+/// - **Key type**: `int` for bare `yield $expr`, or inferred from
+///   `yield $key => $value`.
+///
+/// Returns `None` if the text doesn't contain `yield`.
+pub(in crate::completion) fn infer_generator_type_from_closure_yields(
+    text: &str,
+) -> Option<PhpType> {
+    let trimmed = text.trim();
+
+    // Must be a closure or function literal.
+    let is_arrow = trimmed.starts_with("fn")
+        && trimmed
+            .get(2..3)
+            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
+    let is_closure = trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+
+    if !is_arrow && !is_closure {
+        return None;
+    }
+
+    // Find the opening `{` of the body.
+    let body_start = trimmed.find('{')?;
+    let body = &trimmed[body_start + 1..];
+
+    // Scan for `yield` at any depth within the closure body,
+    // but skip nested function/closure definitions.
+    let mut depth = 0i32;
+    // When inside a nested `function` closure, holds the outer brace depth
+    // at which that closure was declared.  Yields/returns are ignored until
+    // `depth` returns to this level.  `None` while scanning the outer body.
+    let mut nested_fn_base: Option<i32> = None;
+    let mut value_type: Option<PhpType> = None;
+    let mut key_type: Option<PhpType> = None;
+    let mut found_yield = false;
+    let mut return_type: Option<PhpType> = None;
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        let c = bytes[i];
+        match c {
+            b'{' => depth += 1,
+            b'}' => {
+                if depth == 0 {
+                    break; // end of closure body
+                }
+                depth -= 1;
+                if nested_fn_base.is_some_and(|base| depth <= base) {
+                    nested_fn_base = None;
+                }
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                // Skip line comments.
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'\'' | b'"' => {
+                // Skip string literals.
+                let quote = c;
+                i += 1;
+                while i < len && bytes[i] != quote {
+                    if bytes[i] == b'\\' {
+                        i += 1; // skip escaped char
+                    }
+                    i += 1;
+                }
+            }
+            // Detect nested `function` closures so yields inside them
+            // (which belong to a different generator) are ignored until
+            // brace depth returns to the declaration level.  Arrow `fn`
+            // closures are single-expression and cannot contain `yield`,
+            // so they need no special handling.
+            b'f' if nested_fn_base.is_none()
+                && body[i..].starts_with("function")
+                && body
+                    .as_bytes()
+                    .get(i + 8)
+                    .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_') =>
+            {
+                // Remember the depth at which the nested closure was
+                // declared; its `{`/`}` are counted normally by the
+                // braces arms, and we resume scanning once we return here.
+                nested_fn_base = Some(depth);
+            }
+            b'y' if nested_fn_base.is_none()
+                && body[i..].starts_with("yield")
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
+                && i + 5 < len
+                && !bytes[i + 5].is_ascii_alphanumeric()
+                && bytes[i + 5] != b'_' =>
+            {
+                found_yield = true;
+                let after_yield = body[i + 5..].trim_start();
+
+                // Skip `yield from` — that delegates to another iterator.
+                if after_yield.starts_with("from")
+                    && after_yield
+                        .as_bytes()
+                        .get(4)
+                        .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+                {
+                    i += 5;
+                    continue;
+                }
+
+                // Check for `yield $key => $value` vs bare `yield $value`.
+                if let Some(semi_pos) = find_statement_end(after_yield) {
+                    let yield_expr = after_yield[..semi_pos].trim();
+                    if let Some(arrow_pos) = find_fat_arrow_outside_parens(yield_expr) {
+                        // yield $key => $value
+                        let key_text = yield_expr[..arrow_pos].trim();
+                        let val_text = yield_expr[arrow_pos + 2..].trim();
+                        if key_type.is_none() {
+                            key_type = infer_type_from_simple_expr(key_text);
+                        }
+                        if value_type.is_none() {
+                            value_type = infer_type_from_simple_expr(val_text);
+                        }
+                    } else {
+                        // bare yield $value — key is int
+                        if key_type.is_none() {
+                            key_type = Some(PhpType::int());
+                        }
+                        if value_type.is_none() {
+                            value_type = infer_type_from_simple_expr(yield_expr);
+                        }
+                    }
+                }
+            }
+            b'r' if nested_fn_base.is_none()
+                && body[i..].starts_with("return")
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
+                && i + 6 < len
+                && !bytes[i + 6].is_ascii_alphanumeric()
+                && bytes[i + 6] != b'_' =>
+            {
+                let after_return = body[i + 6..].trim_start();
+                if let Some(semi_pos) = find_statement_end(after_return) {
+                    let return_expr = after_return[..semi_pos].trim();
+                    let inferred = if return_expr.is_empty() {
+                        PhpType::void()
+                    } else {
+                        infer_type_from_simple_expr(return_expr).unwrap_or_else(PhpType::mixed)
+                    };
+                    return_type = Some(match return_type.take() {
+                        Some(existing) if existing.equivalent(&inferred) => existing,
+                        Some(existing) => PhpType::Union(vec![existing, inferred]),
+                        None => inferred,
+                    });
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if !found_yield {
+        return None;
+    }
+
+    let key = key_type.unwrap_or_else(PhpType::int);
+    let value = value_type.unwrap_or_else(PhpType::mixed);
+    let ret = return_type.unwrap_or_else(PhpType::void);
+
+    Some(PhpType::Generic(
+        "Generator".to_string(),
+        vec![key, value, PhpType::mixed(), ret],
+    ))
+}
+
+/// Extract the body expression *text* of a closure or arrow function that
+/// carries no explicit return-type annotation, so the caller can resolve
+/// it through the shared type resolver.
+///
+/// - Arrow function `fn(...) => EXPR` → returns `EXPR`.
+/// - Closure `function(...) { …; return EXPR; … }` → returns the first
+///   top-level `return` expression, skipping `return`s inside nested
+///   closures.
+///
+/// This is a best-effort fallback used only when there is no
+/// `: ReturnType` annotation and no `yield` (both handled by
+/// [`extract_closure_return_type_from_text`] and
+/// [`infer_generator_type_from_closure_yields`]).  Returns `None` when the
+/// text is not a closure/arrow function or no returnable expression is
+/// found.
+pub(in crate::completion) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+
+    let is_arrow = trimmed.starts_with("fn")
+        && trimmed
+            .get(2..3)
+            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
+    let is_closure = trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('));
+
+    if !is_arrow && !is_closure {
+        return None;
+    }
+
+    // Find the parameter list's closing `)` by matching depth.
+    let paren_open = trimmed.find('(')?;
+    let mut depth = 0i32;
+    let mut paren_close = None;
+    for (i, c) in trimmed[paren_open..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    paren_close = Some(paren_open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let paren_close = paren_close?;
+
+    if is_arrow {
+        // The body is the single expression after the `=>` arrow.  The
+        // first `=>` past the parameter list is the arrow operator (a
+        // `=>` belonging to the body itself sits inside brackets/parens).
+        let after = &trimmed[paren_close + 1..];
+        let arrow = after.find("=>")?;
+        let body = after[arrow + 2..]
+            .trim()
+            .trim_end_matches([';', ','])
+            .trim();
+        if body.is_empty() { None } else { Some(body) }
+    } else {
+        // The first top-level `return EXPR;` inside the closure body.
+        let body_start = trimmed.find('{')?;
+        find_first_return_expr(&trimmed[body_start + 1..])
+    }
+}
+
+/// Find the first `return EXPR` at the closure body's own brace depth,
+/// skipping `return`s inside nested `function` closures.  Returns the
+/// expression text without the trailing `;`.
+fn find_first_return_expr(body: &str) -> Option<&str> {
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut depth = 0i32;
+    // When inside a nested `function` closure, holds the brace depth at
+    // which it was declared; `return`s are ignored until we return there.
+    let mut nested_fn_base: Option<i32> = None;
+    let mut i = 0;
+
+    while i < len {
+        let c = bytes[i];
+        match c {
+            b'{' => depth += 1,
+            b'}' => {
+                if depth == 0 {
+                    break; // end of closure body
+                }
+                depth -= 1;
+                if nested_fn_base.is_some_and(|base| depth <= base) {
+                    nested_fn_base = None;
+                }
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'\'' | b'"' => {
+                let quote = c;
+                i += 1;
+                while i < len && bytes[i] != quote {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b'f' if nested_fn_base.is_none()
+                && body[i..].starts_with("function")
+                && bytes
+                    .get(i + 8)
+                    .is_some_and(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_') =>
+            {
+                nested_fn_base = Some(depth);
+            }
+            b'r' if nested_fn_base.is_none()
+                && body[i..].starts_with("return")
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_')
+                && i + 6 < len
+                && !bytes[i + 6].is_ascii_alphanumeric()
+                && bytes[i + 6] != b'_' =>
+            {
+                let after_return = body[i + 6..].trim_start();
+                let semi = find_statement_end(after_return)?;
+                let expr = after_return[..semi].trim();
+                return if expr.is_empty() { None } else { Some(expr) };
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Find the end of a statement (`;` or `}`) at brace/paren depth 0.
+fn find_statement_end(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            ';' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find `=>` outside parentheses/brackets in a yield expression.
+fn find_fat_arrow_outside_parens(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len().saturating_sub(1) {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b'=' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Infer a type from a simple expression (cast, literal, etc.).
+fn infer_type_from_simple_expr(expr: &str) -> Option<PhpType> {
+    let trimmed = expr.trim();
+
+    // PHP cast: (string), (int), (float), (bool), (array), (object)
+    if trimmed.starts_with('(')
+        && let Some(close) = trimmed.find(')')
+    {
+        let cast = trimmed[1..close].trim().to_lowercase();
+        match cast.as_str() {
+            "string" => return Some(PhpType::string()),
+            "int" | "integer" => return Some(PhpType::int()),
+            "float" | "double" | "real" => return Some(PhpType::float()),
+            "bool" | "boolean" => return Some(PhpType::bool()),
+            "array" => return Some(PhpType::Named("array".to_string())),
+            "object" => return Some(PhpType::Named("object".to_string())),
+            _ => {} // might be a parenthesized expression, not a cast
+        }
+    }
+
+    // String literal
+    if (trimmed.starts_with('"') || trimmed.starts_with('\'')) && trimmed.len() >= 2 {
+        return Some(PhpType::string());
+    }
+
+    // Numeric literal
+    if trimmed.bytes().next().is_some_and(|b| b.is_ascii_digit()) {
+        if trimmed.contains('.') {
+            return Some(PhpType::float());
+        }
+        return Some(PhpType::int());
+    }
+
+    // true / false / null
+    match trimmed.to_lowercase().as_str() {
+        "true" | "false" => return Some(PhpType::bool()),
+        "null" => return Some(PhpType::null()),
+        _ => {}
+    }
+
+    // Can't infer from text alone — caller may use resolve_arg_text_to_type.
+    None
+}
+
 /// Extract the type annotation of the Nth parameter from a closure or
 /// arrow-function literal.
 ///
@@ -265,6 +683,24 @@ pub(in crate::completion) fn extract_closure_param_type_from_text(
     text: &str,
     position: usize,
 ) -> Option<PhpType> {
+    extract_closure_params_from_text(text)?
+        .into_iter()
+        .nth(position)?
+        .1
+}
+
+/// Extract the parameter list of a closure or arrow-function literal as
+/// `(name, type)` pairs, in declaration order.
+///
+/// Given `fn(Decimal $carry, $op) => ...`, returns
+/// `[("$carry", Some(Decimal)), ("$op", None)]`.  The name includes the
+/// leading `$` so entries can be matched against variable lookups
+/// directly.  Untyped parameters carry `None` as their type.
+///
+/// Returns `None` when the text is not a closure/arrow-function literal.
+pub(in crate::completion) fn extract_closure_params_from_text(
+    text: &str,
+) -> Option<Vec<(String, Option<PhpType>)>> {
     let trimmed = text.trim();
 
     let is_arrow = trimmed.starts_with("fn")
@@ -303,43 +739,52 @@ pub(in crate::completion) fn extract_closure_param_type_from_text(
     // Extract the parameter list text between the parens.
     let params_text = trimmed.get(paren_open + 1..paren_close)?.trim();
     if params_text.is_empty() {
-        return None;
+        return Some(vec![]);
     }
 
     // Split by commas at depth 0 (respecting nested parens/generics).
-    let params = split_params_at_depth_zero(params_text);
-    let param = params.get(position)?;
-    let param = param.trim();
-    if param.is_empty() {
-        return None;
+    let mut result = Vec::new();
+    for param in split_params_at_depth_zero(params_text) {
+        let param = param.trim();
+        if param.is_empty() {
+            continue;
+        }
+
+        // A typed parameter looks like `TypeHint $name` or `?TypeHint $name`
+        // or `TypeHint &$name` or `TypeHint ...$name`, optionally followed
+        // by `= default`.  An untyped parameter is just `$name` (with the
+        // same `&`/`...` and default variations).
+
+        // The first `$` starts the variable name (a default value may
+        // contain further `$`s, which come after the name).
+        let Some(dollar) = param.find('$') else {
+            continue;
+        };
+        let name: String = param[dollar..]
+            .chars()
+            .take_while(|c| *c == '$' || c.is_alphanumeric() || *c == '_')
+            .collect();
+        if name.len() <= 1 {
+            continue;
+        }
+
+        let before_dollar = param[..dollar].trim_end();
+        // Strip trailing `&` or `...` (pass-by-reference or variadic).
+        let before_dollar = before_dollar
+            .strip_suffix("...")
+            .or_else(|| before_dollar.strip_suffix('&'))
+            .unwrap_or(before_dollar)
+            .trim_end();
+
+        let ty = if before_dollar.is_empty() {
+            None
+        } else {
+            Some(PhpType::parse(before_dollar))
+        };
+        result.push((name, ty));
     }
 
-    // A typed parameter looks like `TypeHint $name` or `?TypeHint $name`
-    // or `TypeHint &$name` or `TypeHint ...$name`.
-    // An untyped parameter is just `$name` or `&$name` or `...$name`.
-    // We need to find the type hint, which is everything before the `$`
-    // (or `&$` or `...$`).
-
-    // Find the `$` that starts the variable name.
-    let dollar = param.rfind('$')?;
-    if dollar == 0 {
-        // No type hint — the parameter is untyped.
-        return None;
-    }
-
-    let before_dollar = param[..dollar].trim_end();
-    // Strip trailing `&` or `...` (pass-by-reference or variadic).
-    let before_dollar = before_dollar
-        .strip_suffix("...")
-        .or_else(|| before_dollar.strip_suffix('&'))
-        .unwrap_or(before_dollar)
-        .trim_end();
-
-    if before_dollar.is_empty() {
-        return None;
-    }
-
-    Some(PhpType::parse(before_dollar))
+    Some(result)
 }
 
 /// Split a parameter list string by commas at depth zero, respecting
@@ -516,11 +961,18 @@ fn walk_array_segments_and_resolve(
     for seg in segments {
         // Try pure-type extraction first (array shapes, generics).
         let extracted = match seg {
-            BracketSegment::StringKey(key) => current
+            BracketSegment::StringKey(key) | BracketSegment::IntKey(key) => current
                 .shape_value_type(key)
                 .or_else(|| current.extract_value_type(true))
                 .cloned(),
-            BracketSegment::ElementAccess => current.extract_value_type(true).cloned(),
+            // A dynamic (non-literal) key can address any entry, so a
+            // shape yields the union of its value types (via
+            // `iterable_element_type`); generic arrays yield their
+            // value type as before.
+            BracketSegment::ElementAccess => current
+                .extract_value_type(true)
+                .cloned()
+                .or_else(|| current.iterable_element_type()),
         };
 
         current = if let Some(t) = extracted {
@@ -798,5 +1250,110 @@ mod tests {
             extract_closure_param_type_from_text(text, 2),
             Some(PhpType::parse("string"))
         );
+    }
+
+    /// Extract the `<TKey, TValue>` args from an inferred `Generator` type.
+    fn generator_args(text: &str) -> Vec<PhpType> {
+        match infer_generator_type_from_closure_yields(text) {
+            Some(PhpType::Generic(name, args)) if name == "Generator" => args,
+            other => panic!("expected Generator<...>, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_yield_infers_int_key_and_value_type() {
+        let args = generator_args("function () { yield (string) $x; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+    }
+
+    #[test]
+    fn keyed_yield_infers_key_and_value_types() {
+        let args = generator_args("function () { yield 1 => 'a'; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+    }
+
+    #[test]
+    fn not_a_generator_without_yield() {
+        assert_eq!(
+            infer_generator_type_from_closure_yields("function () { return 1; }"),
+            None
+        );
+    }
+
+    // ─── extract_closure_body_expr_text ─────────────────────────────────
+
+    #[test]
+    fn arrow_body_expr_extracted() {
+        assert_eq!(
+            extract_closure_body_expr_text("fn() => new Order()"),
+            Some("new Order()")
+        );
+    }
+
+    #[test]
+    fn arrow_body_with_params_extracted() {
+        assert_eq!(
+            extract_closure_body_expr_text("fn($x, $y) => foo($x, $y)"),
+            Some("foo($x, $y)")
+        );
+    }
+
+    #[test]
+    fn arrow_body_with_nested_arrow_takes_first_arrow() {
+        // The first `=>` past the parameter list is the outer arrow.
+        assert_eq!(
+            extract_closure_body_expr_text("fn() => fn() => 5"),
+            Some("fn() => 5")
+        );
+    }
+
+    #[test]
+    fn closure_return_expr_extracted() {
+        assert_eq!(
+            extract_closure_body_expr_text("function () { return new Order(); }"),
+            Some("new Order()")
+        );
+    }
+
+    #[test]
+    fn closure_return_skips_nested_closure_return() {
+        assert_eq!(
+            extract_closure_body_expr_text(
+                "function () { $f = function () { return 1; }; return new Order(); }"
+            ),
+            Some("new Order()")
+        );
+    }
+
+    #[test]
+    fn body_expr_none_for_non_closure() {
+        assert_eq!(extract_closure_body_expr_text("$foo->bar()"), None);
+        assert_eq!(extract_closure_body_expr_text("new Order()"), None);
+    }
+
+    /// A nested closure with no inner braces used to make the scan hit its
+    /// `}` at depth 0 and stop early, missing the real yield that follows.
+    #[test]
+    fn nested_closure_without_inner_braces_does_not_end_scan_early() {
+        let args =
+            generator_args("function () { $f = function () { yield 1; }; yield (string) $x; }");
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
+    }
+
+    /// A nested closure containing inner braces used to leak its yields into
+    /// the outer generator; the outer yield must win regardless of order.
+    #[test]
+    fn nested_closure_with_inner_braces_does_not_leak_yields() {
+        let args = generator_args(
+            "function () { \
+                $f = function () { foreach ([] as $y) {} yield 1.5; }; \
+                yield (string) $x; \
+            }",
+        );
+        assert_eq!(args[0], PhpType::int());
+        assert_eq!(args[1], PhpType::string());
     }
 }

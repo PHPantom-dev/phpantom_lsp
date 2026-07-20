@@ -378,7 +378,7 @@ fn test_inline_array_literal_with_index_access() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "[Customer::first()][]",
+        result, "[Customer::first()][0]",
         "Subject should be the literal base plus index segment"
     );
 }
@@ -391,7 +391,7 @@ fn test_inline_array_literal_new_expression() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "[new Foo()][]",
+        result, "[new Foo()][0]",
         "Subject should be the literal base plus index segment"
     );
 }
@@ -438,7 +438,7 @@ fn test_call_expression_base_array_access() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "$c->items()[]",
+        result, "$c->items()[0]",
         "Subject should be the call expression base plus index segment"
     );
 }
@@ -451,7 +451,7 @@ fn test_static_call_expression_base_array_access() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "Collection::all()[]",
+        result, "Collection::all()[0]",
         "Subject should be the static call expression base plus index segment"
     );
 }
@@ -464,7 +464,7 @@ fn test_function_call_base_array_access() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "getItems()[]",
+        result, "getItems()[0]",
         "Subject should be the function call base plus index segment"
     );
 }
@@ -560,7 +560,7 @@ fn test_property_chain_array_access_numeric_index() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "$this->translations[]",
+        result, "$this->translations[0]",
         "Subject should include the full property chain with bracket segment"
     );
 }
@@ -586,7 +586,7 @@ fn test_object_property_array_access() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "$service->items[]",
+        result, "$service->items[0]",
         "Subject should include the full object property chain with bracket segment"
     );
 }
@@ -599,7 +599,7 @@ fn test_nested_property_chain_array_access() {
     let arrow_pos = input.rfind("->").unwrap();
     let result = extract_arrow_subject(&chars, arrow_pos);
     assert_eq!(
-        result, "$this->nested->entries[]",
+        result, "$this->nested->entries[0]",
         "Subject should include the full nested property chain with bracket segment"
     );
 }

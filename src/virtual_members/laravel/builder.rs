@@ -265,13 +265,23 @@ fn custom_builder_chain_declares_method(
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    let mut class = builder_class.clone();
+    use crate::inheritance::ClassRef;
+
+    // Walk the parent chain via `ClassRef` cursors so only the loader's
+    // `Arc` is moved at each step (no per-step `ClassInfo` clone).
+    let mut current = ClassRef::Borrowed(builder_class);
+    // Cyclic inheritance (`class A extends B; class B extends A;`) is illegal
+    // PHP but appears transiently while a file is being edited.  Track visited
+    // FQNs and stop as soon as one repeats so the walk always terminates,
+    // regardless of chain depth.
+    let mut visited = crate::atom::AtomSet::default();
     loop {
-        if class.fqn() == ELOQUENT_BUILDER_FQN || class.name == ELOQUENT_BUILDER_FQN {
+        let fqn = current.fqn();
+        if fqn == ELOQUENT_BUILDER_FQN || current.name == ELOQUENT_BUILDER_FQN {
             return false;
         }
 
-        if class
+        if current
             .methods
             .iter()
             .any(|m| m.name.eq_ignore_ascii_case(method_name))
@@ -279,7 +289,11 @@ fn custom_builder_chain_declares_method(
             return true;
         }
 
-        let Some(parent) = class.parent_class.as_deref() else {
+        if !visited.insert(fqn) {
+            return false;
+        }
+
+        let Some(parent) = current.parent_class.as_deref() else {
             return false;
         };
         if parent == ELOQUENT_BUILDER_FQN {
@@ -289,7 +303,7 @@ fn custom_builder_chain_declares_method(
         let Some(parent_class) = class_loader(parent) else {
             return false;
         };
-        class = parent_class.as_ref().clone();
+        current = ClassRef::Owned(parent_class);
     }
 }
 

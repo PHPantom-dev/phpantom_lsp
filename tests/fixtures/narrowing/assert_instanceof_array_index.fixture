@@ -1,0 +1,33 @@
+// test: assertInstanceOf narrows an array-index subject expression
+// feature: completion
+// expect: getImage(
+---
+<?php
+
+class ASTNode {
+    public function getImage(): string { return ''; }
+}
+
+class BaseAssert
+{
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void
+    {
+    }
+}
+
+class MyTestCase extends BaseAssert
+{
+    /**
+     * @param array<string, mixed> $constants
+     */
+    public function testIt(array $constants): void
+    {
+        static::assertInstanceOf(ASTNode::class, $constants['C']);
+        $constants['C']-><>
+    }
+}

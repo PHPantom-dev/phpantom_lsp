@@ -402,7 +402,6 @@ pub(crate) fn build_completion_items(
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             filter_text: Some(method.name.to_string()),
             tags: deprecation_tag(method.deprecation_message.is_some()),
-            commit_characters: Some(METHOD_COMMIT_CHARS.iter().map(|s| s.to_string()).collect()),
             data,
             ..CompletionItem::default()
         });
@@ -546,12 +545,6 @@ pub(crate) fn build_completion_items(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Characters that auto-accept a method completion item.
-///
-/// `(` is the natural next character after a method name and lets the
-/// user flow directly into typing arguments.
-const METHOD_COMMIT_CHARS: &[&str] = &["("];
 
 /// Return the sort tier for a `CompletionItemKind`.
 ///

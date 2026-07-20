@@ -67,6 +67,22 @@ function array_sum(array $array): int|float {}
  * @return int|float
  */
 function array_product(array $array): int|float {}
+
+/**
+ * @template TValue
+ * @param callable(TValue): mixed $callback
+ * @param array<TValue> $array
+ * @return array
+ */
+function array_map(?callable $callback, array $array): array {}
+
+/**
+ * @template TValue
+ * @param array<TValue> $array
+ * @param callable(TValue): bool $callback
+ * @return array<TValue>
+ */
+function array_filter(array $array, ?callable $callback = null): array {}
 ";
 
 /// Create a test backend with embedded class and function stubs pre-loaded.
@@ -79,6 +95,8 @@ fn create_fixture_backend() -> Backend {
     func_stubs.insert("array_reduce", ARRAY_FUNC_STUB);
     func_stubs.insert("array_sum", ARRAY_FUNC_STUB);
     func_stubs.insert("array_product", ARRAY_FUNC_STUB);
+    func_stubs.insert("array_map", ARRAY_FUNC_STUB);
+    func_stubs.insert("array_filter", ARRAY_FUNC_STUB);
 
     Backend::new_test_with_all_stubs(class_stubs, func_stubs, HashMap::new())
 }

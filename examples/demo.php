@@ -86,6 +86,25 @@ class MixedAccessorDemo
     }
 }
 
+// ── Pseudo-Type Class-Name Collision ────────────────────────────────────────
+// A class may be named after a PHPDoc pseudo-type such as `number` (PHP 8.4
+// ships `BcMath\Number`). The class must not be shadowed by the pseudo-type.
+
+class PseudoTypeCollisionDemo
+{
+    public function demo(): void
+    {
+        $n = new Number('42');
+
+        $n->value;          // own property resolves (not treated as int|float)
+        $n->scaled(2);      // own method resolves
+
+        // A `Number` parameter type resolves to the class, so passing a
+        // `Number` instance is accepted (no false type-mismatch diagnostic).
+        scaleNumber($n);
+    }
+}
+
 // ── Method & Property Chaining ──────────────────────────────────────────────
 
 class ChainingDemo
@@ -132,6 +151,28 @@ class ChainingDemo
 }
 
 
+// ── Trait `return $this` Fluent Chains ──────────────────────────────────────
+// A trait method whose body is `return $this;` (no declared return type)
+// resolves to the class that uses the trait, so a chained call continues with
+// the using class's own members — not just the trait's.
+
+class TraitFluentChainDemo
+{
+    public function demo(): void
+    {
+        $page = new TestablePage();
+
+        // Each step resolves to TestablePage (the using class), so the whole
+        // chain — including TestablePage's own members — stays available.
+        $page->assertSee('Welcome')       // trait method, body `return $this;`
+            ->assertSee('Dashboard')      // still TestablePage, not the trait
+            ->status;                     // using class's own property
+
+        $page->assertSee('x')->refresh(); // using class's own method resolves
+    }
+}
+
+
 // ── @var Docblock Override ──────────────────────────────────────────────────
 
 class VarDocblockDemo
@@ -167,6 +208,9 @@ class ReturnTypeDemo
         $created = makePen();
         $created->write();                        // function return type
         // MUST NOT appear: refill() (private)
+
+        $absolute = \Demo\makePen();              // leading-backslash (absolute) call
+        $absolute->write();                       // resolves the same as makePen()
 
         $found = pickPenOrPencil();               // Pen|Pencil union
         $found->label();                          // available on both types
@@ -206,6 +250,132 @@ class TypeNarrowingDemo
         $sample = pickRockOrBanana();
         if ($sample instanceof Rock && $sample->crush()) {
             // $sample is Rock here too
+        }
+
+        // Short-circuit || narrowing — the right operand of || runs only
+        // when the left is false, so `!$guard instanceof Rock` being false
+        // means $guard IS Rock in the right operand.
+        $guard = pickRockOrBanana();
+        if (!$guard instanceof Rock || !$guard->crush()) {
+            // guard clause body
+        }
+    }
+}
+
+
+// ── Compound & Non-Variable-Subject Narrowing ──────────────────────────────
+// instanceof / assert narrowing survives compound && / || conditions and
+// applies to property, array-indexed, and inline-assignment subjects, not
+// just a single negated variable guard.
+
+class CompoundNarrowingDemo
+{
+    public function demo(SpecimenHolder $holder): void
+    {
+        // && chain: a later conjunct (and the body) see the narrowing
+        // established by the first conjunct.
+        if ($holder->item instanceof Rock && $holder->item->crush() === 'smash!') {
+            $holder->item->crush();               // property narrowed to Rock
+        }
+
+        // Heterogeneous || guard clause: De Morgan narrows the property
+        // subject after the early return.
+        if (!$holder instanceof SpecimenHolder || !$holder->item instanceof Rock) {
+            return;
+        }
+        $holder->item->crush();                   // property narrowed to Rock
+
+        // Inline assignment in the condition narrows the assigned variable.
+        if (($picked = $holder->maybe()) instanceof Banana) {
+            $picked->peel();                      // inline-assigned var narrowed
+        }
+    }
+
+    /** @param array<Rock|Banana> $items */
+    public function indexed(array $items): void
+    {
+        // Integer-indexed subject narrowed by a guard clause.
+        if (!$items[0] instanceof Rock) {
+            return;
+        }
+        $items[0]->crush();                       // element narrowed to Rock
+    }
+
+    /** @param array<string, mixed> $bag */
+    public function untypedIndexed(array $bag): void
+    {
+        // The element type is unknown (mixed), but a guard clause still
+        // narrows the array-index subject to the checked class.
+        if (!$bag['specimen'] instanceof Rock) {
+            return;
+        }
+        $bag['specimen']->crush();                // mixed index narrowed to Rock
+    }
+
+    public function arrow(): callable
+    {
+        // An untyped arrow-function parameter narrowed by an earlier `&&`
+        // conjunct is visible to the member access in a later conjunct.
+        return fn($specimen) => $specimen instanceof Rock && $specimen->crush() === 'smash!';
+    }
+}
+
+
+// ── property_exists() / method_exists() Narrowing ───────────────────────────
+// A member-existence guard proves the (otherwise unknown) member for the rest
+// of the branch, mirroring PHPStan's `object&hasProperty(...)` intersection.
+// The proof is confined to the guarded branch: the same access outside it is
+// still flagged.
+
+class MemberExistsNarrowingDemo
+{
+    public function property(ApiResponse $response): ?string
+    {
+        // property_exists() proves the dynamically-populated property, so the
+        // access resolves instead of reporting an unknown member.
+        if (property_exists($response, 'errorMessage') && is_string($response->errorMessage)) {
+            return $response->errorMessage;       // proven by property_exists
+        }
+        return null;
+    }
+
+    public function guardClause(ApiResponse $response): string
+    {
+        // Negated guard clause: after the early return the property exists.
+        if (!property_exists($response, 'detail')) {
+            return 'none';
+        }
+        return (string) $response->detail;        // proven after the guard
+    }
+
+    public function issetGuard(ApiResponse $response): ?string
+    {
+        // isset($obj->prop) proves the property exists (and is non-null)
+        // for the guarded branch, exactly like property_exists().
+        if (isset($response->errorMessage)) {
+            return (string) $response->errorMessage; // proven by isset
+        }
+        return null;
+    }
+
+    public function ternary(ApiResponse $response): string
+    {
+        // Both member-existence guards prove the property in a ternary's
+        // then-branch, mirroring the if-statement form.
+        $viaPropertyExists = property_exists($response, 'detail')
+            ? (string) $response->detail          // proven by property_exists
+            : 'none';
+        $viaIsset = isset($response->errorMessage)
+            ? (string) $response->errorMessage    // proven by isset
+            : 'none';
+        return $viaPropertyExists . '|' . $viaIsset;
+    }
+
+    public function method(DynamicHandler $handler): void
+    {
+        // method_exists() proves the method for the guarded branch.
+        if (method_exists($handler, 'customHook')) {
+            $handler->customHook();               // proven by method_exists
         }
     }
 }
@@ -259,6 +429,36 @@ class TypeGuardNarrowingDemo
         $payload = json_decode('{}');             // mixed
         if (is_object($payload) && property_exists($payload, 'name')) {
             echo $payload->name;                  // no diagnostic
+        }
+
+        // A property assigned `new stdClass()` resolves back to stdClass,
+        // so a nested object graph built up field by field type-checks.
+        $settings = new \stdClass();
+        $settings->cache = new \stdClass();       // $settings->cache : stdClass
+        $settings->cache->ttl = 3600;             // no diagnostic on ->ttl
+    }
+
+    /**
+     * An `array<T>|false` return keeps its element type after the false
+     * check, so the surviving array still iterates to the element type.
+     */
+    public function falseUnion(): void
+    {
+        $pens = loadPensOrFail();                  // array<int, Pen>|false
+        if (!is_array($pens)) {
+            return;
+        }
+        foreach ($pens as $pen) {
+            $pen->write();                        // array<int, Pen> → Pen
+        }
+
+        // The `=== false` guard narrows the same way.
+        $more = loadPensOrFail();                  // array<int, Pen>|false
+        if ($more === false) {
+            return;
+        }
+        foreach ($more as $pen) {
+            $pen->write();                        // array<int, Pen> → Pen
         }
     }
 }
@@ -343,6 +543,70 @@ class StaticAssertNarrowingDemo
         } else {
             $maybe->crush();                      // narrowed to Rock
         }
+    }
+}
+
+// ── Inherited Assert Narrowing (PHPUnit shape) ─────────────────────────────
+
+// The assert method is declared on the parent (StaticAssert); narrowing
+// still applies when it is reached through inheritance, exactly like a
+// PHPUnit test case calling the inherited `assertInstanceOf`.
+class InheritedAssertNarrowingDemo extends StaticAssert
+{
+    public function demo(): void
+    {
+        // $this-> on an inherited assert method
+        $viaThis = getUnknownValue();
+        $this->assertRock($viaThis);
+        $viaThis->crush();                        // narrowed to Rock
+
+        // self:: on an inherited assert method
+        $viaSelf = getUnknownValue();
+        self::assertRock($viaSelf);
+        $viaSelf->crush();                        // narrowed to Rock
+
+        // static:: on an inherited assert method
+        $viaStatic = getUnknownValue();
+        static::assertRock($viaStatic);
+        $viaStatic->crush();                      // narrowed to Rock
+    }
+}
+
+
+// ── assertTrue / assertFalse Re-Export (PHPUnit shape) ─────────────────────
+
+// PHPUnit's assertTrue()/assertFalse() carry `@phpstan-assert true/false
+// $condition`, so wrapping a check in one re-exports that condition exactly
+// like the bare `if` form.  assertIsObject() first narrows the mixed value
+// to `object`.
+class AssertConditionReexportDemo extends StaticAssert
+{
+    public function demo(): void
+    {
+        // assertIsObject() narrows mixed → object; assertTrue(property_exists())
+        // then proves the dynamically-populated property.
+        $model = getUnknownValue();               // mixed
+        self::assertIsObject($model);             // narrowed to object
+        self::assertTrue(property_exists($model, 'value'));
+        echo $model->value;                       // proven by the re-exported guard
+
+        // assertFalse() re-exports the inverse of the condition: ruling out
+        // the Banana branch narrows the union to Rock.
+        $subject = pickRockOrBanana();            // Rock|Banana
+        self::assertFalse($subject instanceof Banana);
+        $subject->crush();                        // narrowed to Rock
+
+        // assertIsNotString() (a `@phpstan-assert !string` guard) drops the
+        // string arm of a union, leaving the object.
+        $mixedValue = self::pickStringOrRock();   // string|Rock
+        self::assertIsNotString($mixedValue);
+        $mixedValue->crush();                     // narrowed to Rock
+    }
+
+    /** @return string|Rock */
+    private static function pickStringOrRock(): string|Rock
+    {
+        return new Rock();
     }
 }
 
@@ -474,6 +738,51 @@ class BuiltinGenericCollectionDemo
 }
 
 
+// ── SimpleXMLElement Iteration (Iterator without generics) ──────────────────
+
+class SimpleXmlIterationDemo
+{
+    public function demo(): void
+    {
+        $xml = new \SimpleXMLElement('<root><child/></root>');
+        foreach ($xml->children() as $child) {
+            $child->getName();                    // Iterator (no generics) → current(): static
+        }
+    }
+
+    public function firstChild(): ?\SimpleXMLElement
+    {
+        foreach ((new \SimpleXMLElement('<root><child/></root>'))->children() as $child) {
+            return $child;
+        }
+        return null;
+    }
+}
+
+
+// ── SPL Wrapper Iterators (FilterIterator, DirectoryIterator) ───────────────
+
+class SplWrapperIterationDemo
+{
+    public function demo(): void
+    {
+        // `PhpFileFilter` is `@extends FilterIterator<int, SplFileInfo,
+        // \Iterator<int, SplFileInfo>>`. The value type is the middle
+        // argument (SplFileInfo), not the trailing inner-iterator argument.
+        $files = new PhpFileFilter(new \ArrayIterator([new \SplFileInfo(__FILE__)]));
+        foreach ($files as $file) {
+            $file->getRealPath();                 // FilterIterator<_, SplFileInfo, _> → SplFileInfo
+        }
+
+        // Directly-constructed SPL iterator: the value type comes from
+        // `DirectoryIterator::current()`.
+        foreach (new \DirectoryIterator(__DIR__) as $entry) {
+            $entry->isFile();                     // DirectoryIterator → current(): DirectoryIterator
+        }
+    }
+}
+
+
 // ── Inherited Docblock Types ────────────────────────────────────────────────
 
 class InheritedDocblockDemo
@@ -521,6 +830,20 @@ class ConditionalReturnDemo
         $mapper = new TreeMapperImpl();
         $result = $mapper->map('foo', 'bar');
         $result->write();                         // "foo" → Pen (literal string match)
+
+        // Out-of-order named arguments bind to the parameter they name, so
+        // the conditional keys on `$signature` ("foo") regardless of the
+        // order the arguments appear in the call.
+        $named = $mapper->map(source: 'bar', signature: 'foo');
+        $named->write();                          // named "foo" → Pen
+
+        // A conditional branch selecting `mixed` flows `mixed` through as a
+        // real type, so the value stays usable (and narrowable) instead of
+        // becoming untyped.
+        $unknown = sessionValue('file');          // ($key is string ? mixed : null) → mixed
+        if (is_string($unknown)) {
+            strtoupper($unknown);                 // narrowed from mixed to string
+        }
     }
 }
 
@@ -534,6 +857,26 @@ class MethodTemplateDemo
         $locator = new ServiceLocator();
         $locator->get(Pen::class)->write();               // class-string<T> → T
 
+        // A class-string passed as a single-quoted string literal: the
+        // source `\\` is a namespace-separator escape, so `'Demo\\Pen'`
+        // names the class `Demo\Pen` and T resolves to Pen.
+        $locator->get('Demo\\Pen')->write();              // string-literal class-string → Pen
+
+        // A union of class-strings (iterating a class-constant array) binds
+        // the bounded template `T of Pen` to the union of the concrete
+        // classes, so `@return T[]` resolves to (Pen|Marker)[] instead of
+        // collapsing to the bound Pen[]. Marker extends Pen, so both satisfy
+        // the bound.
+        foreach ([Pen::class, Marker::class] as $penClass) {
+            $group = $locator->getAll($penClass);
+            $group[0]->write();                           // Pen|Marker from union class-string bind
+        }
+
+        // Indexing the call result inline keeps the template binding, so
+        // the `@return T[]` element resolves from the `class-string<T>`
+        // argument without an intermediate variable.
+        $locator->getAll(Pen::class)[0]->write();         // Pen from class-string<T> → T[] element
+
         Factory::create(Pen::class)->write();             // static @template
         resolve(Marker::class)->highlight();              // function @template
 
@@ -542,6 +885,15 @@ class MethodTemplateDemo
         $mapped->first();                         // → Pen (T resolved from argument)
 
         $mapper->wrap(new Product())->first()->getPrice(); // new expression arg → Product
+
+        // Untyped class-constant argument binds T to the constant's value
+        // type (int), not the constant's owning class.
+        $mapper->identity(ConstantTypeDemo::TIMEOUT); // hover → int
+
+        // A `::class` argument binds `@param T` to the argument's actual
+        // type — a class-string — so the return type is class-string<Pen>,
+        // not the bare Pen instance type.
+        $mapper->identity(Pen::class); // hover → class-string<Pen>
 
         // Chained instantiation preserves constructor-inferred generics
         (new ObjectMapper())->wrap(new Pen())->first()->write(); // (new ...)->method() chain with generics
@@ -555,6 +907,17 @@ class MethodTemplateDemo
         // Nested generic return: @return Box<T> with class-string<T> param
         $boxed = $locator->wrap(Pen::class);
         $boxed->unwrap()->write();                        // Box<T>::unwrap() → Pen
+
+        // A `class-string<T>|T` union parameter (the Mockery::mock()
+        // shape, here nested in a variadic array hint) binds T to the
+        // named class itself, so a `::class` argument and an instance
+        // argument both resolve to a Pen instance.
+        $locator->build(Pen::class)->write();             // class-string<T>|T with Pen::class → Pen
+        $locator->build(new Pen())->write();              // class-string<T>|T with instance → Pen
+
+        // An identity generic whose *constraint* is an array type: T is
+        // never bound from an argument here, only from its declared bound.
+        $mapper->peekLast([new Pen()]);
     }
 }
 
@@ -588,6 +951,24 @@ class ClosureReturnTemplateDemo
         // Chained call: reduce() result used directly without intermediate variable.
         // The template inference must survive the symbol-map subject text serialization.
         $pencils->reduce(fn(Pen $carry, Pencil $item): Pen => $carry, new Pen('starter'))->write();
+
+        // Closure with NO return-type annotation: the return type is
+        // inferred from the body expression, resolving `$carry` from the
+        // closure's own typed parameter (`$carry->rename(...)` → Pen).
+        $inferred = $pencils->reduce(
+            fn(Pen $carry, $item) => $carry->rename('merged'),
+            new Pen('starter')
+        );
+        $inferred->write();     // TReduceReturnType = Pen (from the body)
+
+        // @template T bound from a `@param \Closure(): T` callback, where the
+        // closure has NO return-type annotation. The return type is inferred
+        // from the closure body (like Laravel's Cache::remember).
+        $cache = new ScaffoldingClosureCache();
+        $cache->remember('pen', fn() => new Pen('cached'))->write();   // arrow body → Pen
+        $cache->remember('marker', function () {
+            return new Marker('cached');
+        })->highlight();                                                // block-closure return → Marker
     }
 }
 
@@ -698,6 +1079,31 @@ class LoopCarriedAssignmentDemo
 }
 
 
+// ── Assignment Inside a Condition ───────────────────────────────────────────
+// A variable assigned in an `if`/`while` condition is a definition site,
+// including the bare negated guard and the call-wrapped form.
+
+class ConditionAssignmentDemo
+{
+    /** @return ?Pen */
+    public function maybePen(): ?Pen { return rand(0, 1) ? new Pen() : null; }
+
+    public function demo(): void
+    {
+        // Bare negated guard: PHP parses this as `!($pen = $this->maybePen())`.
+        if (!$pen = $this->maybePen()) {
+            return;
+        }
+        $pen->write();                            // Pen (assignment seen through `!`)
+
+        // Assignment wrapped in a call argument.
+        while (is_object($next = $this->maybePen())) {
+            $next->write();                       // Pen (assignment seen inside is_object())
+        }
+    }
+}
+
+
 // ── Null Coalesce (`??`) Refinement ─────────────────────────────────────────
 
 class NullCoalesceDemo
@@ -743,6 +1149,32 @@ class ForeachArrayAccessDemo
 
         $inferred = [new Pen(), new Marker()];
         $inferred[0]->write();                    // element type inferred from literal
+    }
+
+    /**
+     * An inline `@var` refines a broadly-typed parameter (here `mixed`)
+     * before iterating it, so the loop variable resolves to the element
+     * type even though the parameter itself carries no useful type.
+     */
+    public function demoRetypedParam(mixed $pens): void
+    {
+        /** @var iterable<Pen> $pens */
+        foreach ($pens as $pen) {
+            $pen->write();                        // Pen from the inline @var retype
+        }
+    }
+
+    /**
+     * The same inline `@var` retype works when the iterable is a method
+     * chain: the annotation types the base variable, the chain resolves
+     * through it, and the loop variable gets the element type.
+     */
+    public function demoRetypedChainBase(mixed $holder): void
+    {
+        /** @var ScaffoldingConcreteHolder $holder */
+        foreach ($holder->getPens() as $pen) {
+            $pen->write();                        // Pen via the @var-typed chain base
+        }
     }
 }
 
@@ -995,6 +1427,16 @@ class CollectionForeachDemo
         foreach ($collection as $pen) {
             $pen->write();                // via variable assignment scanning
         }
+
+        // Conditional @return with nested static<...> generic branches
+        // (Laravel's Collection::chunk shape). Chunking yields a
+        // collection of collections, so each iterated batch is itself a
+        // collection whose elements are the original element type.
+        /** @var TypedCollection<int, Pen> $pens */
+        $pens = new TypedCollection();
+        foreach ($pens->chunk(1) as $batch) {
+            $batch->first()->color();     // $batch → TypedCollection<int, Pen>, first() → Pen
+        }
     }
 }
 
@@ -1083,6 +1525,12 @@ class BrokenDocblockDemo
         $collection = collect([]);
         $collection->groupBy('key');             // multi-line @return resolves correctly
 
+        // Nested conditional in the generic return collapses against the
+        // argument: grouping by a string key makes the result's key type
+        // `array-key`, so passing a string to `get()` type-checks cleanly
+        // instead of comparing against a raw, unevaluated conditional.
+        $collection->groupBy('key')->get('bucket');
+
         $recovered = (new BrokenDocRecovery())->broken();
         $recovered->working();                   // recovers `static` from broken @return static<
     }
@@ -1142,6 +1590,25 @@ class ClassStringVarDemo
         $userClass = User::class;
         $found = $userClass::findByEmail('test@example.com');
         $found->getEmail();                       // resolves User from class-string static call
+    }
+
+    /**
+     * A `class-string<Pen>` variable that passes through a
+     * `class_exists()` guard keeps its `<Pen>` type argument, so
+     * `new $className()` still resolves to `Pen`.
+     */
+    public function guardedInstantiation(mixed $rawName): object
+    {
+        /** @var class-string<Pen> */
+        $className = (string) $rawName;
+
+        if (!class_exists($className)) {
+            throw new \RuntimeException('missing');
+        }
+
+        $pen = new $className();
+        $pen->write();                            // resolves Pen despite the class_exists() guard
+        return $pen;
     }
 }
 
@@ -1314,7 +1781,7 @@ class ShapeMethodDemo
     }
 
     /** @return array{pen: Pen, pencil: Pencil, active: bool} */
-    public function getToolKit(): array { return []; }
+    public function getToolKit(): array { return ['pen' => new Pen(), 'pencil' => new Pencil(), 'active' => true]; }
 
     /** @return object{name: string, age: int, active: bool} */
     public function getProfile(): object { return (object) []; }
@@ -1327,6 +1794,35 @@ class ShapeMethodDemo
     {
         $config['host'];                  // string
         $config['tool']->write();         // Pen
+    }
+
+    // Indexing with a dynamic (non-literal) key resolves to the union of
+    // the shape's value types.
+    public function dynamicKey(string $which): void
+    {
+        $kit = $this->getToolKit();
+        $tool = $kit[$which] ?? null;     // Pen|Pencil|bool|null
+        if ($tool instanceof Pen) {
+            $tool->write();               // Pen after instanceof
+        }
+
+        // A map of shapes built through a dynamic-key write reads back
+        // element-by-element.
+        $sums = [];
+        foreach ([1, 2] as $id) {
+            $sums[$id] = $this->getToolKit();
+            $sums[$id]['pen']->write();   // Pen through the dynamic-key write
+        }
+
+        // Nested dynamic writes read back across the same key path.
+        $report = [];
+        $count = 0;
+        foreach ([new Pen(), new Pen()] as $pen) {
+            $report['data'][$count]['tool'] = $pen;
+            $entry = $report['data'][$count]['tool'];
+            $entry->write();              // Pen
+            $count++;
+        }
     }
 }
 
@@ -1356,6 +1852,21 @@ class DestructuringShapeDemo
         $first->write();                  // Pen (positional index 0)
         $second->sketch();                // Pencil (positional index 1)
 
+        // Positional shape indexed directly with an integer literal
+        $pair[0]->write();                 // Pen (positional index 0)
+        $pair[1]->sketch();                // Pencil (positional index 1)
+
+        // Positional shape spread across multiple docblock lines
+        /**
+         * @var array{
+         *     Pen,
+         *     Pencil,
+         * } $multiline
+         */
+        $multiline = getUnknownValue();
+        $multiline[0]->write();            // Pen (positional index 0)
+        $multiline[1]->sketch();           // Pencil (positional index 1)
+
         // list() syntax
         /** @var array{recipe: Recipe, servings: int} $meal */
         $meal = getUnknownValue();
@@ -1365,6 +1876,28 @@ class DestructuringShapeDemo
 
     /** @return array{pen: Pen, pencil: Pencil, count: int} */
     public function getToolKit(): array { return []; }
+
+    public function inferredTuples(): void
+    {
+        // Inferred (unannotated) nested array literals keep their positional
+        // arity, so the foreach element is a fixed tuple and integer-literal
+        // indexing resolves each position.
+        $rows = [[new Pen(), new Pencil()]];
+        foreach ($rows as $row) {
+            $row[0]->write();             // Pen (nested tuple index 0)
+            $row[1]->sketch();            // Pencil (nested tuple index 1)
+        }
+
+        // A heterogeneous tuple indexed at a position that only some arms
+        // have, combined with a `?? Class::class` fallback, keeps the value
+        // a class-string instead of widening to plain string.
+        $specs = [['pen', Pen::class], ['pencil']];
+        foreach ($specs as $spec) {
+            $toolClass = $spec[1] ?? Pencil::class;   // class-string<Pen>|class-string<Pencil>
+            $tool = new $toolClass();
+            $tool->label();               // Pen|Pencil created from the class-string
+        }
+    }
 }
 
 
@@ -1536,6 +2069,11 @@ class ArrayFuncDemo
 
         $mapped = array_map(fn($pen) => $pen, $src->members);
         $mapped[0]->write();              // Pen from array_map fallback
+
+        // Untyped callback parameter inferred from a method-call array
+        // argument: `$pen` resolves to Pen from roster()'s list<Pen>.
+        array_map(fn($pen) => $pen->color(), $src->roster());
+        array_filter($src->roster(), fn($pen) => $pen->color() === 'blue');
 
         // array_reduce: return type inferred from initial value (3rd arg)
         $merged = array_reduce($src->members, function(Pen $carry, Pen $item): Pen {
@@ -1877,6 +2415,22 @@ class ClosureParamInferenceDemo
         $holder = new ScaffoldingTemplateCallableHolder();
         array_any($holder->tools, fn($item) => $item->write() !== '');
     }
+
+    /**
+     * A declared closure-parameter union is preserved even when the
+     * subject is a union of differently parameterized collections.
+     *
+     * @param FluentCollection<int, Pen>|FluentCollection<int, Pencil> $tools
+     */
+    public function unionSubject(FluentCollection $tools): void
+    {
+        // $item resolves to the declared union Pen|Pencil, not just the
+        // first collection's element type (Pen).  label() exists on both,
+        // so it resolves; hover on $item shows Pen|Pencil.
+        $tools->each(function (Pen|Pencil $item): void {
+            $item->label();               // resolves on both union arms
+        });
+    }
 }
 
 
@@ -1914,6 +2468,11 @@ class StaticEnumDemo
 
         // self::/static:: inside enum methods resolve to the enum type
         Status::defaultValue();      // self::Active->value inside enum
+
+        // cases() returns a list of the enum's own instances, so indexing
+        // it inline resolves the element back to the enum.
+        Status::cases()[0]->value;   // "active" — cases()[0] is a Status
+        Priority::cases()[0]->name;  // "Low" — cases()[0] is a Priority
     }
 }
 
@@ -2217,6 +2776,25 @@ class IntersectionDemo
         $item->print();                       // from Printable
         $item->seal();                        // from Envelope
     }
+
+    /**
+     * A parenthesized "DNF" return type `(A&B)|null` resolves to the
+     * intersection instead of being discarded, so after a null check
+     * both interfaces' members are available on the result.
+     *
+     * @return (Envelope&Printable)|null
+     */
+    public function sealed(): ?Envelope
+    {
+        return openSealedEnvelope();
+    }
+
+    public function useSealed(): void
+    {
+        $item = $this->sealed();
+        $item?->print();                      // from Printable, via the DNF return type
+        $item?->seal();                       // from Envelope
+    }
 }
 
 
@@ -2224,10 +2802,42 @@ class IntersectionDemo
 
 class TernaryNarrowingDemo
 {
+    public function __construct(private Pen|Pencil $tool) {}
+
     public function demo(): void
     {
+        // Variable subject: narrowed to Rock (then) / Banana (else)
         $thing = pickRockOrBanana();
         $thing instanceof Rock ? $thing->crush() : $thing->peel();
+    }
+
+    /**
+     * instanceof in a ternary condition narrows the `$this->tool` property
+     * subject inside the then-branch, so `->write()` (declared only on Pen)
+     * resolves. Because the then-branch resolves, the ternary type is the
+     * union of both branches (`string|null`), not just the else-branch.
+     */
+    public function toolLabel(): ?string
+    {
+        return $this->tool instanceof Pen
+            ? $this->tool->write()            // narrowed to Pen inside the ternary
+            : null;
+    }
+
+    /**
+     * A truthy ternary condition narrows a repeated nullable method-call
+     * subject to its non-null type inside the then-branch.
+     */
+    public function repeatedCall(): ?string
+    {
+        return $this->maybePen()
+            ? $this->maybePen()->write()      // narrowed to Pen (null stripped)
+            : null;
+    }
+
+    private function maybePen(): ?Pen
+    {
+        return $this->tool instanceof Pen ? $this->tool : null;
     }
 }
 
@@ -2355,6 +2965,24 @@ class ArrayAccessDemo
         // Inline method-return array access (no intermediate variable)
         $src->fetchAll()[0]->write();     // resolves Pen from Pen[] return type
         $src->fetchAll()[0]->color();     // same, different member
+    }
+}
+
+
+// ── Indexing an ArrayAccess Object ───────────────────────────────────────────
+// `$obj[$key]` on a class implementing ArrayAccess natively resolves through
+// offsetGet(), whether the value type comes from a generic docblock
+// annotation or from offsetGet()'s own declared return type.
+
+class ArrayAccessObjectDemo
+{
+    public function demo(): void
+    {
+        $pens = new ScaffoldingPenArrayAccess();
+        $pens[0]->write();                // resolves via offsetGet(): Pen
+
+        $shapes = new ScaffoldingGenericArrayAccess([new Pen()]);
+        $shapes[0]->write();              // resolves via @implements \ArrayAccess<int, T>, T bound to Pen
     }
 }
 
@@ -2911,6 +3539,17 @@ class GenericAssertNarrowingDemo
         // the narrowed type from the call-site argument.
         ScaffoldingAssert::assertInstanceOf(Pen::class, $obj);
         $obj->write();                    // $obj narrowed to Pen
+    }
+
+    public function demoVariableClass(string $cls, ?Pen $node): void
+    {
+        // When the asserted class is a variable that cannot be resolved
+        // to a concrete class, the assertion narrows to `object`
+        // intersected with the prior type: `null` is dropped but the
+        // subject keeps the type it already had, so member access still
+        // resolves instead of unresolving the subject entirely.
+        ScaffoldingAssert::assertInstanceOf($cls, $node);
+        $node->write();                   // $node kept as Pen (null dropped)
     }
 }
 
@@ -3609,8 +4248,107 @@ class ConvertToClosureDemo
     }
 }
 
+// ── @phpstan-require-extends: base members on $this in a trait ───────────────
+
+/**
+ * A trait annotated with `@phpstan-require-extends` guarantees that every
+ * class using it extends the named base class, so `$this` inside the trait
+ * can access that base class's members even though the trait analyzed
+ * standalone does not declare them.
+ *
+ * @phpstan-require-extends RequireExtendsTestCase
+ */
+trait MocksServiceDemo
+{
+    public function mockPath(): string
+    {
+        $mock = $this->makeMock();                // RequireExtendsTestCase::makeMock() → Mock
+        return $mock->path();                     // Mock::path() → string
+    }
+}
+
+// ── ReflectionClass<T> instantiation ────────────────────────────────────────
+// `new ReflectionClass($classString)` binds the reflected type from a
+// `class-string<T>`.  `newInstance()` returns `T` and `newInstanceArgs()`
+// returns `T|null`, even though the constructor's native hint is the broad
+// `object|string`.
+
+class ReflectionInstantiationDemo
+{
+    /**
+     * @param class-string<ReflectedWidget> $class
+     */
+    public function build(string $class): ReflectedWidget
+    {
+        // Fully-qualified `\ReflectionClass` so the unused-import demo above
+        // keeps its `use ReflectionClass;` dimmed.
+        $reflection = new \ReflectionClass($class);
+
+        // newInstance() → ReflectedWidget (not class-string<ReflectedWidget>)
+        return $reflection->newInstance();
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
+
+// ── ReflectionClass<T> instantiation scaffolding ────────────────────────────
+
+class ReflectedWidget
+{
+    public function label(): string { return 'widget'; }
+}
+
+// ── @phpstan-require-extends scaffolding ────────────────────────────────────
+
+class Mock
+{
+    public function path(): string { return '/tmp/mock'; }
+}
+
+class RequireExtendsTestCase
+{
+    public function makeMock(): Mock { return new Mock(); }
+}
+
+final class RequireExtendsConsumer extends RequireExtendsTestCase
+{
+    use MocksServiceDemo;
+}
+
+// ── SPL wrapper-iterator scaffolding ───────────────────────────────────────────
+
+/**
+ * A FilterIterator subclass with a three-argument generic annotation
+ * (`<TKey, TValue, TIterator>`). The iterated value type is the middle
+ * argument.
+ *
+ * @extends \FilterIterator<int, \SplFileInfo, \Iterator<int, \SplFileInfo>>
+ */
+class PhpFileFilter extends \FilterIterator
+{
+    public function accept(): bool
+    {
+        return $this->current() instanceof \SplFileInfo;
+    }
+}
+
+// ── Member-existence narrowing scaffolding ─────────────────────────────────────
+
+// Response object whose extra fields are populated dynamically at runtime, so
+// they are not declared statically. `property_exists()` guards prove them.
+#[\AllowDynamicProperties]
+class ApiResponse
+{
+    public int $status = 0;
+}
+
+// Handler whose `customHook()` is not declared — `method_exists()` guards prove
+// it. Deliberately has no `__call`, so only the guard makes the call resolve.
+class DynamicHandler
+{
+    public function run(): void {}
+}
 
 // ── Method-Tag Template scaffolding ────────────────────────────────────────────
 
@@ -3639,7 +4377,7 @@ abstract class ScaffoldingAbstractAstNode {
     /** @return mixed */
     public function __call(string $name, array $arguments): mixed {
         return match ($name) {
-            'getStartColumn', 'getEndColumn' => 0,
+            'getStartColumn', 'getEndColumn', 'getParameterCount' => 0,
             default => null,
         };
     }
@@ -3649,6 +4387,38 @@ abstract class ScaffoldingAbstractAstNode {
  * @extends ScaffoldingAbstractAstNode<ScaffoldingAstNodeInterface>
  */
 class ScaffoldingConcreteAstNode extends ScaffoldingAbstractAstNode {}
+
+// A subclass tightens the template bound to a narrower interface that adds
+// `getParameterCount()`.  The `@mixin TNode` still lives on the base
+// `ScaffoldingAbstractAstNode` (bound to the looser interface), so resolving
+// the tighter member exercises picking the most specific bound in the chain.
+interface ScaffoldingCallableAstNodeInterface extends ScaffoldingAstNodeInterface {
+    public function getParameterCount(): int;
+}
+
+/**
+ * @template-covariant TNode of ScaffoldingCallableAstNodeInterface
+ * @extends ScaffoldingAbstractAstNode<TNode>
+ */
+abstract class ScaffoldingAbstractCallableAstNode extends ScaffoldingAbstractAstNode {}
+
+/**
+ * @extends ScaffoldingAbstractCallableAstNode<ScaffoldingCallableAstNodeInterface>
+ */
+class ScaffoldingConcreteCallableAstNode extends ScaffoldingAbstractCallableAstNode {}
+
+// ── Pseudo-type class-name collision scaffolding ─────────────────────────────
+// `Number` collides with the `number` PHPDoc pseudo-type but is a real class.
+class Number {
+    public function __construct(public string $value) {}
+    public function scaled(int $factor): Number {
+        return new Number((string) ((int) $this->value * $factor));
+    }
+}
+
+function scaleNumber(Number $n): Number {
+    return $n->scaled(10);
+}
 
 // ── class-string<T> instantiation scaffolding ───────────────────────────────
 class ScaffoldingClassStringFactory {
@@ -4000,6 +4770,28 @@ trait ZooTraitB
     public function elephant(string $value): string { return $value; }
 }
 
+trait MakesPageAssertions
+{
+    /** Fluent assertion with no declared return type — body returns $this. */
+    public function assertSee(string $value)
+    {
+        $seen = $value !== '';
+        return $this;
+    }
+}
+
+class TestablePage
+{
+    use MakesPageAssertions;
+
+    public int $status = 200;
+
+    public function refresh(): static
+    {
+        return $this;
+    }
+}
+
 /**
  * @property-read string $iguana
  * @method string jaguar()
@@ -4161,6 +4953,25 @@ class ScaffoldingReducible
     }
 }
 
+/**
+ * Cache-like helper whose `@template T` is bound from the callback's
+ * return type. Mirrors Laravel's `Cache::remember()` so an unannotated
+ * `fn() => new Pen()` callback resolves the result to `Pen`.
+ */
+class ScaffoldingClosureCache
+{
+    /**
+     * @template T
+     *
+     * @param \Closure(): T $callback
+     * @return T
+     */
+    public function remember(string $key, \Closure $callback): mixed
+    {
+        return $callback();
+    }
+}
+
 class ScaffoldingPipeline
 {
     /**
@@ -4218,6 +5029,33 @@ class ScaffoldingArrayAccess
     public function fetchAll(): array { return []; }
 }
 
+class ScaffoldingPenArrayAccess implements \ArrayAccess
+{
+    /** @var Pen[] */
+    private array $items = [];
+
+    public function offsetExists(mixed $offset): bool { return isset($this->items[$offset]); }
+    public function offsetGet(mixed $offset): Pen { return $this->items[$offset] ?? new Pen(); }
+    public function offsetSet(mixed $offset, mixed $value): void { $this->items[$offset] = $value; }
+    public function offsetUnset(mixed $offset): void { unset($this->items[$offset]); }
+}
+
+/**
+ * @template T of Pen
+ * @implements \ArrayAccess<int, T>
+ */
+class ScaffoldingGenericArrayAccess implements \ArrayAccess
+{
+    /** @param T[] $items */
+    public function __construct(private array $items) {}
+
+    public function offsetExists(mixed $offset): bool { return isset($this->items[$offset]); }
+    /** @return T */
+    public function offsetGet(mixed $offset) { return $this->items[$offset]; }
+    public function offsetSet(mixed $offset, mixed $value): void { $this->items[$offset] = $value; }
+    public function offsetUnset(mixed $offset): void { unset($this->items[$offset]); }
+}
+
 class ScaffoldingFormatter
 {
     public function __invoke(): Pen { return new Pen(); }
@@ -4271,6 +5109,23 @@ class ObjectMapper
     public function identity(mixed $item): mixed
     {
         return $item;
+    }
+
+    /**
+     * An identity generic whose *constraint* is an array type: `T` is
+     * never bound from an argument at a call site, only from its
+     * declared bound.  Inside the method body, `$pens` (typed `T`)
+     * must resolve to that bound so array-element functions like
+     * `end()` can find the element's class.
+     *
+     * @template T of Pen[]
+     * @param T $pens
+     * @return T
+     */
+    public function peekLast(array $pens): array
+    {
+        end($pens)->write();      // T resolves to its bound (Pen[]) inside the body
+        return $pens;
     }
 }
 
@@ -4719,6 +5574,22 @@ class TypedCollection
 
     /** @return array<TKey, TValue> */
     public function all(): array { return $this->items; }
+
+    /**
+     * Conditional @return whose branches are `static<...>` generics
+     * (Laravel's `Collection::chunk()` shape). Chunking produces a
+     * collection of collections, so the wrapped generic arguments must
+     * survive the conditional to keep the inner element type resolvable.
+     *
+     * @return ($preserveKeys is true
+     *     ? static<int, static>
+     *     : static<int, static<int, TValue>>)
+     */
+    public function chunk(int $size, bool $preserveKeys = true): static
+    {
+        $chunks = array_chunk($this->items, $size, $preserveKeys);
+        return new static(array_map(fn(array $c): static => new static($c), $chunks));
+    }
 }
 
 /** @extends TypedCollection<int, Pen> */
@@ -4797,6 +5668,28 @@ class ServiceLocator
     {
         return new Box(new $id());
     }
+
+    /**
+     * @template T of Pen
+     * @param class-string<T> $id
+     * @return T[]
+     */
+    public function getAll(string $id): array
+    {
+        return [new $id()];
+    }
+
+    /**
+     * @template T of object
+     * @param array<class-string<T>|T|array<T>> ...$args
+     * @return T
+     */
+    public function build(mixed ...$args): object
+    {
+        $first = $args[0];
+
+        return is_string($first) ? new $first() : $first;
+    }
 }
 
 class Factory
@@ -4849,6 +5742,21 @@ class Banana
     public function weigh(): float { return 0.2; }
 }
 
+class SpecimenHolder
+{
+    public Rock|Banana $item;
+
+    public function __construct()
+    {
+        $this->item = new Rock();
+    }
+
+    public function maybe(): Rock|Banana|null
+    {
+        return null;
+    }
+}
+
 // ─── Ambiguous Variable Support Classes ─────────────────────────────────────
 
 class Lamp
@@ -4873,6 +5781,16 @@ interface Printable
 class Envelope
 {
     public function seal(): void {}
+}
+
+class SealedEnvelope extends Envelope implements Printable
+{
+    public function print(): void {}
+}
+
+function openSealedEnvelope(): ?SealedEnvelope
+{
+    return new SealedEnvelope();
 }
 
 // ─── Shared Narrow Classes ──────────────────────────────────────────────────
@@ -5052,6 +5970,18 @@ function app(?string $abstract = null): mixed
     return $abstract !== null ? $container->make($abstract) : $container;
 }
 
+/**
+ * A conditional return type whose non-null branch is `mixed`. When `$key`
+ * is a string, the value is of unknown type (`mixed`); otherwise it is
+ * `null`. Mirrors Laravel's `session($key)` helper.
+ *
+ * @return ($key is string ? mixed : null)
+ */
+function sessionValue(?string $key = null)
+{
+    return $key !== null ? 'value' : null;
+}
+
 function createUser(string $name, string $email): User
 {
     return new User($name, $email);
@@ -5090,6 +6020,12 @@ function getAppConfig(): array { return []; }
 function pickRockOrBanana(): Rock|Banana
 {
     return new Rock();
+}
+
+/** @return array<int, Pen>|false */
+function loadPensOrFail(): array|false
+{
+    return [new Pen()];
 }
 
 /** @phpstan-assert Rock $value */
@@ -5132,6 +6068,38 @@ class StaticAssert
     public static function isNotRock(mixed $value): bool
     {
         return !$value instanceof Rock;
+    }
+
+    /** @phpstan-assert object $value */
+    public static function assertIsObject(mixed $value): void
+    {
+        if (!is_object($value)) {
+            throw new \InvalidArgumentException('Expected object');
+        }
+    }
+
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void
+    {
+        if ($condition !== true) {
+            throw new \InvalidArgumentException('Expected true');
+        }
+    }
+
+    /** @phpstan-assert false $condition */
+    public static function assertFalse(mixed $condition): void
+    {
+        if ($condition !== false) {
+            throw new \InvalidArgumentException('Expected false');
+        }
+    }
+
+    /** @phpstan-assert !string $value */
+    public static function assertIsNotString(mixed $value): void
+    {
+        if (is_string($value)) {
+            throw new \InvalidArgumentException('Did not expect string');
+        }
     }
 }
 
@@ -5227,6 +6195,15 @@ class FluentCollection
     }
 
     /**
+     * @param  TKey  $key
+     * @return TValue|null
+     */
+    public function get($key)
+    {
+        return $this->items[$key] ?? null;
+    }
+
+    /**
      * @template TMapValue
      *
      * @param  callable(TValue, TKey): TMapValue  $callback
@@ -5313,6 +6290,66 @@ function runDemoAssertions(): void
     $tool = $factory->createTool(true);
     assert($tool instanceof Pen || $tool instanceof Pencil, 'createTool() must return Pen|Pencil');
 
+    // ── Leading-backslash (absolute) function call ─────────────────────
+    assert(\Demo\makePen() instanceof Pen, 'absolute \\Demo\\makePen() resolves the same as makePen()');
+
+    // ── Trait `return $this` fluent chain ───────────────────────────────
+    $page = new TestablePage();
+    assert($page->assertSee('a') instanceof TestablePage, 'trait return $this resolves to the using class');
+    assert($page->assertSee('a')->assertSee('b')->status === 200, 'chained trait return $this keeps the using class members');
+
+    // ── Ternary Condition Narrowing ─────────────────────────────────────
+    $penTool = new TernaryNarrowingDemo(new Pen());
+    assert($penTool->toolLabel() === '', 'ternary then-branch narrows property to Pen; ->write() returns ""');
+    assert($penTool->repeatedCall() === '', 'ternary truthy narrows method-call subject to Pen');
+    $pencilTool = new TernaryNarrowingDemo(new Pencil());
+    assert($pencilTool->toolLabel() === null, 'ternary else-branch yields null (Pencil is not a Pen)');
+    assert($pencilTool->repeatedCall() === null, 'ternary else-branch yields null for repeated call');
+
+    // ── class-string guard keeps its type argument ─────────────────────
+    $guarded = (new ClassStringVarDemo())->guardedInstantiation(Pen::class);
+    assert($guarded instanceof Pen, 'new $className() resolves to Pen after a class_exists() guard');
+
+    // ── property_exists() narrowing ─────────────────────────────────────
+    // The dynamic fields are populated through a variable property name so the
+    // runtime setup mirrors how these responses are filled in real code.
+    $memberDemo = new MemberExistsNarrowingDemo();
+    $response = new ApiResponse();
+    $field = 'errorMessage';
+    $response->$field = 'boom';                    // dynamically populated
+    assert($memberDemo->property($response) === 'boom', 'property_exists guard reads the dynamic property');
+    assert($memberDemo->property(new ApiResponse()) === null, 'no property → guard is false');
+    $withDetail = new ApiResponse();
+    $field = 'detail';
+    $withDetail->$field = 'context';
+    assert($memberDemo->guardClause($withDetail) === 'context', 'negated property_exists guard clause reads the property after it');
+    assert($memberDemo->guardClause(new ApiResponse()) === 'none', 'guard clause returns early when the property is absent');
+    $issetResp = new ApiResponse();
+    $field = 'errorMessage';
+    $issetResp->$field = 'boom';
+    assert($memberDemo->issetGuard($issetResp) === 'boom', 'isset($obj->prop) guard reads the dynamic property');
+    assert($memberDemo->issetGuard(new ApiResponse()) === null, 'isset guard is false when the property is absent');
+    $ternaryResp = new ApiResponse();
+    $field = 'detail';
+    $ternaryResp->$field = 'd';
+    $field = 'errorMessage';
+    $ternaryResp->$field = 'e';
+    assert($memberDemo->ternary($ternaryResp) === 'd|e', 'property_exists and isset ternaries read the proven properties');
+    assert($memberDemo->ternary(new ApiResponse()) === 'none|none', 'member-existence ternaries fall back when the properties are absent');
+
+    // ── array<T>|false keeps its element type after a false check ────────
+    $pens = loadPensOrFail();
+    assert($pens !== false && $pens[0] instanceof Pen, 'loadPensOrFail() returns array<int, Pen> on success');
+
+    // ── @phpstan-require-extends base members on $this ──────────────────
+    $consumer = new RequireExtendsConsumer();
+    assert($consumer->mockPath() === '/tmp/mock', 'trait method reaches base class member via @phpstan-require-extends');
+
+    // ── Pseudo-type class-name collision ────────────────────────────────
+    $num = new Number('42');
+    assert($num->scaled(2) instanceof Number, 'Number::scaled() must return Number (class, not pseudo-type)');
+    assert(scaleNumber($num) instanceof Number, 'scaleNumber() must accept and return a Number');
+
     // ── Return Type: static ─────────────────────────────────────────────
     $pen = Pen::make();
     assert($pen instanceof Pen, 'Pen::make() must return Pen');
@@ -5351,6 +6388,39 @@ function runDemoAssertions(): void
 
     $easel = $canvas->easel;
     assert($easel instanceof Easel, 'Canvas::$easel must be Easel');
+
+    // ── Inferred nested tuple literals ──────────────────────────────────
+    $rows = [[new Pen(), new Pencil()]];
+    foreach ($rows as $row) {
+        assert($row[0] instanceof Pen, 'nested tuple index 0 must be Pen');
+        assert($row[1] instanceof Pencil, 'nested tuple index 1 must be Pencil');
+    }
+
+    // Indexing a position only some arms have, with a `?? Class::class`
+    // fallback, stays a class-string that instantiates Pen|Pencil.
+    $specs = [['pen', Pen::class], ['pencil']];
+    foreach ($specs as $spec) {
+        $toolClass = $spec[1] ?? Pencil::class;
+        assert(class_exists($toolClass), 'index + ?? fallback must yield a class-string');
+        $tool = new $toolClass();
+        assert($tool instanceof Pen || $tool instanceof Pencil, 'class-string must instantiate Pen|Pencil');
+    }
+
+    // ── Indexing an ArrayAccess Object ───────────────────────────────────
+    $penAccess = new ScaffoldingPenArrayAccess();
+    assert($penAccess[0] instanceof Pen, 'ArrayAccess[0] must resolve via offsetGet(): Pen');
+
+    $genericAccess = new ScaffoldingGenericArrayAccess([new Pen()]);
+    assert($genericAccess[0] instanceof Pen, 'ArrayAccess<int, T>[0] must resolve T bound to Pen');
+
+    // ── Conditional @return with nested static<...> generic branches ────
+    /** @var TypedCollection<int, Pen> $penItems */
+    $penItems = new TypedCollection([new Pen()]);
+    $penBatches = $penItems->chunk(1);
+    assert(
+        $penBatches->first()->first() instanceof Pen,
+        'Collection::chunk() conditional return keeps the nested collection element type'
+    );
 
     // ── Fluent Model chains (static return) ─────────────────────────────
     $userObj = new User('Bob', 'bob@example.com');
@@ -5439,6 +6509,25 @@ function runDemoAssertions(): void
     $locatedPen = $locator->get(Pen::class);
     assert($locatedPen instanceof Pen, 'ServiceLocator::get(Pen::class) must return Pen');
 
+    // A single-quoted class-string literal names the class after the source
+    // `\\` escape is collapsed to a single namespace separator.
+    assert($locator->get('Demo\\Pen') instanceof Pen, "ServiceLocator::get('Demo\\\\Pen') must return Pen");
+
+    // A union of class-strings binds the bounded template to the union of
+    // concrete classes; each member's stub returns an instance of itself.
+    foreach ([Pen::class, Marker::class] as $penClass) {
+        $group = $locator->getAll($penClass);
+        assert($group[0] instanceof $penClass, 'getAll() must return an instance of each class in the union');
+    }
+
+    // Indexing the call result inline keeps the template binding.
+    assert($locator->getAll(Pen::class)[0] instanceof Pen, 'getAll(Pen::class)[0] must be a Pen');
+
+    // A class-string<T>|T union parameter accepts a class name or an
+    // instance and returns an instance either way.
+    assert($locator->build(Pen::class) instanceof Pen, 'build(Pen::class) must return a Pen instance');
+    assert($locator->build(new Pen()) instanceof Pen, 'build(new Pen()) must return a Pen instance');
+
     $createdPen = Factory::create(Pen::class);
     assert($createdPen instanceof Pen, 'Factory::create(Pen::class) must return Pen');
 
@@ -5452,6 +6541,20 @@ function runDemoAssertions(): void
     $first = $wrapped->first();
     assert($first instanceof Pen, 'wrap(Pen)->first() must return Pen');
 
+    // Untyped class constant argument binds the template to its value type (int).
+    $constValue = $mapper->identity(ConstantTypeDemo::TIMEOUT);
+    assert(is_int($constValue), 'identity(ConstantTypeDemo::TIMEOUT) must return int (constant value type, not owning class)');
+
+    // A `::class` argument binds `@param T` to a class-string, so the
+    // returned value is the fully-qualified class name string.
+    $penClass = $mapper->identity(Pen::class);
+    assert($penClass === Pen::class, 'identity(Pen::class) must return the class-string Pen::class');
+
+    // An identity generic bound to an array type (`@template T of Pen[]`)
+    // must still return the array unchanged.
+    $peeked = $mapper->peekLast([new Pen('blue')]);
+    assert(end($peeked) instanceof Pen, 'peekLast() must return its argument unchanged');
+
     // ── ScaffoldingReducible::reduce() — closure return type binding ────
     /** @var ScaffoldingReducible<Pencil> $reducible */
     $reducible = new ScaffoldingReducible();
@@ -5464,6 +6567,23 @@ function runDemoAssertions(): void
     // Chained call: reduce() result used directly without intermediate variable.
     $chainedWrite = $reducible->reduce(fn(Pen $carry, Pencil $item): Pen => $carry, new Pen('starter'))->write();
     assert(is_string($chainedWrite), 'reduce()->write() chained must return string (Pen::write() return type)');
+
+    // Unannotated closure: the return type follows from the body expression
+    // resolved through the closure's own typed parameter.
+    $inferredReduce = $reducible->reduce(
+        fn(Pen $carry, $item) => $carry->rename('merged'),
+        new Pen('starter')
+    );
+    assert($inferredReduce instanceof Pen, 'reduce(fn(Pen $carry, $item) => $carry->rename(...)) must return Pen (inferred from body)');
+
+    // ── ScaffoldingClosureCache::remember() — unannotated closure body ──
+    $cache = new ScaffoldingClosureCache();
+    $cachedPen = $cache->remember('pen', fn() => new Pen('cached'));
+    assert($cachedPen instanceof Pen, 'remember(fn() => new Pen()) must return Pen (T from arrow body)');
+    $cachedMarker = $cache->remember('marker', function () {
+        return new Marker('cached');
+    });
+    assert($cachedMarker instanceof Marker, 'remember(function () { return new Marker(); }) must return Marker (T from closure body)');
 
     // ── ScaffoldingEventBus::listen() — closure param type binding ──────
     $bus = new ScaffoldingEventBus();
@@ -5557,6 +6677,10 @@ function runDemoAssertions(): void
     assert($cfd instanceof Model, 'ClassFilteringDemo must extend Model');
     assert($cfd instanceof Renderable, 'ClassFilteringDemo must implement Renderable');
 
+    // ── ReflectionClass<T> instantiation ────────────────────────────────
+    $widget = (new ReflectionInstantiationDemo())->build(ReflectedWidget::class);
+    assert($widget instanceof ReflectedWidget, 'ReflectionClass::newInstance() must be ReflectedWidget');
+
     // ── Inline new chaining ─────────────────────────────────────────────
     $fromNew = (new Canvas())->getBrush();
     assert($fromNew instanceof Brush, '(new Canvas())->getBrush() must be Brush');
@@ -5588,6 +6712,16 @@ function runDemoAssertions(): void
 
     $appSelf = app();
     assert($appSelf instanceof Container, 'app() with no args must return Container');
+
+    // ── Named-argument conditional return type ──────────────────────────
+    $mapper = new TreeMapperImpl();
+    $named = $mapper->map(source: 'bar', signature: 'foo');
+    assert($named instanceof Pen, 'out-of-order named args bind $signature="foo" → Pen');
+
+    // ── Conditional branch selecting `mixed` flows through ──────────────
+    $unknown = sessionValue('file');
+    assert(is_string($unknown), 'sessionValue("file") returns a mixed value narrowable to string');
+    assert(sessionValue() === null, 'sessionValue() with no args returns null');
 
     // ── Closure / arrow function return types ───────────────────────────
     $makePenClosure = function(): Pen { return new Pen(); };
@@ -5628,6 +6762,12 @@ function runDemoAssertions(): void
     $manual = Mode::Manual;
     assert($manual instanceof Mode, 'Mode::Manual must be Mode');
     assert($manual->name === 'Manual', 'Mode::Manual->name must be "Manual"');
+
+    // cases() returns a list of the enum's own instances; indexing it
+    // inline resolves the element back to the enum.
+    assert(Status::cases()[0] instanceof Status, 'Status::cases()[0] must be a Status');
+    assert(Status::cases()[0]->value === 'active', 'Status::cases()[0]->value must be "active"');
+    assert(Priority::cases()[0]->name === 'Low', 'Priority::cases()[0]->name must be "Low"');
 
     $fromString = Status::from('active');
     assert($fromString === Status::Active, 'Status::from("active") must be Status::Active');
@@ -5893,6 +7033,12 @@ function runDemoAssertions(): void
     assert(method_exists(Envelope::class, 'seal'), 'Envelope must have seal()');
     assert(interface_exists(Printable::class), 'Printable must be an interface');
 
+    // A parenthesized DNF return type `(Envelope&Printable)|null` really
+    // yields an object that satisfies both, so both members are callable.
+    $sealed = (new IntersectionDemo())->sealed();
+    assert($sealed instanceof Envelope, 'sealed() must return an Envelope');
+    assert($sealed instanceof Printable, 'sealed() must return a Printable');
+
     // ── First-class callable syntax ─────────────────────────────────────
     $fun = makePen(...);
     assert($fun instanceof \Closure, 'makePen(...) must be a Closure');
@@ -5979,6 +7125,29 @@ function runDemoAssertions(): void
     foreach ($foreachDestrInv as ['tool' => $fTool, 'count' => $fCount]) {
         assert($fTool instanceof Pen, 'Foreach destructured tool must be Pen');
         assert(is_int($fCount), 'Foreach destructured count must be int');
+    }
+
+    // ── Dynamic (non-literal) key on a shape ────────────────────────────
+    $shapeDemo = new ShapeMethodDemo();
+    $dynKit = $shapeDemo->getToolKit();
+    $dynWhich = 'pen';
+    $dynTool = $dynKit[$dynWhich] ?? null;
+    assert($dynTool instanceof Pen, 'Dynamic key on shape must yield a shape value');
+
+    $dynSums = [];
+    foreach ([1, 2] as $dynId) {
+        $dynSums[$dynId] = $shapeDemo->getToolKit();
+        assert($dynSums[$dynId]['pen'] instanceof Pen,
+            'Dynamic-key write must read back the shape value');
+    }
+
+    $dynReport = [];
+    $dynCount = 0;
+    foreach ([new Pen(), new Pen()] as $dynPen) {
+        $dynReport['data'][$dynCount]['tool'] = $dynPen;
+        $dynEntry = $dynReport['data'][$dynCount]['tool'];
+        assert($dynEntry instanceof Pen, 'Nested dynamic write must read back Pen');
+        $dynCount++;
     }
 
     // ── Ambiguous variables ─────────────────────────────────────────────
@@ -6069,6 +7238,12 @@ function runDemoAssertions(): void
     ScaffoldingAssert::assertInstanceOf(Pen::class, $assertObj);
     assert($assertObj instanceof Pen, 'ScaffoldingAssert::assertInstanceOf(Pen::class, $obj) must narrow to Pen');
 
+    // A variable class argument still guarantees the subject is an object.
+    $assertCls = Pen::class;
+    $assertNode = new Pen();
+    ScaffoldingAssert::assertInstanceOf($assertCls, $assertNode);
+    assert($assertNode instanceof Pen, 'ScaffoldingAssert::assertInstanceOf($cls, $node) keeps the prior Pen type');
+
     // ── @param-closure-this scaffolding ──────────────────────────────────
     $ctRoute = new ScaffoldingClosureThisRoute();
     $ctMw = $ctRoute->middleware('auth');
@@ -6096,6 +7271,11 @@ function runDemoAssertions(): void
     $tplMixinNode = new ScaffoldingConcreteAstNode();
     $col = $tplMixinNode->getStartColumn();
     assert(is_int($col), 'ConcreteAstNode (via @mixin TNode bound) getStartColumn() must return int');
+    // The tighter member is only on the subclass's narrowed bound, resolved
+    // through the @mixin declared on the base class.
+    $tplCallableNode = new ScaffoldingConcreteCallableAstNode();
+    $count = $tplCallableNode->getParameterCount();
+    assert(is_int($count), 'ConcreteCallableAstNode (via tightest @mixin TNode bound) getParameterCount() must return int');
 
     // ── new $var() with class-string<T> ─────────────────────────────────
     $penFromClassString = ScaffoldingClassStringFactory::create(Pen::class);
@@ -6272,6 +7452,21 @@ function runDemoAssertions(): void
     $demo = new BuiltinGenericCollectionDemo();
     $pen = $demo->getPens()->current();
     assert($pen instanceof Pen, 'ArrayIterator<int, Pen>::current() must return Pen');
+
+    // ── SimpleXMLElement iteration (Iterator without generics) ──────────
+    $xmlDemo = new SimpleXmlIterationDemo();
+    $xmlChild = $xmlDemo->firstChild();
+    assert($xmlChild instanceof \SimpleXMLElement, 'SimpleXMLElement::children() foreach element must be SimpleXMLElement');
+
+    // ── SPL wrapper iterators ───────────────────────────────────────────
+    $filter = new PhpFileFilter(new \ArrayIterator([new \SplFileInfo(__FILE__)]));
+    foreach ($filter as $splFile) {
+        assert($splFile instanceof \SplFileInfo, 'FilterIterator<_, SplFileInfo, _> foreach element must be SplFileInfo');
+    }
+    foreach (new \DirectoryIterator(__DIR__) as $dirEntry) {
+        assert($dirEntry instanceof \DirectoryIterator, 'DirectoryIterator foreach element must be DirectoryIterator');
+        break;
+    }
 
     echo "All assertions passed.\n";
 }

@@ -179,6 +179,7 @@ impl Backend {
             &class_loader,
             target_is_concrete,
             false,
+            false,
         );
 
         if implementors.is_empty() {
@@ -396,7 +397,7 @@ impl Backend {
             .unwrap_or(target_short.to_string());
 
         let implementors =
-            self.find_implementors(target_short, &target_fqn, class_loader, false, false);
+            self.find_implementors(target_short, &target_fqn, class_loader, false, false, false);
 
         let member_kind = if interface_class
             .methods
@@ -479,6 +480,7 @@ impl Backend {
             function_loader: Some(&function_loader),
             scope_var_resolver: None,
             is_in_static_method: false,
+            preserve_static: false,
         };
 
         let candidates = ResolvedType::into_arced_classes(
@@ -523,8 +525,14 @@ impl Backend {
                 .class_fqn_for_short(target_short)
                 .unwrap_or(target_short.to_string());
 
-            let implementors =
-                self.find_implementors(target_short, &target_fqn, &class_loader, false, false);
+            let implementors = self.find_implementors(
+                target_short,
+                &target_fqn,
+                &class_loader,
+                false,
+                false,
+                false,
+            );
 
             for imp in &implementors {
                 // Check that the implementor actually has this member.
@@ -615,6 +623,15 @@ impl Backend {
     /// extends another class that implements the target interface) are
     /// excluded.  This mode is used by the type hierarchy protocol where
     /// the client walks the tree one level at a time.
+    ///
+    /// When `project_only` is `true`, vendor classes are skipped before
+    /// they are loaded: the index scans (Phases 1-3) drop any candidate
+    /// whose source lives under a `/vendor/` directory, and the embedded
+    /// stub scan (Phase 4) is skipped entirely.  Only the project's own
+    /// classes (already parsed, so their lookups hit the cache) are
+    /// examined.  This keeps callers that need only project implementors
+    /// (e.g. the Laravel auth-model floor) from paying the cost of loading
+    /// and parsing every class in a large vendor tree.
     pub(crate) fn find_implementors(
         &self,
         target_short: &str,
@@ -622,7 +639,20 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         include_abstract: bool,
         direct_only: bool,
+        project_only: bool,
     ) -> Vec<ClassInfo> {
+        // Whether an FQN's indexed source lives outside `/vendor/`.  A class
+        // with no indexed URI is treated as project-local (mirrors the
+        // downstream filter in `project_auth_implementors`).
+        let is_project_fqn = |fqn: &str| -> bool {
+            if !project_only {
+                return true;
+            }
+            match self.fqn_uri_index.read().get(fqn) {
+                Some(uri) => !uri.contains("/vendor/"),
+                None => true,
+            }
+        };
         let mut result: Vec<ClassInfo> = Vec::new();
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
@@ -659,6 +689,9 @@ impl Backend {
             if seen_fqns.contains(child_fqn) {
                 continue;
             }
+            if !is_project_fqn(child_fqn) {
+                continue;
+            }
             if let Some(cls) = class_loader(child_fqn) {
                 if !direct_only {
                     if cls.kind == ClassLikeKind::Interface {
@@ -681,8 +714,11 @@ impl Backend {
                 .collect()
         };
 
-        for (fqn, _uri) in &index_entries {
+        for (fqn, uri) in &index_entries {
             if seen_fqns.contains(fqn) {
+                continue;
+            }
+            if project_only && uri.contains("/vendor/") {
                 continue;
             }
             if let Some(cls) = class_loader(fqn)
@@ -711,6 +747,7 @@ impl Backend {
             .fqn_uri_index
             .read()
             .values()
+            .filter(|uri| !(project_only && uri.contains("/vendor/")))
             .filter_map(|uri| Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()))
             .collect();
 
@@ -724,11 +761,11 @@ impl Backend {
 
             // Cheap pre-filter: read the raw file and skip it if the
             // source doesn't mention the target name at all.
-            let raw = match std::fs::read_to_string(path) {
+            let raw = match crate::classmap_scanner::read_for_scan(path) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
-            if !raw.contains(target_short) {
+            if memchr::memmem::find(&raw, target_short.as_bytes()).is_none() {
                 continue;
             }
 
@@ -758,30 +795,33 @@ impl Backend {
         // Stubs are static strings baked into the binary.  A cheap text
         // search for the target name narrows candidates before we parse.
         // Parsing is lazy and cached in uri_classes_index, so subsequent lookups
-        // hit Phase 1.
-        let stub_idx = self.stub_index.read();
-        for (stub_name, &stub_source) in stub_idx.iter() {
-            if seen_fqns.contains(stub_name) {
-                continue;
-            }
-            // Cheap pre-filter: skip stubs whose source doesn't mention
-            // the target name at all.
-            if !stub_source.contains(target_short) {
-                continue;
-            }
-            if let Some(cls) = class_loader(stub_name)
-                && self.class_implements_or_extends(
-                    &cls,
-                    target_short,
-                    target_fqn,
-                    class_loader,
-                    include_abstract,
-                    direct_only,
-                )
-            {
-                let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-                if seen_fqns.insert(cls_fqn) {
-                    result.push(Arc::unwrap_or_clone(cls));
+        // hit Phase 1.  Stubs are vendor/built-in definitions, so they are
+        // skipped entirely when only project implementors are wanted.
+        if !project_only {
+            let stub_idx = self.stub_index.read();
+            for (stub_name, &stub_source) in stub_idx.iter() {
+                if seen_fqns.contains(stub_name) {
+                    continue;
+                }
+                // Cheap pre-filter: skip stubs whose source doesn't mention
+                // the target name at all.
+                if !stub_source.contains(target_short) {
+                    continue;
+                }
+                if let Some(cls) = class_loader(stub_name)
+                    && self.class_implements_or_extends(
+                        &cls,
+                        target_short,
+                        target_fqn,
+                        class_loader,
+                        include_abstract,
+                        direct_only,
+                    )
+                {
+                    let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
+                    if seen_fqns.insert(cls_fqn) {
+                        result.push(Arc::unwrap_or_clone(cls));
+                    }
                 }
             }
         }

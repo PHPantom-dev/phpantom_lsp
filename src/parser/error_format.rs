@@ -22,7 +22,7 @@ pub(crate) fn format_parse_error(error: &ParseError) -> String {
     match error {
         ParseError::SyntaxError(e) => format_syntax_error(e),
         ParseError::UnexpectedEndOfFile(expected, _, _) => {
-            let expected = friendly_token_list(expected);
+            let expected = friendly_token_list(expected.kinds());
             if expected.is_empty() {
                 "Syntax error: unexpected end of file".to_string()
             } else {
@@ -31,7 +31,7 @@ pub(crate) fn format_parse_error(error: &ParseError) -> String {
         }
         ParseError::UnexpectedToken(expected, found, _) => {
             let found = friendly_token_name(found);
-            let expected = friendly_token_list(expected);
+            let expected = friendly_token_list(expected.kinds());
             if expected.is_empty() {
                 format!("Syntax error: unexpected token {found}")
             } else {
@@ -39,7 +39,7 @@ pub(crate) fn format_parse_error(error: &ParseError) -> String {
             }
         }
         ParseError::UnclosedLiteralString(kind, _) => {
-            use mago_syntax::ast::LiteralStringKind;
+            use mago_syntax::cst::LiteralStringKind;
             match kind {
                 LiteralStringKind::SingleQuoted => {
                     "Syntax error: unclosed single-quoted string".to_string()
@@ -116,6 +116,9 @@ fn friendly_token_name(kind: &TokenKind) -> String {
         TokenKind::LiteralString => "a string",
         TokenKind::PartialLiteralString => "a string",
         TokenKind::StringPart => "a string part",
+        TokenKind::OffsetNumber => "an offset number",
+        TokenKind::OffsetString => "an offset string",
+        TokenKind::StringVariableName => "a string variable name",
 
         // ── Keywords ─────────────────────────────────────────────
         TokenKind::Abstract => "`abstract`",
@@ -320,6 +323,7 @@ mod tests {
     use super::*;
     use mago_database::file::FileId;
     use mago_span::{Position, Span};
+    use mago_syntax::error::Expected;
 
     fn pos(offset: u32) -> Position {
         Position::new(offset)
@@ -332,7 +336,7 @@ mod tests {
     #[test]
     fn unexpected_minus_instead_of_variable() {
         let err = ParseError::UnexpectedToken(
-            Box::new([TokenKind::Variable]),
+            Expected::Exactly(TokenKind::Variable),
             TokenKind::Minus,
             span(10, 11),
         );
@@ -346,7 +350,7 @@ mod tests {
     #[test]
     fn unexpected_token_with_multiple_expected() {
         let err = ParseError::UnexpectedToken(
-            Box::new([TokenKind::Function, TokenKind::Class, TokenKind::Interface]),
+            Expected::OneOf(&[TokenKind::Function, TokenKind::Class, TokenKind::Interface]),
             TokenKind::Minus,
             span(10, 11),
         );
@@ -360,7 +364,7 @@ mod tests {
     #[test]
     fn unexpected_token_with_two_expected() {
         let err = ParseError::UnexpectedToken(
-            Box::new([TokenKind::Semicolon, TokenKind::RightBrace]),
+            Expected::OneOf(&[TokenKind::Semicolon, TokenKind::RightBrace]),
             TokenKind::LeftParenthesis,
             span(5, 6),
         );
@@ -373,7 +377,7 @@ mod tests {
 
     #[test]
     fn unexpected_token_no_expected() {
-        let err = ParseError::UnexpectedToken(Box::new([]), TokenKind::At, span(0, 1));
+        let err = ParseError::UnexpectedToken(Expected::OneOf(&[]), TokenKind::At, span(0, 1));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected token `@`");
     }
@@ -381,8 +385,11 @@ mod tests {
     #[test]
     fn unexpected_eof_with_expected() {
         let file_id = FileId::new(b"test.php");
-        let err =
-            ParseError::UnexpectedEndOfFile(Box::new([TokenKind::Semicolon]), file_id, pos(100));
+        let err = ParseError::UnexpectedEndOfFile(
+            Expected::Exactly(TokenKind::Semicolon),
+            file_id,
+            pos(100),
+        );
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected end of file, expected `;`");
     }
@@ -390,14 +397,14 @@ mod tests {
     #[test]
     fn unexpected_eof_no_expected() {
         let file_id = FileId::new(b"test.php");
-        let err = ParseError::UnexpectedEndOfFile(Box::new([]), file_id, pos(50));
+        let err = ParseError::UnexpectedEndOfFile(Expected::OneOf(&[]), file_id, pos(50));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unexpected end of file");
     }
 
     #[test]
     fn unclosed_single_quoted_string() {
-        use mago_syntax::ast::LiteralStringKind;
+        use mago_syntax::cst::LiteralStringKind;
         let err = ParseError::UnclosedLiteralString(LiteralStringKind::SingleQuoted, span(5, 20));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unclosed single-quoted string");
@@ -405,7 +412,7 @@ mod tests {
 
     #[test]
     fn unclosed_double_quoted_string() {
-        use mago_syntax::ast::LiteralStringKind;
+        use mago_syntax::cst::LiteralStringKind;
         let err = ParseError::UnclosedLiteralString(LiteralStringKind::DoubleQuoted, span(5, 20));
         let msg = format_parse_error(&err);
         assert_eq!(msg, "Syntax error: unclosed double-quoted string");

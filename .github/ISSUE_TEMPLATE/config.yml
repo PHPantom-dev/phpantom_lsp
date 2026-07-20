@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://github.com/AJenbo/phpantom_lsp/tree/main/docs
+    url: https://github.com/PHPantom-dev/phpantom_lsp/tree/main/docs
     about: Check the docs before filing an issue. Your question might already be answered.

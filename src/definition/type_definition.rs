@@ -96,6 +96,7 @@ impl Backend {
                     ),
                     scope_var_resolver: None,
                     is_in_static_method: false,
+                    preserve_static: false,
                 };
 
                 let candidates = ResolvedType::into_arced_classes(
@@ -113,11 +114,20 @@ impl Backend {
             }
 
             SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
-                SelfStaticParentKind::Self_
-                | SelfStaticParentKind::Static
-                | SelfStaticParentKind::This => current_class
+                SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class
                     .map(|cc| vec![PhpType::Named(cc.name.to_string())])
                     .unwrap_or_default(),
+                SelfStaticParentKind::This => {
+                    if let Some(override_cls) =
+                        self.resolve_closure_this_override(uri, content, offset)
+                    {
+                        vec![PhpType::Named(override_cls.fqn().to_string())]
+                    } else {
+                        current_class
+                            .map(|cc| vec![PhpType::Named(cc.name.to_string())])
+                            .unwrap_or_default()
+                    }
+                }
                 SelfStaticParentKind::Parent => current_class
                     .and_then(|cc| cc.parent_class.as_ref())
                     .map(|p| vec![PhpType::Named(p.to_string())])
@@ -139,6 +149,7 @@ impl Backend {
             | SymbolKind::ConstantReference { .. }
             | SymbolKind::NamespaceDeclaration { .. }
             | SymbolKind::LaravelStringKey { .. }
+            | SymbolKind::LaravelMacroString { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
             | SymbolKind::Comment => {

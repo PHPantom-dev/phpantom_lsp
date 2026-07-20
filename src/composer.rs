@@ -178,6 +178,161 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
     }
 }
 
+/// Extract PSR-4 mappings from path-repository packages in `installed.json`.
+///
+/// Path-repository packages (Composer `"type": "path"` repositories) are
+/// local packages symlinked into `vendor/`.  They are project code that
+/// happens to be organized as Composer packages — e.g. the `internachi/modular`
+/// pattern where each module lives under `app-modules/` or similar and has
+/// its own `composer.json` with PSR-4 mappings.
+///
+/// A package is included only when **all three** conditions are met:
+///
+/// 1. `dist.type == "path"` in `installed.json`.
+/// 2. `transport-options.symlink == true` — the package is symlinked into
+///    vendor, not copied.  A copied path-repo is effectively a snapshot
+///    and should be treated as a regular vendor package.
+/// 3. The canonicalized (symlink-resolved) package root is a subdirectory
+///    of the workspace root but is **not** inside `vendor/`.  A symlink
+///    pointing outside the project (e.g. a shared library on disk) is not
+///    project code; neither is a package whose canonical path resolves
+///    back inside `vendor/` — that is an ordinary vendored dependency,
+///    already covered by the vendor classmap and service-provider scan,
+///    and must not be walked by the diagnostics pass as user source.
+///
+/// Their `autoload.psr-4` entries and `install-path` fields are combined
+/// to produce absolute directory mappings that can be appended to the
+/// project's own `psr4_mappings`.
+///
+/// Returns an empty `Vec` if `installed.json` does not exist, cannot be
+/// parsed, or contains no qualifying path-repository packages.
+pub fn extract_path_repo_psr4_mappings(
+    workspace_root: &Path,
+    vendor_dir: &str,
+) -> Vec<Psr4Mapping> {
+    let vendor_path = workspace_root.join(vendor_dir);
+    let installed_path = vendor_path.join("composer").join("installed.json");
+
+    let Ok(content) = fs::read_to_string(&installed_path) else {
+        return Vec::new();
+    };
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+
+    // installed.json: Composer 1 = top-level array, Composer 2 = { "packages": [...] }
+    let packages = if let Some(arr) = json.as_array() {
+        arr.as_slice()
+    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
+        pkgs.as_slice()
+    } else {
+        return Vec::new();
+    };
+
+    let composer_dir = vendor_path.join("composer");
+    let canonical_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let canonical_vendor = vendor_path
+        .canonicalize()
+        .unwrap_or_else(|_| vendor_path.clone());
+    let mut mappings = Vec::new();
+
+    for package in packages {
+        // Condition 1: dist.type must be "path".
+        let is_path_repo = package
+            .get("dist")
+            .and_then(|d| d.get("type"))
+            .and_then(|t| t.as_str())
+            == Some("path");
+        if !is_path_repo {
+            continue;
+        }
+
+        // Condition 2: must be symlinked, not copied.
+        let is_symlinked = package
+            .get("transport-options")
+            .and_then(|t| t.get("symlink"))
+            .and_then(|s| s.as_bool())
+            == Some(true);
+        if !is_symlinked {
+            continue;
+        }
+
+        // Resolve the package root on disk via install-path.
+        let pkg_root =
+            if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
+                composer_dir.join(install_path)
+            } else if let Some(name) = package.get("name").and_then(|n| n.as_str()) {
+                vendor_path.join(name)
+            } else {
+                continue;
+            };
+
+        // Canonicalize to follow symlinks to the real location.
+        let pkg_root = pkg_root.canonicalize().unwrap_or(pkg_root);
+        if !pkg_root.is_dir() {
+            continue;
+        }
+
+        // Condition 3: the resolved path must be inside the workspace but
+        // NOT inside the vendor directory.  Path repositories are project
+        // code only when they are symlinked *out* of vendor (e.g. the
+        // internachi/modular pattern, where modules live under
+        // `app-modules/` and are symlinked into vendor).  A package whose
+        // canonical path resolves back inside `vendor/` — because the
+        // symlink target is itself in vendor, or the symlink was
+        // materialised into a real copy — is an ordinary vendored
+        // dependency.  It is already covered by the vendor classmap for
+        // resolution and by the service-provider scan for macros, so
+        // adding its PSR-4 mapping here would only cause the diagnostics
+        // pass to walk and analyse the whole dependency as if it were the
+        // user's own source.
+        if !pkg_root.starts_with(&canonical_root) || pkg_root.starts_with(&canonical_vendor) {
+            continue;
+        }
+
+        // Extract autoload.psr-4 entries.
+        let Some(psr4) = package
+            .get("autoload")
+            .and_then(|a| a.get("psr-4"))
+            .and_then(|p| p.as_object())
+        else {
+            continue;
+        };
+
+        for (prefix, paths) in psr4 {
+            // The prefix should end with `\` per PSR-4 convention.
+            let normalised = normalise_prefix(prefix);
+
+            // paths can be a string or an array of strings.
+            let dirs: Vec<&str> = if let Some(s) = paths.as_str() {
+                vec![s]
+            } else if let Some(arr) = paths.as_array() {
+                arr.iter().filter_map(|v| v.as_str()).collect()
+            } else {
+                continue;
+            };
+
+            for dir in dirs {
+                let abs_path = pkg_root.join(dir);
+                if abs_path.is_dir() {
+                    mappings.push(Psr4Mapping {
+                        prefix: normalised.clone(),
+                        base_path: abs_path.to_string_lossy().into_owned(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by prefix length descending (longest-prefix-first matching).
+    mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
+
+    mappings
+}
+
 /// Parse `<vendor>/composer/autoload_classmap.php` and return a mapping
 /// from fully-qualified class name to file path (relative to the workspace
 /// root).
@@ -499,6 +654,72 @@ pub fn resolve_class_path(
     None
 }
 
+/// Reverse of [`resolve_class_path`]: given a file path, compute the
+/// expected PSR-4 namespace and class name.
+///
+/// Returns `Some((namespace, class_name))` where `namespace` is the
+/// expected namespace (e.g. `"App\\Models"`) and `class_name` is the
+/// expected short class name (the filename stem, e.g. `"User"`).
+///
+/// Returns `None` if the file doesn't end in `.php` or doesn't fall
+/// under any PSR-4 mapping.
+pub fn resolve_namespace_from_path(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    file_path: &Path,
+) -> Option<(Option<String>, String)> {
+    if file_path.extension().and_then(|e| e.to_str()) != Some("php") {
+        return None;
+    }
+
+    let file_unix = file_path.to_str()?.replace('\\', "/");
+
+    let mut best: Option<(&Psr4Mapping, String)> = None;
+
+    for mapping in mappings {
+        let abs_base = workspace_root.join(&mapping.base_path);
+        let abs_base_str = abs_base.to_str()?.replace('\\', "/");
+        let abs_base_slash = if abs_base_str.ends_with('/') {
+            abs_base_str
+        } else {
+            format!("{}/", abs_base_str)
+        };
+
+        if let Some(remainder) = file_unix.strip_prefix(&abs_base_slash)
+            && best
+                .as_ref()
+                .is_none_or(|(b, _)| mapping.base_path.len() > b.base_path.len())
+        {
+            best = Some((mapping, remainder.to_string()));
+        }
+    }
+
+    let (mapping, remainder) = best?;
+    let without_ext = remainder.strip_suffix(".php")?;
+    let class_name = without_ext
+        .rsplit('/')
+        .next()
+        .unwrap_or(without_ext)
+        .to_string();
+    let ns_from_path = without_ext.replace('/', "\\");
+    let prefix = mapping.prefix.trim_end_matches('\\');
+
+    let namespace = if ns_from_path.contains('\\') {
+        let dir_part = &ns_from_path[..ns_from_path.rfind('\\').unwrap()];
+        if prefix.is_empty() {
+            Some(dir_part.to_string())
+        } else {
+            Some(format!("{}\\{}", prefix, dir_part))
+        }
+    } else if prefix.is_empty() {
+        None
+    } else {
+        Some(prefix.to_string())
+    };
+
+    Some((namespace, class_name))
+}
+
 /// Extract file paths from `require_once` statements in PHP source content.
 ///
 /// Handles both the statement form and the function-like form:
@@ -705,7 +926,7 @@ pub fn detect_phar_references(content: &str, file_dir: &Path) -> Vec<PathBuf> {
         //   '/phpstan.phar/src/'
         // We look for quoted strings containing `.phar` and extract
         // the path up to (and including) the `.phar` extension.
-        for quote in [b'\'', b'"'] {
+        for quote in *b"'\"" {
             let bytes = line.as_bytes();
             let mut i = 0;
             while i < bytes.len() {
@@ -888,6 +1109,43 @@ pub(crate) fn has_require_dev(package: &ComposerPackage, dep: &str) -> bool {
     package.require_dev.contains_key(dep)
 }
 
+/// Detect whether the project depends on Laravel or a standalone
+/// Illuminate component.
+///
+/// Returns `true` when `require` or `require-dev` lists `laravel/framework`
+/// (a full Laravel application) or any `illuminate/*` package (a library or
+/// standalone use of Eloquent, the query builder, collections, etc.).
+///
+/// Laravel-specific analysis (Eloquent model members, the query-builder
+/// forwarding, config/view/route/translation key resolution, the contract
+/// to concrete-class bindings) is only useful when one of these packages is
+/// present.  Gating that work on this check means non-Laravel projects skip
+/// the parent-chain walks and post-resolution patches entirely.
+pub(crate) fn is_laravel_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            name.eq_ignore_ascii_case("laravel/framework")
+                || name.to_ascii_lowercase().starts_with("illuminate/")
+        })
+}
+
+pub(crate) fn explicit_dependency_names(package: &ComposerPackage) -> HashSet<String> {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .filter(|name| {
+            !name.eq_ignore_ascii_case("php")
+                && !name.starts_with("ext-")
+                && !name.starts_with("lib-")
+        })
+        .cloned()
+        .collect()
+}
+
 /// Detect whether the project is a Drupal project and resolve the web root.
 ///
 /// Returns `Some(web_root)` if one of the canonical Drupal core packages is
@@ -941,6 +1199,32 @@ mod tests {
     /// Helper: parse a JSON string into a [`ComposerPackage`].
     fn pkg(json: &str) -> ComposerPackage {
         json.parse::<ComposerPackage>().unwrap()
+    }
+
+    // ── is_laravel_project ──────────────────────────────────────────
+
+    #[test]
+    fn detects_laravel_framework() {
+        let p = pkg(r#"{"require": {"php": "^8.2", "laravel/framework": "^11.0"}}"#);
+        assert!(is_laravel_project(&p));
+    }
+
+    #[test]
+    fn detects_standalone_illuminate_component() {
+        let p = pkg(r#"{"require": {"illuminate/database": "^11.0"}}"#);
+        assert!(is_laravel_project(&p));
+    }
+
+    #[test]
+    fn detects_laravel_in_require_dev() {
+        let p = pkg(r#"{"require-dev": {"laravel/framework": "^11.0"}}"#);
+        assert!(is_laravel_project(&p));
+    }
+
+    #[test]
+    fn non_laravel_project_is_not_detected() {
+        let p = pkg(r#"{"require": {"php": "^8.2", "symfony/console": "^7.0"}}"#);
+        assert!(!is_laravel_project(&p));
     }
 
     // ── unescape_php_single_quoted ──────────────────────────────────
@@ -1178,5 +1462,151 @@ mod tests {
         // Drupal package present but no scaffold config and no matching dirs
         let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
         assert!(detect_drupal_web_root(dir.path(), &p).is_none());
+    }
+
+    // ── resolve_namespace_from_path ─────────────────────────────────
+
+    #[test]
+    fn reverse_psr4_basic() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Models/User.php"));
+        assert_eq!(
+            result,
+            Some((Some("App\\Models".to_string()), "User".to_string()))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_root_of_mapping() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Kernel.php"));
+        assert_eq!(
+            result,
+            Some((Some("App".to_string()), "Kernel".to_string()))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_deeply_nested() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result = resolve_namespace_from_path(
+            &mappings,
+            root,
+            Path::new("/project/app/Http/Controllers/Api/V2/UserController.php"),
+        );
+        assert_eq!(
+            result,
+            Some((
+                Some("App\\Http\\Controllers\\Api\\V2".to_string()),
+                "UserController".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_longest_base_path_wins() {
+        let mappings = vec![
+            Psr4Mapping {
+                prefix: "App\\".to_string(),
+                base_path: "app/".to_string(),
+            },
+            Psr4Mapping {
+                prefix: "App\\Models\\".to_string(),
+                base_path: "app/Models/".to_string(),
+            },
+        ];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Models/User.php"));
+        assert_eq!(
+            result,
+            Some((Some("App\\Models".to_string()), "User".to_string()))
+        );
+    }
+
+    #[test]
+    fn reverse_psr4_empty_prefix() {
+        let mappings = vec![Psr4Mapping {
+            prefix: String::new(),
+            base_path: "src/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/src/Foo.php"));
+        assert_eq!(result, Some((None, "Foo".to_string())));
+    }
+
+    #[test]
+    fn reverse_psr4_empty_prefix_nested() {
+        let mappings = vec![Psr4Mapping {
+            prefix: String::new(),
+            base_path: "src/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/src/Bar/Baz.php"));
+        assert_eq!(result, Some((Some("Bar".to_string()), "Baz".to_string())));
+    }
+
+    #[test]
+    fn reverse_psr4_no_match() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result = resolve_namespace_from_path(
+            &mappings,
+            root,
+            Path::new("/project/vendor/some/File.php"),
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn reverse_psr4_non_php() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "App\\".to_string(),
+            base_path: "app/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result =
+            resolve_namespace_from_path(&mappings, root, Path::new("/project/app/Foo.txt"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn reverse_psr4_absolute_base_path() {
+        let mappings = vec![Psr4Mapping {
+            prefix: "Acme\\Billing\\".to_string(),
+            base_path: "/project/modules/billing/src/".to_string(),
+        }];
+        let root = Path::new("/project");
+        let result = resolve_namespace_from_path(
+            &mappings,
+            root,
+            Path::new("/project/modules/billing/src/Models/Invoice.php"),
+        );
+        assert_eq!(
+            result,
+            Some((
+                Some("Acme\\Billing\\Models".to_string()),
+                "Invoice".to_string()
+            ))
+        );
     }
 }

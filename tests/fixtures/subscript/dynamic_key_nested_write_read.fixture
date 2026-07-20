@@ -1,0 +1,24 @@
+// test: nested dynamic write read back resolves the written value type
+// feature: completion
+// expect: add(
+---
+<?php
+
+class Decimal {
+    public function toString(): string { return ''; }
+    public function add(Decimal $other): Decimal { return $this; }
+}
+
+class Report {
+    /** @param list<Decimal> $prices */
+    public function build(array $prices): void {
+        $return = [];
+        $count = 0;
+        foreach ($prices as $price) {
+            $return['data'][$count]['earnings'] = $price;
+            $sum = $return['data'][$count]['earnings'];
+            $sum-><>
+            $count++;
+        }
+    }
+}

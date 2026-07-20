@@ -72,6 +72,73 @@ async fn test_completion_parenthesized_rhs_variable() {
     }
 }
 
+/// Test error-suppression prefix (`@`) doesn't block RHS resolution
+#[tokio::test]
+async fn test_completion_error_suppression_prefix_rhs_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///suppress_rhs.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SuppressDemo {\n",
+        "    public function foo(): void {}\n",
+        "}\n",
+        "function makeSuppressDemo(): SuppressDemo {\n",
+        "    return new SuppressDemo();\n",
+        "}\n",
+        "class SuppressUser {\n",
+        "    public function test() {\n",
+        "        $p = @makeSuppressDemo();\n",
+        "        $p->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $p = @makeSuppressDemo()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"foo"),
+                "Should include 'foo' method from SuppressDemo despite the @ prefix"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// Test `$var::` completion where variable holds a class-string from `Foo::class`
 #[tokio::test]
 async fn test_completion_class_string_variable_static_access() {
@@ -2224,7 +2291,7 @@ async fn test_completion_method_conditional_return_class_string_chain() {
 
 // ── Symfony-style conditional return with @psalm-return coexisting ───────────
 
-/// Reproduces https://github.com/AJenbo/phpantom_lsp/issues/41
+/// Reproduces https://github.com/PHPantom-dev/phpantom_lsp/issues/41
 ///
 /// When a method has both `@phpstan-return` and `@psalm-return` conditional
 /// annotations and the class-string parameter is not at index 0, the resolved

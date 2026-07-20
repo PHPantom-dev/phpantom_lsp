@@ -131,7 +131,7 @@ fn empty_name_is_not_navigable() {
 // ── extract_symbol_map integration tests ────────────────────────────
 
 fn parse_and_extract(php: &str) -> SymbolMap {
-    let arena = bumpalo::Bump::new();
+    let arena = mago_allocator::LocalArena::new();
     let file_id = mago_database::file::FileId::new(b"test.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
     extract_symbol_map(program, php)
@@ -741,6 +741,43 @@ fn docblock_phpstan_require_implements_produces_class_reference() {
         assert_eq!(name, "Countable");
     } else {
         panic!("Expected ClassReference for Countable");
+    }
+}
+
+#[test]
+fn docblock_phpstan_sealed_produces_class_references() {
+    let php = concat!(
+        "<?php\n",
+        "use App\\FooClass;\n",
+        "use App\\BarClass;\n",
+        "/** @phpstan-sealed FooClass|BarClass */\n",
+        "class BaseClass {}\n"
+    );
+    let map = parse_and_extract(php);
+    let docblock_start = php.find("/**").unwrap();
+    let foo_in_doc = php[docblock_start..].find("FooClass").unwrap() + docblock_start;
+
+    let hit = map.lookup(foo_in_doc as u32);
+    assert!(
+        hit.is_some(),
+        "Should find FooClass in @phpstan-sealed docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "FooClass");
+    } else {
+        panic!("Expected ClassReference for FooClass");
+    }
+
+    let bar_in_doc = php[docblock_start..].find("BarClass").unwrap() + docblock_start;
+    let hit2 = map.lookup(bar_in_doc as u32);
+    assert!(
+        hit2.is_some(),
+        "Should find BarClass in @phpstan-sealed docblock"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit2.unwrap().kind {
+        assert_eq!(name, "BarClass");
+    } else {
+        panic!("Expected ClassReference for BarClass");
     }
 }
 
@@ -1894,6 +1931,41 @@ fn docblock_array_suffix_span_excludes_brackets() {
         span_text, "Item",
         "Span should cover 'Item' only, not 'Item[]'"
     );
+}
+
+#[test]
+fn benevolent_wrapper_is_not_a_class_reference() {
+    // PHPStan's `__benevolent<T>` wrapper is a pseudo-type: the wrapper
+    // itself must not produce a ClassReference span (which would feed
+    // the unknown-class diagnostic), but the inner type still does.
+    let php = concat!(
+        "<?php\n",
+        "class Loop {}\n",
+        "class Holder {\n",
+        "    /** @var __benevolent<Loop|null> */\n",
+        "    public $loop;\n",
+        "}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let docblock_start = php.find("/** @var").unwrap();
+    let benevolent_in_doc = php[docblock_start..].find("__benevolent").unwrap() + docblock_start;
+    let hit = map.lookup(benevolent_in_doc as u32);
+    assert!(
+        !matches!(
+            hit.map(|s| &s.kind),
+            Some(SymbolKind::ClassReference { .. })
+        ),
+        "__benevolent must not be a ClassReference, got {:?}",
+        hit.map(|s| &s.kind)
+    );
+
+    let loop_in_doc = php[docblock_start..].find("Loop").unwrap() + docblock_start;
+    let hit = map.lookup(loop_in_doc as u32);
+    match hit.map(|s| &s.kind) {
+        Some(SymbolKind::ClassReference { name, .. }) => assert_eq!(name, "Loop"),
+        other => panic!("Expected ClassReference for Loop, got {:?}", other),
+    }
 }
 
 // ── Conditional return type tests ───────────────────────────────────
@@ -3158,6 +3230,49 @@ fn see_tag_member_method() {
 }
 
 #[test]
+fn see_tag_member_hash_fragment() {
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @see Order#getTotal\n",
+        " */\n",
+        "class Foo {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    // The class part should produce a ClassReference.
+    let class_offset = php.find("Order").unwrap() as u32;
+    let hit = map.lookup(class_offset);
+    assert!(hit.is_some(), "Should find Order from @see Order#getTotal");
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "Order");
+    } else {
+        panic!("Expected ClassReference for Order");
+    }
+
+    // The member part should produce a MemberAccess, not part of the class name.
+    let member_offset = php.find("getTotal").unwrap() as u32;
+    let hit = map.lookup(member_offset);
+    assert!(
+        hit.is_some(),
+        "Should find getTotal from @see Order#getTotal"
+    );
+    if let SymbolKind::MemberAccess {
+        ref subject_text,
+        ref member_name,
+        is_static,
+        ..
+    } = hit.unwrap().kind
+    {
+        assert_eq!(subject_text, "Order");
+        assert_eq!(member_name, "getTotal");
+        assert!(!is_static, "@see `#` fragments are instance members");
+    } else {
+        panic!("Expected MemberAccess for getTotal");
+    }
+}
+
+#[test]
 fn see_tag_member_property() {
     let php = concat!(
         "<?php\n",
@@ -3440,6 +3555,17 @@ fn see_tag_qualified_member_spans_aligned() {
         class_offset + "App\\Foo".len() as u32,
         "class span end must not overshoot by the synthetic prefix"
     );
+    // The qualified reference must be marked fully-qualified so downstream
+    // consumers do not re-prefix the current namespace and double it.
+    match hit.kind {
+        SymbolKind::ClassReference {
+            ref name, is_fqn, ..
+        } => {
+            assert_eq!(name, "App\\Foo");
+            assert!(is_fqn, "qualified @see class reference must be is_fqn");
+        }
+        ref other => panic!("Expected ClassReference for App\\Foo, got {:?}", other),
+    }
 
     // Member portion: lookup at the exact `bar` offset must succeed (a
     // one-byte shift would make this miss).
@@ -3458,6 +3584,48 @@ fn see_tag_qualified_member_spans_aligned() {
         assert_eq!(member_name, "bar");
     } else {
         panic!("Expected MemberAccess for bar");
+    }
+}
+
+#[test]
+fn see_tag_self_member_spans_emitted() {
+    let php = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function bar(): void {}\n",
+        "    /**\n",
+        "     * @see self::bar()\n",
+        "     */\n",
+        "    public function baz(): void {}\n",
+        "}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let self_offset = php.find("self::bar").unwrap() as u32;
+    let self_hit = map.lookup(self_offset).expect("Should find self keyword");
+    match self_hit.kind {
+        SymbolKind::SelfStaticParent(kind) => {
+            assert_eq!(kind, SelfStaticParentKind::Self_);
+        }
+        ref other => panic!("Expected SelfStaticParent for self, got {:?}", other),
+    }
+
+    let bar_offset = php.rfind("bar()").unwrap() as u32;
+    let bar_hit = map.lookup(bar_offset).expect("Should find bar member");
+    match &bar_hit.kind {
+        SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static,
+            is_docblock_reference,
+            ..
+        } => {
+            assert_eq!(subject_text, "self");
+            assert_eq!(member_name, "bar");
+            assert!(*is_static);
+            assert!(*is_docblock_reference);
+        }
+        other => panic!("Expected MemberAccess for bar, got {:?}", other),
     }
 }
 
@@ -3865,4 +4033,41 @@ fn array_callable_ignores_non_identifier_method_string() {
         map.lookup(offset).is_none(),
         "non-identifier string must not emit a member-access span"
     );
+}
+
+#[test]
+fn array_callable_span_is_marked_as_array_callable() {
+    // A `[Class::class, 'method']` span carries the `is_array_callable`
+    // flag so diagnostics can distinguish it from a real `::`/`->` access.
+    let php = "<?php\nRoute::get('/', [IndexPageController::class, 'indexPage']);\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("indexPage']").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method string");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            is_array_callable, ..
+        } => assert!(
+            *is_array_callable,
+            "array-callable span should set is_array_callable"
+        ),
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
+}
+
+#[test]
+fn real_member_access_is_not_marked_as_array_callable() {
+    // A genuine `->method()` access must not carry the array-callable flag.
+    let php = "<?php\n$obj->doThing();\n";
+    let map = parse_and_extract(php);
+    let offset = php.find("doThing").unwrap() as u32;
+    let hit = map.lookup(offset).expect("span at method name");
+    match &hit.kind {
+        SymbolKind::MemberAccess {
+            is_array_callable, ..
+        } => assert!(
+            !*is_array_callable,
+            "real member access should not set is_array_callable"
+        ),
+        other => panic!("Expected MemberAccess, got {:?}", other),
+    }
 }

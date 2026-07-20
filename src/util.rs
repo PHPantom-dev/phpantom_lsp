@@ -87,6 +87,54 @@ pub(crate) fn resolve_name_via_loader(
         .unwrap_or_else(|| name.to_string())
 }
 
+/// Resolve a source-level (user-typed) class reference to its FQN,
+/// preferring a class in the current namespace over a global class of the
+/// same short name.
+///
+/// PHP resolves an unqualified class reference (as written in `new Foo()`
+/// or a type hint) against the current namespace before falling back to
+/// the global scope, so `new Iterator()` inside `namespace App` means
+/// `App\Iterator` when that class exists, not the global SPL `\Iterator`.
+///
+/// The plain [`resolve_name_via_loader`] delegates to the class loader,
+/// which is deliberately global-first for already-canonicalised names
+/// (parent/interface FQNs, where a backslash-free name signals an
+/// intentional global reference).  This helper corrects that for raw
+/// source references: when the loader lands on a global class, it re-checks
+/// the namespace-qualified form and prefers a genuine same-namespace class.
+///
+/// An explicit `use` import still wins: it resolves to a namespaced or
+/// aliased class whose FQN differs from the bare name, which this helper
+/// leaves untouched.
+pub(crate) fn resolve_source_class_name(
+    name: &str,
+    namespace: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> String {
+    let resolved = class_loader(name);
+    // Only an unqualified name inside a namespace can be shadowed by a
+    // global stub of the same short name.
+    if !name.contains('\\')
+        && let Some(ns) = namespace
+    {
+        // The loader landed on a global class (or found nothing); an
+        // explicit import would have resolved to a namespaced/aliased
+        // class whose FQN carries a namespace.
+        let landed_on_global = resolved.as_ref().is_none_or(|c| c.file_namespace.is_none());
+        if landed_on_global {
+            let ns_qualified = format!("{ns}\\{name}");
+            if let Some(local) = class_loader(&ns_qualified)
+                && local.fqn().eq_ignore_ascii_case(&ns_qualified)
+            {
+                return local.fqn().to_string();
+            }
+        }
+    }
+    resolved
+        .map(|cls| cls.fqn().to_string())
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Resolve all class names inside a [`PhpType`] to their fully-qualified
 /// forms using the class loader.  Scalar/keyword types are left untouched.
 ///
@@ -523,6 +571,48 @@ pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
         .or_else(|| raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
 }
 
+/// Strip the surrounding quotes from a PHP string literal and unescape its
+/// body, returning the runtime string value.
+///
+/// This matters when the literal names a class: `'Foo\\Bar'` is the class
+/// `Foo\Bar` at runtime, so the doubled backslash in the source text must be
+/// collapsed before the value is used as a type/class name. Backslash escapes
+/// are resolved in a single left-to-right pass (sequential `replace` calls are
+/// order-dependent and mis-handle adjacent escapes). In a single-quoted string
+/// only `\\` and `\'` are special; in a double-quoted string only `\\` and
+/// `\"` are recognised here (other backslash sequences are kept literal, which
+/// is sufficient for class names). Returns `None` when `raw` is not a quoted
+/// string literal.
+pub(crate) fn unescape_php_string_literal(raw: &str) -> Option<String> {
+    let (body, double_quoted) =
+        if let Some(b) = raw.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
+            (b, false)
+        } else {
+            let b = raw.strip_prefix('"').and_then(|r| r.strip_suffix('"'))?;
+            (b, true)
+        };
+
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('\'') if !double_quoted => out.push('\''),
+                Some('"') if double_quoted => out.push('"'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
 /// Build a fully-qualified name from a short name and an optional namespace.
 ///
 /// `("Foo", Some("App\\Models"))` → `"App\\Models\\Foo"`,
@@ -920,16 +1010,39 @@ pub(crate) fn is_subtype_of(
     ancestor_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> bool {
+    // Every name handled by this function — the ancestor plus each
+    // `interfaces`/`parent_class` entry pulled from a loaded class — is a
+    // canonical FQN, not a user-typed reference.  A backslash-free name
+    // (e.g. `Iterator`, `Traversable`, `Exception`) is therefore a
+    // root-namespace class and must resolve in the global namespace.
+    //
+    // The raw `class_loader` applies the consuming file's use-map to
+    // unqualified names.  That is correct for user-typed references but
+    // wrong here: when a calling file has `use App\Iterator;`, loading the
+    // global `\Iterator` interface node inside an SPL class's hierarchy
+    // would return `App\Iterator` and break the walk (so subtype checks
+    // against `Iterator`/`Traversable` spuriously fail).  Route
+    // backslash-free names through the `__fqn__\` bypass, which skips the
+    // use-map and falls back to a global short-name lookup.  The
+    // `.or_else` preserves the raw loader for genuine short names that
+    // have no global class (they resolve via namespace context as before).
+    let load_fqn = |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+        if name.contains('\\') {
+            class_loader(name)
+        } else {
+            class_loader(&format!("__fqn__\\{name}")).or_else(|| class_loader(name))
+        }
+    };
+
     // Resolve the ancestor to its FQN so that all comparisons below are
     // FQN-vs-FQN.  When `ancestor_name` is already a FQN (contains `\`)
     // we use it directly.  When it is a short name we try to load it
-    // through the class_loader — which consults the use-map, namespace,
-    // and stubs — and use the loaded class's FQN.  For root-namespace
-    // classes (e.g. `RuntimeException`) the FQN equals the short name,
-    // so the fallback to `ancestor_name` is correct.
+    // through `load_fqn` and use the loaded class's FQN.  For
+    // root-namespace classes (e.g. `RuntimeException`) the FQN equals the
+    // short name, so the fallback to `ancestor_name` is correct.
     let ancestor_fqn: String = if ancestor_name.contains('\\') {
         ancestor_name.to_string()
-    } else if let Some(loaded) = class_loader(ancestor_name) {
+    } else if let Some(loaded) = load_fqn(ancestor_name) {
         loaded.fqn().to_string()
     } else {
         // Cannot resolve — keep the original name.  For root-namespace
@@ -955,7 +1068,7 @@ pub(crate) fn is_subtype_of(
             return true;
         }
         // Load the interface and check its parents (interface extends).
-        if let Some(iface_info) = class_loader(&iface_name) {
+        if let Some(iface_info) = load_fqn(&iface_name) {
             // Interface parents are stored in both `parent_class`
             // (first parent for single-extends compat) and
             // `interfaces` (all parents for multi-extends).
@@ -986,11 +1099,11 @@ pub(crate) fn is_subtype_of(
             return true;
         }
         // Load the parent to check its interfaces (transitively)
-        // and continue the class chain.
-        if let Some(parent_info) = class_loader(name) {
-            // Check parent's interfaces before cycle detection so that
-            // even when the class_loader's use-map shadows a global class
-            // name (returning the wrong class), we still examine interfaces.
+        // and continue the class chain.  `load_fqn` resolves
+        // root-namespace names globally, so the use-map can no longer
+        // shadow a global parent (e.g. a same-file `use App\Exception;`
+        // does not hijack a stub class's global `\Exception` parent).
+        if let Some(parent_info) = load_fqn(name) {
             let mut p_iface_queue: Vec<String> = parent_info
                 .interfaces
                 .iter()
@@ -1002,7 +1115,7 @@ pub(crate) fn is_subtype_of(
                 if iface_name == ancestor {
                     return true;
                 }
-                if let Some(iface_info) = class_loader(&iface_name) {
+                if let Some(iface_info) = load_fqn(&iface_name) {
                     for pi in &iface_info.interfaces {
                         if p_visited.insert(pi.to_string()) {
                             p_iface_queue.push(pi.to_string());
@@ -1015,55 +1128,9 @@ pub(crate) fn is_subtype_of(
                     }
                 }
             }
-            // Cycle detection: if the loaded class's FQN was already
-            // visited, the class_loader's use-map may have shadowed a
-            // global class name with a same-file import (e.g.
-            // `use App\Exceptions\Exception;` makes class_loader("Exception")
-            // return App\Exceptions\Exception instead of global \Exception).
-            // Try bypassing the use-map by passing a namespace-qualified
-            // synthetic name that triggers the class_loader's short-name
-            // fallback path.
+            // Cycle detection: stop if we have already visited this
+            // parent's FQN (a malformed or self-referential hierarchy).
             if !visited_parents.insert(parent_info.fqn().to_string()) {
-                // The name is a root-namespace FQN being shadowed by the
-                // use-map.  Try the class_loader with a synthetic qualified
-                // name — this skips the use-map check (which only fires for
-                // unqualified names) and falls through to the short-name
-                // fallback that calls find_or_load_class(short_name).
-                if !name.contains('\\') {
-                    let synthetic = format!("__fqn__\\{}", name);
-                    if let Some(real_parent) = class_loader(&synthetic) {
-                        // Successfully bypassed the use-map cycle.
-                        // Check this parent's interfaces for the ancestor.
-                        let mut rp_iface_queue: Vec<String> = real_parent
-                            .interfaces
-                            .iter()
-                            .map(|a| a.to_string())
-                            .collect();
-                        let mut rp_visited: std::collections::HashSet<String> =
-                            rp_iface_queue.iter().cloned().collect();
-                        while let Some(iface_name) = rp_iface_queue.pop() {
-                            if iface_name == ancestor {
-                                return true;
-                            }
-                            if let Some(iface_info) = class_loader(&iface_name) {
-                                for pi in &iface_info.interfaces {
-                                    if rp_visited.insert(pi.to_string()) {
-                                        rp_iface_queue.push(pi.to_string());
-                                    }
-                                }
-                                if let Some(ref pc) = iface_info.parent_class
-                                    && rp_visited.insert(pc.to_string())
-                                {
-                                    rp_iface_queue.push(pc.to_string());
-                                }
-                            }
-                        }
-                        // Continue walking from the real parent
-                        visited_parents.insert(real_parent.fqn().to_string());
-                        current_parent = real_parent.parent_class.map(|a| a.to_string());
-                        continue;
-                    }
-                }
                 break;
             }
             current_parent = parent_info.parent_class.map(|a| a.to_string());
@@ -1164,18 +1231,24 @@ pub(crate) fn is_subtype_of_typed(
         return is_subtype_of_typed(subtype, &as_union, class_loader);
     }
 
+    // ── Intersection supertype: all members required ────────────
+    // Checked before the subtype-intersection branch so that the
+    // both-intersections case (e.g. `A&B&C` <: `A&B`) decomposes the
+    // supertype first: every supertype member must be satisfied by
+    // *some* subtype member.  Handling the subtype first would instead
+    // demand that a single member satisfy the whole supertype, wrongly
+    // rejecting a narrower intersection that carries extra constraints.
+    if let PhpType::Intersection(members) = supertype {
+        return members
+            .iter()
+            .all(|m| is_subtype_of_typed(subtype, m, class_loader));
+    }
+
     // ── Intersection subtype: at least one member suffices ──────
     if let PhpType::Intersection(members) = subtype {
         return members
             .iter()
             .any(|m| is_subtype_of_typed(m, supertype, class_loader));
-    }
-
-    // ── Intersection supertype: all members required ────────────
-    if let PhpType::Intersection(members) = supertype {
-        return members
-            .iter()
-            .all(|m| is_subtype_of_typed(subtype, m, class_loader));
     }
 
     // ── Generic covariance with class-loader awareness ──────────
@@ -1241,11 +1314,50 @@ pub(crate) fn is_subtype_of_typed(
     // class-string<Animal>` only when `Cat` and `Animal` are
     // structurally equal.  Extend to nominal hierarchy so that
     // `class-string<Cat>` is accepted where `class-string<Animal>`
-    // is expected when `Cat extends Animal`.
-    if let (PhpType::ClassString(Some(sub_inner)), PhpType::ClassString(Some(sup_inner))) =
-        (subtype, supertype)
+    // is expected when `Cat extends Animal`.  A bare `class-string`
+    // is treated as `class-string<object>`, so it satisfies
+    // `class-string<object>` (and its `mixed` equivalent) — any class
+    // name is a class-string of some object.
+    if let (PhpType::ClassString(sub_inner), PhpType::ClassString(sup_inner)) = (subtype, supertype)
     {
-        return is_subtype_of_typed(sub_inner, sup_inner, class_loader);
+        let object_bound = PhpType::Named("object".to_string());
+        let sub = sub_inner.as_deref().unwrap_or(&object_bound);
+        let sup = sup_inner.as_deref().unwrap_or(&object_bound);
+        return is_subtype_of_typed(sub, sup, class_loader);
+    }
+
+    // ── String literal <: class-string<Bound> ────────────────────
+    // A string literal that names an existing class satisfying the
+    // bound is a valid `class-string<Bound>`, e.g. passing
+    // `'RuntimeException'` where `class-string<Throwable>` is
+    // expected.  Stay silent (return true) whenever the literal's
+    // content cannot be resolved to a class — it may simply live in
+    // a file we haven't indexed — and only reject when the resolved
+    // class provably fails to satisfy the bound.
+    if let PhpType::Literal(crate::php_type::LiteralValue::String(_)) = subtype
+        && matches!(
+            supertype,
+            PhpType::ClassString(_) | PhpType::InterfaceString(_)
+        )
+    {
+        let PhpType::Literal(lit) = subtype else {
+            unreachable!()
+        };
+        let Some(class_name) = lit.string_content() else {
+            return true;
+        };
+        let Some(cls) = class_loader(class_name) else {
+            return true;
+        };
+        return match supertype {
+            PhpType::ClassString(Some(bound)) | PhpType::InterfaceString(Some(bound)) => {
+                match bound.base_name() {
+                    Some(bound_name) => is_subtype_of(&cls, bound_name, class_loader),
+                    None => true,
+                }
+            }
+            _ => true,
+        };
     }
 
     // ── Nominal class hierarchy check ───────────────────────────
@@ -1764,6 +1876,11 @@ impl Backend {
         self.file_imports.write().remove(uri);
         self.resolved_names.write().remove(uri);
         self.file_namespaces.write().remove(uri);
+        // Parse errors are stored per file during update_ast and consumed
+        // by the syntax-error diagnostic. Without this removal the last
+        // parse-error vector for every file ever opened (or deleted from
+        // disk) stays resident for the whole session.
+        self.parse_errors.write().remove(uri);
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
@@ -2131,11 +2248,11 @@ pub(crate) fn infer_type_from_literal(expr: &str) -> Option<PhpType> {
 /// similar features that need to locate the method body surrounding
 /// the cursor.
 pub(crate) fn find_enclosing_method_block_in_members<'a>(
-    members: impl Iterator<Item = &'a mago_syntax::ast::class_like::member::ClassLikeMember<'a>>,
+    members: impl Iterator<Item = &'a mago_syntax::cst::class_like::member::ClassLikeMember<'a>>,
     offset: u32,
-) -> Option<&'a mago_syntax::ast::block::Block<'a>> {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+) -> Option<&'a mago_syntax::cst::block::Block<'a>> {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     for member in members {
         if let ClassLikeMember::Method(method) = member
@@ -2295,6 +2412,42 @@ pub fn run_command_with_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unescape_string_literal_collapses_namespace_separators() {
+        // Single-quoted `'Foo\\Bar'` names the class `Foo\Bar` at runtime.
+        assert_eq!(
+            unescape_php_string_literal(r"'Foo\\Bar'").as_deref(),
+            Some(r"Foo\Bar")
+        );
+        // Double-quoted spelling collapses the same way.
+        assert_eq!(
+            unescape_php_string_literal(r#""App\\Models\\User""#).as_deref(),
+            Some(r"App\Models\User")
+        );
+    }
+
+    #[test]
+    fn unescape_string_literal_handles_quote_and_lone_backslash() {
+        // `\'` produces a literal quote inside a single-quoted string.
+        assert_eq!(
+            unescape_php_string_literal(r"'a\'b'").as_deref(),
+            Some("a'b")
+        );
+        // A lone backslash before a non-special char stays literal.
+        assert_eq!(
+            unescape_php_string_literal(r"'a\nb'").as_deref(),
+            Some(r"a\nb")
+        );
+        // An empty string literal unescapes to an empty string.
+        assert_eq!(unescape_php_string_literal("''").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn unescape_string_literal_rejects_unquoted_input() {
+        assert_eq!(unescape_php_string_literal("bare"), None);
+        assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
 
     #[test]
     fn line_index_matches_offset_to_position() {
@@ -2520,6 +2673,64 @@ mod tests {
         let classes = [exc, cls.clone()];
         let loader = loader_from(&classes);
         assert!(is_subtype_of(&cls, "RuntimeException", &loader));
+    }
+
+    // ── is_subtype_of: global name shadowed by consuming file's use-map ─
+
+    #[test]
+    fn subtype_of_global_interface_not_broken_by_shadowing_use_import() {
+        // A project class shares the short name of a global interface
+        // (`Iterator`).  The consuming file imports the project class
+        // (`use App\Input\Iterator;`), so its use-map maps the unqualified
+        // name `Iterator` to `App\Input\Iterator`.  Subtype checks against
+        // the global `\Iterator` / `\Traversable` — reached while walking a
+        // stub class's hierarchy — must still succeed.
+        let traversable = make_class("Traversable", None, None, &[]);
+        let iterator = make_class("Iterator", None, None, &["Traversable"]);
+        let recursive_iterator = make_class("RecursiveIterator", None, None, &["Iterator"]);
+        let rec_dir_iterator = make_class(
+            "RecursiveDirectoryIterator",
+            None,
+            None,
+            &["RecursiveIterator"],
+        );
+        // The shadowing project class (imported into the consuming file).
+        let app_iterator = make_class("Iterator", Some("App\\Input"), None, &[]);
+
+        let classes = [
+            traversable,
+            iterator,
+            recursive_iterator,
+            rec_dir_iterator.clone(),
+            app_iterator.clone(),
+        ];
+
+        // A loader that mirrors `class_loader_with`: an unqualified name in
+        // the use-map resolves to the imported class first; the `__fqn__\`
+        // bypass skips the use-map and resolves the global short name.
+        let loader = move |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+            let stripped = name.strip_prefix('\\').unwrap_or(name);
+            if !stripped.contains('\\') && stripped == "Iterator" {
+                // use-map shadow: unqualified `Iterator` → App\Input\Iterator
+                return Some(app_iterator.clone());
+            }
+            if let Some(cls) = classes.iter().find(|c| c.fqn() == stripped).cloned() {
+                return Some(cls);
+            }
+            if stripped.contains('\\') {
+                let short = crate::util::short_name(stripped);
+                return classes.iter().find(|c| c.fqn() == short).cloned();
+            }
+            None
+        };
+
+        // Without the fix, the intermediate global `Iterator` node resolves
+        // to `App\Input\Iterator`, so the walk never reaches `Traversable`
+        // and the ancestor `Iterator` itself mis-resolves.
+        assert!(is_subtype_of(&rec_dir_iterator, "Iterator", &loader));
+        assert!(is_subtype_of(&rec_dir_iterator, "Traversable", &loader));
+        // A genuinely unrelated global class is still rejected.
+        assert!(!is_subtype_of(&rec_dir_iterator, "Countable", &loader));
     }
 
     // ── run_command_with_timeout ────────────────────────────────────

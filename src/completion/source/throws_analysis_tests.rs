@@ -830,6 +830,8 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: false,
+            is_macro: false,
+            is_inferred_return: false,
             type_assertions: Vec::new(),
             throws: throws.into_iter().map(PhpType::parse).collect(),
             if_this_is: None,
@@ -857,6 +859,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         used_traits: Vec::new(),
         mixins: Vec::new(),
         mixin_generics: Vec::new(),
+        require_extends: None,
         is_final: false,
         is_abstract: false,
         deprecation_message: None,
@@ -1171,6 +1174,7 @@ fn test_find_cross_file_propagated_throws_function_call() {
         template_bindings: Vec::new(),
         throws: vec![PhpType::parse("DatabaseException")],
         is_polyfill: false,
+        overloads: vec![],
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
@@ -1304,6 +1308,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         template_bindings: Vec::new(),
         throws: vec![PhpType::parse("HelperException")],
         is_polyfill: false,
+        overloads: vec![],
     };
 
     let function_loader = move |name: &str| -> Option<FunctionInfo> {

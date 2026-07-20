@@ -784,6 +784,311 @@ class Foo {
     assert!(has_method, "expected method token on line 4");
 }
 
+// ─── Member existence validation ────────────────────────────────────────────
+//
+// Member tokens (method/property) are only emitted when the member can be
+// verified to exist on the resolved subject class (or the subject cannot
+// be cheaply resolved).  A verifiably absent member gets no token so the
+// text keeps its default coloring — most visibly for array-callable
+// strings like `[Foo::class, 'mispelled']`.
+
+#[test]
+fn array_callable_known_method_gets_method_token() {
+    let php = r#"<?php
+class SortableController {
+    public function sort(): void {}
+}
+$cb = [SortableController::class, 'sort'];
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let method_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 4 && t.length == 4)
+        .collect();
+    assert!(
+        !method_toks.is_empty(),
+        "expected method token for 'sort' in array callable"
+    );
+}
+
+#[test]
+fn array_callable_unknown_method_gets_no_token() {
+    let php = r#"<?php
+class SortableController {
+    public function sort(): void {}
+}
+$cb = [SortableController::class, 'sortaaaa'];
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let method_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 4)
+        .collect();
+    assert!(
+        method_toks.is_empty(),
+        "expected no method token for misspelled 'sortaaaa', got: {:?}",
+        method_toks
+    );
+}
+
+#[test]
+fn array_callable_this_subject_validates_against_enclosing_class() {
+    let php = r#"<?php
+class Listener {
+    public function handle(): void {}
+    public function register(): array {
+        return [[$this, 'handle'], [$this, 'hanlde']];
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    // 'handle' (length 6) gets a method token, the misspelled 'hanlde' does not.
+    let handle_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 4 && t.length == 6)
+        .collect();
+    assert_eq!(
+        handle_toks.len(),
+        1,
+        "expected exactly one method token on line 4 (for 'handle'), got: {:?}",
+        handle_toks
+    );
+}
+
+#[test]
+fn static_call_unknown_method_gets_no_token() {
+    let php = r#"<?php
+class Foo {
+    public static function create(): void {}
+}
+Foo::nonExistentMethod();
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let method_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 4)
+        .collect();
+    assert!(
+        method_toks.is_empty(),
+        "expected no method token for Foo::nonExistentMethod(), got: {:?}",
+        method_toks
+    );
+}
+
+#[test]
+fn static_call_on_unknown_class_keeps_token() {
+    let php = r#"<?php
+NotDefinedAnywhere::whatever();
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    // The class cannot be resolved, so the member cannot be verified —
+    // keep emitting the method token.
+    let method_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 1)
+        .collect();
+    assert!(
+        !method_toks.is_empty(),
+        "expected method token on unresolvable class subject"
+    );
+}
+
+#[test]
+fn variable_subject_keeps_token_unconditionally() {
+    let php = r#"<?php
+function test($obj) {
+    $obj->whatever();
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let method_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 2)
+        .collect();
+    assert!(
+        !method_toks.is_empty(),
+        "expected method token on untyped variable subject"
+    );
+}
+
+#[test]
+fn this_call_unknown_method_gets_no_token() {
+    let php = r#"<?php
+class Foo {
+    public function known(): void {
+        $this->known();
+        $this->unknownMethod();
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let known: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 3)
+        .collect();
+    assert!(
+        !known.is_empty(),
+        "expected method token for $this->known()"
+    );
+    let unknown: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 4)
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "expected no method token for $this->unknownMethod(), got: {:?}",
+        unknown
+    );
+}
+
+#[test]
+fn this_call_trait_method_keeps_token() {
+    let php = r#"<?php
+trait Helper {
+    public function help(): void {}
+}
+class Uses {
+    use Helper;
+    public function go(): void {
+        $this->help();
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let help_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 7)
+        .collect();
+    assert!(
+        !help_toks.is_empty(),
+        "expected method token for trait method via $this->help()"
+    );
+}
+
+#[test]
+fn trait_internal_this_call_keeps_token() {
+    let php = r#"<?php
+trait Concern {
+    public function run(): void {
+        $this->definedByUsingClass();
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    // Inside a trait, $this refers to the (unknown) using class —
+    // members cannot be verified, so the token is kept.
+    let toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 3)
+        .collect();
+    assert!(
+        !toks.is_empty(),
+        "expected method token for $this call inside a trait"
+    );
+}
+
+#[test]
+fn magic_call_static_keeps_token() {
+    let php = r#"<?php
+class Facade {
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+}
+Facade::anythingGoes();
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 4)
+        .collect();
+    assert!(
+        !toks.is_empty(),
+        "expected method token on class with __callStatic catch-all"
+    );
+}
+
+#[test]
+fn deprecated_static_method_call_has_deprecated_modifier() {
+    let php = r#"<?php
+class Api {
+    /** @deprecated Use fresh() instead */
+    public static function stale(): void {}
+}
+Api::stale();
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let stale_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.token_type == TT_METHOD && t.line == 5)
+        .collect();
+    assert!(
+        !stale_toks.is_empty(),
+        "expected method token for Api::stale()"
+    );
+    assert!(
+        stale_toks
+            .iter()
+            .any(|t| has_modifier(t, TM_DEPRECATED) && has_modifier(t, TM_STATIC)),
+        "expected deprecated + static modifiers on Api::stale(), got: {:?}",
+        stale_toks
+    );
+}
+
+// ─── Import prolog is left to the editor grammar ───────────────────────────
+//
+// In regular PHP files the editor's own grammar (Tree-sitter/TextMate)
+// highlights `namespace` and `use` declarations per name segment.  Emitting
+// a single token across the whole path would override that coloring, so
+// these tokens are only produced for Blade files (where no PHP grammar
+// runs).
+
+#[test]
+fn use_import_has_no_token_in_php_file() {
+    let php = r#"<?php
+namespace App;
+use Some\Other\Thing;
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let import_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.line == 2 && t.token_type != TT_KEYWORD)
+        .collect();
+    assert!(
+        import_toks.is_empty(),
+        "expected no non-keyword tokens on the use-import line, got: {:?}",
+        import_toks
+    );
+}
+
+#[test]
+fn namespace_declaration_has_no_token_in_php_file() {
+    let php = r#"<?php
+namespace App\Models;
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+    let ns_toks: Vec<_> = decoded
+        .iter()
+        .filter(|t| t.line == 1 && t.token_type != TT_KEYWORD)
+        .collect();
+    assert!(
+        ns_toks.is_empty(),
+        "expected no non-keyword tokens on the namespace line, got: {:?}",
+        ns_toks
+    );
+}
+
 // ─── Blade semantic token tests ─────────────────────────────────────────────
 
 fn get_blade_tokens(blade: &str) -> Vec<DecodedToken> {

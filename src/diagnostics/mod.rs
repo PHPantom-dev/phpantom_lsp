@@ -14,7 +14,9 @@
 //! 3. **`unknown_*`** — symbol could not be resolved (class, function,
 //!    member, variable).
 //! 4. **`unused_*`** — symbol is defined/imported but never referenced.
-//! 5. **`type_mismatch_*`** — a value's type doesn't satisfy a constraint.
+//! 5. **`type_mismatch_*`** — a value's type doesn't satisfy a constraint
+//!    (`type_mismatch_argument`, `type_mismatch_return`,
+//!    `type_mismatch_property`).
 //! 6. **`missing_*`** — a required declaration is absent (e.g.
 //!    `missing_implementation` for unimplemented interface methods).
 //! 7. **`invalid_*`** — a structural/syntactic violation (e.g.
@@ -24,7 +26,7 @@
 //! 10. **`unresolved_*`** — the analyser couldn't determine the type of an
 //!     expression (opt-in coverage hints).
 //!
-//! Two delivery models are supported:
+//! Two native delivery models are supported:
 //!
 //! - **Pull model** (`textDocument/diagnostic`, LSP 3.17) — the editor
 //!   requests diagnostics when it needs them.  Only visible files are
@@ -34,6 +36,12 @@
 //! - **Push model** (`textDocument/publishDiagnostics`) — the server
 //!   pushes diagnostics after every edit.  Used as a fallback for clients
 //!   that do not advertise pull-diagnostic support.
+//!
+//! Native diagnostics are intentionally sent through exactly one of these
+//! channels per client.  When pull is available, PHPantom uses pull only;
+//! push is reserved for clients that do not support pull.  Mixing both for
+//! the same native diagnostics makes client-side merge behavior ambiguous and
+//! can surface duplicates or flicker.
 //!
 //! Providers are grouped into three phases so that cheap results appear
 //! immediately and expensive external tools never block native feedback:
@@ -146,25 +154,31 @@
 //! sees results incrementally: fast diagnostics first, then slow,
 //! then PHPStan/PHPCS/Mago as each completes.
 //!
-//! **Pull mode:** Only fast diagnostics (syntax errors, unused
-//! imports, unused variables) are pushed via `publishDiagnostics` so
-//! the editor sees them instantly.  The full merged set is cached in
-//! `diag_last_full` with a bumped `resultId`.  The pull handler
-//! (`textDocument/diagnostic`) returns this cached set.  If the
-//! cache is missing (e.g. the file was just opened), the pull
+//! **Pull mode:** Nothing is pushed via `publishDiagnostics`.  The
+//! merged set is cached in `diag_last_full` with a bumped `resultId`
+//! and the editor is asked to re-pull via `workspace/diagnostic/refresh`.
+//! The pull handler (`textDocument/diagnostic`) returns this cached set.
+//! If the cache is missing (e.g. the file was just opened), the pull
 //! handler triggers computation directly instead of returning empty
-//! results.  Pushing the full set in pull mode would duplicate every
-//! slow and external diagnostic because editors merge pushed and
-//! pulled sets additively.
+//! results.  This is not a workaround for a single client; it is the
+//! intended server contract.  A pull-capable client already has a canonical
+//! native diagnostic stream, so pushing the same native diagnostics as well
+//! would create two competing streams that clients may merge differently.
 //!
 //! External tool workers (PHPStan, PHPCS, Mago) use their own
 //! debounce timers in both modes because they are expensive.
 
 mod argument_count;
+pub(crate) mod class_case_mismatch;
+pub(crate) mod class_name_mismatch;
 mod deprecated;
 pub(crate) mod helpers;
+pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod invalid_class_kind;
+pub(crate) mod namespace_mismatch;
+mod property_type_errors;
+mod return_type_errors;
 mod syntax_errors;
 mod type_errors;
 pub(crate) mod undefined_variables;
@@ -209,6 +223,8 @@ impl Backend {
         self.collect_syntax_error_diagnostics(uri_str, content, out);
         self.collect_unused_import_diagnostics(uri_str, content, out);
         self.collect_unused_variable_diagnostics(uri_str, content, out);
+        self.collect_namespace_mismatch_diagnostics(uri_str, content, out);
+        self.collect_class_name_mismatch_diagnostics(uri_str, content, out);
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,
@@ -237,6 +253,7 @@ impl Backend {
         // call site in the file.
         let _callable_guard = crate::completion::call_resolution::with_callable_target_cache();
         let _body_infer_guard = self.activate_body_return_inferrer();
+        let _auth_user_guard = self.activate_auth_user_resolver();
 
         // ── Phase 2: forward-walked diagnostic scope cache ──────
         // Walk every function/method body in the file once with the
@@ -266,17 +283,161 @@ impl Backend {
         }
 
         self.collect_unknown_class_diagnostics(uri_str, content, out);
+        self.collect_class_case_mismatch_diagnostics(uri_str, content, out);
         self.collect_unknown_member_diagnostics(uri_str, content, out);
         self.collect_unknown_function_diagnostics(uri_str, content, out);
         // NOTE: unresolved_member_access diagnostics are now emitted
         // inside collect_unknown_member_diagnostics (in the Untyped arm)
         // to avoid a second full walk with duplicate type resolution.
         self.collect_argument_count_diagnostics(uri_str, content, out);
-        self.collect_type_error_diagnostics(uri_str, content, out);
+        self.collect_type_mismatch_diagnostics(uri_str, content, out);
         self.collect_implementation_error_diagnostics(uri_str, content, out);
         self.collect_deprecated_diagnostics(uri_str, content, out);
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
         self.collect_invalid_class_kind_diagnostics(uri_str, content, out);
+        let is_laravel = self.resolved_class_cache.read().is_laravel();
+        if is_laravel {
+            self.collect_invalid_laravel_string_key_diagnostics(uri_str, content, out);
+        }
+    }
+
+    /// Emit a warning for each `LaravelStringKey` span whose key does
+    /// not resolve to any declaration (typo in route name, config key,
+    /// view name, or translation key).
+    fn collect_invalid_laravel_string_key_diagnostics(
+        &self,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        use crate::symbol_map::{LaravelStringKind, SymbolKind};
+        use std::collections::HashSet;
+
+        // Extract the LaravelStringKey spans we need and determine which
+        // kinds are present, then DROP the read lock before calling
+        // enumeration functions.  Those functions call
+        // `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
+        // `parse_files_parallel()` → `update_ast()` which acquires a
+        // WRITE lock on `symbol_maps`.  Holding a read lock here while
+        // that write is attempted would deadlock.
+        let mut has_route = false;
+        let mut has_config = false;
+        let mut has_view = false;
+        let mut has_trans = false;
+        let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
+            let maps = self.symbol_maps.read();
+            let Some(symbol_map) = maps.get(uri) else {
+                return;
+            };
+            symbol_map
+                .spans
+                .iter()
+                .filter_map(|span| {
+                    if let SymbolKind::LaravelStringKey { kind, key } = &span.kind {
+                        match kind {
+                            LaravelStringKind::Route => has_route = true,
+                            LaravelStringKind::Config => has_config = true,
+                            LaravelStringKind::View => has_view = true,
+                            LaravelStringKind::Trans => has_trans = true,
+                        }
+                        Some((kind.clone(), key.clone(), span.start, span.end))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+            // `maps` read lock is dropped here.
+        };
+
+        if !has_route && !has_config && !has_view && !has_trans {
+            return;
+        }
+
+        // Enumerate valid keys once per kind (lazy), using the cached
+        // enumerations.  Safe to call now that the `symbol_maps` read
+        // lock has been released.
+        let route_keys: HashSet<String> = if has_route {
+            self.cached_route_names().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let config_keys: HashSet<String> = if has_config {
+            self.cached_config_keys().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let view_keys: HashSet<String> = if has_view {
+            self.cached_view_names().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let trans_keys: HashSet<String> = if has_trans {
+            self.cached_trans_keys().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+
+        for (kind, key, start, end) in &key_spans {
+            let (valid, label, code) = match kind {
+                LaravelStringKind::Route => {
+                    (route_keys.contains(key), "route", "invalid_laravel_route")
+                }
+                LaravelStringKind::Config => {
+                    // Config keys may be partial prefixes (e.g. `config('app')`)
+                    // which are valid even without a direct match.
+                    let valid = config_keys.contains(key)
+                        || config_keys
+                            .iter()
+                            .any(|k| k.starts_with(&format!("{}.", key)));
+                    (valid, "config key", "invalid_laravel_config")
+                }
+                LaravelStringKind::View => {
+                    (view_keys.contains(key), "view", "invalid_laravel_view")
+                }
+                LaravelStringKind::Trans => {
+                    // When no translation files are found at all, skip trans
+                    // diagnostics entirely.  This avoids false positives in
+                    // non-Laravel projects (WordPress, GetText) that also use
+                    // `__()` or `trans()` as function names.
+                    if trans_keys.is_empty() {
+                        continue;
+                    }
+                    let valid = trans_keys.contains(key)
+                        || trans_keys
+                            .iter()
+                            .any(|k| k.starts_with(&format!("{}.", key)));
+                    (valid, "translation key", "invalid_laravel_trans")
+                }
+            };
+            if !valid
+                && let Some(range) =
+                    offset_range_to_lsp_range(content, *start as usize, *end as usize)
+            {
+                out.push(helpers::make_diagnostic(
+                    range,
+                    DiagnosticSeverity::WARNING,
+                    code,
+                    format!("Unknown {}: '{}'", label, key),
+                ));
+            }
+        }
+    }
+
+    /// Collect all type mismatch diagnostics: argument types, return
+    /// types, and property assignment types.
+    ///
+    /// This is a convenience entry point that groups the three
+    /// `type_mismatch_*` collectors.  The individual methods remain
+    /// available for selective use (e.g. in `analyse.rs`).
+    pub fn collect_type_mismatch_diagnostics(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        self.collect_argument_type_diagnostics(uri_str, content, out);
+        self.collect_return_type_diagnostics(uri_str, content, out);
+        self.collect_property_type_diagnostics(uri_str, content, out);
     }
 }
 
@@ -502,15 +663,42 @@ fn line_has_ignore_for(content: &str, diag_line: u32, identifier: &str) -> bool 
             if after.starts_with("-line") || after.starts_with("-next-line") {
                 continue;
             }
-            // Parse the comma-separated identifier list.
+            // Parse the identifier list.  Each entry may have a
+            // parenthesized reason whose text can contain commas:
+            //   @phpstan-ignore id1 (reason, with commas), id2 (reason)
+            // A naive `split(',')` would break inside reasons, so we
+            // walk the string and only split on commas at paren depth 0.
             let ids_text = after.trim_start();
-            // Stop at `*/`, ` (reason)`, or end of string.
-            let ids_end = ids_text
-                .find("*/")
-                .or_else(|| ids_text.find(" ("))
-                .unwrap_or(ids_text.len());
-            let ids = &ids_text[..ids_end];
-            if ids.split(',').any(|id| id.trim() == identifier) {
+            let ids_end = ids_text.find("*/").unwrap_or(ids_text.len());
+            let ids_region = &ids_text[..ids_end];
+
+            let mut depth: u32 = 0;
+            let mut start = 0;
+            for (i, ch) in ids_region.char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => depth = depth.saturating_sub(1),
+                    ',' if depth == 0 => {
+                        let entry = ids_region[start..i].trim();
+                        let id = match entry.find(" (") {
+                            Some(pos) => &entry[..pos],
+                            None => entry,
+                        };
+                        if id == identifier {
+                            return true;
+                        }
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            // Last (or only) entry after the final comma.
+            let entry = ids_region[start..].trim();
+            let id = match entry.find(" (") {
+                Some(pos) => &entry[..pos],
+                None => entry,
+            };
+            if id == identifier {
                 return true;
             }
         }
@@ -613,46 +801,23 @@ fn scope_has_throws_tag(scope: &str, short_name: &str) -> bool {
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
 
-/// How long to wait after the last keystroke before running PHPStan.
-/// Longer than the normal debounce because PHPStan is extremely
-/// expensive.  We want the user to be truly idle before spawning it.
-const PHPSTAN_DEBOUNCE_MS: u64 = 2_000;
-
-/// How long to wait after the last keystroke before running PHPCS.
-/// Same rationale as [`PHPSTAN_DEBOUNCE_MS`]: PHPCS is an external
-/// process, so we wait for the user to be idle.
-const PHPCS_DEBOUNCE_MS: u64 = 2_000;
-
-/// How long to wait after the last keystroke before running `mago lint`.
-/// Same debounce as PHPCS — Mago lint is fast (AST-level rules).
-const MAGO_LINT_DEBOUNCE_MS: u64 = 2_000;
-
-/// How long to wait after the last keystroke before running `mago analyze`.
-/// Same debounce as PHPStan — Mago analyze is slower (type-aware).
-const MAGO_ANALYZE_DEBOUNCE_MS: u64 = 2_000;
-
 impl Backend {
     /// Deliver diagnostics for a single file.
     ///
     /// Called from the background diagnostic worker after debouncing.
     ///
-    /// **Phase 1 (instant, both modes):** Run fast collectors (syntax
-    /// errors, deprecated, unused imports), merge with *cached* slow
-    /// and PHPStan results, and push via `publishDiagnostics`.  The
-    /// editor shows strikethrough and dimming within milliseconds.
+    /// **Phase 1 (instant):** Run fast collectors (syntax errors,
+    /// deprecated, unused imports) and assemble them with *cached* slow
+    /// and PHPStan results.  In push mode the merged set is published;
+    /// in pull mode it is cached and a `workspace/diagnostic/refresh` is
+    /// sent so the editor re-pulls.  Either way the editor shows
+    /// strikethrough and dimming within milliseconds.
     ///
-    /// **Phase 2 (background, mode-dependent):**
-    ///
-    /// - **Pull mode:** Compute slow diagnostics, build the full set
-    ///   (fast + fresh slow + cached PHPStan), cache it in
-    ///   `diag_last_full`, bump the `resultId`, and send
-    ///   `workspace/diagnostic/refresh`.  The editor re-pulls and
-    ///   gets the complete set.  Push always serves cached slow, so
-    ///   no second push is needed.
-    ///
-    /// - **Push mode (fallback):** Compute slow diagnostics, then
-    ///   push the full set (fast + fresh slow + cached PHPStan),
-    ///   replacing the Phase 1 snapshot.
+    /// **Phase 2 (background):** Compute slow diagnostics, rebuild the
+    /// full set (fast + fresh slow + cached PHPStan), and deliver it the
+    /// same way: push mode publishes the complete set, replacing the
+    /// Phase 1 snapshot; pull mode caches it, bumps the `resultId`, and
+    /// sends another `workspace/diagnostic/refresh`.
     pub(crate) async fn publish_diagnostics_for_file(&self, uri_str: &str, content: &str) {
         if self.should_skip_diagnostics(uri_str) {
             return;
@@ -688,10 +853,14 @@ impl Backend {
             cache.insert(uri_str.to_string(), fast_diagnostics.clone());
         }
 
-        // Push assembled diagnostics immediately so the editor sees
-        // fast results (strikethrough, dimming) merged with whatever
-        // slow / external results are already cached.
+        // Update the assembled cache immediately so pull-capable editors
+        // can see fast diagnostics before the slower native passes finish.
         self.assemble_and_push(uri_str).await;
+        if self.supports_pull_diagnostics.load(Ordering::Acquire)
+            && let Some(client) = &self.client
+        {
+            let _ = client.workspace_diagnostic_refresh().await;
+        }
 
         // ── Phase 2: compute and cache slow diagnostics ─────────────
         let slow_diagnostics = {
@@ -720,8 +889,13 @@ impl Backend {
             cache.insert(uri_str.to_string(), slow_diagnostics);
         }
 
-        // Push again with fresh slow results merged in.
+        // Update again with fresh slow results merged in.
         self.assemble_and_push(uri_str).await;
+        if self.supports_pull_diagnostics.load(Ordering::Acquire)
+            && let Some(client) = &self.client
+        {
+            let _ = client.workspace_diagnostic_refresh().await;
+        }
     }
 
     /// Assemble diagnostics from all per-source caches for a URI and
@@ -734,13 +908,13 @@ impl Backend {
     /// **Push mode:** The merged set is published via
     /// `textDocument/publishDiagnostics`.
     ///
-    /// **Pull mode:** Only fast diagnostics (syntax errors, unused
-    /// imports, unused variables) are pushed so the editor sees them
-    /// instantly.  The full merged set is cached in `diag_last_full`
-    /// with a bumped `resultId` so the next pull response returns it.
-    /// Editors that support pull diagnostics merge pushed and pulled
-    /// sets additively, so pushing the full set would duplicate every
-    /// slow and external diagnostic.
+    /// **Pull mode:** Nothing is pushed.  The full merged set is cached
+    /// in `diag_last_full` with a bumped `resultId` so the next pull
+    /// response returns it; the caller triggers
+    /// `workspace/diagnostic/refresh` so the editor re-pulls.  Editors
+    /// that support pull diagnostics merge pushed and pulled sets
+    /// additively, so pushing anything here would duplicate native
+    /// diagnostics.
     pub(crate) async fn assemble_and_push(&self, uri_str: &str) {
         let client = match &self.client {
             Some(c) => c,
@@ -827,6 +1001,22 @@ impl Backend {
             }
         }
 
+        // ── Apply [[diagnostics.ignore]] config rules ────────────────
+        {
+            let rules = ignore_rules::compile_ignore_rules(&self.config.lock().diagnostics.ignore);
+            if !rules.is_empty()
+                && let Ok(file_path) = uri.to_file_path()
+                && let Some(root) = self.workspace_root.read().clone()
+            {
+                let relative_path = file_path
+                    .strip_prefix(&root)
+                    .unwrap_or(&file_path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                ignore_rules::filter_ignored_by_config(&mut full, &relative_path, &rules);
+            }
+        }
+
         // If suppression removed any full-line PHPStan diagnostics
         // (because a precise native diagnostic covers the same line),
         // prune them from the PHPStan cache too so they don't resurface.
@@ -843,17 +1033,12 @@ impl Backend {
 
         if pull_mode {
             // ── Pull mode ───────────────────────────────────────────
-            // Push only fast diagnostics so the editor sees syntax
-            // errors and unused-import warnings instantly.  The full
-            // set (fast + slow + external) is cached in `diag_last_full`
-            // for the next pull response.
-            let fast_only = {
-                let cache = self.diag_last_fast.lock();
-                cache.get(uri_str).cloned().unwrap_or_default()
-            };
-            let fast_only = self.filter_suppressed(fast_only);
-            client.publish_diagnostics(uri, fast_only, None).await;
-
+            // Pull-capable clients use `textDocument/diagnostic` as the
+            // single source of truth for native diagnostics.  We only cache
+            // the merged set here; the caller triggers
+            // `workspace/diagnostic/refresh` so the editor re-pulls.  This
+            // avoids duplicate diagnostics in clients that keep pushed and
+            // pulled diagnostics in separate namespaces.
             {
                 let mut cache = self.diag_last_full.lock();
                 cache.insert(uri_str.to_string(), full);
@@ -911,10 +1096,22 @@ impl Backend {
         self.diag_version.fetch_add(1, Ordering::Release);
         self.diag_notify.notify_one();
 
-        // Both modes: schedule external tool runs.  In pull mode the
-        // external tools still use their own debounce timers because
-        // they are expensive and the IDE may send many pulls in
-        // quick succession.
+        // External tools (PHPStan, PHPCS, Mago) are NOT scheduled here.
+        // They are expensive (seconds per run) and would block save-
+        // triggered runs due to the serialization guarantee (one process
+        // at a time).
+    }
+
+    /// Schedule all external tool runs (PHPStan, PHPCS, Mago) for a
+    /// single file.
+    ///
+    /// External tools are expensive (seconds per run) and at most one
+    /// process runs at a time per tool, so triggering them on every
+    /// keystroke would block save-triggered runs.
+    pub(crate) fn schedule_external_diagnostics(&self, uri: String) {
+        if !self.init_complete.load(Ordering::Acquire) {
+            return;
+        }
         self.schedule_phpstan(uri.clone());
         self.schedule_phpcs(uri.clone());
         self.schedule_mago_lint(uri.clone());
@@ -1083,16 +1280,6 @@ impl Backend {
                 };
                 self.publish_diagnostics_for_file(uri, &content).await;
             }
-
-            // In pull mode the freshly computed full set is now cached with a
-            // bumped resultId, but the editor doesn't know to ask for it. Ask
-            // it to re-pull so the new diagnostics replace the stale ones the
-            // pull handler has been returning during the recompute.
-            if self.supports_pull_diagnostics.load(Ordering::Acquire)
-                && let Some(client) = &self.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
         }
     }
 
@@ -1101,8 +1288,7 @@ impl Backend {
     /// Schedule a PHPStan run for a single file.
     ///
     /// Only the most recent file is kept: if the user switches files or
-    /// types rapidly, earlier requests are superseded.  This is
-    /// intentional — PHPStan is too slow to queue up multiple files.
+    /// saves rapidly, earlier requests are superseded.
     fn schedule_phpstan(&self, uri: String) {
         *self.phpstan_pending_uri.lock() = Some(uri);
         self.phpstan_notify.notify_one();
@@ -1147,33 +1333,11 @@ impl Backend {
             // Drain any extra stored permits so that notifications
             // that arrived between the last run finishing and this
             // `notified()` call don't cause an immediate second run.
-            // `Notify::notify_one()` stores at most one permit, but
-            // multiple `schedule_phpstan` calls during debounce or
-            // execution could leave one behind.
-            //
-            // We consume it by polling a fresh `notified()` with a
-            // zero timeout — if there's a stored permit it resolves
-            // immediately, otherwise it times out harmlessly.
             let _ = tokio::time::timeout(std::time::Duration::ZERO, self.phpstan_notify.notified())
                 .await;
 
-            // ── Step 2: debounce (longer than normal diagnostics) ───
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(PHPSTAN_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-                // More edits arrived — loop and debounce again.
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.phpstan_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.phpstan_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1279,6 +1443,14 @@ impl Backend {
             // Assemble and push so the editor sees fresh PHPStan
             // results merged with cached native diagnostics.
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new PHPStan results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -1335,23 +1507,8 @@ impl Backend {
             let _ =
                 tokio::time::timeout(std::time::Duration::ZERO, self.phpcs_notify.notified()).await;
 
-            // ── Step 2: debounce ────────────────────────────────────
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(PHPCS_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-                // More edits arrived — loop and debounce again.
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.phpcs_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.phpcs_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1444,6 +1601,14 @@ impl Backend {
             // Assemble and push so the editor sees fresh PHPCS
             // results merged with cached native diagnostics.
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new PHPCS results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -1484,22 +1649,8 @@ impl Backend {
                 tokio::time::timeout(std::time::Duration::ZERO, self.mago_lint_notify.notified())
                     .await;
 
-            // ── Step 2: debounce ────────────────────────────────────
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(MAGO_LINT_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.mago_lint_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.mago_lint_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1580,6 +1731,14 @@ impl Backend {
             }
 
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new Mago lint results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -1622,23 +1781,8 @@ impl Backend {
             )
             .await;
 
-            // ── Step 2: debounce (longer — type-aware analysis) ─────
-            loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
-                tokio::time::sleep(std::time::Duration::from_millis(MAGO_ANALYZE_DEBOUNCE_MS))
-                    .await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
-                if version_before == version_after {
-                    break;
-                }
-            }
-
-            // ── Step 3: snapshot the pending URI ────────────────────
-            let uri = {
-                let mut pending = self.mago_analyze_pending_uri.lock();
-                pending.take()
-            };
-            let uri = match uri {
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.mago_analyze_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1719,6 +1863,14 @@ impl Backend {
             }
 
             self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new Mago analyze results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
         }
     }
 
@@ -2548,6 +2700,40 @@ mod tests {
     }
 
     #[test]
+    fn stale_phpstan_ignore_mixed_reason_and_bare() {
+        // First identifier has no reason, second has a reason.
+        let content =
+            "<?php\n$x = foo(); // @phpstan-ignore return.type, argument.type (not a real error)\n";
+        let return_diag = make_phpstan_diag(1, "return.type", "...");
+        let arg_diag = make_phpstan_diag(1, "argument.type", "...");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "bare identifier (no reason) should be stale"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "identifier with reason should be stale"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_reason_then_bare() {
+        // First identifier has a reason, second is bare.
+        let content =
+            "<?php\n$x = foo(); // @phpstan-ignore return.type (some reason), argument.type\n";
+        let return_diag = make_phpstan_diag(1, "return.type", "...");
+        let arg_diag = make_phpstan_diag(1, "argument.type", "...");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "identifier with reason should be stale"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "bare identifier (no reason) after one with reason should be stale"
+        );
+    }
+
+    #[test]
     fn missing_checked_exception_not_stale_via_heuristic() {
         // Previously this was detected as stale because a @throws
         // tag was added.  Now only codeAction/resolve clears it.
@@ -2678,6 +2864,99 @@ mod tests {
         assert!(
             is_stale_phpstan_diagnostic(&arg_diag, content),
             "argument.type should be stale (listed in ignore)"
+        );
+        assert!(
+            !is_stale_phpstan_diagnostic(&other_diag, content),
+            "method.notFound should NOT be stale (not listed)"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_with_reason_in_docblock() {
+        // `/** @phpstan-ignore id (reason) */` — the `*/` comes after
+        // the reason text, so the parser must not treat everything
+        // up to `*/` as the identifier list.
+        let content = "<?php\nclass Foo {\n    /** @phpstan-ignore return.type (not a real error) */\n    public function bar(): void {}\n}\n";
+        let diag = make_phpstan_diag(
+            3,
+            "return.type",
+            "Method App\\Foo::bar() should return string but returns void.",
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&diag, content),
+            "should be stale when @phpstan-ignore in docblock has a (reason)"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_with_per_id_reasons() {
+        // Each identifier has its own `(reason)`:
+        //   @phpstan-ignore return.type (reason1), argument.type (reason2)
+        let content = "<?php\nclass Foo {\n    public function bar(): void {} // @phpstan-ignore return.type (not real), argument.type (also fine)\n}\n";
+        let return_diag = make_phpstan_diag(
+            2,
+            "return.type",
+            "Method App\\Foo::bar() should return string but returns void.",
+        );
+        let arg_diag = make_phpstan_diag(
+            2,
+            "argument.type",
+            "Parameter #1 $x expects string, int given.",
+        );
+        let other_diag = make_phpstan_diag(2, "method.notFound", "Call to undefined method.");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "return.type should be stale (first in list with reason)"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "argument.type should be stale (second in list with reason)"
+        );
+        assert!(
+            !is_stale_phpstan_diagnostic(&other_diag, content),
+            "method.notFound should NOT be stale (not listed)"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_reason_with_commas() {
+        // The reason text contains commas — must not confuse the parser.
+        let content = "<?php\n/** @phpstan-ignore return.type (accepts A, B, and C but PHPDoc is narrower) */\nfunction foo(): void {}\n";
+        let diag = make_phpstan_diag(
+            2,
+            "return.type",
+            "Function foo() should return string but returns void.",
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&diag, content),
+            "should be stale even when reason text contains commas"
+        );
+    }
+
+    #[test]
+    fn stale_phpstan_ignore_multiple_ids_each_with_comma_reasons() {
+        // Multiple identifiers, each with reason text that contains commas.
+        // This is the trickiest case: the parser must not confuse commas
+        // inside `(reason)` with the comma separating identifiers.
+        let content = "<?php\n// @phpstan-ignore return.type (accepts A, B, C), argument.type (needs X, Y)\nfunction foo(): void {}\n";
+        let return_diag = make_phpstan_diag(
+            1,
+            "return.type",
+            "Function foo() should return string but returns void.",
+        );
+        let arg_diag = make_phpstan_diag(
+            1,
+            "argument.type",
+            "Parameter #1 $x expects string, int given.",
+        );
+        let other_diag = make_phpstan_diag(1, "method.notFound", "Call to undefined method.");
+        assert!(
+            is_stale_phpstan_diagnostic(&return_diag, content),
+            "return.type should be stale (first id, reason has commas)"
+        );
+        assert!(
+            is_stale_phpstan_diagnostic(&arg_diag, content),
+            "argument.type should be stale (second id, reason has commas)"
         );
         assert!(
             !is_stale_phpstan_diagnostic(&other_diag, content),
@@ -2924,5 +3203,69 @@ mod tests {
             !backend.diag_last_full.lock().contains_key(uri),
             "pull must not compute diagnostics inline on the request path"
         );
+    }
+
+    /// Regression test: `collect_invalid_laravel_string_key_diagnostics`
+    /// must not hold a `symbol_maps` read lock while calling enumeration
+    /// functions that reach `ensure_workspace_indexed()` →
+    /// `parse_files_parallel()` → `update_ast()` → `symbol_maps.write()`.
+    ///
+    /// Before the fix, this deadlocked because the read lock was held
+    /// for the entire function body.  The fix extracts the needed spans
+    /// into an owned `Vec` and drops the lock before enumerating keys.
+    ///
+    /// To trigger the deadlock path, we create a workspace with an
+    /// unindexed PHP file so `ensure_workspace_indexed` must parse it
+    /// (acquiring a write lock).  A 5-second timeout catches the
+    /// deadlock as a test failure instead of an infinite hang.
+    #[test]
+    fn laravel_string_key_diagnostics_no_deadlock() {
+        // Set up a temp workspace with an unindexed PHP file so that
+        // ensure_workspace_indexed() will call parse_files_parallel()
+        // which needs a write lock on symbol_maps.
+        let tmp = std::env::temp_dir().join("phpantom_deadlock_test");
+        let _ = std::fs::create_dir_all(&tmp);
+        let unindexed_file = tmp.join("Unindexed.php");
+        std::fs::write(&unindexed_file, "<?php\nclass Unindexed {}\n").unwrap();
+
+        let backend = crate::Backend::new_test_with_workspace(tmp.clone(), vec![]);
+
+        // Register the unindexed file in fqn_uri_index so
+        // ensure_workspace_indexed Phase 1 will try to parse it.
+        let unindexed_uri = format!("file://{}", unindexed_file.to_str().unwrap());
+        backend
+            .fqn_uri_index
+            .write()
+            .insert("Unindexed".to_string(), unindexed_uri);
+
+        // Parse a file with Laravel string key spans.
+        let uri = "file:///app/Http/test.php";
+        let php = "<?php\nconfig('app.name');\nroute('home');\n";
+        backend.update_ast(uri, php);
+
+        // Run the diagnostics in a thread with a timeout so a deadlock
+        // is caught as a failure rather than an infinite hang.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let backend = std::sync::Arc::new(backend);
+        let bc = std::sync::Arc::clone(&backend);
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            bc.collect_slow_diagnostics(uri, php, &mut out);
+            let _ = tx.send(out);
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(_diags) => { /* success — no deadlock */ }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!(
+                    "collect_slow_diagnostics deadlocked: symbol_maps read lock \
+                     was likely held while enumeration functions tried to write"
+                );
+            }
+            Err(e) => panic!("collect_slow_diagnostics failed: {:?}", e),
+        }
+
+        // Clean up.
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

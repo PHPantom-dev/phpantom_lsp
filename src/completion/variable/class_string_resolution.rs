@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
@@ -154,9 +154,28 @@ fn walk_class_string_assignments<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
+    // Track variables assigned an array literal of `::class` entries
+    // (e.g. `$repos = [Foo::class, Bar::class]`) so that a later
+    // `foreach ($repos as $repository)` can resolve `$repository` to the
+    // union of element classes.  Assignments precede the foreach in the
+    // statement stream, so recording them as we go makes the mapping
+    // available by the time the foreach is processed.
+    let mut array_class_vars: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for stmt in statements {
         if stmt.span().start.offset >= ctx.cursor_offset {
             continue;
+        }
+        // Record `$var = [A::class, B::class]` array-literal assignments.
+        if let Statement::Expression(expr_stmt) = stmt
+            && let Expression::Assignment(assignment) = expr_stmt.expression
+            && assignment.operator.is_assign()
+            && let Expression::Variable(Variable::Direct(dv)) = assignment.lhs
+        {
+            let names = extract_class_string_names_from_array(assignment.rhs);
+            if !names.is_empty() {
+                array_class_vars.insert(bytes_to_str(dv.name).to_string(), names);
+            }
         }
         match stmt {
             Statement::Expression(expr_stmt) => {
@@ -175,9 +194,17 @@ fn walk_class_string_assignments<'b>(
                 if let Some(name) = value_name
                     && name == ctx.var_name
                 {
-                    // Extract class names from the iterated expression
-                    // (e.g. `[Page::class, CustomPage::class]`).
-                    let class_names = extract_class_string_names_from_array(foreach.expression);
+                    // Extract class names from the iterated expression.
+                    // The iterable may be an inline array literal
+                    // (`[Page::class, CustomPage::class]`) or a variable
+                    // that was assigned one earlier (`$pages = [...]`).
+                    let mut class_names = extract_class_string_names_from_array(foreach.expression);
+                    if class_names.is_empty()
+                        && let Expression::Variable(Variable::Direct(dv)) = foreach.expression
+                        && let Some(names) = array_class_vars.get(bytes_to_str(dv.name))
+                    {
+                        class_names = names.clone();
+                    }
                     if !class_names.is_empty() {
                         results.clear();
                         for cn in class_names {
@@ -199,16 +226,82 @@ fn walk_class_string_assignments<'b>(
                 }
                 // Also walk the foreach body for nested assignments.
                 let body_stmts: Vec<&Statement> = match &foreach.body {
-                    mago_syntax::ast::ForeachBody::Statement(s) => vec![s],
-                    mago_syntax::ast::ForeachBody::ColonDelimited(b) => {
+                    mago_syntax::cst::ForeachBody::Statement(s) => vec![s],
+                    mago_syntax::cst::ForeachBody::ColonDelimited(b) => {
                         b.statements.iter().collect()
                     }
                 };
                 walk_class_string_assignments(body_stmts.into_iter(), ctx, results);
             }
-            _ => {}
+            // Descend into nested control-flow blocks so that an assignment
+            // inside a braced foreach/if/while/for/switch/try body (the common
+            // case: `foreach (...) { $cls = Foo::class; }`) is still found.
+            other => {
+                let nested = collect_nested_statements(other);
+                if !nested.is_empty() {
+                    walk_class_string_assignments(nested.into_iter(), ctx, results);
+                }
+            }
         }
     }
+}
+
+/// Collect the directly-nested statements of a control-flow statement so the
+/// class-string walker can recurse into braced blocks.  Returns an empty list
+/// for statements that carry no nested block (the walker then does nothing).
+fn collect_nested_statements<'b>(stmt: &'b Statement<'b>) -> Vec<&'b Statement<'b>> {
+    let mut out: Vec<&Statement> = Vec::new();
+    match stmt {
+        Statement::Block(block) => out.extend(block.statements.iter()),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                out.push(body.statement);
+                for clause in body.else_if_clauses.iter() {
+                    out.push(clause.statement);
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    out.push(else_clause.statement);
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                out.extend(body.statements.iter());
+                for clause in body.else_if_clauses.iter() {
+                    out.extend(clause.statements.iter());
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    out.extend(else_clause.statements.iter());
+                }
+            }
+        },
+        Statement::While(while_stmt) => match &while_stmt.body {
+            WhileBody::Statement(inner) => out.push(inner),
+            WhileBody::ColonDelimited(body) => out.extend(body.statements.iter()),
+        },
+        Statement::DoWhile(dw) => out.push(dw.statement),
+        Statement::For(for_stmt) => match &for_stmt.body {
+            ForBody::Statement(inner) => out.push(inner),
+            ForBody::ColonDelimited(body) => out.extend(body.statements.iter()),
+        },
+        Statement::Switch(switch) => {
+            for case in switch.body.cases().iter() {
+                match case {
+                    SwitchCase::Expression(c) => out.extend(c.statements.iter()),
+                    SwitchCase::Default(c) => out.extend(c.statements.iter()),
+                }
+            }
+        }
+        Statement::Try(try_stmt) => {
+            out.extend(try_stmt.block.statements.iter());
+            for catch in try_stmt.catch_clauses.iter() {
+                out.extend(catch.block.statements.iter());
+            }
+            if let Some(finally) = &try_stmt.finally_clause {
+                out.extend(finally.block.statements.iter());
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 /// Check if an expression is an assignment of a `::class` literal

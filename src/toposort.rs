@@ -234,6 +234,7 @@ mod tests {
             used_traits: Vec::new(),
             mixins: Vec::new(),
             mixin_generics: Vec::new(),
+            require_extends: None,
             is_final: false,
             is_abstract: false,
             deprecation_message: None,

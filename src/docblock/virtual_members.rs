@@ -259,6 +259,8 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: true,
+            is_macro: false,
+            is_inferred_return: false,
             type_assertions: Vec::new(),
             throws: Vec::new(),
             if_this_is: None,

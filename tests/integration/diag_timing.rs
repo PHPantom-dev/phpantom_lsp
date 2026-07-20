@@ -651,11 +651,12 @@ function describe(Base $item): string {
 /// Verify that `assert($data instanceof stdClass)` narrowing survives
 /// through multiple intervening `if` blocks with early returns.
 ///
-/// Regression test for Luxplus Shared `RefundCallback`: after the assert
-/// on line 33, several `if (!$refund)` / `if (!$payment) { return; }`
-/// blocks follow.  The forward walker must preserve the `stdClass`
-/// narrowing across all of them so that `$data->status` on a later line
-/// does not produce an `unresolved_member_access` diagnostic.
+/// Regression test seen in a real project's `RefundCallback` handler:
+/// after the assert on line 33, several `if (!$refund)` /
+/// `if (!$payment) { return; }` blocks follow.  The forward walker must
+/// preserve the `stdClass` narrowing across all of them so that
+/// `$data->status` on a later line does not produce an
+/// `unresolved_member_access` diagnostic.
 #[test]
 fn assert_instanceof_survives_intervening_if_blocks() {
     let php = r#"<?php
@@ -2230,4 +2231,99 @@ class Controller {
         "Should not flag static access on foreach class-string variable, got: {:?}",
         relevant.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
+}
+
+// ─── `for` loop init assignment is visible to condition/update clauses ───────
+
+/// A variable assigned in a `for` loop's init clause must be resolvable in the
+/// condition and update clauses on the same `for` line, not just the loop body.
+///
+/// Reproduces the pdepend false positive where
+/// `for ($p = $e->getPrevious(); $p; $p = $p->getPrevious())` flagged the
+/// update-clause `$p->getPrevious()` as "type could not be resolved" because
+/// no scope snapshot covered the `for` header expressions.
+#[test]
+fn for_loop_init_visible_to_update_clause() {
+    let php = r#"<?php
+class Node {
+    public function getParent(): ?Node { return null; }
+    public function name(): string { return ''; }
+}
+
+class Walker {
+    public function run(Node $start): void {
+        for ($current = $start->getParent(); $current; $current = $current->getParent()) {
+            echo $current->name();
+        }
+    }
+}
+"#;
+
+    let uri = "file:///test/for_update.php";
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+
+    // Use the slow-diagnostics path so the forward walker's diagnostic
+    // scope cache is active — this is what `analyze` exercises.
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+
+    let relevant: Vec<_> = out
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+            })
+        })
+        .collect();
+    assert!(
+        relevant.is_empty(),
+        "Should not flag member access in `for` header clauses, got: {:?}",
+        relevant.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Regression: a self-referencing property assignment
+/// (`$this->prop = f($this->prop, ...)`) must not recurse forever when
+/// diagnostics resolve the property's type.
+///
+/// `try_resolve_this_property_from_assignment` finds the last
+/// `$this->prop = <expr>` before the cursor and resolves `<expr>`.  When
+/// `<expr>` reads `$this->prop` on its own RHS (as an argument to
+/// `array_merge` here), resolving that inner read re-enters the same
+/// function, whose "last assignment before the cursor" search keeps
+/// finding the *same* assignment, producing unbounded recursion that
+/// overflowed the 32 MB `analyze` worker stack.  A keyed re-entry guard
+/// breaks the cycle so resolution falls back to the declared property
+/// type.  This test drives the same slow-diagnostics path `analyze` uses
+/// and asserts it completes instead of aborting on stack overflow.
+#[test]
+fn self_referencing_property_assignment_does_not_overflow() {
+    let php = r#"<?php
+class Router {
+    /** @var array<string> */
+    protected array $middleware = [];
+
+    public function middleware($middleware): self {
+        $middleware = (array) $middleware;
+        $this->middleware = array_unique(array_merge($this->middleware, $middleware));
+        return $this;
+    }
+}
+"#;
+
+    // Full stubs supply `array_unique`/`array_merge` signatures so the RHS
+    // resolution walks the same code path as the real `analyze` run.
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///self_ref_prop.php";
+    backend.update_ast(uri, php);
+
+    // The assertion is simply that this returns (no stack overflow).
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
 }

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
@@ -58,7 +58,7 @@ pub(crate) fn collect_laravel_config_declarations(
     content: &str,
     prefix: &str,
 ) -> Vec<ConfigKeyMatch> {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();
@@ -233,7 +233,23 @@ pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Op
                 return Some(crate::definition::point_location(target_uri, pos));
             }
 
-            // Key not found exactly in this file, but this is the matching file stem.
+            return Some(crate::definition::point_location(
+                target_uri,
+                Position::new(0, 0),
+            ));
+        }
+    }
+
+    let first_part = parts.first()?;
+    for res in &backend.laravel_provider_resources.read().config_files {
+        if res.namespace == *first_part && res.path.is_file() {
+            let target_uri = Url::from_file_path(&res.path).ok()?;
+            let target_content = std::fs::read_to_string(&res.path).ok()?;
+            let declarations = collect_laravel_config_declarations(&target_content, &res.namespace);
+            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+                let pos = crate::util::offset_to_position(&target_content, decl.start);
+                return Some(crate::definition::point_location(target_uri, pos));
+            }
             return Some(crate::definition::point_location(
                 target_uri,
                 Position::new(0, 0),

@@ -674,16 +674,16 @@ fn test_affinity_table_single_import() {
     let mut use_map = HashMap::new();
     use_map.insert(
         "Brand".to_string(),
-        "Luxplus\\Database\\Model\\Brands\\Brand".to_string(),
+        "Acme\\Database\\Model\\Brands\\Brand".to_string(),
     );
     let ns: Option<String> = None;
     let table = build_affinity_table(&use_map, &ns);
-    assert_eq!(table.get("Luxplus"), Some(&1));
-    assert_eq!(table.get("Luxplus\\Database"), Some(&1));
-    assert_eq!(table.get("Luxplus\\Database\\Model"), Some(&1));
-    assert_eq!(table.get("Luxplus\\Database\\Model\\Brands"), Some(&1));
+    assert_eq!(table.get("Acme"), Some(&1));
+    assert_eq!(table.get("Acme\\Database"), Some(&1));
+    assert_eq!(table.get("Acme\\Database\\Model"), Some(&1));
+    assert_eq!(table.get("Acme\\Database\\Model\\Brands"), Some(&1));
     assert_eq!(
-        table.get("Luxplus\\Database\\Model\\Brands\\Brand"),
+        table.get("Acme\\Database\\Model\\Brands\\Brand"),
         None,
         "Class name itself is not a prefix"
     );
@@ -708,7 +708,7 @@ fn test_affinity_table_file_namespace_plus_imports() {
     );
     use_map.insert(
         "Brand".to_string(),
-        "Luxplus\\Database\\Model\\Brands\\Brand".to_string(),
+        "Acme\\Database\\Model\\Brands\\Brand".to_string(),
     );
     let ns = Some("App\\Http\\Controllers".to_string());
     let table = build_affinity_table(&use_map, &ns);
@@ -720,8 +720,8 @@ fn test_affinity_table_file_namespace_plus_imports() {
     assert_eq!(table.get("App\\Http\\Controllers"), Some(&1));
     // "App\\Http\\Requests" from import only
     assert_eq!(table.get("App\\Http\\Requests"), Some(&1));
-    // "Luxplus" from import only
-    assert_eq!(table.get("Luxplus"), Some(&1));
+    // "Acme" from import only
+    assert_eq!(table.get("Acme"), Some(&1));
 }
 
 #[test]
@@ -746,12 +746,12 @@ fn test_affinity_table_global_namespace_import() {
 #[test]
 fn test_affinity_score_known_prefix() {
     let mut table = HashMap::new();
-    table.insert("Luxplus".to_string(), 11);
-    table.insert("Luxplus\\Database".to_string(), 6);
-    table.insert("Luxplus\\Database\\Model".to_string(), 6);
-    let score = affinity_score("Luxplus\\Database\\Model\\Orders\\Order", &table);
-    // Luxplus(11) + Luxplus\Database(6) + Luxplus\Database\Model(6) = 23
-    // Luxplus\Database\Model\Orders is not in the table → 0
+    table.insert("Acme".to_string(), 11);
+    table.insert("Acme\\Database".to_string(), 6);
+    table.insert("Acme\\Database\\Model".to_string(), 6);
+    let score = affinity_score("Acme\\Database\\Model\\Orders\\Order", &table);
+    // Acme(11) + Acme\Database(6) + Acme\Database\Model(6) = 23
+    // Acme\Database\Model\Orders is not in the table → 0
     assert_eq!(score, 23);
 }
 
@@ -775,7 +775,7 @@ fn test_affinity_score_global_namespace_candidate() {
 #[test]
 fn test_affinity_score_empty_table() {
     let table = HashMap::new();
-    let score = affinity_score("Luxplus\\Database\\Model\\Orders\\Order", &table);
+    let score = affinity_score("Acme\\Database\\Model\\Orders\\Order", &table);
     assert_eq!(score, 0);
 }
 
@@ -816,16 +816,41 @@ fn test_match_quality_empty_prefix_returns_b() {
 fn test_class_sort_text_format() {
     let mut table = HashMap::new();
     table.insert("App".to_string(), 4);
-    let result = class_sort_text("Order", "App\\Models\\Order", "Order", '2', false, &table);
-    // quality='a' (exact), tier='2', affinity=9999-4=9995 → "9995", demote='0', gap=5-5=0 → "000"
-    assert_eq!(result, "a299950000_order");
+    let result = class_sort_text(
+        "Order",
+        "App\\Models\\Order",
+        "Order",
+        '2',
+        '0',
+        false,
+        &table,
+    );
+    // quality='a' (exact), source='2', origin='0', affinity=9999-4=9995 → "9995", demote='0', gap=5-5=0 → "000"
+    // source_tier sorts before origin_tier so imported items always rank first.
+    assert_eq!(result, "a2099950000_order");
 }
 
 #[test]
 fn test_class_sort_text_demoted() {
     let table = HashMap::new();
-    let normal = class_sort_text("Handler", "Vendor\\Handler", "Handler", '2', false, &table);
-    let demoted = class_sort_text("Handler", "Vendor\\Handler", "Handler", '2', true, &table);
+    let normal = class_sort_text(
+        "Handler",
+        "Vendor\\Handler",
+        "Handler",
+        '2',
+        '0',
+        false,
+        &table,
+    );
+    let demoted = class_sort_text(
+        "Handler",
+        "Vendor\\Handler",
+        "Handler",
+        '2',
+        '0',
+        true,
+        &table,
+    );
     assert!(
         normal < demoted,
         "Demoted should sort after normal: normal={normal}, demoted={demoted}"
@@ -836,11 +861,12 @@ fn test_class_sort_text_demoted() {
 fn test_class_sort_text_quality_beats_tier() {
     let table = HashMap::new();
     // Exact match in tier 2 should beat starts-with match in tier 0.
-    let exact_tier2 = class_sort_text("Order", "Vendor\\Order", "Order", '2', false, &table);
+    let exact_tier2 = class_sort_text("Order", "Vendor\\Order", "Order", '2', '0', false, &table);
     let prefix_tier0 = class_sort_text(
         "OrderLine",
         "Vendor\\OrderLine",
         "Order",
+        '0',
         '0',
         false,
         &table,
@@ -854,10 +880,10 @@ fn test_class_sort_text_quality_beats_tier() {
 #[test]
 fn test_class_sort_text_tier_beats_affinity() {
     let mut table = HashMap::new();
-    table.insert("Luxplus".to_string(), 50);
+    table.insert("Acme".to_string(), 50);
     // Same match quality, but tier 1 should beat tier 2 even with lower affinity.
-    let tier1_low = class_sort_text("Order", "App\\Order", "Order", '1', false, &table);
-    let tier2_high = class_sort_text("Order", "Luxplus\\Order", "Order", '2', false, &table);
+    let tier1_low = class_sort_text("Order", "App\\Order", "Order", '1', '0', false, &table);
+    let tier2_high = class_sort_text("Order", "Acme\\Order", "Order", '2', '0', false, &table);
     assert!(
         tier1_low < tier2_high,
         "Tier 1 should sort before tier 2 regardless of affinity: tier1={tier1_low}, tier2={tier2_high}"
@@ -867,20 +893,29 @@ fn test_class_sort_text_tier_beats_affinity() {
 #[test]
 fn test_class_sort_text_affinity_within_same_tier() {
     let mut table = HashMap::new();
-    table.insert("Luxplus".to_string(), 11);
-    table.insert("Luxplus\\Database".to_string(), 6);
-    table.insert("Luxplus\\Database\\Model".to_string(), 6);
+    table.insert("Acme".to_string(), 11);
+    table.insert("Acme\\Database".to_string(), 6);
+    table.insert("Acme\\Database\\Model".to_string(), 6);
     table.insert("App".to_string(), 4);
     // Both tier 2, both exact, but different affinity.
     let high = class_sort_text(
         "Order",
-        "Luxplus\\Database\\Model\\Orders\\Order",
+        "Acme\\Database\\Model\\Orders\\Order",
         "Order",
         '2',
+        '0',
         false,
         &table,
     );
-    let low = class_sort_text("Order", "App\\Models\\Order", "Order", '2', false, &table);
+    let low = class_sort_text(
+        "Order",
+        "App\\Models\\Order",
+        "Order",
+        '2',
+        '0',
+        false,
+        &table,
+    );
     assert!(
         high < low,
         "Higher affinity should sort first: high={high}, low={low}"
@@ -891,12 +926,13 @@ fn test_class_sort_text_affinity_within_same_tier() {
 fn test_class_sort_text_demote_after_quality() {
     let table = HashMap::new();
     // A demoted exact match should still beat a non-demoted prefix match.
-    let demoted_exact = class_sort_text("Order", "Vendor\\Order", "Order", '2', true, &table);
+    let demoted_exact = class_sort_text("Order", "Vendor\\Order", "Order", '2', '0', true, &table);
     let normal_prefix = class_sort_text(
         "OrderLine",
         "Vendor\\OrderLine",
         "Order",
         '2',
+        '0',
         false,
         &table,
     );
@@ -910,8 +946,8 @@ fn test_class_sort_text_demote_after_quality() {
 fn test_class_sort_text_alphabetical_tiebreak() {
     let table = HashMap::new();
     // Same quality, tier, affinity, demotion — alphabetical by short name.
-    let alpha = class_sort_text("Alpha", "Vendor\\Alpha", "Al", '2', false, &table);
-    let beta = class_sort_text("Beta", "Vendor\\Beta", "B", '2', false, &table);
+    let alpha = class_sort_text("Alpha", "Vendor\\Alpha", "Al", '2', '0', false, &table);
+    let beta = class_sort_text("Beta", "Vendor\\Beta", "B", '2', '0', false, &table);
     // Both are starts-with ('b'), tier '2', zero affinity, not demoted.
     // Tiebreak: "alpha" < "beta".
     assert!(
@@ -924,27 +960,29 @@ fn test_class_sort_text_alphabetical_tiebreak() {
 fn test_class_sort_text_gap_within_same_affinity() {
     let mut table = HashMap::new();
     // Both classes share the same namespace and thus the same affinity score.
-    table.insert("Luxplus".to_string(), 11);
-    table.insert("Luxplus\\Core".to_string(), 6);
-    table.insert("Luxplus\\Core\\Database".to_string(), 6);
-    table.insert("Luxplus\\Core\\Database\\Model".to_string(), 6);
-    table.insert("Luxplus\\Core\\Database\\Model\\Products".to_string(), 1);
+    table.insert("Acme".to_string(), 11);
+    table.insert("Acme\\Core".to_string(), 6);
+    table.insert("Acme\\Core\\Database".to_string(), 6);
+    table.insert("Acme\\Core\\Database\\Model".to_string(), 6);
+    table.insert("Acme\\Core\\Database\\Model\\Products".to_string(), 1);
 
     // "Product" (len 7, gap 7-3=4) should sort before "ProductFilterTerm" (len 17, gap 17-3=14)
     // when both have the same affinity (same namespace).
     let short = class_sort_text(
         "Product",
-        "Luxplus\\Core\\Database\\Model\\Products\\Product",
+        "Acme\\Core\\Database\\Model\\Products\\Product",
         "Pro",
         '2',
+        '0',
         false,
         &table,
     );
     let long = class_sort_text(
         "ProductFilterTerm",
-        "Luxplus\\Core\\Database\\Model\\Products\\Filters\\ProductFilterTerm",
+        "Acme\\Core\\Database\\Model\\Products\\Filters\\ProductFilterTerm",
         "Pro",
         '2',
+        '0',
         false,
         &table,
     );
@@ -957,21 +995,22 @@ fn test_class_sort_text_gap_within_same_affinity() {
 #[test]
 fn test_class_sort_text_affinity_beats_gap() {
     let mut table = HashMap::new();
-    table.insert("Luxplus".to_string(), 11);
-    table.insert("Luxplus\\Database".to_string(), 6);
+    table.insert("Acme".to_string(), 11);
+    table.insert("Acme\\Database".to_string(), 6);
 
     // "Proxy" has a tiny gap (5-3=2) but zero affinity.
     // "Product" has a larger gap (7-3=4) but high affinity.
     // Affinity should win because it comes before gap in the sort key.
     let high_affinity = class_sort_text(
         "Product",
-        "Luxplus\\Database\\Product",
+        "Acme\\Database\\Product",
         "Pro",
         '2',
+        '0',
         false,
         &table,
     );
-    let low_affinity = class_sort_text("Proxy", "Mockery\\Proxy", "Pro", '2', false, &table);
+    let low_affinity = class_sort_text("Proxy", "Mockery\\Proxy", "Pro", '2', '0', false, &table);
     assert!(
         high_affinity < low_affinity,
         "Higher affinity should beat smaller gap: high_affinity={high_affinity}, low_affinity={low_affinity}"

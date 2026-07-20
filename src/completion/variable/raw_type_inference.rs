@@ -5,7 +5,7 @@
 /// resolver in [`super::forward_walk`] and the foreach/destructuring
 /// resolution module.
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -15,6 +15,7 @@ use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
 use crate::completion::resolver::VarResolutionCtx;
+use crate::types::ResolvedType;
 
 /// Infer the raw PHPStan-style type string for an array literal
 /// (`[…]` or `array(…)`) by examining its keys and resolving value
@@ -22,9 +23,18 @@ use crate::completion::resolver::VarResolutionCtx;
 pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
+    nested: bool,
 ) -> Option<PhpType> {
+    // Maximum number of positional entries to record as a tuple-style
+    // shape. Beyond this the array is almost certainly a homogeneous
+    // collection rather than a fixed-arity tuple, so it is widened to
+    // `list<T>` to avoid unbounded shape growth.
+    const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
+
     let mut types: Vec<PhpType> = Vec::new();
+    let mut positional: Vec<PhpType> = Vec::new();
     let mut has_string_keys = false;
+    let mut saw_spread = false;
     let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
 
     for elem in elements {
@@ -40,7 +50,13 @@ pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
                 });
             }
             ArrayElement::Value(v) => {
-                if let Some(t) = infer_element_type(v.value, ctx)
+                let resolved = infer_element_type(v.value, ctx);
+                // A positional shape must keep one entry per element to
+                // preserve arity, so an unresolvable element becomes
+                // `mixed`. The `list<T>` fallback keeps its original
+                // behaviour of ignoring unresolvable elements.
+                positional.push(resolved.clone().unwrap_or_else(PhpType::mixed));
+                if let Some(t) = resolved
                     && !types.contains(&t)
                 {
                     types.push(t);
@@ -48,6 +64,7 @@ pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
             }
             ArrayElement::Variadic(v) => {
                 // Spread: `...$other` — try to resolve iterable element type.
+                saw_spread = true;
                 if let Some(raw) = super::foreach_resolution::resolve_expression_type(v.value, ctx)
                     && let Some(elem) = raw.extract_value_type(true).cloned()
                     && !types.contains(&elem)
@@ -65,6 +82,35 @@ pub(in crate::completion) fn infer_array_literal_raw_type<'b>(
 
     if types.is_empty() {
         return None;
+    }
+
+    // Nested value-only literal with a fixed set of elements: record it
+    // as a positional (tuple-style) array shape so that integer-literal
+    // indexing (`$pair[1]`) resolves the element at that position and
+    // out-of-bounds indices are known to be absent. A spread element or
+    // an over-long literal makes the arity indeterminate, so those widen
+    // to `list<T>` instead.
+    //
+    // A top-level literal (one assigned or returned directly) is
+    // generalized to `list<T>` because that is what most consumers
+    // expect for a freshly constructed array (return-type inference,
+    // push tracking via `$arr[] = …`, and hover). Nested literals keep
+    // their precise arity because they are typically fixed tuples read
+    // back by position.
+    if nested
+        && !saw_spread
+        && !positional.is_empty()
+        && positional.len() <= MAX_POSITIONAL_SHAPE_LEN
+    {
+        let entries = positional
+            .into_iter()
+            .map(|value_type| crate::php_type::ShapeEntry {
+                key: None,
+                value_type,
+                optional: false,
+            })
+            .collect();
+        return Some(PhpType::ArrayShape(entries));
     }
 
     let elem_type = if types.len() == 1 {
@@ -106,15 +152,21 @@ fn infer_element_type<'b>(
         Expression::Literal(Literal::True(_) | Literal::False(_)) => Some(PhpType::bool()),
         Expression::Literal(Literal::Null(_)) => Some(PhpType::null()),
         // ── Nested array literals ──
-        Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)
+        Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
             .or_else(|| Some(PhpType::array())),
-        Expression::LegacyArray(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)
-            .or_else(|| Some(PhpType::array())),
+        Expression::LegacyArray(arr) => {
+            infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
+                .or_else(|| Some(PhpType::array()))
+        }
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_name_via_loader(&name, ctx.class_loader);
+                let fqn = crate::util::resolve_source_class_name(
+                    &name,
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                );
                 Some(PhpType::Named(fqn))
             }
             Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
@@ -216,14 +268,20 @@ pub(in crate::completion) fn resolve_array_func_raw_type(
     }
 
     // iterator_to_array: converts an iterator to an array, preserving
-    // the value type.  `iterator_to_array($iter)` where `$iter` is
-    // `Iterator<int, Foo>` produces `array<int, Foo>`.
+    // key and value types.  `iterator_to_array($iter)` where `$iter`
+    // is `Iterator<int, Foo>` produces `array<int, Foo>`.  When only
+    // a value type is available (single generic param), produces
+    // `list<Foo>`.
     if func_name.eq_ignore_ascii_case("iterator_to_array") {
         let iter_expr = super::resolution::first_arg_expr(args)?;
         let raw = super::resolution::resolve_arg_raw_type(iter_expr, ctx)?;
-        if raw.extract_value_type(true).is_some() {
-            return Some(raw);
-        }
+        let val = raw.extract_element_type().cloned();
+        let key = raw.extract_key_type(false).cloned();
+        return match (key, val) {
+            (Some(k), Some(v)) => Some(PhpType::generic_array(k, v)),
+            (None, Some(v)) => Some(PhpType::list(v)),
+            _ => Some(PhpType::array()),
+        };
     }
 
     // Element-extracting functions: wrap element type in list<> so
@@ -278,23 +336,36 @@ pub(in crate::completion) fn resolve_array_func_element_type(
 /// extracting their spans. This avoids serialising the argument list
 /// to a flat string and then re-splitting with `split_text_args`.
 pub(in crate::completion) fn extract_arg_texts_from_ast(
-    argument_list: &mago_syntax::ast::ArgumentList<'_>,
+    argument_list: &mago_syntax::cst::ArgumentList<'_>,
     content: &str,
 ) -> Vec<String> {
     argument_list
         .arguments
         .iter()
         .map(|arg| {
-            let span = match arg {
-                mago_syntax::ast::argument::Argument::Positional(pos) => pos.value.span(),
-                mago_syntax::ast::argument::Argument::Named(named) => named.value.span(),
+            let value_span = match arg {
+                mago_syntax::cst::argument::Argument::Positional(pos) => pos.value.span(),
+                mago_syntax::cst::argument::Argument::Named(named) => named.value.span(),
             };
-            let start = span.start.offset as usize;
-            let end = span.end.offset as usize;
-            if end <= content.len() {
-                content[start..end].to_string()
+            let start = value_span.start.offset as usize;
+            let end = value_span.end.offset as usize;
+            let value = if end <= content.len() {
+                &content[start..end]
             } else {
-                String::new()
+                ""
+            };
+            // Preserve the `name:` prefix for named arguments so that
+            // downstream argument binding (`bind_text_args_to_params`) can
+            // route them to the parameter they target rather than their
+            // source-order slot. Without it, `f(b: 1, a: 2)` would bind `a`
+            // to the value `1` and misresolve conditional return types and
+            // template parameters that key on `a`.
+            match arg {
+                mago_syntax::cst::argument::Argument::Named(named) => {
+                    let name = crate::atom::bytes_to_str(named.name.value);
+                    format!("{name}: {value}")
+                }
+                mago_syntax::cst::argument::Argument::Positional(_) => value.to_string(),
             }
         })
         .collect()
@@ -328,13 +399,97 @@ fn extract_array_map_element_type(
     };
 
     if let Some(ref parsed) = return_hint
-        && parsed.base_name().is_some()
+        && !parsed.is_untyped()
     {
         return return_hint;
     }
 
-    // Fallback: use the input array's element type.
+    // No explicit return type — try to infer it from the callback body
+    // by resolving the body expression with the callback parameter
+    // seeded to the input array's element type.
     let arr_expr = super::resolution::nth_arg_expr(args, 1)?;
-    let raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-    raw.extract_value_type(true).cloned()
+    let input_raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
+    let input_element = input_raw.extract_value_type(true)?.clone();
+
+    if let Some(inferred) = infer_callback_return_type(callback_expr, &input_element, ctx) {
+        return Some(inferred);
+    }
+
+    // Final fallback: use the input array's element type.
+    Some(input_element)
+}
+
+/// Infer the return type of a callback (arrow function or closure) by
+/// resolving its body expression with the first parameter seeded to
+/// `param_type`.
+///
+/// For arrow functions: resolves `arrow.expression` directly.
+/// For closures: finds the first `return` statement and resolves its
+/// expression.
+fn infer_callback_return_type(
+    callback_expr: &Expression<'_>,
+    param_type: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let (param_name, body_expr) = match callback_expr {
+        Expression::ArrowFunction(arrow) => {
+            let param = arrow.parameter_list.parameters.first()?;
+            let name = bytes_to_str(param.variable.name).to_string();
+            (name, arrow.expression)
+        }
+        Expression::Closure(closure) => {
+            let param = closure.parameter_list.parameters.first()?;
+            let name = bytes_to_str(param.variable.name).to_string();
+            // Find the first return statement's expression.
+            let ret_expr = closure.body.statements.iter().find_map(|stmt| {
+                if let Statement::Return(ret) = stmt {
+                    ret.value.as_ref()
+                } else {
+                    None
+                }
+            })?;
+            (name, *ret_expr)
+        }
+        _ => return None,
+    };
+
+    // Build a scope resolver that maps the callback parameter to the
+    // input element type.  Include ClassInfo when available so that
+    // property access resolution can find the class members.
+    let resolved_param = if let Some(class_name) = param_type.base_name() {
+        if let Some(cls) = (ctx.class_loader)(class_name) {
+            vec![ResolvedType::from_both(param_type.clone(), (*cls).clone())]
+        } else {
+            vec![ResolvedType::from_type_string(param_type.clone())]
+        }
+    } else {
+        vec![ResolvedType::from_type_string(param_type.clone())]
+    };
+    let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
+        if var == param_name {
+            resolved_param.clone()
+        } else {
+            vec![]
+        }
+    };
+
+    // Create a synthetic context with the scope resolver.
+    let body_offset = body_expr.span().start.offset;
+    let infer_ctx = VarResolutionCtx {
+        var_name: "",
+        current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: body_offset,
+        class_loader: ctx.class_loader,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: None,
+        top_level_scope: None,
+        branch_aware: false,
+        match_arm_narrowing: std::collections::HashMap::new(),
+        scope_var_resolver: Some(&scope_resolver),
+    };
+
+    super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)
 }

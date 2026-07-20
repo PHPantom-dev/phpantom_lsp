@@ -2,12 +2,12 @@
 //!
 //! This module provides [`PhpType`], an owned enum that represents PHP type
 //! expressions as a tree. It is converted from the borrowed
-//! `mago_type_syntax::ast::Type<'input>` AST and can be displayed back into a
+//! `mago_type_syntax::cst::Type<'input>` AST and can be displayed back into a
 //! canonical string form.
 //!
 //! # Design
 //!
-//! `mago_type_syntax::ast::Type` is `#[non_exhaustive]` with 69 variants and
+//! `mago_type_syntax::cst::Type` is `#[non_exhaustive]` with 69 variants and
 //! borrows from input. `PhpType` is simpler: keyword types are collapsed into
 //! `Named`, generic-parameterised references become `Generic`, and rarely-used
 //! variants fall back to `Raw`.
@@ -17,10 +17,10 @@
 
 use std::fmt;
 
-use bumpalo::Bump;
+use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
 use mago_span::{Position, Span};
-use mago_type_syntax::ast;
+use mago_type_syntax::cst;
 
 use crate::atom::bytes_to_str;
 
@@ -102,11 +102,88 @@ pub enum PhpType {
     /// Index access type: `T[K]`.
     IndexAccess(Box<PhpType>, Box<PhpType>),
 
-    /// A literal type: integer (`42`), float (`3.14`), or string (`'foo'`).
-    Literal(String),
+    /// A literal scalar type with preserved kind and source text.
+    Literal(LiteralValue),
 
     /// Fallback for anything we cannot parse or do not yet map.
     Raw(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Int(String),
+    Float(String),
+    String(String),
+}
+
+impl LiteralValue {
+    pub fn int(raw: impl Into<String>) -> Self {
+        Self::Int(raw.into())
+    }
+
+    pub fn float(raw: impl Into<String>) -> Self {
+        Self::Float(raw.into())
+    }
+
+    pub fn string_raw(raw: impl Into<String>) -> Self {
+        Self::String(raw.into())
+    }
+
+    pub fn string_value(value: impl AsRef<str>) -> Self {
+        Self::String(format!(
+            "'{}'",
+            value.as_ref().replace('\\', "\\\\").replace('\'', "\\'")
+        ))
+    }
+
+    pub fn as_raw(&self) -> String {
+        match self {
+            LiteralValue::Int(raw) | LiteralValue::Float(raw) | LiteralValue::String(raw) => {
+                raw.clone()
+            }
+        }
+    }
+
+    pub fn string_content(&self) -> Option<&str> {
+        let LiteralValue::String(raw) = self else {
+            return None;
+        };
+        crate::util::unquote_php_string(raw).or(Some(raw.as_str()))
+    }
+
+    pub fn parse_i64(&self) -> Option<i64> {
+        match self {
+            LiteralValue::Int(raw) => parse_php_int_literal(raw),
+            _ => None,
+        }
+    }
+
+    pub fn parse_f64(&self) -> Option<f64> {
+        match self {
+            LiteralValue::Float(raw) => parse_php_float_literal(raw),
+            _ => None,
+        }
+    }
+
+    pub fn is_numeric_string(&self) -> bool {
+        // Validate the string *content* as a PHP numeric string
+        // (`is_numeric`), not as a PHP source literal.  Underscores,
+        // hex/binary/octal prefixes, and leading `0` octal are only
+        // meaningful in source code; the runtime string `'0xFF'` or
+        // `'1_000'` is not numeric.
+        self.string_content()
+            .is_some_and(|content| content.parse::<i64>().is_ok() || content.parse::<f64>().is_ok())
+    }
+}
+
+impl fmt::Display for LiteralValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LiteralValue::Int(raw) | LiteralValue::Float(raw) | LiteralValue::String(raw) => {
+                write!(f, "{raw}")
+            }
+        }
+    }
 }
 
 /// A single field in an array or object shape.
@@ -154,6 +231,22 @@ impl PhpType {
     /// `bool` type.
     pub fn bool() -> PhpType {
         PhpType::Named("bool".to_owned())
+    }
+
+    pub fn literal_int(raw: impl Into<String>) -> PhpType {
+        PhpType::Literal(LiteralValue::int(raw))
+    }
+
+    pub fn literal_float(raw: impl Into<String>) -> PhpType {
+        PhpType::Literal(LiteralValue::float(raw))
+    }
+
+    pub fn literal_string_raw(raw: impl Into<String>) -> PhpType {
+        PhpType::Literal(LiteralValue::string_raw(raw))
+    }
+
+    pub fn literal_string_value(value: impl AsRef<str>) -> PhpType {
+        PhpType::Literal(LiteralValue::string_value(value))
     }
 
     /// `true` type.
@@ -305,9 +398,13 @@ impl PhpType {
             Position::new(effective.len() as u32),
         );
 
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let effective = arena.alloc_slice_copy(effective.as_bytes());
-        match mago_type_syntax::parse_str(&arena, span, effective) {
+        // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
+        // the migration is tracked as a separate task.
+        #[allow(deprecated)]
+        let parsed = mago_type_syntax::parse_str(&arena, span, effective);
+        match parsed {
             Ok(ty) => convert(&ty),
             Err(_) => PhpType::Raw(input.to_owned()),
         }
@@ -625,12 +722,85 @@ impl PhpType {
         matches!(self, PhpType::Named(s) if is_primitive_scalar_name(s))
     }
 
+    /// Whether this type admits `null` as a value.
+    ///
+    /// Returns `true` for `null` itself, a `?T` nullable wrapper, `mixed`,
+    /// and any union that contains a null member. Returns `false` for
+    /// non-nullable types.
+    pub fn accepts_null(&self) -> bool {
+        match self {
+            PhpType::Nullable(_) => true,
+            PhpType::Union(members) => members.iter().any(|m| m.accepts_null()),
+            PhpType::Named(s) => s.eq_ignore_ascii_case("null") || s.eq_ignore_ascii_case("mixed"),
+            _ => false,
+        }
+    }
+
+    /// Return a copy of this type that also admits `null`.
+    ///
+    /// Leaves the type unchanged when it already [`accepts_null`]. A bare
+    /// type `T` becomes `?T`; a union `A|B` becomes `A|B|null`.
+    ///
+    /// [`accepts_null`]: PhpType::accepts_null
+    #[must_use]
+    pub fn or_null(self) -> PhpType {
+        if self.accepts_null() {
+            return self;
+        }
+        match self {
+            PhpType::Union(mut members) => {
+                members.push(PhpType::null());
+                PhpType::Union(members)
+            }
+            other => PhpType::Nullable(Box::new(other)),
+        }
+    }
+
     /// Whether this type is a scalar/built-in type that does not refer
     /// to a user-defined class.
     ///
     /// Returns `true` when this type is exactly `null`.
     pub fn is_null(&self) -> bool {
         matches!(self, PhpType::Named(s) if s.eq_ignore_ascii_case("null"))
+    }
+
+    /// Whether a [`PhpType::Conditional`] appears anywhere in this type tree.
+    ///
+    /// Used as a cheap guard before running the (cloning) nested-conditional
+    /// evaluator over a method's resolved return type: conditionals embedded
+    /// inside a generic wrapper (e.g. `Collection<($x is array ? … : …), …>`)
+    /// need to be collapsed against the call arguments, but the vast majority
+    /// of return types contain no conditional and can be left untouched.
+    pub fn contains_conditional(&self) -> bool {
+        match self {
+            PhpType::Conditional { .. } => true,
+            PhpType::Nullable(inner)
+            | PhpType::Array(inner)
+            | PhpType::ClassString(Some(inner))
+            | PhpType::InterfaceString(Some(inner))
+            | PhpType::KeyOf(inner)
+            | PhpType::ValueOf(inner) => inner.contains_conditional(),
+            PhpType::Union(members)
+            | PhpType::Intersection(members)
+            | PhpType::Generic(_, members) => members.iter().any(|m| m.contains_conditional()),
+            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+                entries.iter().any(|e| e.value_type.contains_conditional())
+            }
+            PhpType::Callable {
+                params,
+                return_type,
+                ..
+            } => {
+                params.iter().any(|p| p.type_hint.contains_conditional())
+                    || return_type
+                        .as_ref()
+                        .is_some_and(|r| r.contains_conditional())
+            }
+            PhpType::IndexAccess(base, index) => {
+                base.contains_conditional() || index.contains_conditional()
+            }
+            _ => false,
+        }
     }
 
     /// Whether this type is `bool` or `boolean` (case-insensitive).
@@ -701,14 +871,12 @@ impl PhpType {
 
     /// Whether this type is a literal string value (e.g. `'hello'`, `"world"`).
     pub fn is_string_literal(&self) -> bool {
-        matches!(self, PhpType::Literal(s) if
-            (s.starts_with('\'') && s.ends_with('\''))
-            || (s.starts_with('"') && s.ends_with('"')))
+        matches!(self, PhpType::Literal(LiteralValue::String(_)))
     }
 
     /// Whether this type is a literal integer value (e.g. `42`, `-1`).
     pub fn is_int_literal(&self) -> bool {
-        matches!(self, PhpType::Literal(s) if s.parse::<i64>().is_ok())
+        matches!(self, PhpType::Literal(LiteralValue::Int(_)))
     }
 
     /// Whether this type is `string` or any PHPDoc string refinement (case-insensitive).
@@ -733,7 +901,7 @@ impl PhpType {
                     | "non-falsy-string"
             ),
             PhpType::ClassString(_) | PhpType::InterfaceString(_) => true,
-            PhpType::Literal(s) => s.starts_with('\'') || s.starts_with('"'),
+            PhpType::Literal(LiteralValue::String(_)) => true,
             PhpType::Nullable(inner) => inner.is_string_subtype(),
             PhpType::Generic(name, _) => matches!(
                 name.to_ascii_lowercase().as_str(),
@@ -764,11 +932,7 @@ impl PhpType {
                     | "non-zero-int"
             ),
             PhpType::IntRange(_, _) => true,
-            PhpType::Literal(s) => {
-                // Integer literals: optional leading minus, then digits only.
-                let trimmed = s.strip_prefix('-').unwrap_or(s);
-                !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit())
-            }
+            PhpType::Literal(LiteralValue::Int(_)) => true,
             PhpType::Nullable(inner) => inner.is_int_subtype(),
             PhpType::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_int_subtype())
@@ -784,7 +948,7 @@ impl PhpType {
     /// symmetry with [`is_string_subtype`] and [`is_int_subtype`].
     pub fn is_float_subtype(&self) -> bool {
         match self {
-            PhpType::Literal(s) => s.parse::<f64>().is_ok(),
+            PhpType::Literal(LiteralValue::Float(_)) => true,
             PhpType::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_float_subtype())
             }
@@ -1061,6 +1225,12 @@ impl PhpType {
             }
             PhpType::Array(inner) => inner.is_scalar_leaf(),
             PhpType::Nullable(inner) => inner.is_scalar_leaf(),
+            // A shape is only a scalar leaf when every entry value is;
+            // `array{price: Decimal}` yields the non-scalar `Decimal`
+            // when indexed or iterated.
+            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+                entries.iter().all(|e| e.value_type.is_scalar_leaf())
+            }
             _ => self.is_scalar(),
         }
     }
@@ -1132,23 +1302,14 @@ impl PhpType {
                 }
                 Some(native.join("&"))
             }
-            PhpType::Array(_) => Some("array".to_string()),
-            PhpType::ClassString(_) => Some("string".to_string()),
-            PhpType::InterfaceString(_) => Some("string".to_string()),
-            PhpType::IntRange(_, _) => Some("int".to_string()),
-            PhpType::Literal(s) => {
-                // Literal int/float/string/bool → the base scalar type.
-                if s.parse::<i64>().is_ok() {
-                    Some("int".to_string())
-                } else if s.parse::<f64>().is_ok() {
-                    Some("float".to_string())
-                } else if s.starts_with('\'') || s.starts_with('"') {
-                    Some("string".to_string())
-                } else {
-                    None
-                }
+            PhpType::Array(_) | PhpType::ArrayShape(_) => Some("array".to_string()),
+            PhpType::ClassString(_)
+            | PhpType::InterfaceString(_)
+            | PhpType::Literal(LiteralValue::String(_)) => Some("string".to_string()),
+            PhpType::IntRange(_, _) | PhpType::Literal(LiteralValue::Int(_)) => {
+                Some("int".to_string())
             }
-            PhpType::ArrayShape(_) => Some("array".to_string()),
+            PhpType::Literal(LiteralValue::Float(_)) => Some("float".to_string()),
             PhpType::ObjectShape(_) => Some("object".to_string()),
             PhpType::Callable { kind, .. } => Some(kind.clone()),
             // Conditionals, key-of, value-of, index-access, and raw
@@ -1224,22 +1385,14 @@ impl PhpType {
                     Some(PhpType::Intersection(deduped))
                 }
             }
-            PhpType::Array(_) => Some(PhpType::array()),
-            PhpType::ClassString(_) => Some(PhpType::string()),
-            PhpType::InterfaceString(_) => Some(PhpType::string()),
-            PhpType::IntRange(_, _) => Some(PhpType::int()),
-            PhpType::Literal(s) => {
-                if s.parse::<i64>().is_ok() {
-                    Some(PhpType::int())
-                } else if s.parse::<f64>().is_ok() {
-                    Some(PhpType::float())
-                } else if s.starts_with('\'') || s.starts_with('"') {
-                    Some(PhpType::string())
-                } else {
-                    None
-                }
+            PhpType::Array(_) | PhpType::ArrayShape(_) => Some(PhpType::array()),
+            PhpType::ClassString(_)
+            | PhpType::InterfaceString(_)
+            | PhpType::Literal(LiteralValue::String(_)) => Some(PhpType::string()),
+            PhpType::IntRange(_, _) | PhpType::Literal(LiteralValue::Int(_)) => {
+                Some(PhpType::int())
             }
-            PhpType::ArrayShape(_) => Some(PhpType::array()),
+            PhpType::Literal(LiteralValue::Float(_)) => Some(PhpType::float()),
             PhpType::ObjectShape(_) => Some(PhpType::object()),
             PhpType::Callable { kind, .. } => Some(PhpType::Named(kind.clone())),
             PhpType::Conditional { .. }
@@ -1293,15 +1446,18 @@ impl PhpType {
                     Some(inner.as_ref())
                 }
             }
-            PhpType::Generic(name, args) if !args.is_empty() => {
-                let value = if Self::short_name_of(name) == "Generator" {
-                    // Generator<TKey, TValue, TSend, TReturn>: value is
-                    // the 2nd param (index 1). When only one param is
-                    // given, treat it as the value type.
-                    args.get(1).or(args.last())
+            PhpType::Generic(_, args) if !args.is_empty() => {
+                // Iterables follow the `<TKey, TValue>` convention: the value
+                // is the *second* generic argument whenever two or more are
+                // present. This covers `array<K, V>`, `Collection<K, V>`,
+                // `Iterator<K, V>`, `Generator<TKey, TValue, TSend, TReturn>`,
+                // and the SPL wrapper iterators
+                // (`IteratorIterator`/`FilterIterator`/`AppendIterator`) that
+                // append a third `TIterator` argument. With a single argument
+                // (e.g. `list<User>`) that lone argument is the value.
+                let value = if args.len() >= 2 {
+                    Some(&args[1])
                 } else {
-                    // Default: last generic parameter (works for array,
-                    // list, iterable, Collection, etc.).
                     args.last()
                 };
                 match value {
@@ -1351,6 +1507,35 @@ impl PhpType {
     /// Unlike `extract_value_type(true)`, this never skips scalars.
     pub fn extract_element_type(&self) -> Option<&PhpType> {
         self.extract_value_type(false)
+    }
+
+    /// Return the element (value) type produced by iterating this type,
+    /// as an owned type.
+    ///
+    /// Unlike [`extract_value_type`](Self::extract_value_type), this also
+    /// handles array/object shapes: iterating a tuple-style `array{A, B}`
+    /// yields `A|B`. For all other types it delegates to
+    /// `extract_value_type(false)`, so generic collections (`list<User>`,
+    /// `array<int, Order>`) behave exactly as before.
+    pub fn iterable_element_type(&self) -> Option<PhpType> {
+        match self {
+            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+                let mut values: Vec<PhpType> = Vec::new();
+                for entry in entries {
+                    if !values.contains(&entry.value_type) {
+                        values.push(entry.value_type.clone());
+                    }
+                }
+                match values.len() {
+                    0 => None,
+                    1 => Some(values.into_iter().next().unwrap()),
+                    _ => Some(PhpType::Union(values)),
+                }
+            }
+            PhpType::Nullable(inner) => inner.iterable_element_type(),
+            PhpType::Union(members) => members.iter().find_map(|m| m.iterable_element_type()),
+            _ => self.extract_value_type(false).cloned(),
+        }
     }
 
     /// Look up the value type for a specific key in an array shape.
@@ -1477,6 +1662,116 @@ impl PhpType {
             PhpType::ObjectShape(_) => true,
             PhpType::Nullable(inner) => inner.is_object_shape(),
             _ => false,
+        }
+    }
+
+    /// Join two array shapes into a single shape that covers both
+    /// variants.
+    ///
+    /// This is the union of two shapes expressed as one shape:
+    /// `array{a: int}` joined with `array{a: int, b: string}` is
+    /// `array{a: int, b?: string}`.
+    ///
+    /// - A key present on both sides unions the two value types
+    ///   (recursively joining nested shapes) and stays required unless
+    ///   optional on either side.
+    /// - A key present on only one side becomes optional — the other
+    ///   variant does not guarantee it.
+    ///
+    /// Branch merging uses this to fold the shape a variable has after
+    /// one branch with the shape it has after another.  Folding keeps
+    /// the variable at a single tracked shape no matter how many
+    /// branches write to it; accumulating one variant per branch
+    /// instead makes every later merge compare all variants pairwise,
+    /// which turns large procedural methods with hundreds of
+    /// conditional writes into quadratic-and-worse walks.
+    ///
+    /// Handles `?array{…}` on either side (the join is nullable when
+    /// either side is).  Returns `None` when either side is not an
+    /// array shape or contains positional (unkeyed) entries — those are
+    /// list-style shapes where a per-key join is not meaningful.
+    pub fn join_shapes(&self, other: &PhpType) -> Option<PhpType> {
+        match (self, other) {
+            (PhpType::ArrayShape(a), PhpType::ArrayShape(b)) => {
+                Some(PhpType::ArrayShape(Self::join_shape_entries(a, b)?))
+            }
+            (PhpType::Nullable(a), PhpType::Nullable(b)) => {
+                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            }
+            (PhpType::Nullable(a), b @ PhpType::ArrayShape(_)) => {
+                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            }
+            (a @ PhpType::ArrayShape(_), PhpType::Nullable(b)) => {
+                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Join two keyed shape entry lists (see [`join_shapes`]).
+    ///
+    /// Keys from `a` keep their order; keys only in `b` follow in `b`'s
+    /// order.  Returns `None` when either side has positional (unkeyed)
+    /// entries.
+    ///
+    /// [`join_shapes`]: Self::join_shapes
+    fn join_shape_entries(a: &[ShapeEntry], b: &[ShapeEntry]) -> Option<Vec<ShapeEntry>> {
+        if a.iter().any(|e| e.key.is_none()) || b.iter().any(|e| e.key.is_none()) {
+            return None;
+        }
+        let mut joined: Vec<ShapeEntry> = Vec::with_capacity(a.len().max(b.len()));
+        for ea in a {
+            match b.iter().find(|eb| eb.key == ea.key) {
+                Some(eb) => joined.push(ShapeEntry {
+                    key: ea.key.clone(),
+                    value_type: Self::join_values(&ea.value_type, &eb.value_type),
+                    optional: ea.optional || eb.optional,
+                }),
+                None => joined.push(ShapeEntry {
+                    key: ea.key.clone(),
+                    value_type: ea.value_type.clone(),
+                    optional: true,
+                }),
+            }
+        }
+        for eb in b {
+            if !a.iter().any(|ea| ea.key == eb.key) {
+                joined.push(ShapeEntry {
+                    key: eb.key.clone(),
+                    value_type: eb.value_type.clone(),
+                    optional: true,
+                });
+            }
+        }
+        Some(joined)
+    }
+
+    /// Union two value types for a joined shape key.
+    ///
+    /// Equivalent members are kept once and nested shape members are
+    /// joined rather than accumulated, so repeated merges cannot grow
+    /// the value type without bound.
+    fn join_values(a: &PhpType, b: &PhpType) -> PhpType {
+        if a.equivalent(b) {
+            return a.clone();
+        }
+        let mut members: Vec<PhpType> = a.union_members().into_iter().cloned().collect();
+        'incoming: for m in b.union_members() {
+            for existing in members.iter_mut() {
+                if existing.equivalent(m) {
+                    continue 'incoming;
+                }
+                if let Some(joined) = existing.join_shapes(m) {
+                    *existing = joined;
+                    continue 'incoming;
+                }
+            }
+            members.push(m.clone());
+        }
+        if members.len() == 1 {
+            members.into_iter().next().unwrap()
+        } else {
+            PhpType::Union(members)
         }
     }
 
@@ -1711,6 +2006,32 @@ impl PhpType {
     /// ```
     pub fn replace_self(&self, class_name: &str) -> PhpType {
         self.replace_self_with_type(&PhpType::Named(class_name.to_string()))
+    }
+
+    /// Resolve relative class-reference keywords to concrete class names,
+    /// walking the entire type tree (including array elements and generic
+    /// arguments).
+    ///
+    /// `self`, `static`, and `$this` become `class_name`; `parent` becomes
+    /// `parent_class` when it is `Some`.  Unlike [`resolve_names`], which
+    /// treats these keywords as non-class types and leaves them untouched,
+    /// this resolves them so a declared type can be compared against a
+    /// resolved value type.
+    ///
+    /// [`resolve_names`]: PhpType::resolve_names
+    pub fn resolve_self_refs(&self, class_name: &str, parent_class: Option<&str>) -> PhpType {
+        // self / static / $this — case-insensitive, whole-tree walk.
+        let replaced = self.replace_self(class_name);
+        match parent_class {
+            Some(parent) => {
+                let subs = std::collections::HashMap::from([(
+                    "parent".to_string(),
+                    PhpType::Named(parent.to_string()),
+                )]);
+                replaced.substitute(&subs)
+            }
+            None => replaced,
+        }
     }
 
     /// Replace only the `self` keyword (not `static` or `$this`) with a
@@ -2584,6 +2905,18 @@ impl PhpType {
             return self.is_subtype_of(&as_union);
         }
 
+        // ── array-key normalisation ─────────────────────────────────
+        // `array-key` is exactly `int|string`. Expanding it here lets a
+        // subject typed `array-key` satisfy an `int|string` supertype
+        // (the union-supertype check below only tries each member in
+        // isolation, and `array-key` is a subtype of neither `int` nor
+        // `string` alone). Reflexive `array-key <: array-key` is already
+        // handled above, so this only fires against structural supertypes.
+        if self.is_array_key() {
+            let as_union = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            return as_union.is_subtype_of(supertype);
+        }
+
         // ── Union subtype: every member must be a subtype ───────────
         if let PhpType::Union(members) = self {
             return members.iter().all(|m| m.is_subtype_of(supertype));
@@ -2614,14 +2947,48 @@ impl PhpType {
             return literal_is_subtype_of(lit, supertype);
         }
 
-        // ── IntRange <: int ─────────────────────────────────────────
-        if matches!(self, PhpType::IntRange(..))
-            && let PhpType::Named(sup) = supertype
+        // ── IntRange <: int / refined-int / IntRange ────────────────
+        if let PhpType::IntRange(sub_min, sub_max) = self {
+            match supertype {
+                // IntRange <: int, numeric, scalar, array-key
+                PhpType::Named(sup) => {
+                    let sup_l = sup.to_ascii_lowercase();
+                    if matches!(
+                        sup_l.as_str(),
+                        "int" | "integer" | "numeric" | "scalar" | "array-key"
+                    ) {
+                        return true;
+                    }
+                    // IntRange <: refined-int (e.g. int<0,max> <: non-negative-int)
+                    if let Some((sup_min, sup_max)) = refined_int_to_range(&sup_l) {
+                        return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
+                    }
+                    // IntRange <: non-zero-int — the range must not contain 0.
+                    // Either entirely positive (min >= 1) or entirely negative (max <= -1).
+                    if sup_l == "non-zero-int" {
+                        let lo = parse_range_bound(sub_min);
+                        let hi = parse_range_bound(sub_max);
+                        return lo >= 1 || hi <= -1;
+                    }
+                    return false;
+                }
+                // IntRange <: IntRange (e.g. int<1,100> <: int<0,max>)
+                PhpType::IntRange(sup_min, sup_max) => {
+                    return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
+                }
+                _ => {}
+            }
+        }
+
+        // ── refined-int <: IntRange ─────────────────────────────────
+        // e.g. non-negative-int <: int<0,max>, positive-int <: int<0,max>
+        if let PhpType::Named(sub) = self
+            && let PhpType::IntRange(sup_min, sup_max) = supertype
         {
-            return matches!(
-                sup.to_ascii_lowercase().as_str(),
-                "int" | "integer" | "numeric" | "scalar" | "array-key"
-            );
+            let sub_l = sub.to_ascii_lowercase();
+            if let Some((sub_min, sub_max)) = refined_int_to_range(&sub_l) {
+                return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
+            }
         }
 
         // ── Array slice: T[] <: array ───────────────────────────────
@@ -3017,10 +3384,14 @@ impl PhpType {
 
     /// Whether this type conveys no useful return type information.
     ///
-    /// Returns `true` for `mixed`, `void`, and `never` — types that
-    /// indicate "no meaningful return" in conditional resolution.
+    /// Returns `true` only for `void` and `never` — the two types that
+    /// genuinely carry no value. `mixed` is *informative*: it means "some
+    /// value of unknown type", which downstream narrowing (`is_string`,
+    /// `instanceof`, …) can still refine. Treating `mixed` as uninformative
+    /// here would strip the type entirely and leave the variable untyped, so
+    /// a conditional branch selecting `mixed` must flow `mixed` through.
     pub fn is_uninformative_return(&self) -> bool {
-        self.is_mixed() || self.is_void() || self.is_never()
+        self.is_void() || self.is_never()
     }
 
     /// Whether this type is a PHP keyword type (scalar, special, or pseudo-type).
@@ -3111,6 +3482,15 @@ fn is_named_subtype(sub: &str, sup: &str) -> bool {
         return false;
     }
 
+    // `number` is a PHPDoc pseudo-type (int|float) only in its exact lowercase
+    // spelling. A differently-cased bare `Number` (e.g. `BcMath\Number`) is a
+    // real class; the identical-string case was handled above, and nominal
+    // class relationships are resolved by the caller's hierarchy check, so
+    // here it has no scalar sub/supertype relationship.
+    if (sub_l == "number" && sub_raw != "number") || (sup_l == "number" && sup_raw != "number") {
+        return false;
+    }
+
     match sup_n {
         // ── bool supertypes ─────────────────────────────────────
         "bool" => matches!(sub_n, "true" | "false"),
@@ -3124,6 +3504,20 @@ fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-negative-int"
                 | "non-zero-int"
         ),
+        // ── refined-int cross-subtyping ─────────────────────────
+        // e.g. positive-int <: non-negative-int (1..max ⊆ 0..max)
+        "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int"
+            if refined_int_to_range(sub_n).is_some() && refined_int_to_range(sup_n).is_some() =>
+        {
+            let (sub_min, sub_max) = refined_int_to_range(sub_n).unwrap();
+            let (sup_min, sup_max) = refined_int_to_range(sup_n).unwrap();
+            int_range_is_subrange(sub_min, sub_max, sup_min, sup_max)
+        }
+
+        // ── non-zero-int supertype ──────────────────────────────
+        // positive-int and negative-int are subtypes of non-zero-int.
+        // non-negative-int and non-positive-int are NOT (they include 0).
+        "non-zero-int" => matches!(sub_n, "positive-int" | "negative-int"),
 
         // ── float supertypes ────────────────────────────────────
         "float" => matches!(
@@ -3294,14 +3688,23 @@ fn normalize_alias(name: &str) -> &str {
 }
 
 /// Check whether a literal type is a subtype of a given supertype.
-fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
+fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> bool {
     match supertype {
-        PhpType::Literal(other_lit) => lit == other_lit,
+        PhpType::Literal(other_lit) => literals_equal(lit, other_lit),
+        PhpType::IntRange(min, max) => lit
+            .parse_i64()
+            .is_some_and(|value| int_literal_is_within_range(value, min, max)),
         PhpType::Named(sup) => {
             let sup_l = sup.to_ascii_lowercase();
+            // A differently-cased bare `Number` (e.g. `BcMath\Number`) is a
+            // real class, not the lowercase `number` pseudo-type; a scalar
+            // literal is never a subtype of it.
+            if sup_l == "number" && sup != "number" {
+                return false;
+            }
             // Integer literal → int (and its supertypes).
-            if lit.parse::<i64>().is_ok() {
-                return matches!(
+            if matches!(lit, LiteralValue::Int(_)) {
+                if matches!(
                     sup_l.as_str(),
                     "int"
                         | "integer"
@@ -3311,23 +3714,32 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
                         | "number"
                         | "scalar"
                         | "array-key"
-                );
+                ) {
+                    return true;
+                }
+                // Named refined-int types: check the literal's value
+                // against the refinement's constraint directly, rather
+                // than falling through to a name comparison that can
+                // never match a literal.
+                if let Some((min, max)) = refined_int_to_range(&sup_l) {
+                    return lit
+                        .parse_i64()
+                        .is_some_and(|value| int_literal_is_within_range(value, min, max));
+                }
+                if sup_l == "non-zero-int" {
+                    return lit.parse_i64().is_some_and(|value| value != 0);
+                }
+                return false;
             }
             // Float literal → float (and its supertypes).
-            if lit.parse::<f64>().is_ok() {
+            if matches!(lit, LiteralValue::Float(_)) {
                 return matches!(
                     sup_l.as_str(),
                     "float" | "double" | "numeric" | "number" | "scalar"
                 );
             }
             // String literal → string (and its supertypes).
-            if lit.starts_with('\'') || lit.starts_with('"') {
-                if lit.len() < 2 {
-                    return false;
-                }
-                // Extract the content between the quotes.
-                let content = &lit[1..lit.len() - 1];
-
+            if let Some(content) = lit.string_content() {
                 if matches!(
                     sup_l.as_str(),
                     "string" | "literal-string" | "scalar" | "array-key"
@@ -3354,9 +3766,7 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
                 }
 
                 // Numeric-string: the content parses as a number.
-                if sup_l == "numeric-string"
-                    && (content.parse::<i64>().is_ok() || content.parse::<f64>().is_ok())
-                {
+                if sup_l == "numeric-string" && lit.is_numeric_string() {
                     return true;
                 }
 
@@ -3366,6 +3776,134 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
         }
         _ => false,
     }
+}
+
+fn literals_equal(left: &LiteralValue, right: &LiteralValue) -> bool {
+    match (left, right) {
+        (LiteralValue::Int(_), LiteralValue::Int(_)) => left.parse_i64() == right.parse_i64(),
+        (LiteralValue::Float(_), LiteralValue::Float(_)) => left.parse_f64() == right.parse_f64(),
+        (LiteralValue::String(_), LiteralValue::String(_)) => {
+            left.string_content() == right.string_content()
+        }
+        _ => left == right,
+    }
+}
+
+/// Convert a refined-int type name to its equivalent `(min, max)` range
+/// bounds.  Returns `None` for non-refined types.
+///
+/// - `positive-int`     → `("1", "max")`
+/// - `negative-int`     → `("min", "-1")`
+/// - `non-negative-int` → `("0", "max")`
+/// - `non-positive-int` → `("min", "0")`
+fn refined_int_to_range(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "positive-int" => Some(("1", "max")),
+        "negative-int" => Some(("min", "-1")),
+        "non-negative-int" => Some(("0", "max")),
+        "non-positive-int" => Some(("min", "0")),
+        _ => None,
+    }
+}
+
+/// Parse a range bound string into an `i64`, treating `"min"` as
+/// `i64::MIN` and `"max"` as `i64::MAX`.
+fn parse_range_bound(s: &str) -> i64 {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "min" => i64::MIN,
+        "max" => i64::MAX,
+        v => v.parse::<i64>().unwrap_or(0),
+    }
+}
+
+/// Check whether range `(sub_min, sub_max)` is fully contained within
+/// `(sup_min, sup_max)`.  Both bounds are inclusive.
+fn int_range_is_subrange(sub_min: &str, sub_max: &str, sup_min: &str, sup_max: &str) -> bool {
+    let sub_lo = parse_range_bound(sub_min);
+    let sub_hi = parse_range_bound(sub_max);
+    let sup_lo = parse_range_bound(sup_min);
+    let sup_hi = parse_range_bound(sup_max);
+    sup_lo <= sub_lo && sub_hi <= sup_hi
+}
+
+pub(crate) fn int_literal_is_within_range(value: i64, min: &str, max: &str) -> bool {
+    let min_ok = match min.trim().to_ascii_lowercase().as_str() {
+        "min" => true,
+        min => min.parse::<i64>().is_ok_and(|bound| value >= bound),
+    };
+    let max_ok = match max.trim().to_ascii_lowercase().as_str() {
+        "max" => true,
+        max => max.parse::<i64>().is_ok_and(|bound| value <= bound),
+    };
+
+    min_ok && max_ok
+}
+
+fn literal_number_type(raw: String) -> PhpType {
+    if parse_php_int_literal(&raw).is_some() {
+        PhpType::literal_int(raw)
+    } else {
+        PhpType::literal_float(raw)
+    }
+}
+
+fn parse_php_int_literal(raw: &str) -> Option<i64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (negative, body) = if let Some(rest) = trimmed.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, trimmed)
+    };
+
+    let clean = body.replace('_', "");
+    let (radix, digits) = if let Some(rest) = clean
+        .strip_prefix("0x")
+        .or_else(|| clean.strip_prefix("0X"))
+    {
+        (16, rest)
+    } else if let Some(rest) = clean
+        .strip_prefix("0b")
+        .or_else(|| clean.strip_prefix("0B"))
+    {
+        (2, rest)
+    } else if let Some(rest) = clean
+        .strip_prefix("0o")
+        .or_else(|| clean.strip_prefix("0O"))
+    {
+        (8, rest)
+    } else if clean.len() > 1
+        && clean.starts_with('0')
+        && clean.bytes().all(|b| (b'0'..=b'7').contains(&b))
+    {
+        (8, &clean[1..])
+    } else {
+        (10, clean.as_str())
+    };
+
+    if digits.is_empty() {
+        return None;
+    }
+
+    let unsigned = i64::from_str_radix(digits, radix).ok()?;
+    if negative {
+        unsigned.checked_neg()
+    } else {
+        Some(unsigned)
+    }
+}
+
+fn parse_php_float_literal(raw: &str) -> Option<f64> {
+    let clean = raw.trim().replace('_', "");
+    if clean.is_empty() {
+        return None;
+    }
+    clean.parse::<f64>().ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -3601,10 +4139,10 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
             // ── Array / list refinements ────────────────────────────
             | "associative-array"
             // ── Scalar / mixed variants ─────────────────────────────
+            | "mixed"
             | "empty-scalar"
             | "non-empty-scalar"
             | "non-empty-mixed"
-            | "number"
             | "empty"
             // ── Object / callable variants ──────────────────────────
             | "callable-object"
@@ -3622,6 +4160,8 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
             | "value-of"
             // ── Special keywords ────────────────────────────────────
             | "class"
+            // ── PHPStan lenient-union wrapper ───────────────────────
+            | "__benevolent"
     )
 }
 
@@ -3724,6 +4264,13 @@ pub fn is_scalar_name_pub(name: &str) -> bool {
 }
 
 fn is_scalar_name(name: &str) -> bool {
+    // `number` is a PHPDoc-only pseudo-type (int|float) and only in its exact
+    // lowercase spelling. PHP has no native `number` type and allows a class
+    // named `Number` (e.g. PHP 8.4's `BcMath\Number`), so any other casing is
+    // a real class reference and must not be classified as a scalar.
+    if name == "number" {
+        return true;
+    }
     matches!(
         name.to_ascii_lowercase().as_str(),
         "int"
@@ -3742,7 +4289,6 @@ fn is_scalar_name(name: &str) -> bool {
             | "callable"
             | "iterable"
             | "resource"
-            | "mixed"
             | "object"
             | "self"
             | "static"
@@ -3778,7 +4324,6 @@ fn is_scalar_name(name: &str) -> bool {
             | "callable-object"
             | "literal-string"
             | "non-empty-literal-string"
-            | "number"
             | "open-resource"
             | "closed-resource"
     )
@@ -3853,7 +4398,9 @@ fn normalize_keyword_casing(name: &str) -> String {
         | "non-empty-array" | "non-empty-list" | "non-empty-mixed" | "associative-array"
         | "closed-resource" | "open-resource" | "callable-object" | "callable-array"
         | "stringable-object"
-        | "array-key" | "scalar" | "numeric" | "number" => lower,
+        | "array-key" | "scalar" | "numeric" => lower,
+        // `number` is a pseudo-type only in lowercase; fall through so a
+        // `Number` class keeps its casing and lowercase `number` stays as-is.
         // Not a keyword — return the original name unchanged
         // (preserving class name casing).
         _ => name.to_string(),
@@ -3907,8 +4454,11 @@ fn native_scalar_name(name: &str) -> Option<&str> {
         | "non-empty-literal-string" => Some("string"),
 
         // Types with no single native equivalent.
-        "scalar" | "numeric" | "number" | "array-key" | "empty-scalar" | "non-empty-scalar"
-        | "empty" => None,
+        "scalar" | "numeric" | "array-key" | "empty-scalar" | "non-empty-scalar" | "empty" => None,
+
+        // `number` (int|float) has no single native equivalent, but only in
+        // its lowercase pseudo-type spelling; a `Number` class passes through.
+        "number" if name == "number" => None,
 
         // Anything else is a class name — pass it through.
         _ => Some(name),
@@ -3916,27 +4466,33 @@ fn native_scalar_name(name: &str) -> Option<&str> {
 }
 
 /// Convert a borrowed mago AST `Type` into an owned `PhpType`.
-fn convert(ty: &ast::Type<'_>) -> PhpType {
+fn convert(ty: &cst::Type<'_>) -> PhpType {
     match ty {
         // -- Composite types --------------------------------------------------
-        ast::Type::Union(_) => {
+        cst::Type::Union(_) => {
             let members = flatten_union(ty);
             PhpType::Union(members)
         }
-        ast::Type::Intersection(_) => {
+        cst::Type::Intersection(_) => {
             let members = flatten_intersection(ty);
             PhpType::Intersection(members)
         }
-        ast::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
-        ast::Type::Parenthesized(p) => convert(p.inner),
+        cst::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
+        cst::Type::Parenthesized(p) => convert(p.inner),
 
         // -- Named / Reference types ------------------------------------------
-        ast::Type::Reference(r) => {
+        cst::Type::Reference(r) => {
             let name = bytes_to_str(r.identifier.value).to_string();
             match &r.parameters {
                 Some(params) => {
-                    let args: Vec<PhpType> =
+                    let mut args: Vec<PhpType> =
                         params.entries.iter().map(|e| convert(&e.inner)).collect();
+                    // PHPStan's `__benevolent<T>` wrapper marks a lenient
+                    // union; it is never a class. Treat the type as its
+                    // inner `T`.
+                    if args.len() == 1 && name == "__benevolent" {
+                        return args.pop().unwrap();
+                    }
                     PhpType::Generic(name, args)
                 }
                 None => PhpType::Named(name),
@@ -3944,30 +4500,30 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- Array-like types with optional generic parameters ----------------
-        ast::Type::Array(a) => {
+        cst::Type::Array(a) => {
             convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
-        ast::Type::NonEmptyArray(a) => {
+        cst::Type::NonEmptyArray(a) => {
             convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
-        ast::Type::AssociativeArray(a) => {
+        cst::Type::AssociativeArray(a) => {
             convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
         }
-        ast::Type::List(l) => {
+        cst::Type::List(l) => {
             convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
         }
-        ast::Type::NonEmptyList(l) => {
+        cst::Type::NonEmptyList(l) => {
             convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
         }
-        ast::Type::Iterable(i) => {
+        cst::Type::Iterable(i) => {
             convert_keyword_with_optional_generics(bytes_to_str(i.keyword.value), &i.parameters)
         }
 
         // -- Slice: T[] -------------------------------------------------------
-        ast::Type::Slice(s) => PhpType::Array(Box::new(convert(s.inner))),
+        cst::Type::Slice(s) => PhpType::Array(Box::new(convert(s.inner))),
 
         // -- Shape types ------------------------------------------------------
-        ast::Type::Shape(s) => {
+        cst::Type::Shape(s) => {
             let entries: Vec<ShapeEntry> = s
                 .fields
                 .iter()
@@ -3984,16 +4540,16 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
                 .collect();
 
             match s.kind {
-                ast::ShapeTypeKind::Array
-                | ast::ShapeTypeKind::NonEmptyArray
-                | ast::ShapeTypeKind::AssociativeArray
-                | ast::ShapeTypeKind::List
-                | ast::ShapeTypeKind::NonEmptyList => PhpType::ArrayShape(entries),
+                cst::ShapeTypeKind::Array
+                | cst::ShapeTypeKind::NonEmptyArray
+                | cst::ShapeTypeKind::AssociativeArray
+                | cst::ShapeTypeKind::List
+                | cst::ShapeTypeKind::NonEmptyList => PhpType::ArrayShape(entries),
             }
         }
 
         // -- Object type (with optional shape) --------------------------------
-        ast::Type::Object(o) => match &o.properties {
+        cst::Type::Object(o) => match &o.properties {
             Some(props) => {
                 let entries: Vec<ShapeEntry> = props
                     .fields
@@ -4015,7 +4571,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         },
 
         // -- Callable types ---------------------------------------------------
-        ast::Type::Callable(c) => {
+        cst::Type::Callable(c) => {
             let kind = bytes_to_str(c.keyword.value).to_string();
             match &c.specification {
                 Some(spec) => {
@@ -4050,7 +4606,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- Conditional types ------------------------------------------------
-        ast::Type::Conditional(c) => PhpType::Conditional {
+        cst::Type::Conditional(c) => PhpType::Conditional {
             param: c.subject.to_string(),
             negated: c.is_negated(),
             condition: Box::new(convert(c.target)),
@@ -4059,14 +4615,14 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         },
 
         // -- class-string / interface-string ----------------------------------
-        ast::Type::ClassString(c) => {
+        cst::Type::ClassString(c) => {
             let inner = c
                 .parameter
                 .as_ref()
                 .map(|p| Box::new(convert(&p.entry.inner)));
             PhpType::ClassString(inner)
         }
-        ast::Type::InterfaceString(i) => {
+        cst::Type::InterfaceString(i) => {
             let inner = i
                 .parameter
                 .as_ref()
@@ -4075,64 +4631,68 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- key-of / value-of ------------------------------------------------
-        ast::Type::KeyOf(k) => PhpType::KeyOf(Box::new(convert(&k.parameter.entry.inner))),
-        ast::Type::ValueOf(v) => PhpType::ValueOf(Box::new(convert(&v.parameter.entry.inner))),
+        cst::Type::KeyOf(k) => PhpType::KeyOf(Box::new(convert(&k.parameter.entry.inner))),
+        cst::Type::ValueOf(v) => PhpType::ValueOf(Box::new(convert(&v.parameter.entry.inner))),
 
         // -- int range --------------------------------------------------------
-        ast::Type::IntRange(r) => PhpType::IntRange(r.min.to_string(), r.max.to_string()),
+        cst::Type::IntRange(r) => PhpType::IntRange(r.min.to_string(), r.max.to_string()),
 
         // -- Index access: T[K] -----------------------------------------------
-        ast::Type::IndexAccess(i) => {
+        cst::Type::IndexAccess(i) => {
             PhpType::IndexAccess(Box::new(convert(i.target)), Box::new(convert(i.index)))
         }
 
         // -- Variable (e.g. $this in conditional types) -----------------------
-        ast::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
+        cst::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
 
         // -- Literal types ----------------------------------------------------
-        ast::Type::LiteralInt(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
-        ast::Type::LiteralFloat(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
-        ast::Type::LiteralString(l) => PhpType::Literal(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw).to_string()),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
-        ast::Type::Negated(n) => PhpType::Literal(format!("-{}", n.number)),
-        ast::Type::Posited(p) => PhpType::Literal(format!("+{}", p.number)),
+        cst::Type::Negated(n) => literal_number_type(format!("-{}", n.number)),
+        cst::Type::Posited(p) => literal_number_type(format!("+{}", p.number)),
 
         // -- Keyword types → Named -------------------------------------------
-        ast::Type::Mixed(k)
-        | ast::Type::NonEmptyMixed(k)
-        | ast::Type::Null(k)
-        | ast::Type::Void(k)
-        | ast::Type::Never(k)
-        | ast::Type::Resource(k)
-        | ast::Type::ClosedResource(k)
-        | ast::Type::OpenResource(k)
-        | ast::Type::True(k)
-        | ast::Type::False(k)
-        | ast::Type::Bool(k)
-        | ast::Type::Float(k)
-        | ast::Type::Int(k)
-        | ast::Type::PositiveInt(k)
-        | ast::Type::NegativeInt(k)
-        | ast::Type::NonPositiveInt(k)
-        | ast::Type::NonNegativeInt(k)
-        | ast::Type::String(k)
-        | ast::Type::StringableObject(k)
-        | ast::Type::ArrayKey(k)
-        | ast::Type::Numeric(k)
-        | ast::Type::Scalar(k)
-        | ast::Type::NumericString(k)
-        | ast::Type::NonEmptyString(k)
-        | ast::Type::NonEmptyLowercaseString(k)
-        | ast::Type::LowercaseString(k)
-        | ast::Type::NonEmptyUppercaseString(k)
-        | ast::Type::UppercaseString(k)
-        | ast::Type::TruthyString(k)
-        | ast::Type::NonFalsyString(k)
-        | ast::Type::UnspecifiedLiteralInt(k)
-        | ast::Type::UnspecifiedLiteralString(k)
-        | ast::Type::UnspecifiedLiteralFloat(k)
-        | ast::Type::NonEmptyUnspecifiedLiteralString(k) => {
+        cst::Type::Mixed(k)
+        | cst::Type::NonEmptyMixed(k)
+        | cst::Type::Null(k)
+        | cst::Type::Void(k)
+        | cst::Type::Never(k)
+        | cst::Type::Resource(k)
+        | cst::Type::ClosedResource(k)
+        | cst::Type::OpenResource(k)
+        | cst::Type::True(k)
+        | cst::Type::False(k)
+        | cst::Type::Bool(k)
+        | cst::Type::Float(k)
+        | cst::Type::Int(k)
+        | cst::Type::PositiveInt(k)
+        | cst::Type::NegativeInt(k)
+        | cst::Type::NonPositiveInt(k)
+        | cst::Type::NonNegativeInt(k)
+        | cst::Type::NonZeroInt(k)
+        | cst::Type::String(k)
+        | cst::Type::StringableObject(k)
+        | cst::Type::ArrayKey(k)
+        | cst::Type::Numeric(k)
+        | cst::Type::Scalar(k)
+        | cst::Type::CallableString(k)
+        | cst::Type::LowercaseCallableString(k)
+        | cst::Type::UppercaseCallableString(k)
+        | cst::Type::NumericString(k)
+        | cst::Type::NonEmptyString(k)
+        | cst::Type::NonEmptyLowercaseString(k)
+        | cst::Type::LowercaseString(k)
+        | cst::Type::NonEmptyUppercaseString(k)
+        | cst::Type::UppercaseString(k)
+        | cst::Type::TruthyString(k)
+        | cst::Type::NonFalsyString(k)
+        | cst::Type::UnspecifiedLiteralInt(k)
+        | cst::Type::UnspecifiedLiteralString(k)
+        | cst::Type::UnspecifiedLiteralFloat(k)
+        | cst::Type::NonEmptyUnspecifiedLiteralString(k) => {
             PhpType::Named(normalize_keyword_casing(bytes_to_str(k.value)))
         }
 
@@ -4146,7 +4706,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
 /// `iterable<K, V>`).
 fn convert_keyword_with_optional_generics(
     keyword: &str,
-    parameters: &Option<ast::GenericParameters<'_>>,
+    parameters: &Option<cst::GenericParameters<'_>>,
 ) -> PhpType {
     let canonical = normalize_keyword_casing(keyword);
     match parameters {
@@ -4159,9 +4719,9 @@ fn convert_keyword_with_optional_generics(
 }
 
 /// Recursively flatten a left-leaning binary union tree into a flat `Vec`.
-fn flatten_union(ty: &ast::Type<'_>) -> Vec<PhpType> {
+fn flatten_union(ty: &cst::Type<'_>) -> Vec<PhpType> {
     match ty {
-        ast::Type::Union(u) => {
+        cst::Type::Union(u) => {
             let mut types = flatten_union(u.left);
             types.extend(flatten_union(u.right));
             types
@@ -4171,9 +4731,9 @@ fn flatten_union(ty: &ast::Type<'_>) -> Vec<PhpType> {
 }
 
 /// Recursively flatten a left-leaning binary intersection tree into a flat `Vec`.
-fn flatten_intersection(ty: &ast::Type<'_>) -> Vec<PhpType> {
+fn flatten_intersection(ty: &cst::Type<'_>) -> Vec<PhpType> {
     match ty {
-        ast::Type::Intersection(i) => {
+        cst::Type::Intersection(i) => {
             let mut types = flatten_intersection(i.left);
             types.extend(flatten_intersection(i.right));
             types
@@ -4198,7 +4758,7 @@ fn evaluate_key_of(resolved: &PhpType) -> PhpType {
             let keys: Vec<PhpType> = entries
                 .iter()
                 .filter_map(|e| e.key.as_ref())
-                .map(|k| PhpType::Literal(k.clone()))
+                .map(PhpType::literal_string_value)
                 .collect();
             match keys.len() {
                 0 => PhpType::Named("never".to_string()),
@@ -4261,15 +4821,9 @@ fn evaluate_value_of(resolved: &PhpType) -> PhpType {
 fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
     if let PhpType::ArrayShape(entries) = base {
         // If index is a literal string key, look it up directly.
-        if let PhpType::Literal(key) | PhpType::Named(key) = index {
-            // Strip surrounding quotes from string literals (e.g. 'name' → name)
-            let bare_key = key
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
-                .or_else(|| key.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                .unwrap_or(key);
+        if let Some(bare_key) = literal_or_named_shape_key(index) {
             for entry in entries {
-                if entry.key.as_deref() == Some(bare_key) {
+                if entry.key.as_deref() == Some(bare_key.as_str()) {
                     return entry.value_type.clone();
                 }
             }
@@ -4278,14 +4832,9 @@ fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
         if let PhpType::Union(members) = index {
             let mut values: Vec<PhpType> = Vec::new();
             for member in members {
-                if let PhpType::Literal(key) | PhpType::Named(key) = member {
-                    let bare_key = key
-                        .strip_prefix('\'')
-                        .and_then(|s| s.strip_suffix('\''))
-                        .or_else(|| key.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                        .unwrap_or(key);
+                if let Some(bare_key) = literal_or_named_shape_key(member) {
                     for entry in entries {
-                        if entry.key.as_deref() == Some(bare_key)
+                        if entry.key.as_deref() == Some(bare_key.as_str())
                             && !values.contains(&entry.value_type)
                         {
                             values.push(entry.value_type.clone());
@@ -4313,6 +4862,14 @@ fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
         }
     }
     PhpType::IndexAccess(Box::new(base.clone()), Box::new(index.clone()))
+}
+
+fn literal_or_named_shape_key(ty: &PhpType) -> Option<String> {
+    match ty {
+        PhpType::Literal(lit) => lit.string_content().map(ToOwned::to_owned),
+        PhpType::Named(key) => Some(key.clone()),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4536,8 +5093,11 @@ mod tests {
             Position::new(0),
             Position::new(input.len() as u32),
         );
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let input_arena = arena.alloc_slice_copy(input.as_bytes());
+        // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
+        // the migration is tracked as a separate task.
+        #[allow(deprecated)]
         let mago_canonical = match mago_type_syntax::parse_str(&arena, span, input_arena) {
             Ok(ty) => ty.to_string(),
             Err(_) => {
@@ -4869,6 +5429,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_benevolent_unwraps_to_inner_union() {
+        // PHPStan's `__benevolent<T>` wrapper parses as its inner type.
+        let ty = PhpType::parse("__benevolent<Loop|null>");
+        match &ty {
+            PhpType::Union(members) => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(members[0], PhpType::Named("Loop".to_owned()));
+                assert_eq!(members[1], PhpType::null());
+            }
+            other => panic!("Expected Union, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_benevolent_unwraps_single_class() {
+        let ty = PhpType::parse("__benevolent<Foo>");
+        assert_eq!(ty, PhpType::Named("Foo".to_owned()));
+    }
+
+    #[test]
+    fn parse_benevolent_nested_in_generic() {
+        let ty = PhpType::parse("array<int, __benevolent<string|false>>");
+        match &ty {
+            PhpType::Generic(name, args) => {
+                assert_eq!(name, "array");
+                assert_eq!(args.len(), 2);
+                match &args[1] {
+                    PhpType::Union(members) => {
+                        assert_eq!(members.len(), 2);
+                        assert_eq!(members[0], PhpType::string());
+                        assert_eq!(members[1], PhpType::Named("false".to_owned()));
+                    }
+                    other => panic!("Expected Union, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Generic, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn parse_generic_star_does_not_mangle_member_reference() {
         // `Foo::*` is a member reference, not a generic wildcard
         assert_round_trip("Foo::*");
@@ -5020,6 +5620,32 @@ mod tests {
                 assert_eq!(*inner, PhpType::Named("Foo".to_owned()));
             }
             other => panic!("Expected ClassString(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepts_null_recognises_null_forms() {
+        assert!(PhpType::parse("?int").accepts_null());
+        assert!(PhpType::parse("int|null").accepts_null());
+        assert!(PhpType::null().accepts_null());
+        assert!(PhpType::mixed().accepts_null());
+        assert!(!PhpType::int().accepts_null());
+        assert!(!PhpType::parse("int|string").accepts_null());
+    }
+
+    #[test]
+    fn or_null_adds_null_and_is_idempotent() {
+        assert_eq!(PhpType::int().or_null(), PhpType::parse("?int"));
+        // Already nullable → unchanged.
+        let nullable = PhpType::parse("?int");
+        assert_eq!(nullable.clone().or_null(), nullable);
+        // A union gains a null member rather than a nested wrapper.
+        match PhpType::parse("int|string").or_null() {
+            PhpType::Union(members) => {
+                assert!(members.iter().any(|m| m.is_null()));
+                assert_eq!(members.len(), 3);
+            }
+            other => panic!("Expected Union, got {other:?}"),
         }
     }
 
@@ -5179,6 +5805,101 @@ mod tests {
     }
 
     #[test]
+    fn join_shapes_one_sided_key_becomes_optional() {
+        let a = PhpType::parse("array{a: int}");
+        let b = PhpType::parse("array{a: int, b: string}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{a: int, b?: string}"))
+        );
+        // Symmetric: the missing side still makes the key optional.
+        assert_eq!(
+            b.join_shapes(&a),
+            Some(PhpType::parse("array{a: int, b?: string}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_shared_key_unions_value_types() {
+        let a = PhpType::parse("array{a: int}");
+        let b = PhpType::parse("array{a: string}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{a: int|string}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_identical_values_stay_single() {
+        let a = PhpType::parse("array{a: int, b: string}");
+        let b = PhpType::parse("array{a: int, b: string}");
+        assert_eq!(a.join_shapes(&b), Some(a.clone()));
+    }
+
+    #[test]
+    fn join_shapes_optional_on_either_side_stays_optional() {
+        let a = PhpType::parse("array{a?: int}");
+        let b = PhpType::parse("array{a: int}");
+        assert_eq!(a.join_shapes(&b), Some(PhpType::parse("array{a?: int}")));
+    }
+
+    #[test]
+    fn join_shapes_nested_shapes_join_recursively() {
+        let a = PhpType::parse("array{data: array{x: int}}");
+        let b = PhpType::parse("array{data: array{x: int, y: string}}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{data: array{x: int, y?: string}}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_value_union_dedups_equivalent_members() {
+        // int|string joined with string|float keeps each member once.
+        let a = PhpType::parse("array{a: int|string}");
+        let b = PhpType::parse("array{a: string|float}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{a: int|string|float}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_nullable_side_makes_join_nullable() {
+        let a = PhpType::parse("?array{a: int}");
+        let b = PhpType::parse("array{a: int, b: string}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("?array{a: int, b?: string}"))
+        );
+    }
+
+    #[test]
+    fn join_shapes_rejects_positional_entries_and_non_shapes() {
+        // List-style shapes have no keys to join on.
+        let positional = PhpType::parse("array{int, string}");
+        let keyed = PhpType::parse("array{a: int}");
+        assert_eq!(positional.join_shapes(&keyed), None);
+        assert_eq!(keyed.join_shapes(&positional), None);
+        // Non-shape types never join.
+        assert_eq!(
+            keyed.join_shapes(&PhpType::parse("array<int, string>")),
+            None
+        );
+        assert_eq!(PhpType::string().join_shapes(&keyed), None);
+    }
+
+    #[test]
+    fn join_shapes_key_order_is_first_side_then_new_keys() {
+        let a = PhpType::parse("array{b: int, a: int}");
+        let b = PhpType::parse("array{c: int, a: int}");
+        assert_eq!(
+            a.join_shapes(&b),
+            Some(PhpType::parse("array{b?: int, a: int, c?: int}"))
+        );
+    }
+
+    #[test]
     fn object_shape_property_type_test() {
         let ty = PhpType::parse("object{name: string, user: User}");
         assert_eq!(
@@ -5296,13 +6017,13 @@ mod tests {
     #[test]
     fn literal_int() {
         let ty = PhpType::parse("42");
-        assert_eq!(ty, PhpType::Literal("42".to_owned()));
+        assert_eq!(ty, PhpType::literal_int("42"));
     }
 
     #[test]
     fn literal_string() {
         let ty = PhpType::parse("'foo'");
-        assert_eq!(ty, PhpType::Literal("'foo'".to_owned()));
+        assert_eq!(ty, PhpType::literal_string_raw("'foo'"));
     }
 
     // ─── extract_value_type tests ───────────────────────────────────────────
@@ -5332,6 +6053,37 @@ mod tests {
         let ty = PhpType::parse("list<User>");
         let val = ty.extract_value_type(true).unwrap();
         assert_eq!(*val, PhpType::Named("User".to_owned()));
+    }
+
+    #[test]
+    fn iterable_element_type_positional_shape_unions_values() {
+        // Iterating a heterogeneous tuple yields the union of its
+        // positional value types.
+        let ty = PhpType::parse("array{int, string}");
+        let elem = ty.iterable_element_type().unwrap();
+        assert_eq!(
+            elem,
+            PhpType::Union(vec![PhpType::int(), PhpType::string()])
+        );
+    }
+
+    #[test]
+    fn iterable_element_type_homogeneous_shape_collapses() {
+        // A shape whose entries share a type iterates to that single type,
+        // not a redundant union.
+        let ty = PhpType::parse("array{User, User}");
+        let elem = ty.iterable_element_type().unwrap();
+        assert_eq!(elem, PhpType::Named("User".to_owned()));
+    }
+
+    #[test]
+    fn iterable_element_type_delegates_for_generics() {
+        // Non-shape iterables behave exactly like extract_value_type(false).
+        let ty = PhpType::parse("list<User>");
+        assert_eq!(
+            ty.iterable_element_type().unwrap(),
+            PhpType::Named("User".to_owned())
+        );
     }
 
     #[test]
@@ -5419,6 +6171,23 @@ mod tests {
         let ty = PhpType::parse("User|array<int>");
         let val = ty.extract_value_type(false).unwrap();
         assert_eq!(val, &PhpType::Named("int".to_owned()));
+    }
+
+    #[test]
+    fn extract_value_type_shape_element_with_class_value_not_skipped() {
+        // array<int, array{price: Decimal}> — the shape element carries a
+        // non-scalar value, so skip_scalar=true must not discard it.
+        let ty = PhpType::parse("array<int, array{price: Decimal}>");
+        let val = ty.extract_value_type(true).unwrap();
+        assert!(matches!(val, PhpType::ArrayShape(_)));
+    }
+
+    #[test]
+    fn extract_value_type_shape_element_all_scalar_skipped() {
+        // array<int, array{count: int}> — every shape value is scalar, so
+        // skip_scalar=true skips the element.
+        let ty = PhpType::parse("array<int, array{count: int}>");
+        assert!(ty.extract_value_type(true).is_none());
     }
 
     // ─── extract_key_type tests ─────────────────────────────────────────────
@@ -5722,7 +6491,7 @@ mod tests {
         assert!(PhpType::string().is_scalar());
         assert!(PhpType::bool().is_scalar());
         assert!(PhpType::float().is_scalar());
-        assert!(PhpType::mixed().is_scalar());
+        assert!(!PhpType::mixed().is_scalar());
         assert!(PhpType::void().is_scalar());
         assert!(PhpType::null().is_scalar());
         assert!(PhpType::array().is_scalar());
@@ -6007,6 +6776,54 @@ mod tests {
         let ty = PhpType::parse("self&JsonSerializable");
         let replaced = ty.replace_self("App\\User");
         assert_eq!(replaced.to_string(), "App\\User&JsonSerializable");
+    }
+
+    // ── resolve_self_refs ───────────────────────────────────────
+
+    #[test]
+    fn resolve_self_refs_bare() {
+        let ty = PhpType::parse("self");
+        assert_eq!(
+            ty.resolve_self_refs("App\\Cat", None).to_string(),
+            "App\\Cat"
+        );
+    }
+
+    #[test]
+    fn resolve_self_refs_in_array_element() {
+        // `self[]` inside an array must be resolved to the concrete class.
+        // Regression: `resolve_names` treats `self` as a keyword and skips
+        // it, so array/generic element `self` was left unresolved.
+        let ty = PhpType::parse("self[]");
+        let resolved = ty.resolve_self_refs("App\\Cat", None);
+        assert_eq!(resolved, PhpType::parse("App\\Cat[]"));
+    }
+
+    #[test]
+    fn resolve_self_refs_static_in_generic() {
+        let ty = PhpType::parse("array<static>");
+        let resolved = ty.resolve_self_refs("App\\Cat", None);
+        assert_eq!(resolved, PhpType::parse("array<App\\Cat>"));
+    }
+
+    #[test]
+    fn resolve_self_refs_parent() {
+        let ty = PhpType::parse("parent[]");
+        let resolved = ty.resolve_self_refs("App\\Cat", Some("App\\Animal"));
+        assert_eq!(resolved, PhpType::parse("App\\Animal[]"));
+    }
+
+    #[test]
+    fn resolve_self_refs_parent_without_parent_class_unchanged() {
+        let ty = PhpType::parse("parent");
+        assert_eq!(ty.resolve_self_refs("App\\Cat", None).to_string(), "parent");
+    }
+
+    #[test]
+    fn resolve_self_refs_leaves_other_classes_alone() {
+        let ty = PhpType::parse("Other[]");
+        let resolved = ty.resolve_self_refs("App\\Cat", None);
+        assert_eq!(resolved, PhpType::parse("Other[]"));
     }
 
     // ── extract_class_names (recursive) ─────────────────────────
@@ -6595,6 +7412,30 @@ mod tests {
         }
 
         #[test]
+        fn array_key_is_subtype_of_int_string_union() {
+            let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            assert!(PhpType::Named("array-key".into()).is_subtype_of(&int_or_string));
+        }
+
+        #[test]
+        fn int_string_union_is_subtype_of_array_key() {
+            let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            assert!(int_or_string.is_subtype_of(&PhpType::Named("array-key".into())));
+        }
+
+        #[test]
+        fn array_key_is_subtype_of_scalar() {
+            assert!(
+                PhpType::Named("array-key".into()).is_subtype_of(&PhpType::Named("scalar".into()))
+            );
+        }
+
+        #[test]
+        fn array_key_is_not_subtype_of_int_alone() {
+            assert!(!PhpType::Named("array-key".into()).is_subtype_of(&PhpType::int()));
+        }
+
+        #[test]
         fn int_is_subtype_of_numeric() {
             assert!(PhpType::int().is_subtype_of(&PhpType::numeric()));
         }
@@ -6788,37 +7629,39 @@ mod tests {
 
         #[test]
         fn literal_int_is_subtype_of_int() {
-            assert!(PhpType::Literal("42".into()).is_subtype_of(&PhpType::int()));
+            assert!(PhpType::literal_int("42").is_subtype_of(&PhpType::int()));
         }
 
         #[test]
         fn literal_string_is_subtype_of_string() {
-            assert!(PhpType::Literal("'hello'".into()).is_subtype_of(&PhpType::string()));
+            assert!(PhpType::literal_string_raw("'hello'").is_subtype_of(&PhpType::string()));
         }
 
         #[test]
         fn literal_int_is_subtype_of_float() {
-            assert!(PhpType::Literal("42".into()).is_subtype_of(&PhpType::float()));
+            assert!(PhpType::literal_int("42").is_subtype_of(&PhpType::float()));
         }
 
         #[test]
         fn literal_numeric_string_is_subtype_of_numeric_string() {
             assert!(
-                PhpType::Literal("'0.00'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+                PhpType::literal_string_raw("'0.00'")
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
             );
         }
 
         #[test]
         fn literal_integer_string_is_subtype_of_numeric_string() {
             assert!(
-                PhpType::Literal("'42'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+                PhpType::literal_string_raw("'42'")
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
             );
         }
 
         #[test]
         fn literal_non_numeric_string_is_not_subtype_of_numeric_string() {
             assert!(
-                !PhpType::Literal("'hello'".into())
+                !PhpType::literal_string_raw("'hello'")
                     .is_subtype_of(&PhpType::parse("numeric-string"))
             );
         }
@@ -6826,41 +7669,61 @@ mod tests {
         #[test]
         fn literal_empty_string_is_not_subtype_of_non_empty_string() {
             assert!(
-                !PhpType::Literal("''".into()).is_subtype_of(&PhpType::parse("non-empty-string"))
+                !PhpType::literal_string_raw("''")
+                    .is_subtype_of(&PhpType::parse("non-empty-string"))
             );
         }
 
         #[test]
         fn literal_non_empty_string_is_subtype_of_non_empty_string() {
             assert!(
-                PhpType::Literal("'foo'".into()).is_subtype_of(&PhpType::parse("non-empty-string"))
+                PhpType::literal_string_raw("'foo'")
+                    .is_subtype_of(&PhpType::parse("non-empty-string"))
             );
         }
 
         #[test]
         fn literal_string_is_subtype_of_truthy_string() {
             assert!(
-                PhpType::Literal("'foo'".into()).is_subtype_of(&PhpType::parse("truthy-string"))
+                PhpType::literal_string_raw("'foo'")
+                    .is_subtype_of(&PhpType::parse("truthy-string"))
             );
         }
 
         #[test]
         fn literal_zero_string_is_not_subtype_of_truthy_string() {
             assert!(
-                !PhpType::Literal("'0'".into()).is_subtype_of(&PhpType::parse("truthy-string"))
+                !PhpType::literal_string_raw("'0'").is_subtype_of(&PhpType::parse("truthy-string"))
             );
         }
 
         #[test]
         fn literal_empty_string_is_not_subtype_of_truthy_string() {
-            assert!(!PhpType::Literal("''".into()).is_subtype_of(&PhpType::parse("truthy-string")));
+            assert!(
+                !PhpType::literal_string_raw("''").is_subtype_of(&PhpType::parse("truthy-string"))
+            );
         }
 
         #[test]
         fn literal_negative_numeric_string_is_subtype_of_numeric_string() {
             assert!(
-                PhpType::Literal("'-3.14'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+                PhpType::literal_string_raw("'-3.14'")
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
             );
+        }
+
+        #[test]
+        fn literal_source_syntax_string_is_not_subtype_of_numeric_string() {
+            // A runtime string is numeric per PHP's is_numeric, which does
+            // not accept underscores or hex/binary/octal prefixes even
+            // though they are valid in PHP source literals.
+            for raw in ["'1_000'", "'0xFF'", "'0b101'", "'0o17'"] {
+                assert!(
+                    !PhpType::literal_string_raw(raw)
+                        .is_subtype_of(&PhpType::parse("numeric-string")),
+                    "{raw} should not be a numeric-string"
+                );
+            }
         }
 
         // ── IntRange subtyping ──────────────────────────────────────────
@@ -6868,6 +7731,345 @@ mod tests {
         #[test]
         fn int_range_is_subtype_of_int() {
             assert!(PhpType::IntRange("0".into(), "100".into()).is_subtype_of(&PhpType::int()));
+        }
+
+        #[test]
+        fn integer_literal_is_subtype_of_int_range() {
+            assert!(
+                PhpType::literal_int("10000")
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
+            );
+            assert!(
+                PhpType::literal_int("1")
+                    .is_subtype_of(&PhpType::IntRange("1".into(), "59".into(),))
+            );
+            assert!(
+                !PhpType::literal_int("0")
+                    .is_subtype_of(&PhpType::IntRange("1".into(), "59".into(),))
+            );
+        }
+
+        #[test]
+        fn float_literal_is_not_subtype_of_int_range() {
+            assert!(
+                !PhpType::literal_float("1.0")
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into(),))
+            );
+        }
+
+        // ── Integer literal <: named refined-int ─────────────────────
+
+        #[test]
+        fn positive_integer_literal_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::literal_int("1").is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_integer_literal_is_subtype_of_positive_int() {
+            assert!(
+                PhpType::literal_int("1").is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_not_subtype_of_positive_int() {
+            assert!(
+                !PhpType::literal_int("0").is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_not_subtype_of_non_zero_int() {
+            assert!(
+                !PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_integer_literal_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::literal_int("1").is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn negative_integer_literal_is_subtype_of_negative_int() {
+            assert!(
+                PhpType::literal_int("-1").is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_integer_literal_is_not_subtype_of_negative_int() {
+            assert!(
+                !PhpType::literal_int("1").is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn zero_literal_is_subtype_of_non_positive_int() {
+            assert!(
+                PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-positive-int".into()))
+            );
+        }
+
+        // ── IntRange <: refined-int ──────────────────────────────────
+
+        #[test]
+        fn int_range_0_max_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_1_max_is_subtype_of_positive_int() {
+            assert!(
+                PhpType::IntRange("1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_1_max_is_subtype_of_non_negative_int() {
+            // positive-int range is a subset of non-negative-int range
+            assert!(
+                PhpType::IntRange("1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_min_neg1_is_subtype_of_negative_int() {
+            assert!(
+                PhpType::IntRange("min".into(), "-1".into())
+                    .is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_min_0_is_subtype_of_non_positive_int() {
+            assert!(
+                PhpType::IntRange("min".into(), "0".into())
+                    .is_subtype_of(&PhpType::Named("non-positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_100_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::IntRange("0".into(), "100".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_neg1_max_is_not_subtype_of_non_negative_int() {
+            assert!(
+                !PhpType::IntRange("-1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_max_is_not_subtype_of_positive_int() {
+            // 0..max includes 0 which is not positive
+            assert!(
+                !PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        // ── refined-int <: IntRange ─────────────────────────────────────
+
+        #[test]
+        fn non_negative_int_is_subtype_of_int_range_0_max() {
+            assert!(
+                PhpType::Named("non-negative-int".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
+            );
+        }
+
+        #[test]
+        fn positive_int_is_subtype_of_int_range_0_max() {
+            assert!(
+                PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
+            );
+        }
+
+        #[test]
+        fn negative_int_is_subtype_of_int_range_min_neg1() {
+            assert!(
+                PhpType::Named("negative-int".into())
+                    .is_subtype_of(&PhpType::IntRange("min".into(), "-1".into()))
+            );
+        }
+
+        #[test]
+        fn positive_int_is_not_subtype_of_int_range_min_neg1() {
+            assert!(
+                !PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::IntRange("min".into(), "-1".into()))
+            );
+        }
+
+        // ── IntRange <: IntRange ────────────────────────────────────────
+
+        #[test]
+        fn int_range_1_50_is_subtype_of_0_100() {
+            assert!(
+                PhpType::IntRange("1".into(), "50".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "100".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_100_is_not_subtype_of_1_50() {
+            assert!(
+                !PhpType::IntRange("0".into(), "100".into())
+                    .is_subtype_of(&PhpType::IntRange("1".into(), "50".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_max_is_subtype_of_0_max() {
+            assert!(
+                PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
+            );
+        }
+
+        // ── refined-int <: refined-int ──────────────────────────────────
+
+        #[test]
+        fn positive_int_is_subtype_of_non_negative_int() {
+            assert!(
+                PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            );
+        }
+
+        #[test]
+        fn negative_int_is_subtype_of_non_positive_int() {
+            assert!(
+                PhpType::Named("negative-int".into())
+                    .is_subtype_of(&PhpType::Named("non-positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn non_negative_int_is_not_subtype_of_positive_int() {
+            // non-negative includes 0, positive doesn't
+            assert!(
+                !PhpType::Named("non-negative-int".into())
+                    .is_subtype_of(&PhpType::Named("positive-int".into()))
+            );
+        }
+
+        #[test]
+        fn positive_int_is_not_subtype_of_negative_int() {
+            assert!(
+                !PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::Named("negative-int".into()))
+            );
+        }
+
+        // ── non-zero-int subtyping ──────────────────────────────────────
+
+        #[test]
+        fn positive_int_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::Named("positive-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn negative_int_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::Named("negative-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn non_negative_int_is_not_subtype_of_non_zero_int() {
+            // non-negative includes 0
+            assert!(
+                !PhpType::Named("non-negative-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn non_positive_int_is_not_subtype_of_non_zero_int() {
+            // non-positive includes 0
+            assert!(
+                !PhpType::Named("non-positive-int".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_1_max_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::IntRange("1".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_min_neg1_is_subtype_of_non_zero_int() {
+            assert!(
+                PhpType::IntRange("min".into(), "-1".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_0_max_is_not_subtype_of_non_zero_int() {
+            // includes 0
+            assert!(
+                !PhpType::IntRange("0".into(), "max".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn int_range_neg5_5_is_not_subtype_of_non_zero_int() {
+            // includes 0
+            assert!(
+                !PhpType::IntRange("-5".into(), "5".into())
+                    .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            );
+        }
+
+        #[test]
+        fn php_integer_literal_syntaxes_compare_by_value() {
+            assert!(PhpType::literal_int("0x10").is_subtype_of(&PhpType::literal_int("16")));
+            assert!(PhpType::literal_int("0b1010").is_subtype_of(&PhpType::literal_int("10")));
+            assert!(PhpType::literal_int("0o10").is_subtype_of(&PhpType::literal_int("8")));
+            assert!(PhpType::literal_int("1_000").is_subtype_of(&PhpType::literal_int("1000")));
+        }
+
+        #[test]
+        fn php_float_literal_syntaxes_compare_by_value() {
+            assert!(PhpType::literal_float("1.0").is_subtype_of(&PhpType::literal_float("1.00")));
+            assert!(PhpType::literal_float("1e3").is_subtype_of(&PhpType::literal_float("1000.0")));
+            assert!(
+                PhpType::literal_float("1_2.5e2").is_subtype_of(&PhpType::literal_float("1250.0"))
+            );
         }
 
         // ── Unrelated types ─────────────────────────────────────────────
@@ -7661,17 +8863,17 @@ mod tests {
 
         #[test]
         fn is_string_literal_single_quoted() {
-            assert!(PhpType::Literal("'hello'".to_owned()).is_string_literal());
+            assert!(PhpType::literal_string_raw("'hello'").is_string_literal());
         }
 
         #[test]
         fn is_string_literal_double_quoted() {
-            assert!(PhpType::Literal("\"world\"".to_owned()).is_string_literal());
+            assert!(PhpType::literal_string_raw("\"world\"").is_string_literal());
         }
 
         #[test]
         fn is_string_literal_false_for_int() {
-            assert!(!PhpType::Literal("42".to_owned()).is_string_literal());
+            assert!(!PhpType::literal_int("42").is_string_literal());
         }
 
         #[test]
@@ -7681,17 +8883,17 @@ mod tests {
 
         #[test]
         fn is_int_literal_positive() {
-            assert!(PhpType::Literal("42".to_owned()).is_int_literal());
+            assert!(PhpType::literal_int("42").is_int_literal());
         }
 
         #[test]
         fn is_int_literal_negative() {
-            assert!(PhpType::Literal("-1".to_owned()).is_int_literal());
+            assert!(PhpType::literal_int("-1").is_int_literal());
         }
 
         #[test]
         fn is_int_literal_false_for_string() {
-            assert!(!PhpType::Literal("'hello'".to_owned()).is_int_literal());
+            assert!(!PhpType::literal_string_raw("'hello'").is_int_literal());
         }
 
         #[test]

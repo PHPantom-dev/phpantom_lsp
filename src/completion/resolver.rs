@@ -184,6 +184,14 @@ pub(crate) struct ResolutionCtx<'a> {
     /// resolves to nothing.  Precomputed from the `SymbolMap` at the
     /// call site to avoid re-parsing the AST.
     pub is_in_static_method: bool,
+    /// When `true`, `$this` / `self` / `static` resolve to their
+    /// keyword form rather than the concrete class name, and method
+    /// chains use the last method's declared return type directly.
+    ///
+    /// Used by macro return-type inference so that `return $this;` in
+    /// a macro closure produces `$this` — preserving polymorphism and
+    /// generics that the general resolver would flatten.
+    pub preserve_static: bool,
 }
 
 /// Bundles the common parameters threaded through variable-type resolution.
@@ -249,6 +257,7 @@ impl<'a> VarResolutionCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             scope_var_resolver: self.scope_var_resolver,
             is_in_static_method: false,
+            preserve_static: false,
         }
     }
 
@@ -361,11 +370,14 @@ pub(crate) fn resolve_target_classes_expr(
     // due to reassignment or narrowing.
     //
     // PropertyChain expressions rooted in a variable (e.g. `$this->pet`,
-    // `$obj->prop`) are also excluded because instanceof narrowing can
-    // change the resolved type at different positions within the same
-    // method body.  For example, `$this->pet` may resolve to `Dog`
-    // inside `if ($this->pet instanceof Dog)` but to `Cat` after
-    // `if (!$this->pet instanceof Cat) { return; }`.
+    // `$obj->prop`, `$args[0]->value`, `$this->a->b`) are also excluded
+    // because instanceof narrowing can change the resolved type at
+    // different positions within the same method body.  For example,
+    // `$this->pet` may resolve to `Dog` inside `if ($this->pet
+    // instanceof Dog)` but to `Cat` after `if (!$this->pet instanceof
+    // Cat) { return; }`.  The root test is transitive: a chain rooted in
+    // a variable through array accesses or nested property chains
+    // (`$args[0]->value`) is just as narrowable as a direct one.
     //
     // Call expressions and static accesses are safe to cache because
     // their return types are deterministic (method signatures don't
@@ -375,22 +387,38 @@ pub(crate) fn resolve_target_classes_expr(
         | SubjectExpr::MethodCall { .. }
         | SubjectExpr::StaticMethodCall { .. }
         | SubjectExpr::StaticAccess { .. } => true,
-        // PropertyChain is only cacheable when the base is NOT a
-        // bare variable — e.g. `$this->method()->prop` (CallExpr
-        // base) is safe, but `$this->pet` (This/Variable base) is
-        // subject to narrowing.
-        SubjectExpr::PropertyChain { base, .. } => !matches!(
-            base.as_ref(),
-            SubjectExpr::This
-                | SubjectExpr::SelfKw
-                | SubjectExpr::StaticKw
-                | SubjectExpr::Parent
-                | SubjectExpr::Variable(_)
-        ),
+        // PropertyChain is only cacheable when its base does NOT root
+        // in a variable — e.g. `$this->method()->prop` (rooted in a
+        // call) is safe, but `$this->pet`, `$args[0]->value`, and
+        // `$this->a->b` (rooted in `$this`/a variable) are subject to
+        // narrowing.
+        SubjectExpr::PropertyChain { base, .. } => !base_roots_in_variable(base),
         _ => false,
     };
     if is_cacheable_chain {
-        let cache_key = expr.to_subject_text();
+        // A chain that references a local variable (as receiver or as a call
+        // argument) can resolve to different types at call sites where the
+        // variable holds a different type — e.g. `$this->parse($stmt)` where
+        // `$stmt` is a different subtype in two methods, or a `@template T`
+        // method binding `@return T` from a variable argument.  Keying by the
+        // subject text alone would leak the result across sites, so mix in a
+        // discriminator built from those variables' resolved types: sites
+        // where the variables share a type still share the cache entry (so
+        // the common case stays fast), while differently-typed sites get
+        // distinct entries.  When the variables can't be resolved cheaply
+        // (no active scope), fall back to a per-site key so nothing leaks.
+        // Chains with no local variables keep the shared text-only key.
+        let cache_key = {
+            let mut vars = Vec::new();
+            expr.collect_local_variables(&mut vars);
+            if vars.is_empty() {
+                expr.to_subject_text()
+            } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
+                format!("{}{}", expr.to_subject_text(), disc)
+            } else {
+                format!("{}@{}", expr.to_subject_text(), ctx.cursor_offset)
+            }
+        };
         let cached = CHAIN_CACHE.with(|cell| {
             let borrow = cell.borrow();
             borrow.as_ref().and_then(|map| map.get(&cache_key).cloned())
@@ -469,10 +497,45 @@ fn resolve_target_classes_expr_inner_impl(
             {
                 return vec![ResolvedType::from_class(override_cls)];
             }
-            current_class
-                .map(|cc| ResolvedType::from_class(cc.clone()))
-                .into_iter()
-                .collect()
+
+            // Consult the forward-walk scope for a narrowed or seeded
+            // `$this` type.  This covers two cases the lexical
+            // `current_class` fallback cannot:
+            //   - `assert($this instanceof X)` inside a top-level closure
+            //     (e.g. a Pest test) where there is no enclosing class,
+            //     so `current_class` is `None`.
+            //   - `instanceof` narrowing of `$this` to a subclass inside
+            //     a regular method body.
+            // When the scope yields nothing, fall back to the lexical
+            // `current_class` below.
+            let mut this_types = if let Some(scope_types) = resolve_this_from_scope(ctx) {
+                scope_types
+            } else {
+                current_class
+                    .map(|cc| ResolvedType::from_class(cc.clone()))
+                    .into_iter()
+                    .collect()
+            };
+
+            // A trait annotated `@phpstan-require-extends Base` guarantees
+            // that every class using the trait extends `Base`, so inside
+            // the trait's own methods `$this` can access `Base`'s members.
+            // PHPStan only ever analyzes traits in the context of a using
+            // class, but we analyze them standalone, so we resolve the
+            // required base class alongside the trait itself.
+            if let Some(cc) = current_class
+                && cc.kind == ClassLikeKind::Trait
+                && let Some(ref required) = cc.require_extends
+            {
+                let resolved = find_class_by_name(all_classes, required)
+                    .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
+                    .or_else(|| class_loader(required).map(ResolvedType::from_arc));
+                if let Some(rt) = resolved {
+                    ResolvedType::extend_unique(&mut this_types, vec![rt]);
+                }
+            }
+
+            this_types
         }
         SubjectExpr::SelfKw | SubjectExpr::StaticKw => current_class
             .map(|cc| ResolvedType::from_class(cc.clone()))
@@ -583,7 +646,13 @@ fn resolve_target_classes_expr_inner_impl(
             if let Some(cls) = find_class_by_name(all_classes, class_name) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            class_loader(class_name)
+            // `new X` is a source-level reference: PHP resolves an
+            // unqualified name against the current namespace before the
+            // global scope, so a same-namespace class must win over a
+            // global stub of the same short name.
+            let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+            let fqn = crate::util::resolve_source_class_name(class_name, ns, class_loader);
+            class_loader(&fqn)
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -612,6 +681,19 @@ fn resolve_target_classes_expr_inner_impl(
 
         // ── Property chain ──────────────────────────────────────
         SubjectExpr::PropertyChain { base, property } => {
+            // ── Forward-walker scope narrowing ──────────────────
+            // The forward walker computes narrowing for compound
+            // conditions that the property-narrowing re-walk below
+            // cannot express: inline `&&` where a later conjunct uses
+            // an earlier one's narrowing, `||` guard clauses whose
+            // De Morgan expansion narrows several distinct subjects,
+            // and array-indexed subjects.  When it has already
+            // narrowed this exact property path, trust it.
+            let full_path = subject_scope_key(expr);
+            if let Some(narrowed) = lookup_scope_for_subject(&full_path, ctx) {
+                return narrowed;
+            }
+
             let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
             let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
             for cls in &base_arcs {
@@ -651,7 +733,6 @@ fn resolve_target_classes_expr_inner_impl(
                         &dummy_class
                     }
                 };
-                let full_path = format!("{}->{}", base.to_subject_text(), property);
                 apply_property_narrowing(&full_path, effective_class, ctx, &mut arc_results);
             }
 
@@ -663,50 +744,26 @@ fn resolve_target_classes_expr_inner_impl(
 
         // ── Array access on variable or call expression ─────────
         SubjectExpr::ArrayAccess { base, segments } => {
-            // Check if the scope has a narrowed type for this array
-            // access (e.g. `$row['page']` narrowed via `instanceof`).
-            if let Some(scope_resolver) = ctx.scope_var_resolver {
-                // Build the scope key with double-quote format used by
-                // `expr_to_subject_key` (e.g. `$row["page"]`).
-                let scope_key = {
-                    let mut k = base.to_subject_text();
-                    for seg in segments {
-                        match seg {
-                            BracketSegment::StringKey(s) => {
-                                k.push_str(&format!("[\"{}\"]", s));
-                            }
-                            BracketSegment::ElementAccess => {
-                                k.push_str("[]");
-                            }
-                        }
-                    }
-                    k
-                };
-                let from_scope = scope_resolver(&scope_key);
-                if !from_scope.is_empty() {
-                    return from_scope;
-                }
+            // Build the scope key using the canonical double-quote
+            // format that the forward walker's `expr_to_subject_key`
+            // produces (e.g. `$row["page"]`, `$stmts["0"]`).  Integer
+            // indices are stringified because PHP normalises them, so
+            // `$a[0]` and `$a["0"]` narrow the same subject.
+            let scope_key = subject_scope_key(expr);
+
+            // Check if the forward-walker scope has a narrowed type for
+            // this array access (e.g. `$row['page']` narrowed via
+            // `instanceof`, or `$stmts[0]` after a guard clause).
+            if let Some(narrowed) = lookup_scope_for_subject(&scope_key, ctx) {
+                return narrowed;
             }
+
             // When no scope resolver is available (top-level completion),
             // try resolving the full array access key through the forward
             // walker.  This picks up instanceof narrowing on array elements
             // (e.g. `$row['page'] instanceof Page` narrows `$row["page"]`).
             if ctx.scope_var_resolver.is_none() && matches!(base.as_ref(), SubjectExpr::Variable(_))
             {
-                let scope_key = {
-                    let mut k = base.to_subject_text();
-                    for seg in segments {
-                        match seg {
-                            BracketSegment::StringKey(s) => {
-                                k.push_str(&format!("[\"{}\"]", s));
-                            }
-                            BracketSegment::ElementAccess => {
-                                k.push_str("[]");
-                            }
-                        }
-                    }
-                    k
-                };
                 let dummy_class;
                 let effective_class = match current_class {
                     Some(cc) => cc,
@@ -735,24 +792,37 @@ fn resolve_target_classes_expr_inner_impl(
             // but sources the raw type from the method/function signature
             // instead of from docblock annotations or assignments.
             if let SubjectExpr::CallExpr { callee, args_text } = base.as_ref() {
-                let call_raw = resolve_call_raw_return_type(callee, args_text, ctx);
-                if let Some(raw) = call_raw {
-                    let candidates = std::iter::once(raw);
-                    if let Some(resolved) =
-                        super::source::helpers::try_chained_array_access_with_candidates(
-                            candidates,
-                            segments,
-                            current_class,
-                            all_classes,
-                            class_loader,
-                        )
-                    {
-                        return resolved.into_iter().map(ResolvedType::from_arc).collect();
-                    }
+                // Resolve the call's return type with template and generic
+                // substitution applied, so that a method declared
+                // `@return T[]` with a `class-string<T>` parameter resolves
+                // its element type from the call-site argument (e.g.
+                // `$a->findChildrenOfType(Foo::class)[0]` → `Foo`).  The
+                // un-substituted raw return type is kept as a fallback for
+                // callees the hint path doesn't cover.
+                let mut hint: Option<PhpType> = None;
+                let _ = Backend::resolve_call_return_types_expr_with_hint(
+                    callee,
+                    args_text,
+                    ctx,
+                    Some(&mut hint),
+                );
+                let raw = resolve_call_raw_return_type(callee, args_text, ctx);
+                let candidates = hint.into_iter().chain(raw);
+                if let Some(resolved) =
+                    super::source::helpers::try_chained_array_access_with_candidates(
+                        candidates,
+                        segments,
+                        current_class,
+                        all_classes,
+                        class_loader,
+                    )
+                {
+                    return resolved.into_iter().map(ResolvedType::from_arc).collect();
                 }
-                // If raw-type approach didn't work, fall back to resolving
-                // the call normally (handles cases like `getItems()[0]`
-                // where the return type is already a class with ArrayAccess).
+                // Neither the substituted hint nor the raw return type had
+                // array-shape / generic / iterable annotations covering the
+                // bracket access.  Return empty: `call()[i]` is never the
+                // same type as `call()`.
                 return vec![];
             }
 
@@ -1083,6 +1153,22 @@ pub(crate) fn resolve_subject_outcome(
         if let Some(scalar) = resolve_call_scalar_return(callee, access_kind, ctx) {
             return SubjectOutcome::Scalar(scalar);
         }
+        // A call returning `object` (or `?object`) yields no concrete
+        // class, but `object` is the "any object" escape hatch: member
+        // access is always valid at runtime.  Resolve it to a synthetic
+        // `stdClass` so downstream verification treats it like the plain
+        // `object` property/parameter case, instead of reporting the
+        // subject type as unresolved.  `is_object()` unwraps nullability,
+        // so `?object` is handled here too.
+        if let Some(raw_type) = resolve_call_raw_return_type(callee, "", ctx)
+            && raw_type.is_object()
+        {
+            let synthetic = Arc::new(ClassInfo {
+                name: crate::atom::atom("stdClass"),
+                ..ClassInfo::default()
+            });
+            return SubjectOutcome::Resolved(vec![synthetic]);
+        }
         // Try unresolvable class detection for function calls.
         if let SubjectExpr::FunctionCall(fn_name) = callee.as_ref()
             && let Some(fl) = ctx.function_loader
@@ -1206,7 +1292,7 @@ fn check_unresolvable_class_name(
     raw_type: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    if raw_type.all_members_scalar() {
+    if raw_type.all_members_scalar() || raw_type.is_mixed() {
         return None;
     }
 
@@ -1218,6 +1304,91 @@ fn check_unresolvable_class_name(
     } else {
         None
     }
+}
+
+/// Resolve `$this` from the forward-walk scope when it carries a
+/// narrowed or seeded type.
+///
+/// `$this` is normally resolved from the lexical `current_class`, but a
+/// closure body may have a `$this` type that the enclosing class cannot
+/// supply:
+///
+///   - `assert($this instanceof X)` inside a top-level closure (Pest
+///     tests) seeds `$this` in the forward-walk scope even though there
+///     is no lexical class.
+///   - `instanceof` narrowing refines `$this` to a subclass.
+///
+/// This consults the injected `scope_var_resolver` first (used while the
+/// forward walker resolves an assignment RHS), then the diagnostic scope
+/// snapshot cache (used by the member-verification path after the scope
+/// has been built).  Returns `None` when neither yields a type so the
+/// caller falls back to `current_class`.
+fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
+    use crate::completion::variable::forward_walk;
+
+    if let Some(scope_resolver) = ctx.scope_var_resolver {
+        let from_scope = scope_resolver("$this");
+        return (!from_scope.is_empty()).then_some(from_scope);
+    }
+
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && let Some(from_scope) = forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
+        && !from_scope.is_empty()
+    {
+        return Some(from_scope);
+    }
+
+    None
+}
+
+/// Builds a cache-key discriminator from the resolved types of the local
+/// variables an expression references, so that two textually identical
+/// chains resolve from separate cache entries when their variables hold
+/// different types.
+///
+/// Returns `None` when variable types cannot be resolved cheaply (no
+/// forward-walk scope resolver and no active diagnostic scope snapshot);
+/// the caller then falls back to a per-site key.  Variables that resolve
+/// to nothing contribute an empty type: an unresolvable receiver yields an
+/// empty chain result regardless, so sharing those entries is safe.
+fn scope_type_discriminator(vars: &[String], ctx: &ResolutionCtx<'_>) -> Option<String> {
+    use crate::completion::variable::forward_walk;
+
+    let scope_active =
+        forward_walk::is_diagnostic_scope_active() && !forward_walk::is_building_scopes();
+    if ctx.scope_var_resolver.is_none() && !scope_active {
+        return None;
+    }
+
+    let mut names: Vec<&String> = vars.iter().collect();
+    names.sort();
+    names.dedup();
+
+    let mut disc = String::new();
+    for name in names {
+        let resolved: Vec<ResolvedType> = if let Some(scope_resolver) = ctx.scope_var_resolver {
+            scope_resolver(name)
+        } else {
+            forward_walk::lookup_diagnostic_scope(name, ctx.cursor_offset).unwrap_or_default()
+        };
+
+        let mut parts: Vec<String> = resolved
+            .iter()
+            .map(|rt| match &rt.class_info {
+                Some(ci) => ci.fqn().to_string(),
+                None => rt.type_string.to_string(),
+            })
+            .collect();
+        parts.sort();
+        parts.dedup();
+
+        disc.push('|');
+        disc.push_str(name);
+        disc.push('=');
+        disc.push_str(&parts.join("&"));
+    }
+    Some(disc)
 }
 
 /// Shared variable-resolution logic extracted from the former
@@ -1447,6 +1618,102 @@ pub(in crate::completion) fn resolve_static_owner_class(
 /// [`super::types::narrowing`] already support property paths via
 /// [`super::types::narrowing::expr_to_subject_key`], so no changes
 /// to those functions are required.
+/// Consult the forward-walker scope for a narrowed type for a compound
+/// subject key (property path like `$a->b->c` or array access like
+/// `$a["k"]`).
+///
+/// The forward walker seeds and narrows these keys while walking the
+/// enclosing method, capturing narrowing shapes the property-narrowing
+/// re-walk in [`apply_property_narrowing`] cannot express (compound
+/// `&&`/`||` conditions with mixed subjects, guard clauses whose De
+/// Morgan expansion narrows several distinct subjects, etc.).
+///
+/// Returns `Some(types)` only when the scope holds a non-empty narrowed
+/// type for `key`; the caller then trusts it and skips the re-walk.
+/// Returns `None` when no scope is active or the key was never seeded,
+/// so the caller falls back to normal resolution.
+/// Whether a subject expression transitively roots in a variable
+/// (`$var`, `$this`, `self`, `static`, or `parent`), possibly through
+/// array accesses or nested property chains.
+///
+/// Such expressions are subject to `instanceof`/`assert` narrowing that
+/// changes their resolved type at different positions in the same method
+/// body (e.g. `$args[0]->value instanceof Foo` in one `if` branch vs.
+/// `instanceof Bar` in the following `elseif`).  Their resolution must
+/// therefore never be cached by subject text alone.  Expressions rooted
+/// in a call (`$this->make()->prop`) resolve deterministically and stay
+/// cacheable.
+fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
+    match expr {
+        SubjectExpr::This
+        | SubjectExpr::SelfKw
+        | SubjectExpr::StaticKw
+        | SubjectExpr::Parent
+        | SubjectExpr::Variable(_) => true,
+        SubjectExpr::PropertyChain { base, .. } => base_roots_in_variable(base),
+        SubjectExpr::ArrayAccess { base, .. } => base_roots_in_variable(base),
+        _ => false,
+    }
+}
+
+/// Build the canonical forward-walker scope key for a subject
+/// expression (e.g. `$row["page"]`, `$stmts["0"]`, `$args["0"]->value`).
+///
+/// Mirrors the format that `expr_to_subject_key` produces on the AST
+/// side: property paths join with `->`, array keys use double quotes,
+/// and integer indices are stringified so `$a[0]` and `$a["0"]` map to
+/// the same key (matching PHP's integer/string key coercion).  Any
+/// subject shape the forward walker does not key on falls back to
+/// `to_subject_text`.
+fn subject_scope_key(expr: &SubjectExpr) -> String {
+    match expr {
+        SubjectExpr::PropertyChain { base, property } => {
+            format!("{}->{}", subject_scope_key(base), property)
+        }
+        SubjectExpr::ArrayAccess { base, segments } => {
+            let mut k = subject_scope_key(base);
+            for seg in segments {
+                match seg {
+                    BracketSegment::StringKey(s) => k.push_str(&format!("[\"{}\"]", s)),
+                    BracketSegment::IntKey(n) => k.push_str(&format!("[\"{}\"]", n)),
+                    BracketSegment::ElementAccess => k.push_str("[]"),
+                }
+            }
+            k
+        }
+        _ => expr.to_subject_text(),
+    }
+}
+
+fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
+    use crate::completion::variable::forward_walk;
+
+    // During diagnostic passes the forward walker records scope
+    // snapshots for the whole method; these are the authority.  Skip
+    // while the snapshots are still being built (the walker is the
+    // authority then and re-entry would be incomplete).
+    // A snapshot exists but this key was never seeded → fall through to
+    // normal resolution rather than short-circuiting to empty.
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && let Some(types) = forward_walk::lookup_diagnostic_scope(key, ctx.cursor_offset)
+        && !types.is_empty()
+    {
+        return Some(types);
+    }
+
+    // Interactive (completion / hover) forward walk carries a live
+    // scope resolver.
+    if let Some(resolver) = ctx.scope_var_resolver {
+        let types = resolver(key);
+        if !types.is_empty() {
+            return Some(types);
+        }
+    }
+
+    None
+}
+
 pub(crate) fn apply_property_narrowing(
     property_path: &str,
     current_class: &ClassInfo,
@@ -1488,12 +1755,12 @@ pub(crate) fn apply_property_narrowing(
 /// Walk top-level statements to find the class + method containing the
 /// cursor, then apply narrowing to `results` for the given property path.
 fn walk_property_narrowing_in_statements<'b>(
-    statements: impl Iterator<Item = &'b mago_syntax::ast::Statement<'b>>,
+    statements: impl Iterator<Item = &'b mago_syntax::cst::Statement<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     for stmt in statements {
         match stmt {
@@ -1561,12 +1828,12 @@ fn walk_property_narrowing_in_statements<'b>(
 /// Walk class members to find the method containing the cursor, then
 /// apply instanceof / guard-clause narrowing for the property path.
 fn walk_property_narrowing_in_members<'b>(
-    members: impl Iterator<Item = &'b mago_syntax::ast::class_like::member::ClassLikeMember<'b>>,
+    members: impl Iterator<Item = &'b mago_syntax::cst::class_like::member::ClassLikeMember<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     for member in members {
         if let ClassLikeMember::Method(method) = member {
@@ -1587,12 +1854,12 @@ fn walk_property_narrowing_in_members<'b>(
 /// Walk statements applying only narrowing (no assignment scanning)
 /// for a property path like `$this->prop`.
 fn walk_property_narrowing_stmts<'b>(
-    statements: impl Iterator<Item = &'b mago_syntax::ast::Statement<'b>>,
+    statements: impl Iterator<Item = &'b mago_syntax::cst::Statement<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     use super::types::narrowing;
 
@@ -1617,6 +1884,17 @@ fn walk_property_narrowing_stmts<'b>(
                     ctx,
                     results,
                 );
+                // `$x = $this->prop instanceof Foo ? … : …` and other
+                // ternaries nested in the expression narrow the property
+                // path inside the branch containing the cursor.
+                walk_property_narrowing_expr(expr_stmt.expression, ctx, results);
+            }
+            Statement::Return(ret) => {
+                // `return $this->prop instanceof Foo ? … : …` — narrow the
+                // property path inside the ternary branch at the cursor.
+                if let Some(value) = ret.value {
+                    walk_property_narrowing_expr(value, ctx, results);
+                }
             }
             Statement::Foreach(foreach) => match &foreach.body {
                 ForeachBody::Statement(inner) => {
@@ -1666,13 +1944,13 @@ fn walk_property_narrowing_stmts<'b>(
 
 /// Apply property-level narrowing inside an if / elseif / else chain.
 fn walk_property_narrowing_if<'b>(
-    if_stmt: &'b mago_syntax::ast::If<'b>,
-    enclosing_stmt: &'b mago_syntax::ast::Statement<'b>,
+    if_stmt: &'b mago_syntax::cst::If<'b>,
+    enclosing_stmt: &'b mago_syntax::cst::Statement<'b>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     use mago_span::HasSpan;
-    use mago_syntax::ast::*;
+    use mago_syntax::cst::*;
 
     use super::types::narrowing;
 
@@ -1797,9 +2075,97 @@ fn walk_property_narrowing_if<'b>(
 
 /// Dispatch a single statement to `walk_property_narrowing_stmts`.
 fn walk_property_narrowing_stmt<'b>(
-    stmt: &'b mago_syntax::ast::Statement<'b>,
+    stmt: &'b mago_syntax::cst::Statement<'b>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
     walk_property_narrowing_stmts(std::iter::once(stmt), ctx, results);
+}
+
+/// Apply property-level narrowing inside ternary (conditional) expressions.
+///
+/// When the cursor falls inside the then-branch of
+/// `$this->prop instanceof Foo ? <then> : <else>`, the property path is
+/// narrowed to `Foo`; inside the else-branch the inverse applies. This
+/// mirrors the if-statement narrowing in [`walk_property_narrowing_if`]
+/// but for ternaries, which can appear anywhere an expression is expected
+/// (return values, assignment RHS, call arguments, …). The walk recurses
+/// through those containers so a ternary nested inside them is still
+/// reached.
+fn walk_property_narrowing_expr<'b>(
+    expr: &'b mago_syntax::cst::Expression<'b>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ClassInfo>,
+) {
+    use mago_span::HasSpan;
+    use mago_syntax::cst::*;
+
+    use super::types::narrowing;
+
+    // Only descend into the sub-expression that contains the cursor.
+    let span = expr.span();
+    if ctx.cursor_offset < span.start.offset || ctx.cursor_offset > span.end.offset {
+        return;
+    }
+
+    match expr {
+        Expression::Conditional(cond) => {
+            // Full ternary `cond ? then : else`. Narrow the property path
+            // in whichever branch holds the cursor. The short form
+            // `$x ?: $y` has no `then` branch, so nothing to narrow there.
+            if let Some(then_expr) = cond.then {
+                let then_span = then_expr.span();
+                if ctx.cursor_offset >= then_span.start.offset
+                    && ctx.cursor_offset <= then_span.end.offset
+                {
+                    narrowing::try_apply_instanceof_narrowing(
+                        cond.condition,
+                        then_span,
+                        ctx,
+                        results,
+                    );
+                    walk_property_narrowing_expr(then_expr, ctx, results);
+                    return;
+                }
+            }
+            let else_span = cond.r#else.span();
+            if ctx.cursor_offset >= else_span.start.offset
+                && ctx.cursor_offset <= else_span.end.offset
+            {
+                narrowing::try_apply_instanceof_narrowing_inverse(
+                    cond.condition,
+                    else_span,
+                    ctx,
+                    results,
+                );
+                walk_property_narrowing_expr(cond.r#else, ctx, results);
+            }
+        }
+        Expression::Assignment(assign) => {
+            walk_property_narrowing_expr(assign.rhs, ctx, results);
+        }
+        Expression::Binary(bin) => {
+            walk_property_narrowing_expr(bin.lhs, ctx, results);
+            walk_property_narrowing_expr(bin.rhs, ctx, results);
+        }
+        Expression::Parenthesized(inner) => {
+            walk_property_narrowing_expr(inner.expression, ctx, results);
+        }
+        Expression::Call(call) => {
+            let args = match call {
+                Call::Function(fc) => &fc.argument_list,
+                Call::Method(mc) => &mc.argument_list,
+                Call::NullSafeMethod(mc) => &mc.argument_list,
+                Call::StaticMethod(sc) => &sc.argument_list,
+            };
+            for arg in args.arguments.iter() {
+                let arg_expr = match arg {
+                    Argument::Positional(a) => a.value,
+                    Argument::Named(a) => a.value,
+                };
+                walk_property_narrowing_expr(arg_expr, ctx, results);
+            }
+        }
+        _ => {}
+    }
 }

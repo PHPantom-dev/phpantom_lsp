@@ -12,9 +12,9 @@
 use std::collections::{HashMap, HashSet};
 
 use mago_span::HasSpan;
-use mago_syntax::ast::access::Access;
-use mago_syntax::ast::call::Call;
-use mago_syntax::ast::*;
+use mago_syntax::cst::access::Access;
+use mago_syntax::cst::call::Call;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -491,7 +491,9 @@ fn find_arrow_in_expression(
         Expression::AnonymousClass(anon) => {
             if let Some(args) = &anon.argument_list {
                 for a in args.arguments.iter() {
-                    find_arrow_in_expression(a.value(), cursor, content, best);
+                    if let Some(value) = a.value() {
+                        find_arrow_in_expression(value, cursor, content, best);
+                    }
                 }
             }
         }
@@ -801,7 +803,9 @@ fn collect_variables_in_expression(
         Expression::AnonymousClass(anon) => {
             if let Some(args) = &anon.argument_list {
                 for a in args.arguments.iter() {
-                    collect_variables_in_expression(a.value(), content, param_names, out);
+                    if let Some(value) = a.value() {
+                        collect_variables_in_expression(value, content, param_names, out);
+                    }
                 }
             }
         }
@@ -834,7 +838,7 @@ mod tests {
     use super::*;
 
     fn find_conversion(php: &str) -> Option<String> {
-        let arena = bumpalo::Bump::new();
+        let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
 

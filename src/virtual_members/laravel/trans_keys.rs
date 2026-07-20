@@ -1,34 +1,75 @@
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 
 /// Resolve `__('file.key')` / `trans('file.key')` / `Lang::get('file.key')` to the
-/// matching keys inside all matching `lang/{locale}/file.php` translation files.
+/// matching keys inside all matching `lang/{locale}/file.php` translation files,
+/// or inside `lang/{locale}.json` JSON translation files.
 ///
-/// The key format is `file_stem.nested.key` (first segment = file, rest = array path).
+/// For PHP files the key format is `file_stem.nested.key` (first segment = file,
+/// rest = array path).  For JSON files the key is looked up directly as a
+/// top-level object key (Laravel's JSON translations are flat).
+///
 /// Falls back to the top of the file when the exact key cannot be located.
 pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Location> {
-    let Some(file_stem) = key.split('.').next() else {
-        return Vec::new();
-    };
-
-    let snapshot = backend.user_file_symbol_maps();
     let mut results = Vec::new();
-    let target_suffix = format!("/{file_stem}.php");
 
-    for (file_uri, _) in snapshot {
-        // Check if the file is in a lang directory and matches the stem.
-        if (file_uri.contains("/lang/") || file_uri.contains("/resources/lang/"))
-            && file_uri.ends_with(&target_suffix)
-        {
-            let Ok(uri) = Url::parse(&file_uri) else {
+    if let Some((namespace, rest)) = key.split_once("::") {
+        let file_stem = rest.split('.').next().unwrap_or(rest);
+        for res in &backend.laravel_provider_resources.read().trans_dirs {
+            if res.namespace != namespace {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&res.path) else {
                 continue;
             };
-            let Some(content) = backend.get_file_content(&file_uri) else {
+            for entry in entries.flatten() {
+                let locale_dir = entry.path();
+                if !locale_dir.is_dir() {
+                    continue;
+                }
+                let candidate = locale_dir.join(format!("{file_stem}.php"));
+                if !candidate.is_file() {
+                    continue;
+                }
+                let Ok(content) = std::fs::read_to_string(&candidate) else {
+                    continue;
+                };
+                let Ok(uri) = Url::from_file_path(&candidate) else {
+                    continue;
+                };
+                let prefix = format!("{namespace}::{file_stem}");
+                let declarations = collect_trans_declarations(&content, &prefix);
+                if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+                    let pos = crate::util::offset_to_position(&content, decl.start);
+                    results.push(crate::definition::point_location(uri, pos));
+                    continue;
+                }
+                results.push(crate::definition::point_location(uri, Position::new(0, 0)));
+            }
+        }
+        return results;
+    }
+
+    let snapshot = backend.user_file_symbol_maps();
+
+    let file_stem = key.split('.').next().unwrap_or(key);
+    let target_suffix = format!("/{file_stem}.php");
+
+    for (file_uri, _) in &snapshot {
+        if !(file_uri.contains("/lang/") || file_uri.contains("/resources/lang/")) {
+            continue;
+        }
+
+        if file_uri.ends_with(&target_suffix) {
+            let Ok(uri) = Url::parse(file_uri) else {
+                continue;
+            };
+            let Some(content) = backend.get_file_content(file_uri) else {
                 continue;
             };
 
@@ -39,23 +80,44 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
                 continue;
             }
 
-            // File matched by stem but key not found — point to top of file.
             results.push(crate::definition::point_location(uri, Position::new(0, 0)));
         }
     }
+
+    if let Some(root) = backend.workspace_root.read().clone() {
+        for sub in &["lang", "resources/lang"] {
+            let dir = root.join(sub);
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "json")
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                    && let Ok(map) =
+                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+                    && map.contains_key(key)
+                    && let Ok(uri) = Url::from_file_path(&path)
+                {
+                    results.push(crate::definition::point_location(uri, Position::new(0, 0)));
+                }
+            }
+        }
+    }
+
     results
 }
 
 // ─── Declaration extractor (mirrors config_keys logic) ───────────────────────
 
 #[derive(Debug)]
-struct TransKeyMatch {
-    key: String,
-    start: usize,
+pub(crate) struct TransKeyMatch {
+    pub key: String,
+    pub start: usize,
 }
 
-fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMatch> {
-    let arena = Bump::new();
+pub(crate) fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMatch> {
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();

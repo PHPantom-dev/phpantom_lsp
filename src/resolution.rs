@@ -44,6 +44,117 @@ use crate::php_type::{PhpType, is_builtin_non_class_type};
 use crate::types::{ClassInfo, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
 
+/// Deduplicates concurrent parses of the same file.
+///
+/// The first thread to request a URI claims it and performs the parse;
+/// any other thread that requests the same URI while the parse is in
+/// flight blocks on a condvar until the claim is released, then reads
+/// the completed result from `uri_classes_index`.
+///
+/// Blocking (rather than spin-waiting with a timeout) matters for
+/// correctness: a timed-out waiter would conclude the class does not
+/// exist and poison the `class_not_found_cache` for the rest of the
+/// process, turning a scheduling hiccup into permanently unresolved
+/// types.  Waiting is always finite because a parse never parses
+/// another file (so there are no claim cycles) and the claim is
+/// released via an RAII guard even when the parse unwinds.
+///
+/// Claims are keyed by URI and record the owning thread, so a
+/// (currently impossible) re-entrant parse of the same URI on the same
+/// thread degrades to reading the current cached state instead of
+/// self-deadlocking.
+pub(crate) struct ParseInflight {
+    /// URI → thread currently parsing it.
+    entries: parking_lot::Mutex<HashMap<String, std::thread::ThreadId>>,
+    /// Notified whenever a claim is released.
+    released: parking_lot::Condvar,
+}
+
+impl ParseInflight {
+    /// Create an empty inflight set.
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: parking_lot::Mutex::new(HashMap::new()),
+            released: parking_lot::Condvar::new(),
+        }
+    }
+
+    /// Try to claim `uri` for parsing on the current thread.
+    ///
+    /// Returns `true` when the claim was acquired (the caller must
+    /// parse and then release via [`InflightGuard`]), `false` when
+    /// another thread already holds the claim.
+    fn try_claim(&self, uri: &str) -> bool {
+        let mut entries = self.entries.lock();
+        match entries.get(uri) {
+            Some(_) => false,
+            None => {
+                entries.insert(uri.to_string(), std::thread::current().id());
+                true
+            }
+        }
+    }
+
+    /// Block until no thread holds a claim on `uri`.
+    ///
+    /// If the current thread itself holds the claim (re-entrant parse),
+    /// returns immediately instead of deadlocking — the caller then
+    /// sees whatever partial state is already cached.
+    ///
+    /// A single parse takes milliseconds, so the 10-second escape
+    /// hatch is never reached in normal operation.  It exists so that
+    /// if a parse ever hangs abnormally (e.g. a future caller waiting
+    /// while holding a lock the parsing thread needs), the waiter
+    /// degrades to a loudly-logged stale read instead of hanging the
+    /// analyzer forever.
+    fn wait_until_released(&self, uri: &str) {
+        const ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + ESCAPE_HATCH;
+        let mut entries = self.entries.lock();
+        while let Some(owner) = entries.get(uri) {
+            if *owner == std::thread::current().id() {
+                tracing::warn!(
+                    "PHPantom: re-entrant parse of {uri} on the same thread; \
+                     returning current cached state"
+                );
+                return;
+            }
+            if self.released.wait_until(&mut entries, deadline).timed_out() {
+                tracing::warn!(
+                    "PHPantom: gave up waiting for another thread's parse of {uri} \
+                     after {ESCAPE_HATCH:?}; results for this file may be incomplete"
+                );
+                return;
+            }
+        }
+    }
+
+    /// Release the claim on `uri` and wake all waiters.
+    fn release(&self, uri: &str) {
+        self.entries.lock().remove(uri);
+        self.released.notify_all();
+    }
+}
+
+/// RAII guard that releases a URI claim in `parse_inflight` on drop.
+///
+/// Holding the claim in a guard ensures that if parsing or extraction
+/// unwinds (panics), the claim is still released and waiting threads
+/// wake up. Without this, a panic would leave the URI claimed forever,
+/// blocking every subsequent lookup of the same file.
+struct InflightGuard<'a> {
+    /// The shared inflight set the URI was claimed in.
+    inflight: &'a ParseInflight,
+    /// The URI to release on drop.
+    uri: String,
+}
+
+impl Drop for InflightGuard<'_> {
+    fn drop(&mut self) {
+        self.inflight.release(&self.uri);
+    }
+}
+
 impl Backend {
     /// Try to find a class by name across all cached files in the uri_classes_index,
     /// and if not found, attempt PSR-4 resolution to load the class from disk.
@@ -55,10 +166,25 @@ impl Backend {
     ///
     /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
     pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
+        if class_name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN {
+            let configured = self.laravel_date_class.read().clone()?;
+            let configured = configured
+                .unwrap_or_else(|| crate::virtual_members::laravel::SUPPORT_CARBON_FQN.to_string());
+            return self.find_or_load_class(&configured);
+        }
         // Defensively strip nullable prefix (`?Foo` → `Foo`) and generic
         // parameters (`Collection<int, User>` → `Collection`) so that
         // callers don't need to normalise before lookup.
-        self.find_or_load_class_typed(&PhpType::parse(class_name))
+        if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(class_name)) {
+            return Some(cls);
+        }
+        // Fall back to Laravel's own alias tables (container string aliases and
+        // global facade class aliases), parsed from the installed framework
+        // source.  Only reached when every ordinary phase has missed, so a
+        // real project class of the same name always wins, and non-class
+        // strings like `blade.compiler` still resolve to their bound concrete
+        // class.
+        self.resolve_laravel_alias(class_name)
     }
 
     /// Like [`find_or_load_class`], but accepts a pre-parsed `PhpType`,
@@ -66,7 +192,33 @@ impl Backend {
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
         let base = ty.base_name()?;
-        self.find_or_load_class_inner(base)
+        let mut loaded = self.find_or_load_class_inner(base)?;
+        // Refine the auth entry points' `user()` return type to the configured
+        // model.  Gated on the cheap stored short name so the hot loader path
+        // is untouched for every other class.
+        if matches!(loaded.name.as_str(), "Guard" | "Request") {
+            loaded = crate::virtual_members::laravel::patch_auth_user_class(self, loaded);
+        }
+        // Add any Laravel macros registered on this class.  Gated on a cheap
+        // atomic so the hot loader path is untouched when no macros exist.
+        loaded = self.inject_laravel_macros(loaded);
+        Some(loaded)
+    }
+
+    /// Add Laravel macro methods registered on `class` (by FQN).
+    ///
+    /// A no-op unless the project registered at least one
+    /// `Target::macro('name', closure)` on this class.  See
+    /// [`laravel_macros`](crate::Backend::laravel_macros).
+    fn inject_laravel_macros(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        if !self
+            .laravel_has_macros
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return class;
+        }
+        let index = self.laravel_macros.read();
+        crate::virtual_members::laravel::inject_macros(&index, class)
     }
 
     /// Shared implementation used by [`find_or_load_class`].
@@ -269,45 +421,55 @@ impl Backend {
             let uri = format!("phar://{}/{}", phar_path.display(), internal_path);
 
             // Deduplicate concurrent parses of the same phar entry.
-            if !self.parse_inflight.lock().insert(uri.clone()) {
+            if !self.parse_inflight.try_claim(&uri) {
                 return self.wait_for_cached_result(&uri);
             }
-            let result = (|| {
+            // Remove the inflight entry even if the work below unwinds.
+            let _guard = InflightGuard {
+                inflight: &self.parse_inflight,
+                uri: uri.clone(),
+            };
+            return (|| {
                 let archives = self.phar_archives.read();
                 let archive = archives.get(phar_path)?;
                 let bytes = archive.read_file(internal_path)?;
                 let content = std::str::from_utf8(bytes).ok()?;
                 self.parse_and_cache_content(content, &uri)
             })();
-            self.parse_inflight.lock().remove(&uri);
-            return result;
         }
 
         // ── Regular file path ───────────────────────────────────
         let uri = crate::util::path_to_uri(file_path);
 
         // Deduplicate concurrent parses of the same file.
-        if !self.parse_inflight.lock().insert(uri.clone()) {
+        if !self.parse_inflight.try_claim(&uri) {
             return self.wait_for_cached_result(&uri);
         }
+        // Remove the inflight entry even if the work below unwinds.
+        let _guard = InflightGuard {
+            inflight: &self.parse_inflight,
+            uri: uri.clone(),
+        };
         let content = std::fs::read_to_string(file_path).ok();
-        let result = content.and_then(|c| self.parse_and_cache_content(&c, &uri));
-        self.parse_inflight.lock().remove(&uri);
-        result
+        content.and_then(|c| self.parse_and_cache_content(&c, &uri))
     }
 
-    /// Spin-wait for another thread to finish parsing a file and return
+    /// Block until another thread finishes parsing a file, then return
     /// the cached result from `uri_classes_index`.
+    ///
+    /// The wait must not give up while the parse is still running:
+    /// returning early makes the caller conclude the class does not
+    /// exist, and that conclusion is cached in `class_not_found_cache`
+    /// — one slow parse under heavy thread contention would permanently
+    /// poison resolution of every class in the file for the rest of the
+    /// process (nondeterministic "type could not be resolved"
+    /// diagnostics in full-project runs).  The wait is bounded by the
+    /// owning thread's single parse, which never parses another file
+    /// and releases its claim via RAII even on panic; see
+    /// [`ParseInflight::wait_until_released`] for the abnormal-hang
+    /// escape hatch.
     fn wait_for_cached_result(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
-        for _ in 0..200 {
-            // Check if parsing is complete (URI removed from inflight set).
-            if !self.parse_inflight.lock().contains(uri) {
-                return self.uri_classes_index.read().get(uri).cloned();
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        // Timeout: the other thread is still parsing.  Return whatever is
-        // in uri_classes_index (may be stale or None).
+        self.parse_inflight.wait_until_released(uri);
         self.uri_classes_index.read().get(uri).cloned()
     }
 
@@ -429,6 +591,30 @@ impl Backend {
         // is needed (only on re-parse, not first load).
         let was_already_parsed = self.parsed_uris.read().contains(uri);
 
+        // When re-parsing a previously loaded URI, capture the prior FQN
+        // set (still available in uri_classes_index before the overwrite
+        // below) so stale entries for renamed or removed classes can be
+        // evicted.  Mirrors `update_ast_inner`, which computes `old_fqns`
+        // and evicts fqn_class_index, fqn_uri_index, gti_index, and
+        // method_store.  Without this, a class deleted or renamed on
+        // re-parse (vendor change, phar refresh, re-open after did_close)
+        // leaves ghost entries that keep resolving from stale state and
+        // pollute find_implementors / type hierarchy.
+        let old_fqns: Vec<String> = if was_already_parsed {
+            self.uri_classes_index
+                .read()
+                .get(uri)
+                .map(|v| {
+                    v.iter()
+                        .filter(|c| !c.name.starts_with("__anonymous@"))
+                        .map(|c| c.fqn().to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
         // Record that this URI has been parsed.
         self.parsed_uris.write().insert(uri.to_owned());
 
@@ -461,21 +647,31 @@ impl Backend {
 
             let mut class_idx = self.fqn_uri_index.write();
             let mut fqn_idx = self.fqn_class_index.write();
+            // On re-parse, drop entries for classes that this file no
+            // longer defines before re-inserting the current set.  This
+            // repoints/removes the FQN → URI and FQN → ClassInfo mappings
+            // so a renamed or deleted class stops resolving from the old
+            // ClassInfo.
+            for old_fqn in &old_fqns {
+                class_idx.remove(old_fqn);
+                fqn_idx.remove(old_fqn);
+            }
             for (fqn, cls) in new_entries {
                 class_idx.or_insert_with(fqn.as_str(), || uri.to_owned());
                 fqn_idx.insert(fqn, cls);
             }
         }
 
-        // Populate the method store from the freshly parsed classes.
-        {
-            let fqns: Vec<String> = arc_classes
-                .iter()
-                .filter(|c| !c.name.starts_with("__anonymous@"))
-                .map(|c| c.fqn().to_string())
-                .collect();
-            self.evict_methods_for_fqns(&fqns);
-        }
+        // On re-parse, evict the method_store and gti_index entries for
+        // the classes this file previously defined before re-populating.
+        // Evicting the *old* FQN set (rather than the new one) removes
+        // methods of classes that were deleted or renamed, and clears
+        // stale reverse-inheritance edges so find_implementors / type
+        // hierarchy stop serving children that no longer extend a parent.
+        // For a first-time load `old_fqns` is empty and both calls
+        // early-return.
+        self.evict_methods_for_fqns(&old_fqns);
+        self.evict_gti_for_fqns(&old_fqns);
         self.populate_method_store(&arc_classes);
         self.populate_gti_index(&arc_classes);
 
@@ -516,9 +712,20 @@ impl Backend {
         // the cost/benefit is strongly negative.
         if was_already_parsed {
             let mut cache = self.resolved_class_cache.write();
+            let mut new_fqns: std::collections::HashSet<String> =
+                std::collections::HashSet::with_capacity(arc_classes.len());
             for cls in &arc_classes {
                 let fqn = cls.fqn();
+                new_fqns.insert(fqn.to_string());
                 let _ = crate::virtual_members::evict_fqn(&mut cache, &fqn);
+            }
+            // Also evict classes this file previously defined but no longer
+            // does (renames / removals) so they stop resolving from a stale
+            // resolved-class cache entry.
+            for old_fqn in &old_fqns {
+                if !new_fqns.contains(old_fqn) {
+                    let _ = crate::virtual_members::evict_fqn(&mut cache, old_fqn);
+                }
             }
         }
 
@@ -646,7 +853,7 @@ impl Backend {
                     let mut fmap = self.global_functions.write();
                     for func in &functions {
                         let fqn = if let Some(ref ns) = func.namespace {
-                            format!("{}\\{}", ns, &func.name)
+                            format!("{}\\{}", ns, func.name)
                         } else {
                             func.name.to_string()
                         };
@@ -803,6 +1010,15 @@ impl Backend {
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
+        // A leading backslash (`\response`, `\App\Helpers\foo`) is an
+        // explicit global/absolute reference.  Strip it and look up the
+        // qualified name directly, bypassing the use-map and namespace
+        // qualification (which would otherwise mangle it into
+        // `Current\Ns\\response`).
+        if let Some(absolute) = name.strip_prefix('\\') {
+            return self.find_or_load_function(&[absolute]);
+        }
+
         // Build candidate names to try: exact name, use-map
         // resolved name, and namespace-qualified name.
         let mut candidates: Vec<&str> = vec![name];
@@ -859,8 +1075,16 @@ impl Backend {
             // `Event` (e.g. the PECL event extension).  Without this
             // check, `find_or_load_class("Event")` would find the stub
             // and short-circuit, never consulting the use-map.
+            //
+            // A leading backslash (`\Redis`) is an explicit global
+            // reference and must bypass imports entirely, even when an
+            // import shares the short name (e.g.
+            // `use Illuminate\Support\Facades\Redis;`).  Only strip the
+            // backslash for the direct FQN lookups below.
+            let has_leading_backslash = name.starts_with('\\');
             let stripped = name.strip_prefix('\\').unwrap_or(name);
-            if !stripped.contains('\\')
+            if !has_leading_backslash
+                && !stripped.contains('\\')
                 && let Some(fqn) = use_map.get(stripped)
                 && let Some(cls) = self.find_or_load_class(fqn)
             {
@@ -880,7 +1104,16 @@ impl Backend {
             // that should resolve via namespace context, the direct
             // lookup will miss (no global class with that name) and
             // we fall through to full resolution.
-            if let Some(cls) = self.find_or_load_class(stripped) {
+            //
+            // This early lookup deliberately excludes the Laravel alias
+            // table (it uses the alias-free `find_or_load_class_typed`).
+            // A bare name like `Request` must first get a chance to
+            // resolve against the current namespace in `resolve_class_name`
+            // below, so a same-namespace project class wins over a global
+            // facade alias of the same short name.  The alias table is
+            // still consulted as a genuine last resort by
+            // `resolve_class_name`'s final global lookup.
+            if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(stripped)) {
                 return Some(cls);
             }
             // When the name is namespace-qualified (e.g. "App\IteratorAggregate")
@@ -889,7 +1122,7 @@ impl Backend {
             // file namespace to an unqualified global class name.
             if stripped.contains('\\') {
                 let short = crate::util::short_name(stripped);
-                if let Some(cls) = self.find_or_load_class(short) {
+                if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(short)) {
                     return Some(cls);
                 }
             }
@@ -921,6 +1154,42 @@ impl Backend {
         namespace: &'a Option<String>,
     ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
         move |name: &str| self.resolve_function_name(name, use_map, namespace)
+    }
+
+    /// Check whether `cursor_offset` is inside a closure whose
+    /// enclosing call site declares `@param-closure-this`, and if so
+    /// return the overridden class.
+    ///
+    /// This is a convenience wrapper that builds the [`ResolutionCtx`]
+    /// and calls [`find_closure_this_override`] so that callers (hover,
+    /// go-to-definition, go-to-type-definition) don't need to duplicate
+    /// that boilerplate.
+    pub(crate) fn resolve_closure_this_override(
+        &self,
+        uri: &str,
+        content: &str,
+        cursor_offset: u32,
+    ) -> Option<ClassInfo> {
+        use crate::completion::resolver::ResolutionCtx;
+        use crate::util::find_class_at_offset;
+
+        let ctx = self.file_context_at(uri, cursor_offset);
+        let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
+        let class_loader = self.class_loader(&ctx);
+        let function_loader = self.function_loader(&ctx);
+        let rctx = ResolutionCtx {
+            current_class,
+            all_classes: &ctx.classes,
+            content,
+            cursor_offset,
+            class_loader: &class_loader,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: Some(&function_loader),
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        };
+        crate::completion::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 
     /// Return a constant-value-loader closure.
@@ -1046,5 +1315,274 @@ mod tests {
             indexed.get_method("getvalue").expect("indexed").name,
             "getValue"
         );
+    }
+
+    /// Re-parsing a lazily-loaded file through `parse_and_cache_content`
+    /// (the vendor / stub / re-open-after-close path) must evict index
+    /// entries for classes the file no longer defines.  Previously this
+    /// path only inserted new FQNs, so a renamed or deleted class kept
+    /// ghost entries in the FQN indexes, the GTI reverse-inheritance edges
+    /// (find_implementors / type hierarchy), and the method store.
+    #[test]
+    fn versioned_reparse_evicts_removed_classes() {
+        let backend = Backend::new_test();
+        let uri = "file:///lib.php";
+
+        backend.parse_and_cache_content(
+            "<?php namespace Lib; class Base {} \
+             class Child extends Base { public function ghost() {} }",
+            uri,
+        );
+
+        // First parse populated every index.
+        assert!(
+            backend.fqn_class_index.read().get("Lib\\Child").is_some(),
+            "Child should be in fqn_class_index after first parse"
+        );
+        assert!(
+            backend.fqn_uri_index.read().get("Lib\\Child").is_some(),
+            "Child should be in fqn_uri_index after first parse"
+        );
+        assert!(
+            backend
+                .gti_index
+                .read()
+                .values()
+                .any(|kids| kids.iter().any(|k| k == "Lib\\Child")),
+            "some parent should list Child as an implementor after first parse"
+        );
+        assert!(
+            backend
+                .method_store
+                .read()
+                .contains_key(&("Lib\\Child".to_string(), "ghost".to_string())),
+            "Child::ghost should be in the method store after first parse"
+        );
+
+        // Re-parse the same URI with Child (and its method) removed.
+        backend.parse_and_cache_content("<?php namespace Lib; class Base {}", uri);
+
+        assert!(
+            backend.fqn_class_index.read().get("Lib\\Child").is_none(),
+            "Child must be evicted from fqn_class_index on re-parse"
+        );
+        assert!(
+            backend.fqn_uri_index.read().get("Lib\\Child").is_none(),
+            "Child must be evicted from fqn_uri_index on re-parse"
+        );
+        assert!(
+            !backend
+                .gti_index
+                .read()
+                .values()
+                .any(|kids| kids.iter().any(|k| k == "Lib\\Child")),
+            "no parent should still list the removed Child as an implementor"
+        );
+        assert!(
+            !backend
+                .method_store
+                .read()
+                .contains_key(&("Lib\\Child".to_string(), "ghost".to_string())),
+            "Child::ghost must be evicted from the method store on re-parse"
+        );
+
+        // Base, which the file still defines, must survive the re-parse.
+        assert!(
+            backend.fqn_class_index.read().get("Lib\\Base").is_some(),
+            "Base should survive the re-parse"
+        );
+    }
+
+    /// Renaming a class on re-parse repoints the FQN → URI mapping to the
+    /// new name and drops the old, rather than leaving both.
+    #[test]
+    fn versioned_reparse_repoints_renamed_class() {
+        let backend = Backend::new_test();
+        let uri = "file:///renamed.php";
+
+        backend.parse_and_cache_content("<?php namespace Lib; class OldName {}", uri);
+        assert!(backend.fqn_uri_index.read().get("Lib\\OldName").is_some());
+
+        backend.parse_and_cache_content("<?php namespace Lib; class NewName {}", uri);
+        assert!(
+            backend.fqn_uri_index.read().get("Lib\\OldName").is_none(),
+            "old name must be evicted after rename"
+        );
+        assert!(
+            backend.fqn_class_index.read().get("Lib\\OldName").is_none(),
+            "old ClassInfo must be evicted after rename"
+        );
+        assert!(
+            backend.fqn_uri_index.read().get("Lib\\NewName").is_some(),
+            "new name must be indexed after rename"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stub_patch_consistency_tests {
+    //! A constant lookup routes its stub source through `update_ast`
+    //! (under a `phpantom-stub://const/…` URI).  The same stub file
+    //! often also defines functions — e.g. `ARRAY_FILTER_USE_BOTH`
+    //! lives in the stub chunk that declares `array_map`.  Functions
+    //! registered on that path must carry the same stub patches as the
+    //! dedicated stub-function loader; otherwise the unpatched variant
+    //! overwrites (or preempts) the patched one and `array_map` loses
+    //! its `@template TValue`, silently breaking closure parameter
+    //! inference for the rest of the session.  Which registration runs
+    //! first depends on file analysis order, so the breakage was
+    //! nondeterministic in full-project runs.
+
+    use crate::Backend;
+
+    #[test]
+    fn constant_lookup_before_function_lookup_keeps_stub_patches() {
+        let backend = Backend::new_test_with_full_stubs();
+
+        assert!(
+            backend
+                .lookup_global_constant("ARRAY_FILTER_USE_BOTH")
+                .is_some(),
+            "ARRAY_FILTER_USE_BOTH must resolve from the embedded stubs"
+        );
+
+        let fi = backend
+            .find_or_load_function(&["array_map"])
+            .expect("array_map must resolve from the embedded stubs");
+        assert!(
+            !fi.template_params.is_empty(),
+            "array_map must keep its @template stub patch when the \
+             constant stub that defines it was parsed first"
+        );
+    }
+
+    #[test]
+    fn constant_lookup_after_function_lookup_keeps_stub_patches() {
+        let backend = Backend::new_test_with_full_stubs();
+
+        assert!(
+            backend
+                .find_or_load_function(&["array_map"])
+                .is_some_and(|fi| !fi.template_params.is_empty()),
+            "array_map must resolve with its @template stub patch"
+        );
+
+        assert!(
+            backend
+                .lookup_global_constant("ARRAY_FILTER_USE_BOTH")
+                .is_some(),
+            "ARRAY_FILTER_USE_BOTH must resolve from the embedded stubs"
+        );
+
+        let fi = backend
+            .find_or_load_function(&["array_map"])
+            .expect("array_map must still resolve");
+        assert!(
+            !fi.template_params.is_empty(),
+            "array_map must keep its @template stub patch after a \
+             constant lookup re-registered the same stub file's functions"
+        );
+    }
+}
+
+#[cfg(test)]
+mod inflight_guard_tests {
+    //! The inflight guard must release its URI claim in `parse_inflight`
+    //! even when the parse/extraction work unwinds, so a panic can never
+    //! leave a URI claimed forever (blocking every subsequent lookup).
+    //! Waiters must block until the claim is released — never time out
+    //! into a "class not found" conclusion — and a re-entrant wait on
+    //! the claiming thread must return instead of self-deadlocking.
+
+    use super::{InflightGuard, ParseInflight};
+
+    #[test]
+    fn guard_releases_claim_on_panic() {
+        let inflight = ParseInflight::new();
+        assert!(inflight.try_claim("file:///a.php"));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = InflightGuard {
+                inflight: &inflight,
+                uri: "file:///a.php".to_string(),
+            };
+            panic!("boom");
+        }));
+
+        assert!(
+            result.is_err(),
+            "the panic should propagate to catch_unwind"
+        );
+        assert!(
+            inflight.try_claim("file:///a.php"),
+            "guard must release the claim even when the scope unwinds"
+        );
+    }
+
+    #[test]
+    fn guard_releases_claim_on_normal_drop() {
+        let inflight = ParseInflight::new();
+        assert!(inflight.try_claim("file:///b.php"));
+        {
+            let _guard = InflightGuard {
+                inflight: &inflight,
+                uri: "file:///b.php".to_string(),
+            };
+        }
+        assert!(
+            inflight.try_claim("file:///b.php"),
+            "guard must release the claim when it drops normally"
+        );
+    }
+
+    #[test]
+    fn waiter_blocks_until_claim_released() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let inflight = ParseInflight::new();
+        assert!(inflight.try_claim("file:///c.php"));
+        let released = AtomicBool::new(false);
+
+        std::thread::scope(|s| {
+            let waiter = s.spawn(|| {
+                inflight.wait_until_released("file:///c.php");
+                assert!(
+                    released.load(Ordering::SeqCst),
+                    "waiter must not wake up before the claim is released"
+                );
+            });
+
+            // Hold the claim long enough that a woken-too-early waiter
+            // would observe `released == false` and fail the assert.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            released.store(true, Ordering::SeqCst);
+            inflight.release("file:///c.php");
+            waiter.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn reentrant_wait_on_claiming_thread_returns() {
+        let inflight = ParseInflight::new();
+        assert!(inflight.try_claim("file:///d.php"));
+        // Same thread holds the claim — must return, not deadlock.
+        inflight.wait_until_released("file:///d.php");
+        inflight.release("file:///d.php");
+    }
+
+    #[test]
+    fn second_claim_fails_while_held() {
+        let inflight = ParseInflight::new();
+        assert!(inflight.try_claim("file:///e.php"));
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                assert!(
+                    !inflight.try_claim("file:///e.php"),
+                    "a held claim must not be claimable from another thread"
+                );
+            })
+            .join()
+            .unwrap();
+        });
     }
 }

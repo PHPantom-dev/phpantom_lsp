@@ -88,7 +88,10 @@ use crate::symbol_map::SymbolKind;
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::{compute_existence_guards, find_innermost_enclosing_class, make_diagnostic};
+use super::helpers::{
+    compute_existence_guards, compute_isset_empty_argument_ranges, find_innermost_enclosing_class,
+    is_offset_in_ranges, make_diagnostic,
+};
 
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
@@ -262,6 +265,11 @@ impl Backend {
         // ── Compute existence guards ────────────────────────────────────
         let existence_guards = compute_existence_guards(content);
 
+        // ── Compute isset()/empty() argument ranges ─────────────────────
+        // Member/array access inside these constructs never triggers a
+        // runtime error even when the accessed member doesn't exist.
+        let isset_empty_ranges = compute_isset_empty_argument_ranges(content);
+
         // ── Parse cache for this diagnostic pass ────────────────────────
         // The file content is immutable during a single diagnostic pass.
         // Activating the thread-local parse cache means every call to
@@ -295,13 +303,30 @@ impl Backend {
                         is_static,
                         is_method_call,
                         is_docblock_reference,
-                    } => (
-                        subject_text,
-                        member_name,
-                        *is_static,
-                        *is_method_call,
-                        *is_docblock_reference,
-                    ),
+                        is_array_callable,
+                    } => {
+                        // A `[Class::class, 'method']` / `[$obj, 'method']`
+                        // array literal is only a callable when it flows into
+                        // a callable-typed context (a callable parameter,
+                        // `is_callable`, or a direct invocation).  Without
+                        // type-flow analysis we cannot tell such an array
+                        // apart from a plain data pair like
+                        // `return [[Foo::class, 'name'], ...]`, so we do not
+                        // validate its second element as a method.  The span
+                        // still drives navigation, hover, and semantic tokens,
+                        // which only surface information when the member
+                        // actually resolves.
+                        if *is_array_callable {
+                            continue;
+                        }
+                        (
+                            subject_text,
+                            member_name,
+                            *is_static,
+                            *is_method_call,
+                            *is_docblock_reference,
+                        )
+                    }
                     _ => continue,
                 };
 
@@ -312,6 +337,13 @@ impl Backend {
 
             // ── Skip members guarded by method_exists() ───────────────
             if existence_guards.is_method_guarded(member_name, span.start) {
+                continue;
+            }
+
+            // ── Skip accesses inside isset()/empty() ──────────────────
+            // `isset($x->prop)` and `empty($x->prop)` never error or warn
+            // even when `prop` doesn't exist — that is their purpose.
+            if is_offset_in_ranges(span.start, &isset_empty_ranges) {
                 continue;
             }
 
@@ -438,6 +470,7 @@ impl Backend {
                         function_loader: Some(&function_loader),
                         scope_var_resolver: None,
                         is_in_static_method: symbol_map.is_in_static_method(span.start),
+                        preserve_static: false,
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
                 })
@@ -592,6 +625,7 @@ impl Backend {
                                 function_loader: Some(&function_loader),
                                 scope_var_resolver: None,
                                 is_in_static_method: symbol_map.is_in_static_method(span.start),
+                                preserve_static: false,
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {
@@ -735,13 +769,18 @@ impl Backend {
             return (MemberCheckResult::Ok, diagnostics);
         }
 
-        // ── Check for __call / __callStatic on ANY branch ───────────
-        // When any branch has a magic call handler, the method IS
-        // dispatched at runtime (no fatal error), but it is still
-        // "unknown" in the sense that it has no explicit declaration.
-        // We emit the diagnostic so the user knows, but we return
-        // `MagicFallback` so the chain is NOT broken — the return
-        // type of `__call`/`__callStatic` recovers the chain type.
+        // ── Suppress method calls dispatched through __call / __callStatic ──
+        // When any branch has a magic call handler, the method is
+        // dispatched to it at runtime, so the call is valid PHP — there
+        // is no fatal error and no undefined member.  This is how
+        // proxies (SoapClient), mock/fluent APIs (Mockery's higher-order
+        // messages), and dynamic query builders work.  We suppress the
+        // diagnostic entirely (mirroring how `__get` suppresses
+        // property-access diagnostics above) and return `MagicFallback`
+        // so the chain keeps resolving through the magic method's return
+        // type.  A speculative "we can't verify this" warning here is a
+        // false positive: the receiver has explicitly opted into handling
+        // arbitrary method names.
         let has_magic_call = is_method_call
             && (base_classes
                 .iter()
@@ -749,17 +788,7 @@ impl Backend {
                 || resolved_classes
                     .iter()
                     .any(|c| has_magic_method_for_access(c, is_static, true, report_magic)));
-
-        // ── SoapClient: suppress diagnostic entirely ────────────────
-        // SoapClient is a SOAP proxy where any method name is valid
-        // (proxied to the remote service).  PHP does not error, and
-        // PHPStan treats all calls as returning mixed.  Suppress the
-        // diagnostic but do not break the chain.
-        if has_magic_call
-            && resolved_classes
-                .iter()
-                .any(|c| is_soap_client(&c.name, class_loader))
-        {
+        if has_magic_call {
             return (MemberCheckResult::MagicFallback, diagnostics);
         }
 
@@ -810,12 +839,9 @@ impl Backend {
             message,
         ));
 
-        let result = if has_magic_call {
-            MemberCheckResult::MagicFallback
-        } else {
-            MemberCheckResult::Break
-        };
-        (result, diagnostics)
+        // The member exists on no branch and no branch has a magic call
+        // handler, so the type cannot be recovered — break the chain.
+        (MemberCheckResult::Break, diagnostics)
     }
 }
 
@@ -917,7 +943,7 @@ fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: 
     class.constants.iter().any(|c| c.name == member_name)
 }
 
-fn member_exists(
+pub(crate) fn member_exists(
     class: &ClassInfo,
     member_name: &str,
     is_static: bool,
@@ -950,8 +976,16 @@ fn member_exists(
         return false;
     }
 
-    // Instance property access.
-    class.properties.iter().any(|p| p.name == member_name)
+    // Instance property access (case-sensitive, per PHP semantics).
+    if class.properties.iter().any(|p| p.name == member_name) {
+        return true;
+    }
+
+    // Eloquent relation properties are the exception: `$model->orderProducts`
+    // flows through `__get()` → `isRelation()` → `method_exists()`, all of
+    // which are case-insensitive, so a differently-cased access like
+    // `$model->orderproducts` resolves the same relationship at runtime.
+    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
 }
 
 /// Check whether the class has a magic method that would handle the
@@ -998,29 +1032,6 @@ fn has_magic_method_for_access(
         }
     }
 
-    false
-}
-
-/// Returns `true` if `class_name` is `SoapClient` or a class that
-/// ultimately extends `SoapClient`.  SoapClient acts as a SOAP
-/// proxy: any method name is valid and returns mixed at runtime.
-fn is_soap_client(class_name: &str, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
-    if class_name == "SoapClient" {
-        return true;
-    }
-    // Walk the parent chain to check if this class extends SoapClient.
-    let mut current = class_loader(class_name);
-    let mut depth = 0;
-    while let Some(cls) = current {
-        if cls.name == "SoapClient" {
-            return true;
-        }
-        depth += 1;
-        if depth > 20 {
-            break;
-        }
-        current = cls.parent_class.as_ref().and_then(|p| class_loader(p));
-    }
     false
 }
 

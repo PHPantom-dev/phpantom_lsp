@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str, last_segment};
 use crate::docblock;
@@ -844,7 +844,7 @@ fn find_anonymous_class_containing_cursor<'a>(
 
     /// Walk a list of call arguments.
     fn walk_args<'a>(
-        arguments: &'a mago_syntax::ast::sequence::TokenSeparatedSequence<'a, Argument<'a>>,
+        arguments: &'a mago_syntax::cst::sequence::TokenSeparatedSequence<'a, Argument<'a>>,
         cursor: u32,
     ) -> Option<&'a AnonymousClass<'a>> {
         for arg in arguments.iter() {
@@ -1357,7 +1357,11 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_name_via_loader(&name, ctx.class_loader);
+                let fqn = crate::util::resolve_source_class_name(
+                    &name,
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                );
                 Some(PhpType::Named(fqn))
             }
             Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
@@ -1423,10 +1427,13 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
             _ => None,
         },
         // First-class callable syntax, closure literals, and arrow
-        // functions always produce a Closure.
+        // functions always produce a Closure. When we can infer the
+        // body return type, preserve it in a typed `Closure(): T`.
         Expression::PartialApplication(_)
         | Expression::Closure(_)
-        | Expression::ArrowFunction(_) => Some(PhpType::closure()),
+        | Expression::ArrowFunction(_) => {
+            Some(super::rhs_resolution::infer_closure_literal_type(rhs, ctx))
+        }
         _ => None,
     }
 }
@@ -1492,6 +1499,65 @@ pub(super) fn merge_nested_shape_keys(
         .unwrap_or_else(PhpType::array);
     let inner_merged = merge_nested_shape_keys(&inner_base, &keys[1..], value_type);
     merge_shape_key(base, first_key, &inner_merged)
+}
+
+/// A single key segment in a (possibly nested) array write like
+/// `$var['a'][$i]['b'] = …`.
+pub(super) enum ArrayWriteKey {
+    /// A string-literal key tracked as a shape entry, e.g. `['name']`.
+    Shape(String),
+    /// A dynamic (variable / expression / numeric) key tracked as a
+    /// generic `array<K, V>` level. Carries the inferred key type.
+    Keyed(PhpType),
+}
+
+/// Merge a nested array write with a mix of literal-string and dynamic
+/// key segments into the base type.
+///
+/// Literal segments build/extend array shapes (like
+/// [`merge_nested_shape_keys`]); dynamic segments build/extend generic
+/// `array<K, V>` levels (like [`merge_keyed_type`]). For example,
+/// merging `['data', $count, 'earnings']` with value `Decimal` into a
+/// bare `array` produces:
+///   `array{data: array<int, array{earnings: Decimal}>}`
+///
+/// A dynamic write onto an existing non-empty shape leaves the shape
+/// unchanged (the literal keys already tracked are worth more than a
+/// widened `array<K, V>`), matching the single-segment behaviour.
+pub(super) fn merge_nested_array_write(
+    base: &PhpType,
+    keys: &[ArrayWriteKey],
+    value_type: &PhpType,
+) -> PhpType {
+    debug_assert!(!keys.is_empty());
+    match &keys[0] {
+        ArrayWriteKey::Shape(key) => {
+            if keys.len() == 1 {
+                merge_shape_key(base, key, value_type)
+            } else {
+                let inner_base = base
+                    .shape_value_type(key)
+                    .cloned()
+                    .unwrap_or_else(PhpType::array);
+                let inner_merged = merge_nested_array_write(&inner_base, &keys[1..], value_type);
+                merge_shape_key(base, key, &inner_merged)
+            }
+        }
+        ArrayWriteKey::Keyed(key_type) => {
+            // Preserve an existing non-empty shape rather than widening
+            // it to a generic array and losing its literal keys.
+            if base.shape_entries().is_some_and(|e| !e.is_empty()) {
+                return base.clone();
+            }
+            let inner_merged = if keys.len() == 1 {
+                value_type.clone()
+            } else {
+                let inner_base = base.iterable_element_type().unwrap_or_else(PhpType::array);
+                merge_nested_array_write(&inner_base, &keys[1..], value_type)
+            };
+            merge_keyed_type(base, key_type, &inner_merged)
+        }
+    }
 }
 
 /// Extract a string key from an array access index expression.

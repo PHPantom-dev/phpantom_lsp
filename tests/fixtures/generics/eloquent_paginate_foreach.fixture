@@ -1,0 +1,45 @@
+// test: Eloquent Builder paginate() foreach resolves the element to the model
+// feature: completion
+// The framework declares paginate() as a bare LengthAwarePaginator; the
+// Laravel patch parameterises it with <int, TModel> so iterating a
+// Builder<BlogPost>::paginate() yields BlogPost instances.
+// expect: publishedAt(
+// expect_absent: nonexistentMethod
+---
+=== src/Builder.php ===
+<?php
+namespace Illuminate\Database\Eloquent;
+/** @template TModel of \Illuminate\Database\Eloquent\Model */
+class Builder {
+    /** @return \Illuminate\Pagination\LengthAwarePaginator */
+    public function paginate($perPage = null, $columns = ['*']) {}
+}
+=== src/LengthAwarePaginator.php ===
+<?php
+namespace Illuminate\Pagination;
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @implements \IteratorAggregate<TKey, TValue>
+ */
+class LengthAwarePaginator implements \IteratorAggregate {}
+=== src/BlogPost.php ===
+<?php
+namespace App\Models;
+class BlogPost {
+    public function publishedAt(): void {}
+}
+=== src/Test.php ===
+<?php
+namespace App;
+use App\Models\BlogPost;
+use Illuminate\Database\Eloquent\Builder;
+class Test {
+    /** @param Builder<BlogPost> $query */
+    public function run(Builder $query): void
+    {
+        foreach ($query->paginate() as $post) {
+            $post-><>
+        }
+    }
+}

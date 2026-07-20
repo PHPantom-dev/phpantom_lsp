@@ -403,9 +403,8 @@ Key design decisions to adopt:
    (assertions + types → narrowed types). Each is independently
    testable.
 
-See `references/psalm/src/Psalm/Internal/Algebra.php`,
-`references/psalm/src/Psalm/Internal/Clause.php`, and
-`references/psalm/src/Psalm/Internal/Analyzer/Statements/Expression/AssertionFinder.php`.
+See Psalm's `Psalm\Internal\Algebra`, `Psalm\Internal\Clause`, and
+`Psalm\Internal\Analyzer\Statements\Expression\AssertionFinder`.
 
 **Depends on:** The structured type representation (`PhpType`) has
 landed, which makes reconciliation much simpler than working with
@@ -563,8 +562,7 @@ This eliminates the exponential re-resolution that causes performance
 issues on deeply chained expressions (P20 class of problems).
 
 **References:**
-- Psalm: `NodeTypeProvider` interface in
-  `references/psalm/src/Psalm/NodeTypeProvider.php`
+- Psalm: `NodeTypeProvider` interface (`Psalm\NodeTypeProvider`)
 - Mago: per-node type caching via `spl_object_id` equivalent
 
 ---
@@ -611,8 +609,7 @@ When selecting the final type for a template param:
 
 **References:**
 - Psalm: `TemplateBound` with `appearance_depth` and
-  `getMostSpecificTypeFromBounds` in
-  `references/psalm/src/Psalm/Internal/Type/TemplateResult.php`
+  `getMostSpecificTypeFromBounds` in `Psalm\Internal\Type\TemplateResult`
 
 ---
 
@@ -658,7 +655,7 @@ intentional).
 
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
-  in `references/psalm/src/Psalm/Context.php`
+  (`Psalm\Context`)
 
 ---
 
@@ -682,9 +679,39 @@ that normal code never hits it, but low enough to prevent pathological
 blowup.
 
 **References:**
-- Psalm: literal limit in `Type::combineUnionTypes()` at
-  `references/psalm/src/Psalm/Type.php`
+- Psalm: literal limit in `Type::combineUnionTypes()` (`Psalm\Type`)
 
 
 
 
+
+## T31. Closure literal-return shape inference
+
+**Impact: Low-Medium · Effort: Medium**
+
+A closure whose native return hint is just `array` but whose body
+returns a literal array should get the literal shape as its
+inferred return type, so `array_map()` results carry it:
+
+```php
+$declarations = array_map(function (ASTNode $child): array {
+    return [$child->getType(), $childChildren[1]];
+}, $children);
+
+[$type, $variable] = $declarations[$index];
+$type->getImage();   // "type of '$type' could not be resolved"
+```
+
+Found in the 2026-07 analyze triage: ~10 pdepend errors
+(`tests/.../PHP82/TrueTypeTest.php:89`,
+`AllowNullAndFalseAsStandAloneTypesTest.php:94`,
+`PHPParserVersion81Test.php:1191,1480`) destructure tuples out of
+`array_map` results built this way. PHPStan infers the shape from
+the return statements; without it the destructured elements are
+unresolved. Depends on nothing else in this file; complements the
+call-site inference work in T25.
+
+**References:**
+- PHPStan: closure return type inference in
+  `ClosureReturnStatementsNode` / `TypeSpecifyingExtension` flow.
+- Psalm: `ClosureAnalyzer` return-type widening.

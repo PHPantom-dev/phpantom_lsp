@@ -232,4 +232,24 @@ class Foo {
         assert_eq!(out[0].range.start.line, 0);
         assert_eq!(out[0].range.start.character, 0);
     }
+
+    #[test]
+    fn clear_file_maps_prunes_parse_errors() {
+        // A file with a syntax error populates parse_errors; closing the
+        // file (which calls clear_file_maps) must drop the entry so the
+        // map does not grow for the whole session.
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        backend.update_ast(uri, &Arc::new("<?php\n$x = \"unclosed\n".to_string()));
+        assert!(
+            backend.parse_errors.read().contains_key(uri),
+            "parse errors should be recorded after update_ast"
+        );
+
+        backend.clear_file_maps(uri);
+        assert!(
+            !backend.parse_errors.read().contains_key(uri),
+            "clear_file_maps should remove the file's parse-error entry"
+        );
+    }
 }

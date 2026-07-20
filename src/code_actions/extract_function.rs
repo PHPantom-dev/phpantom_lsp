@@ -10,7 +10,7 @@
 //! variable-type resolution pipeline.
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;

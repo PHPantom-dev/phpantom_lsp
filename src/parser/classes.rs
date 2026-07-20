@@ -4,15 +4,15 @@ use crate::php_type::PhpType;
 use crate::types::TypeAliasDef;
 use crate::util::strip_fqn_prefix;
 use mago_span::HasSpan;
-use mago_syntax::ast::attribute::AttributeList;
-use mago_syntax::ast::class_like::enum_case::EnumCaseItem;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::method::{Method, MethodBody};
-use mago_syntax::ast::class_like::property::{Property, PropertyItem};
-use mago_syntax::ast::class_like::trait_use::{
+use mago_syntax::cst::attribute::AttributeList;
+use mago_syntax::cst::class_like::enum_case::EnumCaseItem;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::method::{Method, MethodBody};
+use mago_syntax::cst::class_like::property::{Property, PropertyItem};
+use mago_syntax::cst::class_like::trait_use::{
     TraitUseAdaptation, TraitUseMethodReference, TraitUseSpecification,
 };
-use mago_syntax::ast::sequence::Sequence;
+use mago_syntax::cst::sequence::Sequence;
 
 /// Check whether a method has the `#[Scope]` attribute (Laravel 11+).
 ///
@@ -143,7 +143,7 @@ fn parse_attribute_target_flags(text: &str) -> u8 {
 /// given synthetic names of the form `__anonymous@<offset>` so that
 /// [`find_class_at_offset`](crate::util::find_class_at_offset) can resolve
 /// `$this` inside their bodies.
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str, last_segment};
@@ -186,6 +186,8 @@ struct ClassDocblockInfo {
     /// Each entry is `(MixinClassName, [TypeArg1, TypeArg2, …])`.
     /// Only populated for mixins that have generic arguments.
     mixin_generics: Vec<(Atom, Vec<PhpType>)>,
+    /// Required base class from a `@phpstan-require-extends` tag (traits only).
+    require_extends: Option<Atom>,
     /// URLs from `@link` and `@see` tags in the class-level docblock.
     links: Vec<String>,
     /// `@see` references from the class-level docblock.
@@ -256,6 +258,7 @@ fn extract_class_docblock<'a>(
             .collect(),
         mixins,
         mixin_generics,
+        require_extends: docblock::extract_require_extends_from_info(&info).map(|n| atom(&n)),
         links: docblock::extract_link_urls_from_info(&info),
         see_refs: docblock::extract_see_references_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
@@ -1016,6 +1019,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: class.modifiers.contains_final(),
                         is_abstract: class.modifiers.contains_abstract(),
                         deprecation_message: class_depr.message,
@@ -1127,6 +1131,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: false,
                         is_abstract: false,
                         deprecation_message: iface_depr.message,
@@ -1214,6 +1219,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: false,
                         is_abstract: false,
                         deprecation_message: trait_depr.message,
@@ -1259,11 +1265,29 @@ impl Backend {
 
                     let ExtractedMembers {
                         methods,
-                        properties,
+                        mut properties,
                         constants,
                         mut used_traits,
                         ..
                     } = Self::extract_class_like_members(enum_def.members.iter(), doc_ctx, &[]);
+
+                    // Every enum case exposes a readonly `name` property, and
+                    // backed enums additionally expose a `value` property whose
+                    // type is the backing type.  These are real instance
+                    // properties in PHP (declared on the UnitEnum/BackedEnum
+                    // interfaces via stubs, but interface properties are not
+                    // merged into implementors), so synthesize them here.
+                    properties.push(crate::types::PropertyInfo::virtual_property_typed(
+                        "name",
+                        Some(&PhpType::Named("string".to_string())),
+                    ));
+                    if let Some(hint) = enum_def.backing_type_hint.as_ref() {
+                        let value_type = crate::parser::extract_hint_type(&hint.hint);
+                        properties.push(crate::types::PropertyInfo::virtual_property_typed(
+                            "value",
+                            Some(&value_type),
+                        ));
+                    }
 
                     // Enums implicitly implement UnitEnum or BackedEnum.
                     // We add the interface with a leading backslash so that
@@ -1332,6 +1356,7 @@ impl Backend {
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
+                        require_extends: doc_info.require_extends,
                         is_final: true,
                         is_abstract: false,
                         deprecation_message: enum_depr.message,
@@ -1533,6 +1558,7 @@ impl Backend {
             used_traits,
             mixins: vec![],
             mixin_generics: vec![],
+            require_extends: None,
             is_final: false,
             is_abstract: false,
             deprecation_message: None,
@@ -2045,14 +2071,18 @@ impl Backend {
                     // Check for a #[LanguageLevelTypeAware] override on the
                     // method's return type.  When present, it replaces the
                     // native type hint with the version-appropriate string.
-                    let native_return_type = if let Some(ctx) = doc_ctx
+                    let lang_level_return = if let Some(ctx) = doc_ctx
                         && let Some(ver) = ctx.php_version
                     {
                         super::extract_language_level_type(&method.attribute_lists, ctx, ver)
-                            .or(raw_native_return_type)
                     } else {
-                        raw_native_return_type
+                        None
                     };
+                    // The `#[LanguageLevelTypeAware]` attribute is JetBrains'
+                    // authoritative, version-resolved return type, so the
+                    // accompanying legacy `@return` docblock must not widen it.
+                    let return_from_lang_level = lang_level_return.is_some();
+                    let native_return_type = lang_level_return.or(raw_native_return_type);
                     let is_static = method.modifiers.iter().any(|m| m.is_static());
                     let visibility = extract_visibility(method.modifiers.iter());
 
@@ -2082,10 +2112,14 @@ impl Backend {
                         method_template_bindings,
                     ) = if let Some(ref info) = method_docblock_info {
                         let parsed_doc_type = docblock::extract_return_type_from_info(info);
-                        let effective = docblock::resolve_effective_type_typed(
-                            native_return_type.as_ref(),
-                            parsed_doc_type.as_ref(),
-                        );
+                        let effective = if return_from_lang_level {
+                            native_return_type.clone()
+                        } else {
+                            docblock::resolve_effective_type_typed(
+                                native_return_type.as_ref(),
+                                parsed_doc_type.as_ref(),
+                            )
+                        };
 
                         // Apply #[ArrayShape] override if present.
                         let effective = if let Some(ctx) = doc_ctx {
@@ -2375,6 +2409,13 @@ impl Backend {
                         }
                     }
 
+                    // A docblock `@param` merge above may have overwritten
+                    // `type_hint` with a non-nullable docblock type. Re-fold
+                    // null for parameters whose default value is `null`.
+                    for param in &mut parameters {
+                        param.apply_null_default();
+                    }
+
                     let has_scope_attr = has_scope_attribute(method);
 
                     // Extract description, return description, link, and
@@ -2443,6 +2484,8 @@ impl Backend {
                         has_scope_attribute: has_scope_attr,
                         is_abstract: method.is_abstract(),
                         is_virtual: false,
+                        is_macro: false,
+                        is_inferred_return: false,
                         type_assertions,
                         throws,
                         if_this_is: method_docblock_text
@@ -2694,7 +2737,7 @@ impl Backend {
                                         };
                                     let alias =
                                         alias_adapt.alias.as_ref().map(|a| atom_bytes(a.value));
-                                    let visibility = alias_adapt.visibility.as_ref().map(|m| {
+                                    let visibility = alias_adapt.modifier.as_ref().map(|m| {
                                         if m.is_private() {
                                             Visibility::Private
                                         } else if m.is_protected() {

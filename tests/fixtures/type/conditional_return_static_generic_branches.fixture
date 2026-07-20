@@ -1,0 +1,29 @@
+// test: conditional return with nested static<...> generic branches resolves the chunk element
+// feature: completion
+// A conditional @return whose branches are static<...> generics must keep the
+// generic arguments so the foreach element type (a nested Collection) resolves.
+// expect: chunkMarker(
+---
+<?php
+
+/**
+ * @template TKey
+ * @template TValue
+ */
+class Collection {
+    /**
+     * @return ($preserveKeys is true ? static<int, static> : static<int, static<int, TValue>>)
+     */
+    public function chunk($size, $preserveKeys = true) {}
+
+    public function chunkMarker(): void {}
+}
+
+/**
+ * @param Collection<int, string> $tokens
+ */
+function foo(Collection $tokens): void {
+    foreach ($tokens->chunk(500) as $batch) {
+        $batch-><>
+    }
+}

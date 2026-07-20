@@ -38,6 +38,8 @@ enum MemberOrigin {
     /// The member is virtual (synthesized from `@method`, `@property`,
     /// `@mixin`, or a framework provider).
     Virtual,
+    /// The member is a macro registration.
+    Macro,
 }
 
 /// Check whether the **raw** (unmerged) class declares a member with the
@@ -89,12 +91,15 @@ fn build_origin_lines(
     member_name: &str,
     owner: &ClassInfo,
     is_virtual: bool,
+    is_macro: bool,
     member_kind: MemberKindForOrigin,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     let mut origins: Vec<MemberOrigin> = Vec::new();
 
-    if is_virtual {
+    if is_macro {
+        origins.push(MemberOrigin::Macro);
+    } else if is_virtual {
         origins.push(MemberOrigin::Virtual);
     }
 
@@ -158,6 +163,7 @@ fn build_origin_lines(
             MemberOrigin::Override(name) => format!("↑ overrides **{}**", name),
             MemberOrigin::Implements(name) => format!("◆ implements **{}**", name),
             MemberOrigin::Virtual => "👻 virtual".to_string(),
+            MemberOrigin::Macro => "🔌 macro".to_string(),
         })
         .collect();
 
@@ -440,6 +446,40 @@ impl Backend {
         }
     }
 
+    /// Return a Markdown provenance line for a class FQN, or `None` for
+    /// project-local classes.
+    pub(crate) fn provenance_line_for_class(&self, fqn: &str) -> Option<String> {
+        let class_uri = self.fqn_uri_index.read().get(fqn).cloned()?;
+        let (origin, pkg_name) = self.package_info_for_uri(&class_uri);
+        format_provenance_line(origin, pkg_name.as_deref())
+    }
+
+    /// Return a Markdown provenance line for a function by name.
+    ///
+    /// By the time hover asks for provenance the function has already
+    /// been resolved, so `global_functions` holds its defining URI
+    /// (including `phpantom-stub-fn://` for built-ins). Falls back to
+    /// the autoload index for functions discovered by the byte-level
+    /// scan but not yet parsed.
+    pub(crate) fn provenance_line_for_function(&self, func_name: &str) -> Option<String> {
+        let uri = self
+            .global_functions
+            .read()
+            .get(func_name)
+            .map(|(uri, _)| uri.clone());
+        if let Some(uri) = uri {
+            let (origin, pkg_name) = self.package_info_for_uri(&uri);
+            return format_provenance_line(origin, pkg_name.as_deref());
+        }
+        let path = self
+            .autoload_function_index
+            .read()
+            .get(func_name)
+            .cloned()?;
+        let (origin, pkg_name) = self.package_info_for_path(&path);
+        format_provenance_line(origin, pkg_name.as_deref())
+    }
+
     /// Handle a `textDocument/hover` request.
     ///
     /// Returns `Some(Hover)` when the symbol under the cursor can be
@@ -447,6 +487,7 @@ impl Backend {
     /// fails or the cursor is not on a navigable symbol.
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
         let _body_infer_guard = self.activate_body_return_inferrer();
+        let _auth_user_guard = self.activate_auth_user_resolver();
         let offset = crate::util::position_to_offset(content, position);
 
         // Try the exact cursor offset first.
@@ -531,6 +572,7 @@ impl Backend {
                     function_loader: Some(&function_loader),
                     scope_var_resolver: None,
                     is_in_static_method: false,
+                    preserve_static: false,
                 };
 
                 let access_kind = if *is_static {
@@ -632,6 +674,17 @@ impl Backend {
 
                     let hover = match member_result {
                         Some(HoverMemberHit::Method(ref method)) => {
+                            let mut method = method.clone();
+                            if let Some((_date_class, date_return_type)) =
+                                Self::configured_laravel_date_return(
+                                    &owner,
+                                    member_name,
+                                    &class_loader,
+                                )
+                            {
+                                method.return_type = Some(date_return_type);
+                                method.is_inferred_return = true;
+                            }
                             let declaring = find_declaring_class(
                                 &owner,
                                 member_name,
@@ -641,7 +694,7 @@ impl Backend {
                             Some((
                                 declaring.name.to_string(),
                                 self.hover_for_method(
-                                    method,
+                                    &method,
                                     &declaring,
                                     &class_loader,
                                     uri,
@@ -746,9 +799,12 @@ impl Backend {
                 let is_this = *ssp_kind == SelfStaticParentKind::This;
 
                 let resolved = match ssp_kind {
-                    SelfStaticParentKind::Self_
-                    | SelfStaticParentKind::Static
-                    | SelfStaticParentKind::This => current_class.cloned(),
+                    SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => {
+                        current_class.cloned()
+                    }
+                    SelfStaticParentKind::This => self
+                        .resolve_closure_this_override(uri, content, cursor_offset)
+                        .or_else(|| current_class.cloned()),
                     SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
                         .and_then(|parent_name| {
@@ -809,11 +865,95 @@ impl Backend {
                 }
             }
 
-            SymbolKind::LaravelStringKey { .. }
+            SymbolKind::LaravelStringKey { kind, key } => self.hover_laravel_string_key(kind, key),
+
+            SymbolKind::LaravelMacroString { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
             | SymbolKind::Comment => None,
         }
+    }
+
+    /// Build hover content for a Laravel string key (route name, config
+    /// key, view name, or translation key).
+    fn hover_laravel_string_key(
+        &self,
+        kind: &crate::symbol_map::LaravelStringKind,
+        key: &str,
+    ) -> Option<Hover> {
+        use crate::symbol_map::LaravelStringKind;
+
+        let (label, detail) = match kind {
+            LaravelStringKind::Route => {
+                // Try to resolve the route to show where it's defined.
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/routes/")
+                        .next()
+                        .map(|p| format!("routes/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("Defined in `{}`", short_path)
+                } else {
+                    "Route name".to_string()
+                };
+                ("Route", detail)
+            }
+            LaravelStringKind::Config => {
+                // Try to resolve the config key to show its value.
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/config/")
+                        .next()
+                        .map(|p| format!("config/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("Defined in `{}`", short_path)
+                } else {
+                    "Config key".to_string()
+                };
+                ("Config", detail)
+            }
+            LaravelStringKind::View => {
+                // Show the resolved file path.
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/resources/views/")
+                        .next()
+                        .map(|p| format!("resources/views/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("`{}`", short_path)
+                } else {
+                    "View template".to_string()
+                };
+                ("View", detail)
+            }
+            LaravelStringKind::Trans => {
+                let locations =
+                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let detail = if let Some(loc) = locations.first() {
+                    let path = loc.uri.path();
+                    let short_path = path
+                        .rsplit("/lang/")
+                        .next()
+                        .map(|p| format!("lang/{}", p))
+                        .unwrap_or_else(|| path.to_string());
+                    format!("Defined in `{}`", short_path)
+                } else {
+                    "Translation key".to_string()
+                };
+                ("Trans", detail)
+            }
+        };
+
+        Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))
     }
 
     /// Look up a global constant by name, returning its value if found.
@@ -1094,9 +1234,33 @@ impl Backend {
         _ctx: &FileContext,
         function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
     ) -> Option<Hover> {
-        if let Some(func) = function_loader(name) {
+        if let Some(mut func) = function_loader(name) {
+            let is_configured_date_helper = matches!(
+                name.trim_start_matches('\\').rsplit('\\').next(),
+                Some("now" | "today")
+            );
+            // Only when the configured date class actually resolves do we
+            // override the declared return type; the `(inferred)` annotation
+            // must reflect that override, not merely the helper's name (a
+            // user-defined `now()` in a non-Laravel project keeps its own
+            // return type unannotated).
+            let mut inferred_date_return = false;
+            if is_configured_date_helper
+                && let Some(date_class) = self
+                    .find_or_load_class(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+            {
+                let date_type = crate::php_type::PhpType::Named(date_class.fqn().to_string());
+                func.return_type = Some(date_type);
+                inferred_date_return = true;
+            }
             let resolved_see = self.resolve_see_refs(&func.see_refs, uri, content);
-            Some(hover_for_function(&func, Some(&resolved_see)))
+            let provenance = self.provenance_line_for_function(name);
+            Some(hover_for_function(
+                &func,
+                Some(&resolved_see),
+                provenance,
+                inferred_date_return,
+            ))
         } else {
             None
         }
@@ -1174,6 +1338,7 @@ impl Backend {
             &method.name,
             owner,
             method.is_virtual,
+            method.is_macro,
             MemberKindForOrigin::Method,
             class_loader,
         );
@@ -1198,11 +1363,13 @@ impl Backend {
         format_see_refs(&resolved_see, &method.links, &mut lines);
 
         // Build the readable param/return section as markdown.
+        let show_inferred = method.is_inferred_return || inferred_return_type.is_some();
         if let Some(section) = build_param_return_section(
             &method.parameters,
             effective_return,
             method.native_return_type.as_ref(),
             method.return_description.as_deref(),
+            show_inferred,
         ) {
             lines.push(section);
         }
@@ -1215,6 +1382,10 @@ impl Backend {
             &member_line,
         );
         lines.push(code);
+
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
 
         make_hover(lines.join("\n\n"))
     }
@@ -1265,6 +1436,7 @@ impl Backend {
             &property.name,
             owner,
             property.is_virtual,
+            false,
             MemberKindForOrigin::Property,
             class_loader,
         );
@@ -1289,6 +1461,10 @@ impl Backend {
             &member_line,
         );
         lines.push(code);
+
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
 
         make_hover(lines.join("\n\n"))
     }
@@ -1331,6 +1507,7 @@ impl Backend {
             &constant.name,
             owner,
             constant.is_virtual,
+            false,
             MemberKindForOrigin::Constant,
             class_loader,
         );
@@ -1355,6 +1532,10 @@ impl Backend {
             &member_line,
         );
         lines.push(code);
+
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
 
         make_hover(lines.join("\n\n"))
     }
@@ -1458,6 +1639,10 @@ impl Backend {
                 "```php\n<?php\n{}{} {{\n{}}}\n```",
                 ns_line, signature, body_lines
             ));
+        }
+
+        if let Some(prov) = self.provenance_line_for_class(&cls.fqn()) {
+            lines.push(prov);
         }
 
         make_hover(lines.join("\n\n"))

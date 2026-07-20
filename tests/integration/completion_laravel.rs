@@ -791,6 +791,51 @@ class User extends Model {
     );
 }
 
+// ─── Differently-cased relation access still chains ─────────────────────────
+
+#[tokio::test]
+async fn test_relationship_property_access_is_case_insensitive() {
+    // PHP method names are case-insensitive, and Eloquent's `__get()`
+    // magic accessor resolves relations via `method_exists()`, so
+    // `$user->profile` and `$user->PROFILE` resolve the same relationship.
+    let profile_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Profile extends Model {
+    public function getBio(): string { return ''; }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasOne;
+class User extends Model {
+    /** @return HasOne<\\App\\Models\\Profile, $this> */
+    public function profile(): HasOne { return $this->hasOne(Profile::class); }
+    public function test() {
+        $user = new User();
+        $user->PROFILE->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Profile.php", profile_php),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    // "$user->PROFILE->" at line 9, character 24
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 24).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"getBio"),
+        "Differently-cased relation access should still chain to Profile::getBio, got: {:?}",
+        methods
+    );
+}
+
 // ─── $this-> shows relationship properties ──────────────────────────────────
 
 #[tokio::test]
@@ -13035,5 +13080,66 @@ class ColumnTest {
         labels.contains(&"status"),
         "Should offer 'status' column from $casts in where() string, got: {:?}",
         labels
+    );
+}
+
+// ─── @mixin of an Eloquent model exposes the model's virtual members ─────────
+
+#[tokio::test]
+async fn test_mixin_of_model_exposes_relationship_property() {
+    let cart_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class ShoppingCart extends Model {
+    /** @return HasMany<\\App\\Models\\Item, $this> */
+    public function items(): HasMany { return $this->hasMany(Item::class); }
+}
+";
+    let item_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Item extends Model {
+    public function getName(): string { return ''; }
+}
+";
+    let facade_php = "\
+<?php
+namespace App\\Support;
+use App\\Models\\ShoppingCart;
+/**
+ * @mixin ShoppingCart
+ */
+class CartFacade {
+    public function test() {
+        $cart = new CartFacade();
+        $cart->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/ShoppingCart.php", cart_php),
+        ("src/Models/Item.php", item_php),
+        ("src/Support/CartFacade.php", facade_php),
+    ]);
+
+    // Line 9 = "        $cart->", character 15 = after ->
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Support/CartFacade.php",
+        facade_php,
+        9,
+        15,
+    )
+    .await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"items"),
+        "@mixin of a model should expose the model's synthesized 'items' relationship property, got: {:?}",
+        props
     );
 }

@@ -10,9 +10,9 @@
 //! them from outermost to innermost, and builds the linked `SelectionRange`
 //! list that the LSP protocol expects.
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
 use crate::Backend;
@@ -27,7 +27,7 @@ impl Backend {
         content: &str,
         positions: &[Position],
     ) -> Option<Vec<SelectionRange>> {
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 

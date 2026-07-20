@@ -233,6 +233,38 @@ async fn test_completion_chained_stub_function_call() {
     );
 }
 
+/// A leading-backslash global function call (`\response()->`) is an
+/// explicit global-namespace reference and must resolve its return
+/// type the same way the unqualified form (`response()->`) does.
+#[tokio::test]
+async fn test_completion_chained_leading_backslash_function_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///leading_backslash_fn.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Reply {\n",
+        "    public function json(array $data): string { return ''; }\n",
+        "}\n",
+        "function response(): Reply { return new Reply(); }\n",
+        "class Controller {\n",
+        "    public function index(): void {\n",
+        "        \\response()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Column 21 is right after `\response()->`.
+    let items = complete_at(&backend, &uri, text, 7, 21).await;
+
+    let has_json = items.iter().any(|item| item.label.starts_with("json"));
+    assert!(
+        has_json,
+        "Chained completion after \\response()-> should include json, got labels: {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
 /// Verify that `simplexml_load_string` resolves and its return type
 /// includes `SimpleXMLElement`.
 #[tokio::test]
@@ -361,6 +393,7 @@ async fn test_user_function_takes_precedence_over_stub() {
         template_bindings: vec![],
         throws: vec![],
         is_polyfill: false,
+        overloads: vec![],
     };
 
     {

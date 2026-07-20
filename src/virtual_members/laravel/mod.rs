@@ -76,13 +76,18 @@
 //!   (for `User::whereName('Alice')`).
 
 mod accessors;
+mod aliases;
+mod auth;
 mod builder;
 mod casts;
 mod config_keys;
+mod config_values;
 mod env_vars;
 mod factory;
 mod helpers;
+mod macros;
 pub(crate) mod patches;
+mod provider_resources;
 mod relationships;
 mod route_names;
 mod scopes;
@@ -90,12 +95,23 @@ mod trans_keys;
 mod view_names;
 mod where_property;
 
+pub(crate) use aliases::LaravelAliases;
+pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
-    find_all_config_references, resolve_config_key_declaration,
+    collect_laravel_config_declarations, find_all_config_references,
+    laravel_config_prefix_from_uri, resolve_config_key_declaration,
     resolve_config_key_definition_fallback,
 };
 pub(crate) use env_vars::resolve_env_definition;
+pub(crate) use macros::{
+    LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
+    inject_macros, parse_installed_providers, parse_provider_class_list,
+    parse_provider_referenced_classes,
+};
+pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
+pub(crate) use route_names::enumerate_all_route_names;
+pub(crate) use trans_keys::collect_trans_declarations;
 
 /// Unified go-to-definition entry point for all Laravel string-key spans.
 ///
@@ -210,6 +226,7 @@ fn find_string_key_usages(
 }
 
 pub use helpers::extends_eloquent_model;
+pub(crate) use helpers::walk_all_php_expressions;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
 
 pub(crate) use accessors::is_accessor_method;
@@ -219,6 +236,7 @@ use accessors::{
 };
 pub(crate) use where_property::where_property_method_to_column;
 
+pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
@@ -249,6 +267,13 @@ pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Mod
 
 /// The fully-qualified name of the Eloquent Builder class.
 pub const ELOQUENT_BUILDER_FQN: &str = "Illuminate\\Database\\Eloquent\\Builder";
+
+/// The fully-qualified name of Laravel's concrete Carbon subclass, which
+/// the `now()` and `today()` helpers actually instantiate.
+pub const SUPPORT_CARBON_FQN: &str = "Illuminate\\Support\\Carbon";
+
+/// Internal class-loader key for the class selected through `Date::use()`.
+pub const CONFIGURED_DATE_CLASS_FQN: &str = "phpantom-configured-laravel-date-class";
 
 /// Build a substitution map that replaces `static`, `$this`, and `self`
 /// with the given type.

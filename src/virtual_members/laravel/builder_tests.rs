@@ -448,6 +448,60 @@ fn builder_forwarding_multiple_methods() {
 }
 
 #[test]
+fn custom_builder_chain_terminates_on_cyclic_parents() {
+    // `class A extends B; class B extends A; class MyBuilder extends A`.
+    // The cycle is illegal PHP but the walk must still terminate instead of
+    // hanging the request thread.
+    let mut a = make_class("App\\A");
+    a.parent_class = Some(atom("App\\B"));
+    let mut b = make_class("App\\B");
+    b.parent_class = Some(atom("App\\A"));
+    let mut my_builder = make_class("App\\MyBuilder");
+    my_builder.parent_class = Some(atom("App\\A"));
+
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "App\\A" => Some(Arc::new(a.clone())),
+            "App\\B" => Some(Arc::new(b.clone())),
+            "App\\MyBuilder" => Some(Arc::new(my_builder.clone())),
+            _ => None,
+        }
+    };
+
+    assert!(
+        !custom_builder_chain_declares_method(&my_builder, "scopeFoo", &loader),
+        "no class in the cyclic chain declares scopeFoo"
+    );
+}
+
+#[test]
+fn custom_builder_chain_finds_method_through_cyclic_parents() {
+    // Same cycle, but the parent `A` genuinely declares the method. It must be
+    // found before the cycle is detected.
+    let mut a = make_class("App\\A");
+    a.parent_class = Some(atom("App\\B"));
+    a.methods.push(Arc::new(make_method("scopeFoo", None)));
+    let mut b = make_class("App\\B");
+    b.parent_class = Some(atom("App\\A"));
+    let mut my_builder = make_class("App\\MyBuilder");
+    my_builder.parent_class = Some(atom("App\\A"));
+
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "App\\A" => Some(Arc::new(a.clone())),
+            "App\\B" => Some(Arc::new(b.clone())),
+            "App\\MyBuilder" => Some(Arc::new(my_builder.clone())),
+            _ => None,
+        }
+    };
+
+    assert!(
+        custom_builder_chain_declares_method(&my_builder, "scopeFoo", &loader),
+        "scopeFoo is declared on the parent A"
+    );
+}
+
+#[test]
 fn builder_forwarding_with_no_return_type() {
     let builder = make_builder(vec![make_method("doSomething", None)]);
     let user = make_class("App\\Models\\User");

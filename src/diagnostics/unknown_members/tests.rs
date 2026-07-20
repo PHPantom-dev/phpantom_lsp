@@ -163,7 +163,7 @@ echo Foo::class;
 // ── Magic methods ───────────────────────────────────────────────
 
 #[test]
-fn diagnostic_when_class_has_magic_call_but_chain_continues() {
+fn no_diagnostic_when_class_has_magic_call() {
     let php = r#"<?php
 class Dynamic {
 public function __call(string $name, array $args): mixed { return null; }
@@ -176,15 +176,9 @@ $d->anything();
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag unknown method even when __call exists, got: {diags:?}"
-    );
     assert!(
-        diags[0].message.contains("anything"),
-        "Diagnostic should mention 'anything', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "Method dispatched through __call is valid and must not be flagged, got: {diags:?}"
     );
 }
 
@@ -206,7 +200,7 @@ echo $d->anything;
 }
 
 #[test]
-fn diagnostic_when_class_has_magic_call_static_but_chain_continues() {
+fn no_diagnostic_when_class_has_magic_call_static() {
     let php = r#"<?php
 class Dynamic {
 public static function __callStatic(string $name, array $args): mixed { return null; }
@@ -216,15 +210,9 @@ Dynamic::anything();
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag unknown static method even when __callStatic exists, got: {diags:?}"
-    );
     assert!(
-        diags[0].message.contains("anything"),
-        "Diagnostic should mention 'anything', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "Static method dispatched through __callStatic is valid and must not be flagged, got: {diags:?}"
     );
 }
 
@@ -850,7 +838,7 @@ $svc->run();
 // ── Parent with magic ───────────────────────────────────────────
 
 #[test]
-fn diagnostic_when_parent_has_magic_call_but_chain_continues() {
+fn no_diagnostic_when_parent_has_magic_call() {
     let php = r#"<?php
 class Base {
 public function __call(string $name, array $args): mixed { return null; }
@@ -864,15 +852,9 @@ $c->anything();
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag unknown method even when parent has __call, got: {diags:?}"
-    );
     assert!(
-        diags[0].message.contains("anything"),
-        "Diagnostic should mention 'anything', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "Method inherited through a parent's __call is valid and must not be flagged, got: {diags:?}"
     );
 }
 
@@ -1022,7 +1004,13 @@ public function run(): void {
 }
 
 #[test]
-fn diagnostic_when_any_union_branch_has_magic_call_but_chain_continues() {
+fn no_diagnostic_when_any_union_branch_has_magic_call() {
+    // When the subject is a union and any branch defines `__call`, the
+    // access is dynamically dispatched through that branch at runtime,
+    // so it must not be flagged (matches PHPStan, and the single-class
+    // behaviour).  This is the Mockery higher-order-message pattern:
+    // `$mock->shouldReceive(...)` returns a union where one branch has
+    // `__call`, so the fluent method must not warn.
     let php = r#"<?php
 class Normal {
 public function known(): void {}
@@ -1045,15 +1033,9 @@ public function run(): void {
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag unknown method even when a union branch has __call, got: {diags:?}"
-    );
     assert!(
-        diags[0].message.contains("anything"),
-        "Diagnostic should mention 'anything', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "Method dispatched through a union branch's __call must not be flagged, got: {diags:?}"
     );
 }
 
@@ -1111,6 +1093,58 @@ echo $obj->whatever;
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+}
+
+#[test]
+fn no_diagnostic_for_nested_stdclass_property_chain() {
+    // A property assigned `new stdClass()` resolves to stdClass when
+    // read again, so a further property access on it is not flagged.
+    let php = r#"<?php
+function test(): void {
+$settings = new stdClass();
+$settings->cache = new stdClass();
+$settings->cache->ttl = 3600;
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+}
+
+#[test]
+fn no_diagnostic_for_deeply_nested_stdclass_property_chain() {
+    let php = r#"<?php
+function test(): void {
+$root = new stdClass();
+$root->a = new stdClass();
+$root->a->b = new stdClass();
+$root->a->b->c = 1;
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+}
+
+#[test]
+fn stdclass_property_key_invalidated_on_base_reassignment() {
+    // Reassigning `$s` drops the stale `$s->cache` type, so `$s->cache`
+    // resolves against the new object (a typed class here) rather than
+    // the stdClass assigned before the reassignment.
+    let php = r#"<?php
+class Holder { public ?Holder $cache = null; public int $ttl = 0; }
+function test(): void {
+$s = new stdClass();
+$s->cache = new stdClass();
+$s = new Holder();
+echo $s->cache->ttl;
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    // `$s->cache` is now `?Holder`, which has a `ttl` property — no
+    // diagnostic, and crucially not resolved as the stale stdClass.
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
 }
 
@@ -2331,6 +2365,26 @@ public function test(): void {}
 }
 
 #[test]
+fn no_diagnostic_for_see_tag_hash_fragment_reference() {
+    let php = r#"<?php
+class Foo {
+public function bar(): void {}
+
+/**
+ * @see Foo#bar
+ */
+public function test(): void {}
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for @see tag hash-fragment reference, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_inline_see_tag_method_reference() {
     let php = r#"<?php
 class Foo {
@@ -2887,6 +2941,83 @@ class Svc {
     assert!(
         scalar_diags.is_empty(),
         "should not flag scalar_member_access on $validMandate->details after guard clause, got: {scalar_diags:?}"
+    );
+}
+
+/// `fn($x) => $x instanceof Foo && $x->method()` — an untyped arrow
+/// function parameter narrowed by an earlier `&&` conjunct must be
+/// visible to the member access in a later conjunct.  This mirrors the
+/// production `analyse` path where the forward-walker scope cache is
+/// built before diagnostics run.
+#[test]
+fn arrow_fn_param_narrowed_by_and_instanceof_scope_cache() {
+    let php = r#"<?php
+class Collection {
+    public function contains($x): bool { return true; }
+}
+class Svc {
+    public function run(): void {
+        $faq1 = 1;
+        $cb = fn($faqs) => $faqs instanceof Collection && $faqs->contains($faq1);
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    backend.config.lock().diagnostics.unresolved_member_access = Some(true);
+    backend.update_ast("file:///test.php", php);
+
+    let _scope_guard = crate::completion::variable::forward_walk::with_diagnostic_scope_cache();
+    {
+        let file_ctx = backend.file_context("file:///test.php");
+        let class_loader = backend.class_loader(&file_ctx);
+        let function_loader_cl = backend.function_loader(&file_ctx);
+        let constant_loader_cl = backend.constant_loader();
+        let loaders = crate::completion::resolver::Loaders {
+            function_loader: Some(&function_loader_cl),
+            constant_loader: Some(&constant_loader_cl),
+        };
+        let local_classes: Vec<std::sync::Arc<crate::types::ClassInfo>> = backend
+            .uri_classes_index
+            .read()
+            .get("file:///test.php")
+            .cloned()
+            .unwrap_or_default();
+        crate::completion::variable::forward_walk::build_diagnostic_scopes(
+            php,
+            &local_classes,
+            &class_loader,
+            loaders,
+            Some(&backend.resolved_class_cache),
+        );
+    }
+
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics("file:///test.php", php, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "arrow-fn param narrowed by `&&` instanceof should resolve, got: {diags:?}"
+    );
+}
+
+#[test]
+fn arrow_fn_param_narrowed_by_and_instanceof_fresh_path() {
+    let php = r#"<?php
+class Collection {
+    public function contains($x): bool { return true; }
+}
+class Svc {
+    public function run(): void {
+        $faq1 = 1;
+        $cb = fn($faqs) => $faqs instanceof Collection && $faqs->contains($faq1);
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    backend.config.lock().diagnostics.unresolved_member_access = Some(true);
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "arrow-fn param narrowed by `&&` instanceof should resolve (fresh path), got: {diags:?}"
     );
 }
 
@@ -4074,11 +4205,11 @@ while ($row = nextRow()) {
 
 // ── __call chain continuation ───────────────────────────────────
 
-/// When a class defines `__call` with a typed return, unknown methods
-/// are flagged but the chain continues.  Known methods after the
-/// unknown call should NOT be flagged.
+/// When a class defines `__call` with a typed return, the dispatched
+/// method is valid PHP and must not be flagged.  Known methods after
+/// it resolve through the `__call` return type.
 #[test]
-fn magic_call_chain_flags_unknown_but_continues() {
+fn magic_call_chain_not_flagged_and_continues() {
     let php = r#"<?php
 class AppleCart {
 public function getApples(): array { return []; }
@@ -4096,22 +4227,17 @@ public function run(): void {
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag only doesntExist(), not first() or getApples(), got: {diags:?}"
-    );
     assert!(
-        diags[0].message.contains("doesntExist"),
-        "Diagnostic should mention 'doesntExist', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "doesntExist() is dispatched through __call (returns static), so nothing should be flagged, got: {diags:?}"
     );
 }
 
-/// Two unknown methods in a chain should both be flagged, but known
-/// methods between and after them should not.
+/// Multiple `__call`-dispatched methods in a chain are all valid and
+/// none should be flagged; known methods between and after them
+/// resolve through the `__call` return type.
 #[test]
-fn magic_call_chain_flags_multiple_unknown_methods() {
+fn magic_call_chain_multiple_dynamic_methods_not_flagged() {
     let php = r#"<?php
 class AppleCart {
 public function getApples(): array { return []; }
@@ -4130,30 +4256,15 @@ public function run(): void {
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    // First statement: doesntExist (1 diagnostic)
-    // Second statement: doesntExist + alsoDoesntExist (2 diagnostics)
-    let unknown_diags: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("doesntExist") || d.message.contains("alsoDoesntExist"))
-        .collect();
-    assert_eq!(
-        unknown_diags.len(),
-        3,
-        "Should flag doesntExist twice and alsoDoesntExist once, got: {diags:?}"
-    );
-    // first() and getApples() should NOT be flagged
-    let false_positives: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("first") || d.message.contains("getApples"))
-        .collect();
     assert!(
-        false_positives.is_empty(),
-        "Should not flag first() or getApples(), got: {false_positives:?}"
+        diags.is_empty(),
+        "Dynamic methods dispatched through __call must not be flagged, got: {diags:?}"
     );
 }
 
 /// When `__call` returns a concrete type (not self/static), the
-/// chain resolves to that type after the unknown method.
+/// dispatched method is not flagged and the chain resolves to that
+/// type afterwards.
 #[test]
 fn magic_call_concrete_return_continues_chain() {
     let php = r#"<?php
@@ -4172,23 +4283,18 @@ public function run(): void {
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag 'anything' but not 'getData', got: {diags:?}"
-    );
     assert!(
-        diags[0].message.contains("anything"),
-        "Diagnostic should mention 'anything', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "anything() dispatches through __call (returns Result), getData() resolves — nothing to flag, got: {diags:?}"
     );
 }
 
-/// When `__call` returns `mixed`, the chain cannot recover.
-/// The unknown method is flagged, and downstream methods produce
-/// unresolvable-chain diagnostics.
+/// When `__call` returns `mixed`, the dispatched method is still not
+/// flagged.  The chain type becomes `mixed`, which is unresolvable, so
+/// downstream accesses are simply unverifiable (no diagnostic by
+/// default) rather than flagged as unknown members.
 #[test]
-fn magic_call_mixed_return_breaks_chain_downstream() {
+fn magic_call_mixed_return_not_flagged() {
     let php = r#"<?php
 class Loose {
 public function __call(string $name, array $args): mixed { return null; }
@@ -4202,13 +4308,9 @@ public function run(): void {
 "#;
     let backend = Backend::new_test();
     let diags = collect(&backend, "file:///test.php", php);
-    // 'unknown' is flagged (magic fallback, chain continues in
-    // principle but mixed resolves to nothing).
-    // 'somethingElse' should get an unresolvable-chain diagnostic
-    // because mixed yields no class info.
     assert!(
-        diags.iter().any(|d| d.message.contains("unknown")),
-        "Should flag 'unknown', got: {diags:?}"
+        !diags.iter().any(|d| d.message.contains("unknown")),
+        "unknown() is dispatched through __call and must not be flagged, got: {diags:?}"
     );
 }
 
@@ -4218,7 +4320,7 @@ fn no_false_positive_when_variable_reassigned_inside_try_block() {
     // after the reassignment (still inside the try) should resolve
     // against the new type, not the original.
     let php = r#"<?php
-class LuxplusCustomer {
+class AppCustomer {
 public function getName(): string { return ''; }
 }
 class MollieCustomer {
@@ -4228,10 +4330,10 @@ class MolliePayment {
 public function getCheckoutUrl(): string { return ''; }
 }
 class MollieClient {
-public function getOrCreateCustomer(LuxplusCustomer $c): MollieCustomer { return new MollieCustomer(); }
+public function getOrCreateCustomer(AppCustomer $c): MollieCustomer { return new MollieCustomer(); }
 }
 class Gateway {
-public function charge(LuxplusCustomer $customer): void {
+public function charge(AppCustomer $customer): void {
     $client = new MollieClient();
     try {
         $customer = $client->getOrCreateCustomer($customer);
@@ -4559,6 +4661,58 @@ public function calculateCost(array $items): Decimal {
     );
 }
 
+/// A call whose return type is `object` is the "any object" escape
+/// hatch: property/method access on the result is always valid at
+/// runtime, so no unresolved-member diagnostic should fire.
+#[test]
+fn no_diagnostic_for_object_return_type_member_access() {
+    let php = r#"<?php
+class Repo {
+    public function all(): object { return new \stdClass(); }
+}
+function test(Repo $r): void {
+    $x = $r->all()->projects ?? [];
+}
+"#;
+    let backend = Backend::new_test();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for member access on object return type, got: {diags:?}"
+    );
+}
+
+/// Adding nullability (`?object`) must not lose the `object` type and
+/// leave the subject unresolvable.  Property access on a `?object`
+/// return is treated the same as a plain `object` return.
+#[test]
+fn no_diagnostic_for_nullable_object_return_type_member_access() {
+    let php = r#"<?php
+class Repo {
+    public function all(): ?object { return new \stdClass(); }
+}
+function test(Repo $r): void {
+    $x = $r->all()->projects ?? [];
+}
+"#;
+    let backend = Backend::new_test();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for member access on nullable object return type, got: {diags:?}"
+    );
+}
+
 #[test]
 fn no_diagnostic_for_object_parameter_type() {
     let php = r#"<?php
@@ -4590,6 +4744,141 @@ if (is_object($data)) {
     assert!(
         diags.is_empty(),
         "expected no diagnostics after is_object() guard, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_after_is_object_guard_on_real_union() {
+    let php = r#"<?php
+class Thing {
+    public function bar(): void {}
+}
+function test(string|Thing $file): void {
+    if (is_object($file)) {
+        $file->bar();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    backend.config.lock().diagnostics.unresolved_member_access = Some(true);
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after is_object() guard on a real union, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_scalar_member_access_after_is_object_guard_on_plain_string() {
+    // When upstream type inference produced a plain `string` type for a
+    // variable that can, at runtime, also be an object (e.g. a foreach
+    // element whose type was under-inferred), an `is_object()` guard
+    // must still stop `scalar_member_access` on the guarded access —
+    // trust the runtime check over the incomplete static type.
+    let php = r#"<?php
+function test(string $file): void {
+    if (is_object($file)) {
+        $file->getPathname();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    backend.config.lock().diagnostics.unresolved_member_access = Some(true);
+    let diags = collect(&backend, "file:///test.php", php);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $file->getPathname() inside is_object() guard, got: {scalar_diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_isset_on_missing_property() {
+    let php = r#"<?php
+class Item {
+    public string $name = '';
+}
+
+function test(Item $item): void {
+    if (isset($item->maybeDynamic)) {
+        echo 'ok';
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "isset() should suppress unknown-property diagnostics, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_empty_on_missing_property() {
+    let php = r#"<?php
+class Item {
+    public string $name = '';
+}
+
+function test(Item $item): void {
+    if (empty($item->maybeDynamic)) {
+        echo 'ok';
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "empty() should suppress unknown-property diagnostics, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_scalar_member_access_for_isset_on_union_with_stdclass() {
+    let php = r#"<?php
+class Item {
+    public string $name = '';
+}
+
+function test(Item|\stdClass $item): void {
+    if (isset($item->maybeDynamic)) {
+        echo 'ok';
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "isset() on a union with stdClass should not flag the other union members, got: {diags:?}"
+    );
+}
+
+#[test]
+fn still_flags_bare_access_to_missing_property_outside_isset() {
+    // Sanity check: isset()'s suppression must not leak to a sibling
+    // bare access on the same property.
+    let php = r#"<?php
+class Item {
+    public string $name = '';
+}
+
+function test(Item $item): void {
+    if (isset($item->maybeDynamic)) {
+        echo 'ok';
+    }
+    echo $item->maybeDynamic;
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.iter().any(|d| d.message.contains("maybeDynamic")),
+        "bare access outside isset() should still be flagged, got: {diags:?}"
     );
 }
 
@@ -5290,5 +5579,127 @@ $svc->getConnection()->customMethod();
     assert!(
         diags.is_empty(),
         "expected no diagnostics for arbitrary methods on SoapClient subclass, got: {diags:?}",
+    );
+}
+
+/// `$m->prop = null;` records the property as exactly `null`.  A following
+/// not-null assertion (`@phpstan-assert !null`, e.g. PHPUnit's
+/// `assertNotNull`) must strip that tracked `null` so the subsequent member
+/// access is not flagged as a scalar member access on `null`.  Class-based
+/// exclusion alone cannot remove the `null` pseudo-type.
+#[test]
+fn not_null_assert_strips_tracked_null_on_property() {
+    let php = r#"<?php
+class Clock {
+    public function toString(): string { return ''; }
+}
+class Model {
+    public ?Clock $at = null;
+    public function save(): void {}
+}
+class Helper {
+    /** @phpstan-assert !null $actual */
+    public static function assertNotNull(mixed $actual): void {}
+}
+class Demo {
+    public function run(Model $m): void {
+        $m->at = null;
+        $m->save();
+        Helper::assertNotNull($m->at);
+        echo $m->at->toString();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "assertNotNull should strip the tracked null, got: {scalar_diags:?}"
+    );
+}
+
+/// A `@var array{First, Second}` annotation on an assignment must let
+/// integer-indexed access resolve each positional entry to its own type,
+/// so member access on `$pair[0]` / `$pair[1]` verifies against the right
+/// class instead of reporting the subject type as unresolved.
+#[test]
+fn positional_shape_var_annotation_resolves_int_index_element() {
+    let php = r#"<?php
+class Label {
+public function labelOnly(): void {}
+}
+class Stmt {
+public function stmtOnly(): void {}
+}
+class Node {
+/** @return Node[] */
+public function getChildren(): array { return []; }
+}
+function test(Node $n): void {
+/** @var array{Label, Stmt} $pair */
+$pair = $n->getChildren();
+$pair[0]->labelOnly();
+$pair[1]->stmtOnly();
+}
+"#;
+    let backend = Backend::new_test();
+    backend.config.lock().diagnostics.unresolved_member_access = Some(true);
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "positional shape entries should resolve to their own type, got: {diags:?}"
+    );
+}
+
+/// The same positional-shape resolution must work for a multiline
+/// `@var array{...}` block with a trailing comma, and it must resolve
+/// each entry to the correct class (so a method that only exists on the
+/// wrong entry is still flagged).
+#[test]
+fn positional_shape_multiline_var_annotation_resolves_int_index_element() {
+    let php = r#"<?php
+class Label {
+public function labelOnly(): void {}
+}
+class Stmt {
+public function stmtOnly(): void {}
+}
+class Node {
+/** @return Node[] */
+public function getChildren(): array { return []; }
+}
+function test(Node $n): void {
+/**
+ * @var array{
+ *     Label,
+ *     Stmt,
+ * } $pair
+ */
+$pair = $n->getChildren();
+$pair[0]->labelOnly();
+$pair[1]->stmtOnly();
+}
+"#;
+    let backend = Backend::new_test();
+    backend.config.lock().diagnostics.unresolved_member_access = Some(true);
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "multiline positional shape entries should resolve, got: {diags:?}"
+    );
+
+    // A method that only exists on the *other* entry must still be flagged,
+    // proving each index resolves to its own distinct type.
+    let php_wrong = php.replace("$pair[0]->labelOnly();", "$pair[0]->stmtOnly();");
+    let diags_wrong = collect(&backend, "file:///test2.php", &php_wrong);
+    assert!(
+        diags_wrong
+            .iter()
+            .any(|d| d.message.contains("stmtOnly") && d.message.contains("Label")),
+        "calling Stmt's method on $pair[0] (a Label) should be flagged, got: {diags_wrong:?}"
     );
 }

@@ -6,7 +6,10 @@ use crate::test_fixtures::make_class;
 use crate::types::MethodInfo;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
-use super::{CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN, apply_laravel_patches};
+use super::{
+    CACHE_FACADE_FQN, CONDITIONABLE_FQN, DB_CONNECTION_FQN, DB_FACADE_FQN,
+    LEGACY_MOCK_INTERFACE_FQN, STORAGE_FACADE_FQN, apply_laravel_patches,
+};
 
 /// Create a method with a parsed `PhpType` return type.
 ///
@@ -692,5 +695,447 @@ fn fqn_in_return_type_is_not_treated_as_template() {
             .to_string(),
         return_type.to_string(),
         "FQN types should not trigger the template heuristic"
+    );
+}
+
+// ─── Cache facade generics restoration ──────────────────────────────────────
+
+/// Build the `Cache` facade's generated `remember` shape: a `mixed`
+/// return with a `$ttl` closure and the value-producing `$callback`.
+fn make_cache_remember() -> MethodInfo {
+    MethodInfo {
+        return_type: Some(PhpType::mixed()),
+        parameters: vec![
+            crate::test_fixtures::make_param("$key", Some("string"), true),
+            crate::test_fixtures::make_param("$ttl", Some("\\Closure|int|null"), true),
+            crate::test_fixtures::make_param("$callback", Some("\\Closure"), true),
+        ],
+        ..MethodInfo::virtual_method("remember", None)
+    }
+}
+
+#[test]
+fn cache_facade_remember_gets_template() {
+    let mut class = make_class(CACHE_FACADE_FQN);
+    class.methods = vec![Arc::new(make_cache_remember())].into();
+
+    apply_laravel_patches(&mut class, CACHE_FACADE_FQN);
+
+    let method = class.methods.iter().next().unwrap();
+    assert_eq!(
+        method.return_type.as_ref().unwrap().to_string(),
+        "TCacheValue",
+        "return type should be the restored template"
+    );
+    assert_eq!(
+        method.template_params,
+        vec![atom("TCacheValue")],
+        "the method-level template should be added"
+    );
+    assert_eq!(
+        method.template_bindings,
+        vec![(atom("TCacheValue"), atom("$callback"))],
+        "TCacheValue should bind from the $callback closure"
+    );
+    // The callback param is retyped as a closure returning the template.
+    let callback = method
+        .parameters
+        .iter()
+        .find(|p| p.name.as_str() == "$callback")
+        .unwrap();
+    assert!(
+        callback
+            .type_hint
+            .as_ref()
+            .unwrap()
+            .to_string()
+            .contains("TCacheValue"),
+        "the callback should return TCacheValue, got: {:?}",
+        callback.type_hint
+    );
+}
+
+// ─── Eloquent Builder paginate element type patch ───────────────────────────
+
+#[test]
+fn builder_paginate_gets_parameterised() {
+    let mut class = make_class(ELOQUENT_BUILDER_FQN);
+    class.methods = vec![
+        Arc::new(make_method_typed(
+            "paginate",
+            Some(PhpType::Named(
+                "Illuminate\\Pagination\\LengthAwarePaginator".to_string(),
+            )),
+        )),
+        Arc::new(make_method_typed(
+            "simplePaginate",
+            Some(PhpType::Named(
+                "Illuminate\\Contracts\\Pagination\\Paginator".to_string(),
+            )),
+        )),
+        Arc::new(make_method_typed(
+            "cursorPaginate",
+            Some(PhpType::Named(
+                "Illuminate\\Contracts\\Pagination\\CursorPaginator".to_string(),
+            )),
+        )),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, ELOQUENT_BUILDER_FQN);
+
+    let methods: Vec<_> = class.methods.iter().collect();
+    assert_eq!(
+        methods[0].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Pagination\\LengthAwarePaginator<int, TModel>",
+    );
+    assert_eq!(
+        methods[1].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Contracts\\Pagination\\Paginator<int, TModel>",
+    );
+    assert_eq!(
+        methods[2].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Contracts\\Pagination\\CursorPaginator<int, TModel>",
+    );
+}
+
+#[test]
+fn builder_paginate_already_generic_is_not_patched() {
+    let mut class = make_class(ELOQUENT_BUILDER_FQN);
+    let original = PhpType::Generic(
+        "Illuminate\\Pagination\\LengthAwarePaginator".to_string(),
+        vec![
+            PhpType::int(),
+            PhpType::Named("App\\Models\\User".to_string()),
+        ],
+    );
+    class.methods = vec![Arc::new(make_method_typed(
+        "paginate",
+        Some(original.clone()),
+    ))]
+    .into();
+
+    apply_laravel_patches(&mut class, ELOQUENT_BUILDER_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        original.to_string(),
+        "an already-parameterised paginator should be left untouched",
+    );
+}
+
+// ─── Storage fake return type patch ─────────────────────────────────────────
+
+#[test]
+fn storage_fake_contract_becomes_adapter() {
+    let mut class = make_class(STORAGE_FACADE_FQN);
+    class.methods = vec![
+        Arc::new(make_method_typed(
+            "fake",
+            Some(PhpType::Named(
+                "Illuminate\\Contracts\\Filesystem\\Filesystem".to_string(),
+            )),
+        )),
+        Arc::new(make_method_typed(
+            "persistentFake",
+            Some(PhpType::Named(
+                "\\Illuminate\\Contracts\\Filesystem\\Filesystem".to_string(),
+            )),
+        )),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
+
+    let methods: Vec<_> = class.methods.iter().collect();
+    assert_eq!(
+        methods[0].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Filesystem\\FilesystemAdapter",
+    );
+    assert_eq!(
+        methods[1].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Filesystem\\FilesystemAdapter",
+        "a leading-backslash contract FQN should also be corrected",
+    );
+}
+
+#[test]
+fn storage_fake_non_contract_return_is_not_patched() {
+    let mut class = make_class(STORAGE_FACADE_FQN);
+    let original = PhpType::Named("Illuminate\\Filesystem\\FilesystemAdapter".to_string());
+    class.methods = vec![Arc::new(make_method_typed("fake", Some(original.clone())))].into();
+
+    apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        original.to_string(),
+        "a return type that is already the adapter should be left untouched",
+    );
+}
+
+#[test]
+fn storage_other_method_is_not_patched() {
+    let mut class = make_class(STORAGE_FACADE_FQN);
+    let original = PhpType::Named("Illuminate\\Contracts\\Filesystem\\Filesystem".to_string());
+    class.methods = vec![Arc::new(make_method_typed("disk", Some(original.clone())))].into();
+
+    apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        original.to_string(),
+        "disk() honestly returns the contract and must not be patched",
+    );
+}
+
+#[test]
+fn cache_facade_non_callback_method_untouched() {
+    let mut class = make_class(CACHE_FACADE_FQN);
+    // `get` returns `mixed` but has no `$callback` closure.
+    class.methods = vec![Arc::new(MethodInfo {
+        return_type: Some(PhpType::mixed()),
+        parameters: vec![crate::test_fixtures::make_param(
+            "$key",
+            Some("string"),
+            true,
+        )],
+        ..MethodInfo::virtual_method("get", None)
+    })]
+    .into();
+
+    apply_laravel_patches(&mut class, CACHE_FACADE_FQN);
+
+    let method = class.methods.iter().next().unwrap();
+    assert_eq!(
+        method.return_type.as_ref().unwrap().to_string(),
+        "mixed",
+        "methods without a $callback closure should be left as-is"
+    );
+    assert!(method.template_params.is_empty());
+}
+
+// ─── Testing mock() / partialMock() / spy() generics ────────────────────────
+
+/// Build a framework testing helper: `mock($abstract)` declared as
+/// returning the bare `Mockery\MockInterface` contract.
+///
+/// This is a real declared trait method (`is_virtual == false`), like
+/// the framework's `InteractsWithContainer::mock()`, not a `@method`
+/// tag.
+fn make_testing_mock(name: &str) -> MethodInfo {
+    MethodInfo {
+        return_type: Some(PhpType::Named("Mockery\\MockInterface".to_string())),
+        parameters: vec![
+            crate::test_fixtures::make_param("$abstract", Some("string"), true),
+            crate::test_fixtures::make_param("$mock", Some("\\Closure|null"), false),
+        ],
+        is_virtual: false,
+        ..MethodInfo::virtual_method(name, None)
+    }
+}
+
+#[test]
+fn testing_mock_helpers_become_generic() {
+    // Any test class inherits these from the framework base TestCase, so
+    // the patch runs regardless of the class FQN.
+    let mut class = make_class("Tests\\Feature\\ExampleTest");
+    class.methods = vec![
+        Arc::new(make_testing_mock("mock")),
+        Arc::new(make_testing_mock("partialMock")),
+        Arc::new(make_testing_mock("spy")),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, "Tests\\Feature\\ExampleTest");
+
+    for method in class.methods.iter() {
+        assert_eq!(
+            method.return_type.as_ref().unwrap().to_string(),
+            "Mockery\\MockInterface&TMock",
+            "{} should return the mock intersection",
+            method.name
+        );
+        assert_eq!(
+            method.template_params,
+            vec![atom("TMock")],
+            "{} should declare the TMock template",
+            method.name
+        );
+        assert_eq!(
+            method.template_bindings,
+            vec![(atom("TMock"), atom("$abstract"))],
+            "{} should bind TMock from $abstract",
+            method.name
+        );
+        let abstract_param = method
+            .parameters
+            .iter()
+            .find(|p| p.name.as_str() == "$abstract")
+            .unwrap();
+        assert_eq!(
+            abstract_param.type_hint.as_ref().unwrap().to_string(),
+            "class-string<TMock>|TMock",
+            "{} should retype $abstract to bind the template",
+            method.name
+        );
+    }
+}
+
+#[test]
+fn testing_mock_helper_with_concrete_return_is_untouched() {
+    // A hand-written override that already carries the mocked class must
+    // not be rewritten.
+    let concrete = PhpType::Intersection(vec![
+        PhpType::Named("App\\Contracts\\Storage".to_string()),
+        PhpType::Named("Mockery\\MockInterface".to_string()),
+    ]);
+    let mut class = make_class("Tests\\Feature\\ExampleTest");
+    class.methods = vec![Arc::new(MethodInfo {
+        return_type: Some(concrete.clone()),
+        parameters: vec![crate::test_fixtures::make_param(
+            "$abstract",
+            Some("string"),
+            true,
+        )],
+        ..MethodInfo::virtual_method("mock", None)
+    })]
+    .into();
+
+    apply_laravel_patches(&mut class, "Tests\\Feature\\ExampleTest");
+
+    let method = class.methods.iter().next().unwrap();
+    assert_eq!(
+        method.return_type.as_ref().unwrap().to_string(),
+        concrete.to_string(),
+        "a method that already returns the intersection is left as-is"
+    );
+    assert!(method.template_params.is_empty());
+}
+
+// ─── Mockery verification return types ─────────────────────────────────────
+
+#[test]
+fn mockery_verification_methods_lose_the_self_return() {
+    let mut class = make_class(LEGACY_MOCK_INTERFACE_FQN);
+    class.methods = vec![
+        Arc::new(make_method_typed(
+            "shouldHaveReceived",
+            Some(PhpType::self_()),
+        )),
+        Arc::new(make_method_typed(
+            "shouldHaveBeenCalled",
+            Some(PhpType::self_()),
+        )),
+    ]
+    .into();
+
+    apply_laravel_patches(&mut class, LEGACY_MOCK_INTERFACE_FQN);
+
+    let should_have_received = class
+        .methods
+        .iter()
+        .find(|m| m.name == "shouldHaveReceived")
+        .unwrap();
+    assert_eq!(
+        should_have_received
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "Mockery\\VerificationDirector|Mockery\\HigherOrderMessage",
+        "shouldHaveReceived() should resolve to the director/higher-order-message union"
+    );
+
+    let should_have_been_called = class
+        .methods
+        .iter()
+        .find(|m| m.name == "shouldHaveBeenCalled")
+        .unwrap();
+    assert_eq!(
+        should_have_been_called
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "Mockery\\VerificationDirector",
+        "shouldHaveBeenCalled() should resolve to the director"
+    );
+}
+
+#[test]
+fn mockery_verification_method_with_concrete_return_is_untouched() {
+    let mut class = make_class(LEGACY_MOCK_INTERFACE_FQN);
+    let concrete = PhpType::Named("Mockery\\VerificationDirector".to_string());
+    class.methods = vec![Arc::new(make_method_typed(
+        "shouldHaveReceived",
+        Some(concrete.clone()),
+    ))]
+    .into();
+
+    apply_laravel_patches(&mut class, LEGACY_MOCK_INTERFACE_FQN);
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        concrete.to_string(),
+        "a method that already returns a concrete type is left as-is"
+    );
+}
+
+#[test]
+fn mockery_verification_patch_only_applies_to_legacy_mock_interface() {
+    let mut class = make_class("App\\Services\\Pipeline");
+    class.methods = vec![Arc::new(make_method_typed(
+        "shouldHaveReceived",
+        Some(PhpType::self_()),
+    ))]
+    .into();
+
+    apply_laravel_patches(&mut class, "App\\Services\\Pipeline");
+
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .next()
+            .unwrap()
+            .return_type
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "self",
+        "an unrelated class's shouldHaveReceived() must not be rewritten"
     );
 }

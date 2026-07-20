@@ -26,8 +26,10 @@
 //! server, so the results match exactly what a user would see in their
 //! editor.
 //!
-//! Only single Composer projects (root `composer.json`) are supported
-//! for now.
+//! Composer projects (root `composer.json`) use their autoload
+//! configuration for file discovery; a plain PHP tree without one is
+//! analysed by scanning and walking the workspace root.  Multi-project
+//! monorepos are not supported.
 //!
 //! # Usage
 //!
@@ -80,7 +82,9 @@ pub enum OutputFormat {
 /// Options for the analyse command.
 #[derive(Debug)]
 pub struct AnalyseOptions {
-    /// Workspace root (project directory containing composer.json).
+    /// Workspace root.  Usually a Composer project directory; a plain
+    /// PHP tree without a composer.json is analysed by walking the
+    /// root.
     pub workspace_root: PathBuf,
     /// Optional path filter: only analyse files under this path.
     /// Can be a directory or a single file.
@@ -111,10 +115,16 @@ struct FileDiagnostic {
 pub async fn run(options: AnalyseOptions) -> i32 {
     let root = &options.workspace_root;
 
+    // A missing composer.json is not an error: plain PHP trees (a
+    // WordPress site, a legacy codebase) analyse fine — classes are
+    // indexed by scanning the tree and files are discovered by walking
+    // the root.  Note it on stderr so a mistyped --project-root does
+    // not silently analyse the wrong directory as a bare tree.
     if !root.join("composer.json").is_file() {
-        eprintln!("Error: no composer.json found in {}", root.display());
-        eprintln!("The analyse command currently only supports single Composer projects.");
-        return 1;
+        eprintln!(
+            "Note: no composer.json found in {} — analysing as a plain PHP project.",
+            root.display()
+        );
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
@@ -125,6 +135,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
             config::Config::default()
         }
     };
+
+    let ignore_rules =
+        crate::diagnostics::ignore_rules::compile_ignore_rules(&cfg.diagnostics.ignore);
 
     // ── 2. Index project ────────────────────────────────────────────
     // Create a headless Backend (no LSP client) and run the same init
@@ -204,7 +217,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                 let files = &files;
                 std::thread::Builder::new()
                     .name("index-worker".into())
-                    .stack_size(32 * 1024 * 1024)
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
                         let mut entries: Vec<(usize, String, String)> = Vec::new();
                         loop {
@@ -240,6 +253,18 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         indexed
     });
 
+    // ── Discover the configured Laravel date class ──────────────────
+    // The `now()`/`today()` helpers and the Date facade / DateFactory
+    // resolve to the class selected by `Date::use()` (defaulting to
+    // `Illuminate\Support\Carbon`).  Discovery reads project service
+    // providers, so it must run after Phase 1 has parsed every user file.
+    // The LSP does the equivalent in its `initialized` handler; without
+    // this call the helpers would resolve to nothing here, producing
+    // false-positive return-type diagnostics.
+    if backend.resolved_class_cache.read().is_laravel() {
+        backend.build_laravel_date_class();
+    }
+
     // ── Phase 1.5: Eager class population ───────────────────────────
     // Pre-populate the resolved_class_cache by resolving every known
     // class in topological (dependency-first) order.  This ensures
@@ -254,16 +279,16 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         let uri_classes_index = backend.uri_classes_index.read();
         crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
     };
-    // Run eager population on a large-stack thread.  `resolve_class_fully_inner`
-    // can nest deeply when the toposort misses dependencies (stubs, dynamically
-    // loaded classes) and the recursion guard kicks in.  The default 8 MB thread
-    // stack is not enough for very large codebases.
+    // Run on a dedicated large-stack thread: `resolve_class_fully_inner`
+    // can nest deeply when the toposort misses dependencies (stubs,
+    // dynamically loaded classes), and this runs on a Tokio worker whose
+    // stack is the 2 MB default rather than the main thread's 8 MB.
     std::thread::scope(|s| {
         let backend = &backend;
         let sorted_fqns = &sorted_fqns;
         std::thread::Builder::new()
             .name("eager-populate".into())
-            .stack_size(32 * 1024 * 1024)
+            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
             .spawn_scoped(s, move || {
                 let class_loader =
                     |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
@@ -283,11 +308,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
 
     // Phase 2 diagnostic threads need large stacks because the forward
     // walker + type resolution pipeline can nest deeply on files with
-    // many class hierarchies and virtual members.
-    //
-    // `std::thread::scope` + `s.spawn()` ignores `RUST_MIN_STACK` and
-    // always uses the OS default (8 MB).  Use `std::thread::Builder`
-    // with an explicit 32 MB stack to avoid stack overflow.
+    // many class hierarchies and virtual members.  Spawned threads get a
+    // 2 MB stack by default (only the main thread gets the 8 MB OS
+    // default), so set it explicitly.
     let mut all_file_diagnostics: Vec<(String, Vec<FileDiagnostic>)> = std::thread::scope(|s| {
         let handles: Vec<_> =
             (0..n_threads)
@@ -297,8 +320,10 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                     let done_count = &done_count;
                     let files = &files;
                     let file_data = &file_data;
+                    let ignore_rules = &ignore_rules;
                     std::thread::Builder::new()
                     .name("diag-worker".into())
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
                     .spawn_scoped(s, move || {
                     let mut results: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
                     loop {
@@ -339,6 +364,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         let _callable_guard =
                             crate::completion::call_resolution::with_callable_target_cache();
                         let _body_infer_guard = backend.activate_body_return_inferrer();
+                        let _auth_user_guard = backend.activate_auth_user_resolver();
 
                         // ── Forward-walked diagnostic scope cache ───
                         // Walk every function/method body once with the
@@ -406,6 +432,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                         b.collect_unknown_class_diagnostics(u, c, o)
                                     },
                                 ),
+                                ("class_case_mismatch", &|b, u, c, o| {
+                                    b.collect_class_case_mismatch_diagnostics(u, c, o)
+                                }),
                                 ("unknown_member", &|b, u, c, o| {
                                     b.collect_unknown_member_diagnostics(u, c, o)
                                 }),
@@ -416,7 +445,13 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                     b.collect_argument_count_diagnostics(u, c, o)
                                 }),
                                 ("type_mismatch_argument", &|b, u, c, o| {
-                                    b.collect_type_error_diagnostics(u, c, o)
+                                    b.collect_argument_type_diagnostics(u, c, o)
+                                }),
+                                ("type_mismatch_return", &|b, u, c, o| {
+                                    b.collect_return_type_diagnostics(u, c, o)
+                                }),
+                                ("type_mismatch_property", &|b, u, c, o| {
+                                    b.collect_property_type_diagnostics(u, c, o)
                                 }),
                                 ("missing_implementation", &|b, u, c, o| {
                                     b.collect_implementation_error_diagnostics(u, c, o)
@@ -503,6 +538,20 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // diagnostic line numbers have already been translated
                         // back to original file coordinates.
                         crate::diagnostics::filter_ignored_by_comment(&mut raw, original_content);
+
+                        // ── Apply [[diagnostics.ignore]] config rules ──────
+                        if !ignore_rules.is_empty() {
+                            let relative_path = files[i]
+                                .strip_prefix(root)
+                                .unwrap_or(&files[i])
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            crate::diagnostics::ignore_rules::filter_ignored_by_config(
+                                &mut raw,
+                                &relative_path,
+                                ignore_rules,
+                            );
+                        }
 
                         // For Blade files, translate diagnostic ranges from
                         // virtual PHP coordinates back to original Blade
@@ -667,6 +716,15 @@ pub(crate) fn discover_user_files(
         })
         .filter(|p| p.is_dir())
         .collect();
+
+    // Projects without PSR-4 mappings (no composer.json at all, or a
+    // classmap/files-only autoload section) still need a user-file
+    // set: walk the workspace root itself, the same tree the
+    // self-scan class indexing covers.  The walker below still
+    // honours ignore files and skips vendor directories.
+    if source_dirs.is_empty() {
+        source_dirs.push(workspace_root.to_path_buf());
+    }
 
     // Also scan Laravel Blade view directories (from config/view.php
     // or the conventional resources/views fallback).
@@ -1190,5 +1248,57 @@ mod tests {
             s
         };
         assert_eq!(out, "{}");
+    }
+
+    /// Without PSR-4 mappings (no composer.json, or a classmap-only
+    /// autoload), file discovery falls back to walking the workspace
+    /// root, still skipping registered vendor directories.
+    #[test]
+    fn discover_user_files_walks_root_without_psr4() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("index.php"), "<?php\n").unwrap();
+        std::fs::create_dir_all(root.join("includes")).unwrap();
+        std::fs::write(root.join("includes/helper.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("readme.txt"), "not php\n").unwrap();
+        std::fs::create_dir_all(root.join("vendor/lib")).unwrap();
+        std::fs::write(root.join("vendor/lib/dep.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        backend.add_vendor_dir(&root.join("vendor"));
+
+        let files = discover_user_files(&backend, root, None);
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"index.php".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"includes/helper.php".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.starts_with("vendor")),
+            "vendor files must be skipped: {names:?}"
+        );
+        assert!(
+            !names.contains(&"readme.txt".to_string()),
+            "non-PHP files must be skipped: {names:?}"
+        );
+    }
+
+    /// A single-file path filter returns exactly that file even when
+    /// the project has no PSR-4 mappings.
+    #[test]
+    fn discover_user_files_single_file_filter_without_psr4() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("includes")).unwrap();
+        std::fs::write(root.join("includes/target.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("other.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, root, Some(Path::new("includes/target.php")));
+        assert_eq!(files, vec![root.join("includes/target.php")]);
     }
 }

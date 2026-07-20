@@ -134,6 +134,7 @@ impl Backend {
             function_loader: Some(&function_loader),
             scope_var_resolver: None,
             is_in_static_method: false,
+            preserve_static: false,
         };
         let candidates = ResolvedType::into_arced_classes(
             crate::completion::resolver::resolve_target_classes(subject, access_kind, &rctx),
@@ -368,6 +369,16 @@ impl Backend {
                     None => continue, // member not on this candidate, try next
                 };
 
+            // ── Laravel macro registration site ─────────────────────
+            // A macro method has no declaration in the declaring class's own
+            // file; jump to its `::macro('name', ...)` registration instead.
+            if member_kind == MemberKind::Method
+                && let Some(location) =
+                    self.macro_definition_location(declaring_class.fqn().as_str(), &search_name)
+            {
+                return Some(location);
+            }
+
             // Locate the file that contains the declaring class.
             if let Some((class_uri, class_content)) =
                 self.find_class_file_content(&declaring_fqn, uri, content)
@@ -589,6 +600,14 @@ impl Backend {
 
         let member_kind = Self::classify_member(&declaring_class, &search_name, access_hint)?;
 
+        // ── Laravel macro registration site (fallback path) ─────
+        if member_kind == MemberKind::Method
+            && let Some(location) =
+                self.macro_definition_location(declaring_class.fqn().as_str(), &search_name)
+        {
+            return Some(location);
+        }
+
         // ── Object shape property fallback (fallback path) ──────
         if declaring_fqn == "__object_shape"
             && let Some(position) = Self::find_object_shape_property_position(
@@ -613,6 +632,32 @@ impl Backend {
 
         let parsed_uri = Url::parse(&class_uri).ok()?;
         Some(point_location(parsed_uri, member_position))
+    }
+
+    /// Locate the `::macro('name', ...)` registration site for a Laravel macro
+    /// method named `name` on the class `fqn`.
+    ///
+    /// A macro is synthesized onto its target class but has no declaration in
+    /// that class's own file, so the ordinary declaring-class file lookup finds
+    /// nothing.  This jumps to the name literal of the registration call
+    /// instead (typically in a service provider).  Returns `None` when the
+    /// project has no macros or the member is not a recognized macro.
+    fn macro_definition_location(&self, fqn: &str, name: &str) -> Option<Location> {
+        if !self
+            .laravel_has_macros
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return None;
+        }
+        let (uri, offset) = {
+            let index = self.laravel_macros.read();
+            let (uri, offset) = index.definition(fqn, name)?;
+            (uri.to_string(), offset)
+        };
+        let content = self.get_file_content(&uri)?;
+        let position = crate::util::offset_to_position(&content, offset as usize + 1);
+        let parsed_uri = Url::parse(&uri).ok()?;
+        Some(point_location(parsed_uri, position))
     }
 
     // ─── Member Access Context Extraction ───────────────────────────────────

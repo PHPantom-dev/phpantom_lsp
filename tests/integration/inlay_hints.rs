@@ -1368,3 +1368,83 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
         all
     );
 }
+
+// ─── Call-result invocation: callable return type (#184) ────────────────────
+
+#[tokio::test]
+async fn callable_return_invocation_no_wrong_hints() {
+    // When a function returns `callable` and the result is immediately
+    // invoked, inlay hints must NOT show the outer function's parameter
+    // names on the inner call's arguments.
+    //
+    // Before the fix, `makeCallable('1', '2')('test')` showed `$a:`
+    // on `'test'` instead of suppressing the hint (bare `callable`
+    // has no known parameter names).
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/callable_invoke.php").unwrap();
+    let text = r#"<?php
+function makeCallable(string $a, string $b): callable
+{
+    return fn (string $c) => "$a $b $c";
+}
+
+makeCallable('1', '2')('test');
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+
+    // Line 6: `makeCallable('1', '2')('test');`
+    let line6_hints = hints_at_line(&hints, 6);
+    let line6_labels: Vec<String> = line6_hints.iter().map(|h| hint_label(h)).collect();
+
+    // The outer call `makeCallable('1', '2')` should show `$a:` and `$b:`.
+    assert!(
+        line6_labels.iter().any(|l| l == "a:"),
+        "Should show 'a:' hint for makeCallable's first arg; got: {:?}",
+        line6_labels
+    );
+    assert!(
+        line6_labels.iter().any(|l| l == "b:"),
+        "Should show 'b:' hint for makeCallable's second arg; got: {:?}",
+        line6_labels
+    );
+
+    // The inner call `('test')` should NOT show `$a:` — it's invoking
+    // a bare `callable`, not `makeCallable`.
+    // Count how many `a:` hints there are — should be exactly 1 (from
+    // the outer call), not 2.
+    let a_count = line6_labels.iter().filter(|l| *l == "a:").count();
+    assert_eq!(
+        a_count, 1,
+        "Should have exactly 1 'a:' hint (outer call only), got {}: {:?}",
+        a_count, line6_labels
+    );
+}
+
+#[tokio::test]
+async fn callable_return_invocation_fully_qualified_closure() {
+    // The fully-qualified `\Closure` return type spelling must be
+    // recognised the same way as bare `Closure` and `callable`.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_invoke.php").unwrap();
+    let text = r#"<?php
+function makeClosure(string $a, string $b): \Closure
+{
+    return fn (string $c) => "$a $b $c";
+}
+
+makeClosure('1', '2')('test');
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+
+    let line6_hints = hints_at_line(&hints, 6);
+    let line6_labels: Vec<String> = line6_hints.iter().map(|h| hint_label(h)).collect();
+
+    let a_count = line6_labels.iter().filter(|l| *l == "a:").count();
+    assert_eq!(
+        a_count, 1,
+        "Should have exactly 1 'a:' hint (outer call only), got {}: {:?}",
+        a_count, line6_labels
+    );
+}

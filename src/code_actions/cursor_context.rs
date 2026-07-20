@@ -7,12 +7,12 @@
 //! namespace → class-like → member traversal.
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::constant::ClassLikeConstant;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::method::Method;
-use mago_syntax::ast::class_like::property::Property;
-use mago_syntax::ast::function_like::function::Function;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::constant::ClassLikeConstant;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::method::Method;
+use mago_syntax::cst::class_like::property::Property;
+use mago_syntax::cst::function_like::function::Function;
+use mago_syntax::cst::*;
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -204,7 +204,7 @@ fn find_member_at_cursor<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bumpalo::Bump;
+    use mago_allocator::LocalArena;
 
     /// Helper: parse PHP and find cursor context at a given byte offset.
     fn ctx_at(php: &str, offset: u32) -> CursorContext<'_> {
@@ -212,7 +212,7 @@ mod tests {
         // borrows from the Program) lives long enough for the test
         // assertions.  This is fine in tests — the memory is reclaimed
         // when the process exits.
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
         find_cursor_context(&program.statements, offset)

@@ -6,8 +6,8 @@
 //! [`extract_symbol_map`].
 
 use mago_span::HasSpan;
-use mago_syntax::ast::sequence::TokenSeparatedSequence;
-use mago_syntax::ast::*;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::*;
 
 use super::docblock::{
     class_ref_span, class_ref_span_ctx, extract_docblock_symbols, extract_param_var_spans,
@@ -80,6 +80,9 @@ struct ExtractionCtx<'a> {
     /// Stack of block-end offsets for each conditional nesting level.
     /// The top of the stack is the end of the innermost conditional block.
     cond_block_end_stack: Vec<u32>,
+    /// Whether the file imports from `Illuminate\Container\Attributes\`
+    /// (checked once lazily, cached for all attribute inspections).
+    has_laravel_container_attrs: Option<bool>,
 }
 
 // ─── Keyword helper ─────────────────────────────────────────────────────────
@@ -151,6 +154,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         untyped_closure_sites: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
+        has_laravel_container_attrs: None,
     };
 
     for stmt in program.statements.iter() {
@@ -244,8 +248,20 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
 
+    let mut member_access_indices: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (idx, span) in ctx.spans.iter().enumerate() {
+        if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
+            member_access_indices
+                .entry(member_name.clone())
+                .or_default()
+                .push(idx);
+        }
+    }
+
     SymbolMap {
         spans: ctx.spans,
+        member_access_indices,
         var_defs: ctx.var_defs,
         scopes: ctx.scopes,
         arrow_fn_scopes: ctx.arrow_fn_scopes,
@@ -1003,9 +1019,9 @@ fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
 /// Emits a `ClassReference` for the attribute class name and recurses
 /// into argument expressions.
 fn extract_from_attribute_lists<'a>(
-    attribute_lists: &mago_syntax::ast::sequence::Sequence<
+    attribute_lists: &mago_syntax::cst::sequence::Sequence<
         'a,
-        mago_syntax::ast::attribute::AttributeList<'a>,
+        mago_syntax::cst::attribute::AttributeList<'a>,
     >,
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
@@ -1025,14 +1041,36 @@ fn extract_from_attribute_lists<'a>(
             // signature help and named parameter completion work
             // inside `#[Attr(...)]` just like `new Attr(...)`.
             if let Some(ref arg_list) = attr.argument_list {
-                extract_from_arguments(&arg_list.arguments, ctx, scope_start);
+                extract_from_partial_arguments(&arg_list.arguments, ctx, scope_start);
                 let class_name = raw.trim_start_matches('\\');
                 if !class_name.is_empty() {
-                    emit_call_site(
+                    emit_partial_call_site(
                         format!("new {}", class_name),
                         arg_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
+                    );
+                }
+
+                // Laravel container attributes: #[Config('key')],
+                // #[Database('conn')], #[Cache('store')], etc. →
+                // emit a LaravelStringKey::Config span so hover,
+                // go-to-definition, and diagnostics work on the key.
+                //
+                // FQN attributes match directly. Short names require
+                // the file to import from the Illuminate namespace;
+                // that check is cached once per file to avoid repeated
+                // linear scans.
+                if let Some(kind) = resolve_laravel_container_attr(
+                    class_name,
+                    &mut ctx.has_laravel_container_attrs,
+                    ctx.content,
+                ) {
+                    try_emit_laravel_string_span_partial(
+                        kind,
+                        arg_list,
+                        ctx.content,
+                        &mut ctx.spans,
                     );
                 }
             }
@@ -1161,6 +1199,7 @@ fn extract_from_trait_alias_adaptation<'a>(
                     is_static: true,
                     is_method_call: true,
                     is_docblock_reference: false,
+                    is_array_callable: false,
                 },
             });
         }
@@ -1178,6 +1217,7 @@ fn extract_from_trait_alias_adaptation<'a>(
                     is_static: true,
                     is_method_call: true,
                     is_docblock_reference: false,
+                    is_array_callable: false,
                 },
             });
         }
@@ -1197,6 +1237,7 @@ fn extract_from_trait_alias_adaptation<'a>(
                 is_static: true,
                 is_method_call: true,
                 is_docblock_reference: false,
+                is_array_callable: false,
             },
         });
     }
@@ -1231,6 +1272,7 @@ fn extract_from_trait_precedence_adaptation<'a>(
             is_static: true,
             is_method_call: true,
             is_docblock_reference: false,
+            is_array_callable: false,
         },
     });
 
@@ -1655,12 +1697,17 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
 // ─── Use statement extractor ────────────────────────────────────────────────
 
 fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
-    fn register_use_item(item: &UseItem<'_>, spans: &mut Vec<SymbolSpan>) {
-        let raw = bytes_to_str(item.name.value()).to_string();
+    fn register_use_item(item: &UseItem<'_>, prefix: Option<&str>, spans: &mut Vec<SymbolSpan>) {
+        let raw = bytes_to_str(item.name.value());
+        let full = if let Some(prefix) = prefix {
+            format!("{}\\{}", prefix, raw)
+        } else {
+            raw.to_string()
+        };
         // Use statement names are always fully qualified (even without a
         // leading `\`), so force `is_fqn = true`.  `class_ref_span`
         // derives the flag from a leading `\` which use statements omit.
-        let name = strip_fqn_prefix(&raw).to_string();
+        let name = strip_fqn_prefix(&full).to_string();
         spans.push(SymbolSpan {
             start: item.name.span().start.offset,
             end: item.name.span().end.offset,
@@ -1675,25 +1722,27 @@ fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
     match &use_stmt.items {
         UseItems::Sequence(seq) => {
             for use_item in seq.items.iter() {
-                register_use_item(use_item, spans);
+                register_use_item(use_item, None, spans);
             }
         }
         UseItems::TypedSequence(typed_seq) => {
             // Only class imports (not function/const).
             if !typed_seq.r#type.is_function() && !typed_seq.r#type.is_const() {
                 for use_item in typed_seq.items.iter() {
-                    register_use_item(use_item, spans);
+                    register_use_item(use_item, None, spans);
                 }
             }
         }
         UseItems::TypedList(list) => {
             if !list.r#type.is_function() && !list.r#type.is_const() {
+                let prefix = bytes_to_str(list.namespace.value());
                 for use_item in list.items.iter() {
-                    register_use_item(use_item, spans);
+                    register_use_item(use_item, Some(prefix), spans);
                 }
             }
         }
         UseItems::MixedList(list) => {
+            let prefix = bytes_to_str(list.namespace.value());
             for use_item in list.items.iter() {
                 // MixedList items are MaybeTypedUseItem — skip function/const.
                 if let Some(ref typ) = use_item.r#type
@@ -1701,7 +1750,7 @@ fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
                 {
                     continue;
                 }
-                register_use_item(&use_item.item, spans);
+                register_use_item(&use_item.item, Some(prefix), spans);
             }
         }
     }
@@ -1933,38 +1982,32 @@ fn extract_from_expression<'a>(
                                 is_definition: false,
                             },
                         });
-                        if name_clean.eq_ignore_ascii_case("config") {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Config,
-                                &func_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        if name_clean.eq_ignore_ascii_case("view")
+                        // Detect Laravel helper calls and emit a
+                        // LaravelStringKey span for the first string arg.
+                        // Uses if-else to short-circuit (most function calls
+                        // won't match) and avoids to_ascii_lowercase() heap
+                        // allocations.
+                        let laravel_kind = if name_clean.eq_ignore_ascii_case("config") {
+                            Some(crate::symbol_map::LaravelStringKind::Config)
+                        } else if name_clean.eq_ignore_ascii_case("view")
                             || name_clean.eq_ignore_ascii_case("blade_view_directive")
                         {
+                            Some(crate::symbol_map::LaravelStringKind::View)
+                        } else if name_clean.eq_ignore_ascii_case("route")
+                            || name_clean.eq_ignore_ascii_case("to_route")
+                        {
+                            Some(crate::symbol_map::LaravelStringKind::Route)
+                        } else if name_clean.eq_ignore_ascii_case("__")
+                            || name_clean.eq_ignore_ascii_case("trans")
+                            || name_clean.eq_ignore_ascii_case("trans_choice")
+                        {
+                            Some(crate::symbol_map::LaravelStringKind::Trans)
+                        } else {
+                            None
+                        };
+                        if let Some(kind) = laravel_kind {
                             try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::View,
-                                &func_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        if name_clean.eq_ignore_ascii_case("route") {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Route,
-                                &func_call.argument_list,
-                                ctx.content,
-                                &mut ctx.spans,
-                            );
-                        }
-                        if matches!(
-                            name_clean.to_ascii_lowercase().as_str(),
-                            "__" | "trans" | "trans_choice"
-                        ) {
-                            try_emit_laravel_string_span(
-                                crate::symbol_map::LaravelStringKind::Trans,
+                                kind,
                                 &func_call.argument_list,
                                 ctx.content,
                                 &mut ctx.spans,
@@ -1993,6 +2036,13 @@ fn extract_from_expression<'a>(
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                     let member_name = bytes_to_str(ident.value).to_string();
+                    if member_name.eq_ignore_ascii_case("macro") {
+                        try_emit_laravel_macro_string_span(
+                            &method_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     if is_laravel_config_repository_call(method_call.object, &member_name) {
                         try_emit_laravel_string_span(
                             crate::symbol_map::LaravelStringKind::Config,
@@ -2003,7 +2053,7 @@ fn extract_from_expression<'a>(
                     }
                     // Emit call site for method call: `$subject->method(...)`
                     emit_call_site(
-                        format!("{}->{}", &subject_text, &member_name),
+                        format!("{}->{}", subject_text, member_name),
                         &method_call.argument_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
@@ -2017,8 +2067,25 @@ fn extract_from_expression<'a>(
                             is_static: false,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
+                    // Laravel: if this is a ->group() call, check for
+                    // ->controller(X::class) in the chain and emit MemberAccess
+                    // spans for route method-name strings inside the closure.
+                    if ident.value.eq_ignore_ascii_case(b"group")
+                        && let Some(controller) =
+                            laravel_route_find_controller_in_chain(method_call.object)
+                    {
+                        for arg in method_call.argument_list.arguments.iter() {
+                            laravel_route_scan_group_body(
+                                arg.value(),
+                                &controller,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                    }
                 }
                 extract_from_arguments(&method_call.argument_list.arguments, ctx, scope_start);
             }
@@ -2040,7 +2107,7 @@ fn extract_from_expression<'a>(
                     // Use `->` so resolve_callable handles it the same
                     // as regular method calls.
                     emit_call_site(
-                        format!("{}->{}", &subject_text, &member_name),
+                        format!("{}->{}", subject_text, member_name),
                         &method_call.argument_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
@@ -2054,6 +2121,7 @@ fn extract_from_expression<'a>(
                             is_static: false,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                 }
@@ -2065,9 +2133,16 @@ fn extract_from_expression<'a>(
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
                     let member_name = bytes_to_str(ident.value).to_string();
+                    if member_name.eq_ignore_ascii_case("macro") {
+                        try_emit_laravel_macro_string_span(
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     // Emit call site for static method call: `Class::method(...)`
                     emit_call_site(
-                        format!("{}::{}", &subject_text, &member_name),
+                        format!("{}::{}", subject_text, member_name),
                         &static_call.argument_list,
                         &mut ctx.call_sites,
                         &mut ctx.untyped_closure_sites,
@@ -2081,6 +2156,7 @@ fn extract_from_expression<'a>(
                             is_static: true,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                     let clean_subject = strip_fqn_prefix(&subject_text);
@@ -2145,6 +2221,7 @@ fn extract_from_expression<'a>(
                                     is_static: false,
                                     is_method_call: false,
                                     is_docblock_reference: false,
+                                    is_array_callable: false,
                                 },
                             });
                         }
@@ -2173,6 +2250,7 @@ fn extract_from_expression<'a>(
                                     is_static: false,
                                     is_method_call: false,
                                     is_docblock_reference: false,
+                                    is_array_callable: false,
                                 },
                             });
                         }
@@ -2203,6 +2281,7 @@ fn extract_from_expression<'a>(
                                 is_static: true,
                                 is_method_call: false,
                                 is_docblock_reference: false,
+                                is_array_callable: false,
                             },
                         });
                     }
@@ -2225,6 +2304,7 @@ fn extract_from_expression<'a>(
                                     is_static: true,
                                     is_method_call: false,
                                     is_docblock_reference: false,
+                                    is_array_callable: false,
                                 },
                             });
                         }
@@ -2546,7 +2626,7 @@ fn extract_from_expression<'a>(
         Expression::AnonymousClass(anon) => {
             // Constructor arguments.
             if let Some(ref args) = anon.argument_list {
-                extract_from_arguments(&args.arguments, ctx, scope_start);
+                extract_from_partial_arguments(&args.arguments, ctx, scope_start);
             }
 
             // Extends.
@@ -2719,6 +2799,7 @@ fn extract_from_expression<'a>(
                             is_static: false,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                 }
@@ -2737,6 +2818,7 @@ fn extract_from_expression<'a>(
                             is_static: true,
                             is_method_call: true,
                             is_docblock_reference: false,
+                            is_array_callable: false,
                         },
                     });
                 }
@@ -2815,6 +2897,22 @@ fn extract_from_arguments<'a>(
         let arg_expr = match arg {
             Argument::Positional(pos) => pos.value,
             Argument::Named(named) => named.value,
+        };
+        extract_from_expression(arg_expr, ctx, scope_start);
+    }
+}
+
+/// Walk an argument list and extract symbols from each partial argument expression.
+fn extract_from_partial_arguments<'a>(
+    args: &TokenSeparatedSequence<'a, PartialArgument<'a>>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    for arg in args.iter() {
+        let arg_expr = match arg {
+            PartialArgument::Positional(pos) => pos.value,
+            PartialArgument::Named(named) => named.value,
+            _ => continue,
         };
         extract_from_expression(arg_expr, ctx, scope_start);
     }
@@ -2965,6 +3063,81 @@ fn emit_call_site(
         arg_offsets,
         arg_count,
         has_unpacking,
+        named_arg_indices,
+        named_arg_names,
+        spread_arg_indices,
+    });
+}
+
+/// Build and push a [`CallSite`] from a partial argument list and its call expression string.
+fn emit_partial_call_site(
+    call_expression: String,
+    argument_list: &PartialArgumentList<'_>,
+    call_sites: &mut Vec<CallSite>,
+    untyped_closure_sites: &mut Vec<UntypedClosureSite>,
+) {
+    let args_start = argument_list.left_parenthesis.end.offset;
+    let args_end = argument_list.right_parenthesis.start.offset;
+    let comma_offsets = argument_list
+        .arguments
+        .tokens
+        .iter()
+        .map(|token| token.start.offset)
+        .collect();
+    let mut arg_offsets = Vec::with_capacity(argument_list.arguments.len());
+    let mut named_arg_indices = Vec::new();
+    let mut named_arg_names = Vec::new();
+    let mut spread_arg_indices = Vec::new();
+
+    for (index, argument) in argument_list.arguments.iter().enumerate() {
+        match argument {
+            PartialArgument::Positional(argument) => {
+                let offset = argument
+                    .ellipsis
+                    .map(|span| span.start.offset)
+                    .unwrap_or_else(|| argument.value.span().start.offset);
+                arg_offsets.push(offset);
+                if argument.ellipsis.is_some() {
+                    spread_arg_indices.push(index as u32);
+                }
+                collect_untyped_closure_site(
+                    argument.value,
+                    &call_expression,
+                    index,
+                    untyped_closure_sites,
+                );
+            }
+            PartialArgument::Named(argument) => {
+                arg_offsets.push(argument.name.span.start.offset);
+                named_arg_indices.push(index as u32);
+                named_arg_names.push(bytes_to_str(argument.name.value).to_string());
+                collect_untyped_closure_site(
+                    argument.value,
+                    &call_expression,
+                    index,
+                    untyped_closure_sites,
+                );
+            }
+            PartialArgument::NamedPlaceholder(argument) => {
+                arg_offsets.push(argument.name.span.start.offset);
+                named_arg_indices.push(index as u32);
+                named_arg_names.push(bytes_to_str(argument.name.value).to_string());
+            }
+            PartialArgument::Placeholder(argument) => arg_offsets.push(argument.span.start.offset),
+            PartialArgument::VariadicPlaceholder(argument) => {
+                arg_offsets.push(argument.span.start.offset)
+            }
+        }
+    }
+
+    call_sites.push(CallSite {
+        args_start,
+        args_end,
+        call_expression,
+        comma_offsets,
+        arg_count: argument_list.arguments.len() as u32,
+        has_unpacking: !spread_arg_indices.is_empty(),
+        arg_offsets,
         named_arg_indices,
         named_arg_names,
         spread_arg_indices,
@@ -3127,7 +3300,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let mut parts = Vec::new();
             for element in array.elements.iter() {
                 match element {
-                    mago_syntax::ast::ArrayElement::KeyValue(kv) => {
+                    mago_syntax::cst::ArrayElement::KeyValue(kv) => {
                         let val = expr_to_subject_text(kv.value);
                         if !val.is_empty() {
                             let key = expr_to_subject_text(kv.key);
@@ -3140,7 +3313,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push("...".to_string());
                         }
                     }
-                    mago_syntax::ast::ArrayElement::Value(v) => {
+                    mago_syntax::cst::ArrayElement::Value(v) => {
                         let val = expr_to_subject_text(v.value);
                         if val.is_empty() {
                             parts.push("...".to_string());
@@ -3148,7 +3321,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push(val);
                         }
                     }
-                    mago_syntax::ast::ArrayElement::Variadic(v) => {
+                    mago_syntax::cst::ArrayElement::Variadic(v) => {
                         let val = expr_to_subject_text(v.value);
                         if val.is_empty() {
                             parts.push("...".to_string());
@@ -3156,7 +3329,7 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push(format!("...{}", val));
                         }
                     }
-                    mago_syntax::ast::ArrayElement::Missing(_) => {
+                    mago_syntax::cst::ArrayElement::Missing(_) => {
                         parts.push("...".to_string());
                     }
                 }
@@ -3204,6 +3377,16 @@ fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                     let raw_str = bytes_to_str(s.raw);
                     let inner = crate::util::unquote_php_string(raw_str).unwrap_or(raw_str);
                     format!("['{}']", inner)
+                }
+                // Preserve integer-literal indices so downstream
+                // narrowing can address a specific element (e.g.
+                // `$stmts[0]` after `if (! $stmts[0] instanceof Foo)`).
+                Expression::Literal(Literal::Integer(i)) => {
+                    let n = i
+                        .value
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| bytes_to_str(i.raw).to_string());
+                    format!("[{}]", n)
                 }
                 _ => "[]".to_string(),
             };
@@ -3376,6 +3559,52 @@ fn is_assert_instanceof(expr: &Expression<'_>) -> bool {
     false
 }
 
+/// Check whether an attribute class name refers to a Laravel container
+/// attribute (`Config`, `Database`, `Cache`, `Log`, `Storage`, `Auth`,
+/// `Authenticated`).  Returns the corresponding [`LaravelStringKind`] if
+/// so — always `Config` since all container attributes resolve to config
+/// sub-keys.
+///
+/// FQN names (containing `\`) are matched directly against
+/// `Illuminate\Container\Attributes\*`.  Short names require the file to
+/// import from that namespace; the result of that check is cached in
+/// `import_cache` to avoid repeated linear scans of the file content.
+const LARAVEL_CONTAINER_ATTR_NS: &str = "Illuminate\\Container\\Attributes\\";
+const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
+    "Config",
+    "Database",
+    "DB",
+    "Cache",
+    "Log",
+    "Storage",
+    "Auth",
+    "Authenticated",
+];
+
+fn resolve_laravel_container_attr(
+    class_name: &str,
+    import_cache: &mut Option<bool>,
+    content: &str,
+) -> Option<crate::symbol_map::LaravelStringKind> {
+    if class_name.contains('\\') {
+        let stripped = class_name.strip_prefix(LARAVEL_CONTAINER_ATTR_NS)?;
+        if LARAVEL_CONTAINER_ATTR_NAMES.contains(&stripped) {
+            return Some(crate::symbol_map::LaravelStringKind::Config);
+        }
+        return None;
+    }
+    if !LARAVEL_CONTAINER_ATTR_NAMES.contains(&class_name) {
+        return None;
+    }
+    let has_import = *import_cache
+        .get_or_insert_with(|| content.contains("use Illuminate\\Container\\Attributes\\"));
+    if has_import {
+        Some(crate::symbol_map::LaravelStringKind::Config)
+    } else {
+        None
+    }
+}
+
 /// If the first argument of `argument_list` is a non-empty, non-interpolated
 /// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
 /// string content (inside the quotes) onto `spans`.
@@ -3417,6 +3646,82 @@ fn try_emit_laravel_string_span(
         kind: SymbolKind::LaravelStringKey {
             kind,
             key: key.to_string(),
+        },
+    });
+}
+
+/// If the first argument of `argument_list` is a non-empty, non-interpolated
+/// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
+/// string content (inside the quotes) onto `spans`.
+///
+/// Called by the `config()` function-call extractor and the
+/// `Config::get()` / `Config::set()` static-call extractor so that
+/// find-references and go-to-definition for Laravel config keys can use
+/// the pre-built symbol map instead of re-parsing every file on demand.
+fn try_emit_laravel_string_span_partial(
+    kind: crate::symbol_map::LaravelStringKind,
+    argument_list: &PartialArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Some(Expression::Literal(literal::Literal::String(s))) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let key = &content[inner_start as usize..inner_end as usize];
+    if key.is_empty() {
+        return;
+    }
+
+    if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
+        // Require at least one dot: bare keys like 'app' are not valid config paths.
+        return;
+    }
+
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelStringKey {
+            kind,
+            key: key.to_string(),
+        },
+    });
+}
+
+/// If `argument_list` starts with a plain, non-empty string literal, push a
+/// [`SymbolKind::LaravelMacroString`] span covering the string content.
+fn try_emit_laravel_macro_string_span(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let name = &content[inner_start as usize..inner_end as usize];
+    if name.is_empty() {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelMacroString {
+            name: name.to_string(),
         },
     });
 }
@@ -3510,43 +3815,79 @@ fn try_emit_array_callable_span(
             is_static,
             is_method_call: true,
             is_docblock_reference: false,
+            is_array_callable: true,
         },
     });
 }
 
 /// If `argument_list` belongs to a `compact()` call, emit one
-/// [`SymbolKind::CompactVariable`] span per direct string-literal argument.
+/// [`SymbolKind::CompactVariable`] span per string-literal variable name,
+/// including names inside (possibly nested) array-literal arguments.
 fn try_emit_compact_string_spans(
     argument_list: &ArgumentList<'_>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
     for arg in argument_list.arguments.iter() {
-        let Expression::Literal(literal::Literal::String(s)) = arg.value() else {
-            continue;
-        };
-        let inner_start = s.span.start.offset + 1;
-        let inner_end = s.span.end.offset - 1;
-        if inner_start >= inner_end || inner_end as usize > content.len() {
-            continue;
-        }
+        emit_compact_name_spans(arg.value(), content, spans);
+    }
+}
 
-        let name = if let Some(value) = s.value {
-            bytes_to_str(value)
-        } else {
-            &content[inner_start as usize..inner_end as usize]
-        };
-        if name.is_empty() {
-            continue;
-        }
+/// Emit [`SymbolKind::CompactVariable`] spans for one `compact()` argument:
+/// a string literal names a variable directly, and an array literal is
+/// descended into recursively so `compact(['a', ['b']])` covers both names.
+fn emit_compact_name_spans(expr: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    match expr {
+        Expression::Literal(literal::Literal::String(s)) => {
+            let inner_start = s.span.start.offset + 1;
+            let inner_end = s.span.end.offset - 1;
+            if inner_start >= inner_end || inner_end as usize > content.len() {
+                return;
+            }
 
-        spans.push(SymbolSpan {
-            start: inner_start,
-            end: inner_end,
-            kind: SymbolKind::CompactVariable {
-                name: name.to_string(),
-            },
-        });
+            let name = if let Some(value) = s.value {
+                bytes_to_str(value)
+            } else {
+                &content[inner_start as usize..inner_end as usize]
+            };
+            if name.is_empty() {
+                return;
+            }
+
+            spans.push(SymbolSpan {
+                start: inner_start,
+                end: inner_end,
+                kind: SymbolKind::CompactVariable {
+                    name: name.to_string(),
+                },
+            });
+        }
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                emit_compact_name_elem_spans(elem, content, spans);
+            }
+        }
+        Expression::LegacyArray(arr) => {
+            for elem in arr.elements.iter() {
+                emit_compact_name_elem_spans(elem, content, spans);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Emit spans for one element of an array passed to `compact()`. Keys are
+/// ignored; values are variable names or nested arrays.
+fn emit_compact_name_elem_spans(
+    elem: &ArrayElement<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match elem {
+        ArrayElement::KeyValue(kv) => emit_compact_name_spans(kv.value, content, spans),
+        ArrayElement::Value(v) => emit_compact_name_spans(v.value, content, spans),
+        ArrayElement::Variadic(s) => emit_compact_name_spans(s.value, content, spans),
+        ArrayElement::Missing(_) => {}
     }
 }
 
@@ -3599,5 +3940,217 @@ fn arg_contains_instanceof(expr: &Expression<'_>) -> bool {
             arg_contains_instanceof(bin.lhs) || arg_contains_instanceof(bin.rhs)
         }
         _ => false,
+    }
+}
+
+// ─── Laravel route controller method spans ──────────────────────────────────
+
+/// HTTP method names used in Laravel route definitions.
+///
+/// `Route::get(…)`, `Route::post(…)`, etc.  `match` is excluded because
+/// its action argument is in a different position (3rd, not 2nd).
+const ROUTE_HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "options", "any"];
+
+/// Walk a fluent method chain backwards looking for `->controller(X::class)`.
+///
+/// Returns the class name (as written in source, e.g. `"WorkItemController"`)
+/// if found, `None` otherwise.  Handles both instance-method chains
+/// (`->prefix('…')->controller(X::class)`) and a static entry point
+/// (`Route::controller(X::class)`).
+fn laravel_route_find_controller_in_chain(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Call(Call::Method(mc)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method
+                && ident.value.eq_ignore_ascii_case(b"controller")
+            {
+                return laravel_route_extract_class_arg(&mc.argument_list);
+            }
+            laravel_route_find_controller_in_chain(mc.object)
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &sc.method
+                && ident.value.eq_ignore_ascii_case(b"controller")
+            {
+                return laravel_route_extract_class_arg(&sc.argument_list);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Extract the class name from the first argument when it is a `X::class`
+/// constant access.  Returns the source text of `X` (e.g.
+/// `"WorkItemResourceController"` or `"App\\Http\\Controllers\\Foo"`).
+fn laravel_route_extract_class_arg(args: &ArgumentList<'_>) -> Option<String> {
+    let first_arg = args.arguments.iter().next()?;
+    if let Expression::Access(Access::ClassConstant(cca)) = first_arg.value() {
+        let is_class = matches!(
+            &cca.constant,
+            ClassLikeConstantSelector::Identifier(ident)
+                if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
+        );
+        if is_class {
+            let name = expr_to_subject_text(cca.class);
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Walk the closure (or arrow function) body passed to `->group()`.
+fn laravel_route_scan_group_body(
+    expr: &Expression<'_>,
+    controller: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match expr {
+        Expression::Closure(closure) => {
+            for stmt in closure.body.statements.iter() {
+                laravel_route_scan_stmt(stmt, controller, content, spans);
+            }
+        }
+        Expression::ArrowFunction(af) => {
+            laravel_route_scan_expr(af.expression, controller, content, spans);
+        }
+        _ => {}
+    }
+}
+
+/// Scan a statement for route definition calls with controller method strings.
+fn laravel_route_scan_stmt(
+    stmt: &Statement<'_>,
+    controller: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match stmt {
+        Statement::Expression(e) => {
+            laravel_route_scan_expr(e.expression, controller, content, spans);
+        }
+        Statement::Return(r) => {
+            if let Some(v) = r.value {
+                laravel_route_scan_expr(v, controller, content, spans);
+            }
+        }
+        Statement::If(if_stmt) => {
+            for s in if_stmt.body.statements() {
+                laravel_route_scan_stmt(s, controller, content, spans);
+            }
+            for stmts in if_stmt.body.else_if_statements() {
+                for s in stmts {
+                    laravel_route_scan_stmt(s, controller, content, spans);
+                }
+            }
+            if let Some(else_stmts) = if_stmt.body.else_statements() {
+                for s in else_stmts {
+                    laravel_route_scan_stmt(s, controller, content, spans);
+                }
+            }
+        }
+        Statement::Foreach(fe) => {
+            for s in fe.body.statements() {
+                laravel_route_scan_stmt(s, controller, content, spans);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Scan an expression for `Route::get(…)` / `Route::post(…)` / etc. and
+/// emit a [`SymbolKind::MemberAccess`] span for the action string.
+///
+/// Also recurses into nested `->group()` calls that do **not** declare
+/// their own `->controller()` (inheriting the parent controller), while
+/// stopping at nested groups that **do** declare a new controller (those
+/// are handled by their own extraction-time invocation).
+fn laravel_route_scan_expr(
+    expr: &Expression<'_>,
+    controller: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    match expr {
+        // Chained call: Route::patch('cancel', 'cancel')->name('cancel')
+        Expression::Call(Call::Method(mc)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method
+                && ident.value.eq_ignore_ascii_case(b"group")
+            {
+                // Nested group — check for its own controller.
+                if laravel_route_find_controller_in_chain(mc.object).is_some() {
+                    return; // Own controller; handled separately.
+                }
+                // No new controller — inherit the parent's.
+                for arg in mc.argument_list.arguments.iter() {
+                    laravel_route_scan_group_body(arg.value(), controller, content, spans);
+                }
+                return;
+            }
+            // Walk the inner object (chain before ->name() etc.).
+            laravel_route_scan_expr(mc.object, controller, content, spans);
+        }
+        // Route::patch('cancel', 'cancel')
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let subject = expr_to_subject_text(sc.class);
+            if !strip_fqn_prefix(&subject).eq_ignore_ascii_case("Route") {
+                return;
+            }
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return;
+            };
+            let method_lower = bytes_to_str(ident.value).to_ascii_lowercase();
+            if !ROUTE_HTTP_METHODS.iter().any(|m| *m == method_lower) {
+                return;
+            }
+            // Second argument is the controller method name.
+            let mut args_iter = sc.argument_list.arguments.iter();
+            let _uri_arg = args_iter.next(); // skip first (URI)
+            let Some(action_arg) = args_iter.next() else {
+                return;
+            };
+            let Expression::Literal(literal::Literal::String(s)) = action_arg.value() else {
+                return;
+            };
+
+            let inner_start = s.span.start.offset + 1;
+            let inner_end = s.span.end.offset - 1;
+            if inner_start >= inner_end || inner_end as usize > content.len() {
+                return;
+            }
+            let method_name = if let Some(value) = s.value {
+                bytes_to_str(value)
+            } else {
+                &content[inner_start as usize..inner_end as usize]
+            };
+            // Must look like a valid PHP method name.
+            if method_name.is_empty()
+                || !method_name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                || method_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
+            {
+                return;
+            }
+
+            spans.push(SymbolSpan {
+                start: inner_start,
+                end: inner_end,
+                kind: SymbolKind::MemberAccess {
+                    subject_text: controller.to_string(),
+                    member_name: method_name.to_string(),
+                    is_static: true,
+                    is_method_call: true,
+                    is_docblock_reference: false,
+                    is_array_callable: false,
+                },
+            });
+        }
+        _ => {}
     }
 }

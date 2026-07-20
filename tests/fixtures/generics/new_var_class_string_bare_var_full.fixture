@@ -1,0 +1,36 @@
+// test: class_exists() guard keeps class-string<T>, so new $var resolves to T
+// feature: completion
+// expect: setName(
+---
+<?php
+
+class Rule {
+    public function setName(string $name): void {}
+    public function getPriority(): int {}
+}
+
+class Factory {
+    public function create(array $ruleNode): void {
+        $fileName = '';
+        $className = $ruleNode['class'] ?? ($fileName === '' ? '' : 'x');
+        if ((!$className instanceof \Stringable) && !is_string($className)) {
+            throw new \RuntimeException('Invalid class');
+        }
+
+        /** @var class-string<Rule> */
+        $className = (string) $className;
+
+        if (!is_readable($fileName)) {
+            $fileName = strtr($className, '\\', '/') . '.php';
+        }
+
+        // The class_exists() guard must not downgrade class-string<Rule>
+        // to a bare class-string, or `new $className()` loses the <Rule>.
+        if (!class_exists($className)) {
+            throw new \RuntimeException('nope');
+        }
+
+        $rule = new $className();
+        $rule-><>
+    }
+}

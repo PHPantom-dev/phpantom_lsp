@@ -5,6 +5,12 @@ use super::source_map::BladeSourceMap;
 enum Mode {
     Html,
     Php,
+    /// A raw `<?php` / `<?=` / `<?` tag embedded directly in the template
+    /// (i.e. not via `@php`/`@endphp`). Content is passed through verbatim
+    /// with no directive/echo scanning, and the mode ends at `?>`. The
+    /// `bool` tracks whether the opening tag was a short-echo tag (`<?=`),
+    /// which needs a trailing `;` injected before the closing `?>`.
+    RawPhp(bool),
     DirectiveArgs(&'static str),
     SkipArgs(&'static str),
     Verbatim,
@@ -106,6 +112,17 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                     };
                     match_len = if is_comment || is_raw { 4 } else { 2 };
                     next_mode = Mode::Php;
+                } else if remaining.starts_with(&['<', '?', 'p', 'h', 'p']) {
+                    // Raw <?php tag embedded directly in the template (not via @php).
+                    match_len = 5;
+                    next_mode = Mode::RawPhp(false);
+                } else if remaining.starts_with(&['<', '?', '=']) {
+                    match_len = 3;
+                    replacement = " echo ".to_string();
+                    next_mode = Mode::RawPhp(true);
+                } else if remaining.starts_with(&['<', '?']) {
+                    match_len = 2;
+                    next_mode = Mode::RawPhp(false);
                 } else if remaining.starts_with(&['@']) {
                     let rest_str: String = remaining[1..].iter().collect();
                     if let Some(directive) = match_directive(&rest_str) {
@@ -172,7 +189,13 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             paren_depth = 0;
                         } else if matches!(
                             directive,
-                            "if" | "elseif" | "for" | "while" | "switch" | "unless" | "isset"
+                            "if" | "elseif"
+                                | "for"
+                                | "while"
+                                | "switch"
+                                | "unless"
+                                | "isset"
+                                | "case"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(":"); // Directive Args
@@ -273,6 +296,16 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                     next_mode = Mode::Html;
                     match_len = 7;
                     replacement = "".to_string();
+                }
+            } else if let Mode::RawPhp(needs_semicolon) = mode {
+                if remaining.starts_with(&['?', '>']) {
+                    replacement = if needs_semicolon {
+                        "; ".to_string()
+                    } else {
+                        "".to_string()
+                    };
+                    match_len = 2;
+                    next_mode = Mode::Html;
                 }
             } else if let Mode::DirectiveArgs(suffix) = mode {
                 // In Directive Args, we wait for balanced parentheses
@@ -752,6 +785,43 @@ mod tests {
             "@endonce should produce endif;: {}",
             php
         );
+    }
+
+    #[test]
+    fn test_preprocess_raw_php_tag_preserves_at_prefixed_string() {
+        // A raw <?php ... ?> block (not @php/@endphp) containing a string
+        // literal that starts with '@' (e.g. a JSON-LD '@context' key) must
+        // not be misread as a Blade directive.
+        let content = "@php\n@endphp\n<?php\n$schema = ['@context' => 'x'];\n?>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("'@context' => 'x'"),
+            "raw PHP tag content should pass through verbatim: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_raw_php_tag_short_echo() {
+        let content = "<p><?= $value ?></p>";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $value ;"),
+            "<?= ?> should translate to an echo statement: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_switch_case_with_class_constant() {
+        let content = "@switch($x)\n    @case (App\\Enums\\E::A)\n        {{ 1 }}\n        @break\n@endswitch\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("case  (App\\Enums\\E::A):"),
+            "@case should preserve its argument and emit a trailing colon: {}",
+            php
+        );
+        assert!(php.contains("break;"), "@break should emit break;: {}", php);
     }
 
     #[test]

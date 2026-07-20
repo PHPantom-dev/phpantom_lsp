@@ -337,8 +337,13 @@ fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String {
                 || (inner_trimmed.starts_with('"') && inner_trimmed.ends_with('"'))
             {
                 segments.push(format!("[{}]", inner_trimmed));
+            } else if !inner_trimmed.is_empty() && inner_trimmed.chars().all(|c| c.is_ascii_digit())
+            {
+                // Integer-literal index → preserve it so the resolver can
+                // address positional array shape entries (`array{Foo, Bar}`).
+                segments.push(format!("[{}]", inner_trimmed));
             } else {
-                // Generic / numeric index → strip to `[]`.
+                // Variable / generic index → strip to `[]`.
                 segments.push("[]".to_string());
             }
             bracket_ranges.push((bracket_open, pos));

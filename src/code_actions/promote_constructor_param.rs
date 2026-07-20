@@ -13,13 +13,13 @@
 //! unaffected because constructor promotion is transparent to callers.
 
 #[cfg(test)]
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::method::MethodBody;
-use mago_syntax::ast::class_like::property::{PlainProperty, Property, PropertyItem};
-use mago_syntax::ast::modifier::Modifier;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::method::MethodBody;
+use mago_syntax::cst::class_like::property::{PlainProperty, Property, PropertyItem};
+use mago_syntax::cst::modifier::Modifier;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
@@ -466,7 +466,7 @@ mod tests {
 
     /// Helper: parse PHP and find a promotion candidate at the given byte offset.
     fn find_candidate(php: &str, offset: u32) -> Option<PromotionCandidate> {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
         let ctx = find_cursor_context(&program.statements, offset);

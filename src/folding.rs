@@ -4,9 +4,9 @@
 /// (class bodies, function/method bodies, closures, arrays, control-flow
 /// blocks, argument/parameter lists), and scans trivia for doc-block and
 /// consecutive single-line comment ranges.
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
 use crate::Backend;
@@ -19,7 +19,7 @@ impl Backend {
     /// Re-parses the source with `mago_syntax` (the raw AST is not cached)
     /// and walks every statement/expression to emit `FoldingRange` entries.
     pub fn handle_folding_range(&self, content: &str) -> Option<Vec<FoldingRange>> {
-        let arena = Bump::new();
+        let arena = LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 
@@ -558,7 +558,9 @@ fn collect_from_expression(
                     ranges,
                 );
                 for arg in arg_list.arguments.iter() {
-                    collect_from_expression(arg.value(), idx, ranges);
+                    if let Some(value) = arg.value() {
+                        collect_from_expression(value, idx, ranges);
+                    }
                 }
             }
             for member in anon.members.iter() {

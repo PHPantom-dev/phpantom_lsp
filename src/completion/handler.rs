@@ -286,6 +286,7 @@ impl Backend {
             // request.  The guard is re-entrant safe.
             let _chain_guard = super::resolver::with_chain_resolution_cache();
             let _body_infer_guard = self.activate_body_return_inferrer();
+            let _auth_user_guard = self.activate_auth_user_resolver();
             let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
                 &self.resolved_class_cache,
             );
@@ -358,7 +359,6 @@ impl Backend {
             let string_ctx =
                 crate::completion::comment_position::classify_string_context(&content, position);
             use crate::completion::comment_position::StringContext;
-
             // ── Array shape key completion ───────────────────────────
             // Runs before `InStringLiteral` suppression because in
             // normal code `$arr['` puts the scanner inside a
@@ -372,6 +372,24 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── Laravel string key completion (route/config/view/trans) ──
+            // Inside `route('|')`, `config('|')`, `view('|')`, `__('|')`,
+            // etc., offer matching key names from the project.
+            // NB: `is_laravel` is extracted to a `let` so the read lock
+            // on `resolved_class_cache` is dropped before calling
+            // `try_laravel_string_key_completion`, which may trigger
+            // `ensure_workspace_indexed` → `update_ast` → write lock.
+            let is_laravel = self.resolved_class_cache.read().is_laravel();
+            if is_laravel
+                && matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                )
+                && let Some(response) = self.try_laravel_string_key_completion(&content, position)
+            {
+                return Ok(Some(response));
+            }
+
             // ── Eloquent relation/column string completion ──────────
             // Like array shape completion, this triggers inside string
             // literals where the cursor is in a method argument position
@@ -381,6 +399,19 @@ impl Backend {
                 StringContext::InStringLiteral | StringContext::NotInString
             ) && let Some(response) =
                 self.try_eloquent_string_completion(&content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
+            // ── Laravel route controller method completion ─────────
+            // Inside `Route::controller(X::class)->group(fn(){…})`,
+            // the 2nd argument string of Route::get/post/patch/… is a
+            // controller method name.
+            if matches!(
+                string_ctx,
+                StringContext::InStringLiteral | StringContext::NotInString
+            ) && let Some(response) =
+                self.try_laravel_route_controller_completion(&uri, &content, position, &ctx)
             {
                 return Ok(Some(response));
             }
@@ -975,6 +1006,7 @@ impl Backend {
             function_loader: Some(&function_loader),
             scope_var_resolver: None,
             is_in_static_method: false,
+            preserve_static: false,
         };
         let mut resolved = if suppress {
             vec![]
@@ -1000,6 +1032,7 @@ impl Backend {
                     function_loader: Some(&function_loader),
                     scope_var_resolver: None,
                     is_in_static_method: false,
+                    preserve_static: false,
                 };
                 resolved = super::resolver::resolve_target_classes(
                     &target.subject,

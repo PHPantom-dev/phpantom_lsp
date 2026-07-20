@@ -203,15 +203,7 @@ Currently silenced conservatively. Passing the return value of a
 `void` function is always a bug — PHP 8 returns `null` but the call
 site clearly misunderstands the API. Should be **Error** severity.
 
-### 3. `int` → `string` type juggling (lines 313–322)
-
-Currently unconditionally accepted because we can't know the
-`strict_types` setting. Under `declare(strict_types=1)` this is a
-`TypeError`. Consider detecting the `declare` statement in the file
-and flagging when strict types are enabled. When the declare is
-absent or set to `0`, keep the current permissive behaviour.
-
-### 4. Union any-member-compatible threshold (lines 189–213)
+### 3. Union any-member-compatible threshold (lines 189–213)
 
 Currently: if ANY single member of an arg union is compatible with
 the param, the entire union passes. Combined with the other

@@ -12,6 +12,7 @@ use crate::util::{short_name, strip_fqn_prefix};
 use crate::completion::builder::{
     analyze_use_block, build_callable_label, build_callable_snippet, deprecation_tag,
 };
+use crate::completion::context::symbol_ranking::{flat_symbol_sort_text, origin_sort_tier};
 use crate::completion::resolve::CompletionItemData;
 use crate::completion::use_edit::build_use_function_edit;
 
@@ -255,12 +256,13 @@ impl Backend {
                         )
                     };
 
+                    let origin_tier = origin_sort_tier(self.completion_origin_for_uri(_uri));
                     items.push(
                         FunctionItemBuilder::new(
                             label,
                             insert_text,
                             filter_text,
-                            format!("4_{}", info.name.to_lowercase()),
+                            flat_symbol_sort_text(&info.name, &prefix_lower, origin_tier, '0'),
                             fqn.clone(),
                             uri.to_string(),
                         )
@@ -317,12 +319,19 @@ impl Backend {
                         (format!("{sn}()$0"), sn.to_string())
                     };
 
+                    let origin = self
+                        .autoload_function_origin_index
+                        .read()
+                        .get(fqn)
+                        .copied()
+                        .unwrap_or(crate::ClassCompletionOrigin::Project);
+                    let origin_tier = origin_sort_tier(origin);
                     items.push(
                         FunctionItemBuilder::new(
                             sn.to_string(),
                             insert_text,
                             filter_text,
-                            format!("4_{}", sn.to_lowercase()),
+                            flat_symbol_sort_text(sn, &prefix_lower, origin_tier, '1'),
                             fqn.to_owned(),
                             uri.to_string(),
                         )
@@ -373,7 +382,12 @@ impl Backend {
                         sn.to_string(),
                         format!("{sn}()$0"),
                         sn.to_string(),
-                        format!("5_{}", sn.to_lowercase()),
+                        flat_symbol_sort_text(
+                            sn,
+                            &prefix_lower,
+                            origin_sort_tier(crate::ClassCompletionOrigin::CoreStub),
+                            '0',
+                        ),
                         name.to_string(),
                         uri.to_string(),
                     )

@@ -583,6 +583,8 @@ mod tests {
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: false,
+            is_macro: false,
+            is_inferred_return: false,
             type_assertions: vec![],
             throws: vec![],
             if_this_is: None,
@@ -637,6 +639,8 @@ mod tests {
             has_scope_attribute: false,
             is_abstract: false,
             is_virtual: false,
+            is_macro: false,
+            is_inferred_return: false,
             type_assertions: vec![],
             throws: vec![],
             if_this_is: None,
@@ -667,6 +671,7 @@ mod tests {
             used_traits: vec![],
             mixins: vec![],
             mixin_generics: vec![],
+            require_extends: None,
             is_final: false,
             is_abstract: false,
             deprecation_message: None,
@@ -711,6 +716,7 @@ mod tests {
             used_traits: vec![],
             mixins: vec![],
             mixin_generics: vec![],
+            require_extends: None,
             is_final: false,
             is_abstract: false,
             deprecation_message: None,
@@ -758,6 +764,7 @@ mod tests {
             template_bindings: vec![],
             throws: Vec::new(),
             is_polyfill: false,
+            overloads: vec![],
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

@@ -19,7 +19,7 @@
 
 use mago_docblock::document::TagKind;
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
 use crate::types::{AssertionKind, PhpVersion, TypeAssertion};
@@ -285,6 +285,44 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
     results
 }
 
+/// Extract the required base class from a `@phpstan-require-extends`
+/// (or `@psalm-require-extends` / bare `@require-extends`) tag.
+///
+/// This tag appears on traits to declare that any using class must extend
+/// the named base class. Returns the class name as written (minus any
+/// generic arguments), which is resolved to a fully-qualified name later
+/// during post-processing. Returns `None` when no such tag is present.
+pub fn extract_require_extends(docblock: &str) -> Option<String> {
+    let info = parse_docblock_for_tags(docblock)?;
+    extract_require_extends_from_info(&info)
+}
+
+/// Like [`extract_require_extends`], but operates on a pre-parsed
+/// [`DocblockInfo`].
+pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> {
+    for tag in info.tags_by_kinds(&[
+        TagKind::RequireExtends,
+        TagKind::PhpstanRequireExtends,
+        TagKind::PsalmRequireExtends,
+    ]) {
+        let desc = tag.description.trim();
+        if desc.is_empty() {
+            continue;
+        }
+        // Take the first type token so a trailing description or generic
+        // argument list does not leak into the class name.
+        let (type_token, _remainder) = split_type_token(desc);
+        let base = match PhpType::parse(type_token) {
+            PhpType::Generic(name, _) | PhpType::Named(name) => name,
+            _ => continue,
+        };
+        if !base.is_empty() {
+            return Some(base);
+        }
+    }
+    None
+}
+
 /// Strip a leading `\` from a `PhpType` without a `to_string()` →
 /// `PhpType::parse()` round-trip.  Uses `resolve_names` which already
 /// walks the entire type structure recursively.
@@ -391,12 +429,23 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
             continue;
         }
 
-        // Check for negation: `!Type $param`
-        let (negated, rest) = if let Some(r) = desc.strip_prefix('!') {
-            (true, r.trim_start())
-        } else {
-            (false, desc)
-        };
+        // Strip leading assertion-type modifiers in any order: `!` marks a
+        // negated assertion; `=` marks an exact-type assertion (PHPUnit's
+        // `assertInstanceOf`, `assertSame`, etc. use `=ExpectedType`).  For
+        // narrowing purposes the exact form behaves the same as the default
+        // subtype form, so the `=` is dropped.
+        let mut rest = desc;
+        let mut negated = false;
+        loop {
+            if let Some(r) = rest.strip_prefix('!') {
+                negated = !negated;
+                rest = r.trim_start();
+            } else if let Some(r) = rest.strip_prefix('=') {
+                rest = r.trim_start();
+            } else {
+                break;
+            }
+        }
 
         // Next token is the type (which may contain spaces in generics).
         let (type_str, remainder) = split_type_token(rest);
@@ -507,9 +556,9 @@ pub fn find_inline_var_docblock(
     let open_pos = trimmed.rfind("/**")?;
 
     // Ensure nothing but whitespace between the start of the line and `/**`.
-    let line_start = match trimmed.get(..open_pos) {
-        Some(s) => s.rfind('\n').map_or(0, |p| p + 1),
-        None => return None,
+    let line_start = {
+        let s = trimmed.get(..open_pos)?;
+        s.rfind('\n').map_or(0, |p| p + 1)
     };
     let prefix = trimmed.get(line_start..open_pos)?;
     if !prefix.chars().all(|c| c.is_ascii_whitespace()) {
@@ -943,45 +992,38 @@ pub fn extract_link_urls_from_info(info: &DocblockInfo) -> Vec<String> {
     urls
 }
 
-/// Strip common HTML tags from a docblock description string.
+/// Convert common HTML tags in a docblock description to plain text.
 ///
-/// Removes `<p>`, `</p>`, `<i>`, `</i>`, `<b>`, `</b>`, `<br>`, `<br/>`,
-/// `<br />`, `<li>`, `</li>`, `<ul>`, `</ul>`, `<ol>`, `</ol>`,
-/// `<code>`, `</code>`, `<em>`, `</em>`, and `<strong>`, `</strong>`.
+/// Inline formatting tags (`<b>`, `<i>`, `<code>`, `<em>`, `<strong>`,
+/// `<span>`) are unwrapped, `<br>` and `<p>` become line breaks, and list
+/// and definition-list tags (`<ul>`/`<ol>`/`<li>`, `<dl>`/`<dt>`/`<dd>`)
+/// become bullet-prefixed or indented lines. Tag matching is
+/// case-insensitive. Unrecognised tags are left untouched.
 fn strip_html_tags(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.char_indices().peekable();
     while let Some((i, c)) = chars.next() {
         if c == '<' {
-            // Find the closing `>`.
             if let Some(end) = s[i..].find('>') {
                 let tag = &s[i..i + end + 1];
                 let tag_lower = tag.to_ascii_lowercase();
-                let is_html = tag_lower == "<p>"
-                    || tag_lower == "</p>"
-                    || tag_lower == "<i>"
-                    || tag_lower == "</i>"
-                    || tag_lower == "<b>"
-                    || tag_lower == "</b>"
-                    || tag_lower == "<br>"
-                    || tag_lower == "<br/>"
-                    || tag_lower == "<br />"
-                    || tag_lower == "<li>"
-                    || tag_lower == "</li>"
-                    || tag_lower == "<ul>"
-                    || tag_lower == "</ul>"
-                    || tag_lower == "<ol>"
-                    || tag_lower == "</ol>"
-                    || tag_lower == "<code>"
-                    || tag_lower == "</code>"
-                    || tag_lower == "<em>"
-                    || tag_lower == "</em>"
-                    || tag_lower == "<strong>"
-                    || tag_lower == "</strong>"
-                    || tag_lower == "<span>"
-                    || tag_lower == "</span>";
-                if is_html {
-                    // Skip past the closing `>`.
+                let replacement = match tag_lower.as_str() {
+                    "<li>" => Some("- "),
+                    "</li>" => Some("\n"),
+                    "<ul>" | "<ol>" => Some("\n"),
+                    "<dl>" | "</dl>" => Some("\n"),
+                    "<dt>" => Some("\n"),
+                    "<dd>" => Some("\n  "),
+                    "<br>" | "<br/>" | "<br />" => Some("\n"),
+                    "<p>" => Some("\n\n"),
+                    "</ul>" | "</ol>" => Some("\n"),
+                    "</p>" | "</dt>" | "</dd>" | "<i>" | "</i>" | "<b>" | "</b>" | "<code>"
+                    | "</code>" | "<em>" | "</em>" | "<strong>" | "</strong>" | "<span>"
+                    | "</span>" => Some(""),
+                    _ => None,
+                };
+                if let Some(rep) = replacement {
+                    result.push_str(rep);
                     for _ in 0..end {
                         chars.next();
                     }
@@ -1334,11 +1376,23 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     }
 
     // If the native type is a union or intersection, check each component.
-    // If ALL parts are scalar, the docblock can't override.
-    // If ANY part is non-scalar, it's plausible to refine.
+    // A member is refinable when it is non-scalar (a class the docblock can
+    // parameterise) or a broad type (`array`, `iterable`, `callable`,
+    // `object`) that a docblock commonly refines. `is_scalar()` counts bare
+    // `array` and `object` as scalar, so without the explicit container and
+    // object checks a native union like `array|false` would wrongly reject a
+    // `array<int, User>|false` docblock (dropping the element type), and
+    // `object|string` would reject a `class-string<T>|T` docblock (as with
+    // `new ReflectionClass($classString)`, dropping the template binding).
     match native_inner {
         PhpType::Union(members) | PhpType::Intersection(members) => {
-            return members.iter().any(|m| !m.is_scalar());
+            return members.iter().any(|m| {
+                !m.is_scalar()
+                    || m.is_bare_array()
+                    || m.is_iterable()
+                    || m.is_callable()
+                    || m.is_object()
+            });
         }
         _ => {}
     }
@@ -1550,7 +1604,19 @@ pub fn resolve_effective_type_typed(
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
             if should_override_type_typed(doc, native) {
-                Some(doc.clone())
+                // Preserve nullability from the native hint. A `?array`
+                // native with a non-nullable `@param Foo[]` docblock still
+                // accepts null at runtime, so the effective type is
+                // `Foo[]|null`. This mirrors PHPStan's `decideType`.
+                //
+                // `mixed` is excluded: it accepts null but carries no
+                // explicit null member, so narrowing it through a docblock
+                // is intentional and must not re-add null.
+                if native.accepts_null() && !native.is_mixed() {
+                    Some(doc.clone().or_null())
+                } else {
+                    Some(doc.clone())
+                }
             } else {
                 Some(native.clone())
             }
@@ -1630,12 +1696,6 @@ fn extract_type_via_mago_from_info(info: &DocblockInfo, kinds: &[TagKind]) -> Op
                 continue;
             }
 
-            // PHPStan conditional return types start with `(` — skip them
-            // here; they are handled by `extract_conditional_return_type`.
-            if desc.starts_with('(') {
-                return None;
-            }
-
             // mago-docblock joins multi-line tag descriptions with `\n`.
             // Normalise newlines (and surrounding whitespace from
             // indentation) into a single space so that `split_type_token`
@@ -1648,7 +1708,19 @@ fn extract_type_via_mago_from_info(info: &DocblockInfo, kinds: &[TagKind]) -> Op
             }
 
             let raw = type_str.trim_end_matches(['.', ',']);
-            return sanitise_and_parse_docblock_type(raw);
+            let parsed = sanitise_and_parse_docblock_type(raw);
+
+            // A leading `(` may open either a PHPStan conditional return
+            // type (`($p is T ? A : B)`) or a parenthesized type group
+            // such as a DNF `(A&B)|null`.  Conditionals are handled
+            // separately by `extract_conditional_return_type`, so bail
+            // here only when the type genuinely parses as a conditional;
+            // a parenthesized union/intersection group is a normal type
+            // and must be returned.
+            if matches!(parsed, Some(PhpType::Conditional { .. })) {
+                return None;
+            }
+            return parsed;
         }
     }
 
@@ -2171,6 +2243,95 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result[0].negated);
         assert_eq!(result[0].asserted_type.to_string(), "Collection<int, User>");
+    }
+
+    #[test]
+    fn assert_exact_type_prefix_is_stripped() {
+        // PHPUnit's `assertInstanceOf` ships `@phpstan-assert =ExpectedType`.
+        let doc = "/** @phpstan-assert =ExpectedType $actual */";
+        let result = extract_type_assertions(doc);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].asserted_type.to_string(), "ExpectedType");
+        assert_eq!(result[0].param_name, "$actual");
+        assert!(!result[0].negated);
+    }
+
+    #[test]
+    fn assert_negated_exact_type_prefix() {
+        // Both modifiers together, in either order, are stripped and the
+        // negation is preserved.
+        for doc in [
+            "/** @phpstan-assert !=Foobar $actual */",
+            "/** @phpstan-assert =!Foobar $actual */",
+        ] {
+            let result = extract_type_assertions(doc);
+            assert_eq!(result.len(), 1, "doc: {doc}");
+            assert_eq!(result[0].asserted_type.to_string(), "Foobar", "doc: {doc}");
+            assert!(result[0].negated, "doc: {doc}");
+        }
+    }
+
+    // ── strip_html_tags ──────────────────────────────────────────────
+
+    #[test]
+    fn strip_html_tags_removes_inline_tags() {
+        assert_eq!(
+            strip_html_tags("<b>bold</b> <i>italic</i> <code>code</code>"),
+            "bold italic code"
+        );
+    }
+
+    #[test]
+    fn strip_html_tags_strong_em_span() {
+        assert_eq!(
+            strip_html_tags("<strong>a</strong> <em>b</em> <span>c</span>"),
+            "a b c"
+        );
+    }
+
+    #[test]
+    fn strip_html_tags_br_becomes_newline() {
+        assert_eq!(strip_html_tags("a<br>b<br/>c<br />d"), "a\nb\nc\nd");
+    }
+
+    #[test]
+    fn strip_html_tags_paragraph() {
+        assert_eq!(strip_html_tags("first<p>second</p>"), "first\n\nsecond");
+    }
+
+    #[test]
+    fn strip_html_tags_list_items_become_bullets() {
+        assert_eq!(
+            strip_html_tags("<ul><li>one</li><li>two</li></ul>"),
+            "\n- one\n- two\n\n"
+        );
+    }
+
+    #[test]
+    fn strip_html_tags_ordered_list() {
+        assert_eq!(
+            strip_html_tags("<ol><li>first</li><li>second</li></ol>"),
+            "\n- first\n- second\n\n"
+        );
+    }
+
+    #[test]
+    fn strip_html_tags_definition_list() {
+        assert_eq!(
+            strip_html_tags("<dl><dt>Term</dt><dd>Definition</dd></dl>"),
+            "\n\nTerm\n  Definition\n"
+        );
+    }
+
+    #[test]
+    fn strip_html_tags_preserves_non_html_angle_brackets() {
+        assert_eq!(strip_html_tags("a < b and c > d"), "a < b and c > d");
+    }
+
+    #[test]
+    fn strip_html_tags_no_html() {
+        let plain = "No HTML here.";
+        assert_eq!(strip_html_tags(plain), plain);
     }
 
     #[test]

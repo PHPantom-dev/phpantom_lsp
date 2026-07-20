@@ -279,9 +279,9 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
 
 // ─── Shared PHP AST walker ───────────────────────────────────────────────────
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 /// Parse `content` as PHP and call `visitor` for every expression node
 /// (pre-order, depth-first).  Used by navigation modules to find specific
@@ -294,7 +294,7 @@ pub(crate) fn walk_all_php_expressions(
     content: &str,
     visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
 ) {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     for stmt in program.statements.iter() {
@@ -628,6 +628,39 @@ fn walk_array_el_depth(
         ArrayElement::Missing(_) => {}
     }
     ControlFlow::Continue(())
+}
+
+/// Try to extract a relative path from a `__DIR__ . '/path.php'` expression.
+///
+/// Returns the string literal portion (e.g. `"/ems/accounting.php"`).
+pub(crate) fn extract_dir_concat_path<'a>(
+    expr: &Expression<'a>,
+    content: &'a str,
+) -> Option<&'a str> {
+    let Expression::Binary(bin) = expr else {
+        return None;
+    };
+    let is_dir = matches!(
+        bin.lhs,
+        Expression::MagicConstant(MagicConstant::Directory { .. })
+    );
+    if !is_dir {
+        return None;
+    }
+    let Expression::Literal(literal::Literal::String(s)) = bin.rhs else {
+        return None;
+    };
+    if let Some(value) = s.value {
+        Some(crate::atom::bytes_to_str(value))
+    } else {
+        let start = s.span.start.offset as usize + 1;
+        let end = s.span.end.offset as usize - 1;
+        if start < end && end <= content.len() {
+            Some(&content[start..end])
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

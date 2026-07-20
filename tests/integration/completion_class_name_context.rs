@@ -1936,13 +1936,13 @@ async fn test_instanceof_no_heuristic_demotion() {
     assert!(repo_item.is_some(), "UserRepository should be present");
     assert!(iface_item.is_some(), "UserInterface should be present");
 
-    // sort_text format: {quality}{tier}{affinity:4}{demote}{gap:3}_{name}
-    // Demote flag is at position 6.  Neither should be demoted in
+    // sort_text format: {quality}{origin_tier}{source_tier}{affinity:4}{demote}{gap:3}_{name}
+    // Demote flag is at position 7.  Neither should be demoted in
     // instanceof context.
     let demote_flag = |item: &CompletionItem| -> char {
         item.sort_text
             .as_deref()
-            .and_then(|s| s.chars().nth(6))
+            .and_then(|s| s.chars().nth(7))
             .unwrap_or('?')
     };
 
@@ -2010,13 +2010,13 @@ async fn test_extends_interface_does_not_demote_interface_names() {
     assert!(logger_item.is_some(), "LoggerInterface should be present");
     assert!(loggable_item.is_some(), "Loggable should be present");
 
-    // sort_text format: {quality}{tier}{affinity:4}{demote}{gap:3}_{name}
-    // Demote flag is at position 6.  Neither should be demoted in
+    // sort_text format: {quality}{origin_tier}{source_tier}{affinity:4}{demote}{gap:3}_{name}
+    // Demote flag is at position 7.  Neither should be demoted in
     // extends-interface context.
     let demote_flag = |item: &CompletionItem| -> char {
         item.sort_text
             .as_deref()
-            .and_then(|s| s.chars().nth(6))
+            .and_then(|s| s.chars().nth(7))
             .unwrap_or('?')
     };
 
@@ -2529,6 +2529,7 @@ async fn test_use_import_excludes_constants_and_functions() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );
@@ -2662,6 +2663,7 @@ async fn test_use_function_shows_only_functions() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );

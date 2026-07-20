@@ -12,9 +12,14 @@ use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 
 class Demo
@@ -57,6 +62,13 @@ class Demo
         $bakery->vendor_count;        // relationship count         → int
         $bakery->warmth;              // $appends (no cast/attr)    → mixed
         // MUST NOT appear: secret_ingredient (private $attributes field)
+
+        // Relation properties resolve case-insensitively, matching Laravel's
+        // magic accessor, which dispatches relations through a
+        // case-insensitive method lookup. Both spellings resolve to the same
+        // relationship, so a differently-cased access is not flagged.
+        $bakery->headbaker->getName(); // HasOne (lower-case)       → Baker
+        $bakery->MasterRecipe;         // BelongsToMany (mixed)     → Collection<BakeryRecipe>
 
         // BelongsTo relationship property + method call with covariant $this
         $post = new BlogPost();
@@ -108,6 +120,17 @@ class Demo
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
+
+        // Paginators carry the model element type through foreach
+        foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
+            $author->profile->getBio();       // → BlogAuthor
+        }
+        foreach (BlogAuthor::simplePaginate() as $author) {
+            $author->posts();                 // → BlogAuthor
+        }
+        foreach (BlogAuthor::cursorPaginate() as $author) {
+            $author->ofGenre('fiction');      // → BlogAuthor
+        }
     }
 
 
@@ -256,5 +279,156 @@ class Demo
         config('app.name');
         Config::get('database.default');
         Config::set('app.timezone', 'UTC');
+    }
+
+
+    // ── Cache::remember() — closure return type binding ─────────────────
+
+    public function cacheRemember(): void
+    {
+        // Cache::remember()'s TCacheValue is bound from the callback's
+        // return type, even when the closure has no return annotation.
+        $author = Cache::remember('author', 3600, fn () => BlogAuthor::firstOrFail());
+        $author->name;                    // → BlogAuthor property (not mixed)
+
+        $post = Cache::remember('post', 3600, function () {
+            return new BlogPost();
+        });
+        $post->author;                    // → BlogPost relationship (block closure body)
+
+        $forever = Cache::rememberForever('count', fn () => BlogAuthor::count());
+        $forever + 1;                     // → int
+    }
+
+
+    // ── Auth user model from config/auth.php ────────────────────────────
+
+    public function authUser(Request $request): void
+    {
+        // config/auth.php maps the default `web` guard's provider to
+        // App\Models\Customer, so the authenticated user resolves to that
+        // model.
+        $request->user()->isPremium();    // → Customer method
+        $request->user()->name;           // → Customer property
+
+        // Passing a guard name selects that guard's configured model.
+        // The `admin` guard's provider maps to App\Models\Administrator,
+        // so the user resolves to Administrator, not Customer.
+        auth('admin')->user()->isSuperAdmin();          // → Administrator method
+        Auth::guard('admin')->user()->isSuperAdmin();   // → Administrator method
+        $request->user('admin')->isSuperAdmin();        // → Administrator method
+    }
+
+
+    // ── @mixin of an Eloquent model exposes its virtual members ─────────
+
+    public function mixinModel(): void
+    {
+        // BakeryProxy is a plain class with `@mixin Bakery`.  The model's
+        // synthesized virtual members flow through the mixin, not just its
+        // real declared members.
+        $proxy = new BakeryProxy(new Bakery());
+
+        $proxy->baguettes;                // relationship HasMany → Collection<Loaf>
+        $proxy->headBaker;                // relationship HasOne  → Baker
+        $proxy->apricot;                  // $casts 'boolean'     → bool
+        $proxy->topping('choc');          // scope method         → Builder
+    }
+
+
+    // ── Storage::fake() resolves to the concrete adapter ────────────────
+
+    public function storageFake(): void
+    {
+        // fake() declares the Filesystem contract but always builds a
+        // FilesystemAdapter, so the adapter-only assertion helpers resolve.
+        Storage::fake('avatars')->assertExists('me.png');
+        Storage::persistentFake('logs')->assertMissing('old.log');
+    }
+
+
+    // ── Container string aliases & global facades ───────────────────────
+
+    public function containerAliases(): void
+    {
+        // Laravel binds these string keys to concrete classes in the
+        // container.  PHPantom reads the framework's own alias table
+        // (`Application::registerCoreContainerAliases()`), so the concrete
+        // class resolves instead of `mixed`.
+        resolve('blade.compiler')->compileString('<x-foo />');  // → BladeCompiler
+        app('cache')->store();                                  // → CacheManager
+
+        // A bare global facade alias resolves without an explicit import,
+        // from the framework's own `Facade::defaultAliases()` table.
+        \App::environment('production');                        // → App facade
+    }
+
+
+    // ── Macro methods registered in a service provider ─────────────────
+
+    public function collectionMacro(Collection $items): float
+    {
+        // `sumField` is registered via Collection::macro(...) in
+        // DemoServiceProvider::boot(). PHPantom scans that registration, so
+        // the macro autocompletes and resolves to the closure's return type.
+        return $items->sumField('price');   // → float
+    }
+
+
+    // ── Macros from a path-repository module ──────────────────────────
+
+    public function moduleCollectionMacro(Collection $items): Collection
+    {
+        // `toUpper` is registered in Demo\Common\CommonServiceProvider (a
+        // path-repository package under app-modules/common/).  PHPantom
+        // discovers path-repo PSR-4 directories from installed.json,
+        // so macros defined in local modules work the same as app/ macros.
+        return $items->toUpper();   // → Collection
+    }
+
+
+    // ── Contract type-hints resolve through the concrete class ──────────
+
+    public function viewContract(\Illuminate\Contracts\View\View $view): void
+    {
+        // The View contract declares only name()/with()/getData(), but the
+        // object Laravel binds is the concrete Illuminate\View\View, which
+        // uses the Macroable trait.  PHPantom binds the concrete to the
+        // contract as a mixin, so concrete-only methods resolve and calls
+        // dispatched through Macroable's __call no longer report as unknown.
+        $view->getName();                 // concrete-only method → string
+        $view->render();                  // concrete-only method → string
+        $view->fragment('sidebar');       // concrete-only method
+    }
+
+
+    // ── Leading backslash bypasses a same-short-name import ────────────
+
+    public function globalRedisOverImport(): void
+    {
+        // This file imports `Illuminate\Support\Facades\Redis`, but a
+        // leading-backslash `\Redis` is an explicit global reference, so
+        // it resolves to the PECL extension's global `\Redis` class rather
+        // than the facade that shares the short name.
+        /** @var \Redis $client */
+        $client = new \Redis();
+        $client->select(1);               // global \Redis method
+        $client->connect('127.0.0.1');    // global \Redis method
+
+        // The bare `Redis` short name still resolves to the imported facade.
+        Redis::connection();              // Facades\Redis static method
+    }
+
+    public function dateHelpers(): \DateTime
+    {
+        // now()/today() are declared to return CarbonInterface, but they
+        // instantiate the concrete Illuminate\Support\Carbon (a \DateTime),
+        // so member access resolves and a chained fluent call stays concrete.
+        now()->addHours(1);               // → Illuminate\Support\Carbon
+        today()->startOfDay();            // → Illuminate\Support\Carbon
+
+        // Returning the chain from a :DateTime method is not a mismatch,
+        // because Illuminate\Support\Carbon extends \DateTime.
+        return now()->addHours(1);
     }
 }

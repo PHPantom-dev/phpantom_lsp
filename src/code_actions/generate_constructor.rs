@@ -14,12 +14,12 @@
 use std::collections::HashMap;
 
 #[cfg(test)]
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::property::{Property, PropertyItem};
-use mago_syntax::ast::modifier::Modifier;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::property::{Property, PropertyItem};
+use mago_syntax::cst::modifier::Modifier;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn detects_existing_constructor() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public function __construct() {}\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -844,7 +844,7 @@ mod tests {
 
     #[test]
     fn detects_no_constructor() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $name;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -859,7 +859,7 @@ mod tests {
 
     #[test]
     fn detects_constructor_case_insensitive() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public function __CONSTRUCT() {}\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -876,7 +876,7 @@ mod tests {
 
     #[test]
     fn collects_non_static() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $name;\n    private int $age;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn skips_static_properties() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $name;\n    public static int $count;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn includes_readonly_properties() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $name;\n    public readonly int $id;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -957,7 +957,7 @@ mod tests {
 
     #[test]
     fn extracts_default_values() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $status = 'active';\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -975,7 +975,7 @@ mod tests {
 
     #[test]
     fn extracts_docblock_type_when_no_native_hint() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    /** @var string */\n    public $name;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[test]
     fn skips_compound_docblock_type() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    /** @var int|string */\n    public $id;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -1021,7 +1021,7 @@ mod tests {
 
     #[test]
     fn preserves_nullable_native_type() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public ?string $name;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -1045,7 +1045,7 @@ mod tests {
 
     #[test]
     fn preserves_union_native_type() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public int|string $id;\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
@@ -1069,7 +1069,7 @@ mod tests {
 
     #[test]
     fn captures_declaration_span() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $name;\n}\n";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());

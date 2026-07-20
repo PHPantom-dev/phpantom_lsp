@@ -673,6 +673,25 @@ pub(crate) fn resolve_class_with_inheritance(
         }
     }
 
+    // Refine the `cases()` method on enums.  The `UnitEnum` interface
+    // declares `public static function cases(): array`, which loses the
+    // element type: `Country::cases()[0]` would resolve to `mixed`.
+    // Every concrete enum returns a list of its own instances, so
+    // replace the bare `array` with `list<EnumName>` (using the FQN so
+    // the element resolves regardless of the call site's namespace).
+    if merged.kind == crate::types::ClassLikeKind::Enum {
+        let element = PhpType::Named(merged.fqn().to_string());
+        let list_type = PhpType::Generic("list".to_string(), vec![element]);
+        if let Some(cases) = merged
+            .methods
+            .make_mut()
+            .iter_mut()
+            .find(|m| m.name.eq_ignore_ascii_case("cases"))
+        {
+            Arc::make_mut(cases).return_type = Some(list_type);
+        }
+    }
+
     merged
 }
 
@@ -741,6 +760,20 @@ pub(crate) fn resolve_property_type_hint(
         .iter()
         .find(|p| p.name == prop_name)
         .and_then(|p| p.type_hint.clone())
+    {
+        return Some(replace_self_in_property_type(hint, class));
+    }
+
+    // Eloquent relation properties resolve case-insensitively: access like
+    // `$model->orderproducts` flows through `__get()` → `isRelation()` →
+    // `method_exists()`, so a relation-backed virtual property matches the
+    // relationship regardless of the case used at the access site.
+    if crate::virtual_members::laravel::class_has_relation_method_ci(&merged, prop_name)
+        && let Some(hint) = merged
+            .properties
+            .iter()
+            .find(|p| p.is_virtual && p.name.eq_ignore_ascii_case(prop_name))
+            .and_then(|p| p.type_hint.clone())
     {
         return Some(replace_self_in_property_type(hint, class));
     }
@@ -815,7 +848,7 @@ fn resolve_magic_get_return_type(class: &ClassInfo, prop_name: &str) -> Option<P
         // (e.g. key-of<array{a: int, b: string}> → 'a'|'b').
         // We infer the template value as a literal string matching the
         // property name.
-        method_subs.insert(tparam.to_string(), PhpType::Literal(prop_name.to_string()));
+        method_subs.insert(tparam.to_string(), PhpType::literal_string_value(prop_name));
     }
 
     let resolved = return_type.substitute(&method_subs);

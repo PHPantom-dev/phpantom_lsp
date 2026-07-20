@@ -30,7 +30,7 @@
 mod tests;
 
 use std::collections::HashMap;
-
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
@@ -62,18 +62,16 @@ impl Backend {
             return None;
         }
 
-        // Namespace rename: narrow the range to the segment under the cursor.
+        // Namespace rename: offer the full namespace so the user can edit
+        // multiple segments at once.
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
-            let cursor_byte = crate::util::position_to_byte_offset(content, position);
-            let (segment, seg_start, seg_end) =
-                find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)?;
             let range = Range {
-                start: offset_to_position(content, seg_start as usize),
-                end: offset_to_position(content, seg_end as usize),
+                start: offset_to_position(content, span.start as usize),
+                end: offset_to_position(content, span.end as usize),
             };
             return Some(PrepareRenameResponse::RangeWithPlaceholder {
                 range,
-                placeholder: segment.to_string(),
+                placeholder: name.to_string(),
             });
         }
 
@@ -87,10 +85,16 @@ impl Backend {
             return None;
         }
 
-        Some(PrepareRenameResponse::RangeWithPlaceholder {
-            range,
-            placeholder: name,
-        })
+        // For class declarations, show the FQN as placeholder so the
+        // user can change the namespace to move the class.
+        let placeholder = if let SymbolKind::ClassDeclaration { ref name } = span.kind {
+            let ctx = self.file_context(uri);
+            build_fqn(name, ctx.namespace.as_deref())
+        } else {
+            name
+        };
+
+        Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
     }
 
     /// Handle `textDocument/rename`.
@@ -119,6 +123,9 @@ impl Backend {
 
         // Namespace rename: delegate to the specialised handler.
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
+            if new_name.contains('\\') {
+                return self.build_namespace_prefix_rename_edit(name, new_name);
+            }
             let cursor_byte = crate::util::position_to_byte_offset(content, position);
             let (segment, _seg_start, _seg_end) =
                 find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)?;
@@ -148,6 +155,9 @@ impl Backend {
         // For class renames, delegate to the specialised handler that
         // understands `use` statements, aliases, and collisions.
         if let Some(ref fqn) = class_rename_fqn {
+            if new_name.contains('\\') {
+                return self.build_class_move_edit(fqn, new_name, &locations);
+            }
             return self.build_class_rename_edit(fqn, new_name, &locations);
         }
 
@@ -531,6 +541,241 @@ impl Backend {
         })
     }
 
+    /// Build a `WorkspaceEdit` that moves a class to a new FQN.
+    ///
+    /// Handles namespace change, class name change, file move, and
+    /// updates all references across the workspace.  This is the
+    /// handler for rename requests where `new_name` contains `\`.
+    fn build_class_move_edit(
+        &self,
+        old_fqn: &str,
+        new_fqn_raw: &str,
+        locations: &[Location],
+    ) -> Option<WorkspaceEdit> {
+        let old_fqn_normalized = strip_fqn_prefix(old_fqn);
+        let new_fqn_normalized = strip_fqn_prefix(new_fqn_raw).to_string();
+        let old_short_name = crate::util::short_name(old_fqn_normalized);
+        let new_short_name = crate::util::short_name(&new_fqn_normalized);
+
+        let old_ns = old_fqn_normalized
+            .rfind('\\')
+            .map(|i| &old_fqn_normalized[..i]);
+        let new_ns = new_fqn_normalized
+            .rfind('\\')
+            .map(|i| &new_fqn_normalized[..i]);
+
+        let class_name_changed = old_short_name != new_short_name;
+        let namespace_changed = old_ns != new_ns;
+
+        if !class_name_changed && !namespace_changed {
+            return None;
+        }
+
+        let mut locations_by_file: HashMap<String, Vec<&Location>> = HashMap::new();
+        for loc in locations {
+            locations_by_file
+                .entry(loc.uri.to_string())
+                .or_default()
+                .push(loc);
+        }
+
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        let def_uri_str = self.fqn_uri_index.read().get(old_fqn_normalized).cloned();
+
+        for (file_uri_str, file_locations) in &locations_by_file {
+            let file_content = match self.get_file_content(file_uri_str) {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let parsed_uri = match Url::parse(file_uri_str) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+
+            let file_use_map = self
+                .file_imports
+                .read()
+                .get(file_uri_str)
+                .cloned()
+                .unwrap_or_default();
+
+            let import_info = find_import_for_fqn(&file_use_map, old_fqn_normalized);
+
+            let has_collision = class_name_changed
+                && import_info.is_some()
+                && has_import_collision(&file_use_map, old_fqn_normalized, new_short_name);
+
+            let (skip_alias_refs, in_code_replacement) = match &import_info {
+                Some(info) if info.alias != old_short_name => (true, info.alias.clone()),
+                Some(_) if has_collision => {
+                    let alias = pick_collision_alias(new_short_name, &file_use_map);
+                    (false, alias)
+                }
+                _ if class_name_changed => (false, new_short_name.to_string()),
+                _ => (true, old_short_name.to_string()),
+            };
+
+            let use_line_range = if import_info.is_some() {
+                find_use_line_range(&file_content, old_fqn_normalized)
+            } else {
+                None
+            };
+
+            let mut file_edits: Vec<TextEdit> = Vec::new();
+
+            let is_definition_file = def_uri_str.as_ref() == Some(file_uri_str);
+
+            if is_definition_file
+                && namespace_changed
+                && let Some(sm) = self.symbol_maps.read().get(file_uri_str).cloned()
+            {
+                if let Some(ns_span) = sm
+                    .spans
+                    .iter()
+                    .find(|s| matches!(&s.kind, SymbolKind::NamespaceDeclaration { .. }))
+                {
+                    let start = offset_to_position(&file_content, ns_span.start as usize);
+                    let end = offset_to_position(&file_content, ns_span.end as usize);
+                    file_edits.push(TextEdit {
+                        range: Range { start, end },
+                        new_text: new_ns.unwrap_or("").to_string(),
+                    });
+                } else if let Some(ns) = new_ns {
+                    let insert_line = find_namespace_insert_line(&file_content);
+                    file_edits.push(TextEdit {
+                        range: Range {
+                            start: Position {
+                                line: insert_line,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: insert_line,
+                                character: 0,
+                            },
+                        },
+                        new_text: format!("namespace {};\n\n", ns),
+                    });
+                }
+            }
+
+            for loc in file_locations {
+                let start_off =
+                    crate::util::position_to_byte_offset(&file_content, loc.range.start);
+                let end_off = crate::util::position_to_byte_offset(&file_content, loc.range.end);
+                let source_text = file_content
+                    .get(start_off..end_off)
+                    .unwrap_or("")
+                    .to_string();
+
+                if let Some(ref ul) = use_line_range
+                    && ranges_overlap(&loc.range, &ul.range)
+                {
+                    continue;
+                }
+
+                if matches!(source_text.as_str(), "self" | "static" | "parent") {
+                    continue;
+                }
+
+                if source_text.contains('\\') {
+                    let new_text = if source_text.starts_with('\\') {
+                        format!("\\{}", new_fqn_normalized)
+                    } else {
+                        new_fqn_normalized.clone()
+                    };
+                    file_edits.push(TextEdit {
+                        range: loc.range,
+                        new_text,
+                    });
+                } else if skip_alias_refs
+                    && import_info
+                        .as_ref()
+                        .is_some_and(|info| source_text == info.alias)
+                {
+                    continue;
+                } else if class_name_changed {
+                    file_edits.push(TextEdit {
+                        range: loc.range,
+                        new_text: in_code_replacement.clone(),
+                    });
+                }
+            }
+
+            if let Some(ref info) = import_info
+                && let Some(ref ul) = use_line_range
+            {
+                let new_line = build_use_line(
+                    &new_fqn_normalized,
+                    info,
+                    has_collision,
+                    new_short_name,
+                    &file_use_map,
+                );
+                file_edits.push(TextEdit {
+                    range: ul.range,
+                    new_text: new_line,
+                });
+            }
+
+            if !file_edits.is_empty() {
+                changes.entry(parsed_uri).or_default().extend(file_edits);
+            }
+        }
+
+        if changes.is_empty() {
+            return None;
+        }
+
+        let file_move = self.compute_class_file_move(old_fqn_normalized, &new_fqn_normalized);
+
+        if let Some((old_uri, new_uri)) = file_move
+            && self.supports_file_rename.load(Ordering::Acquire)
+        {
+            let doc_changes = Self::convert_to_document_changes(changes, &old_uri, &new_uri);
+            return Some(WorkspaceEdit {
+                changes: None,
+                document_changes: Some(doc_changes),
+                change_annotations: None,
+            });
+        }
+
+        Some(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        })
+    }
+
+    /// Compute the file move for a class being moved to a new FQN.
+    ///
+    /// Returns `Some((old_uri, new_uri))` when the file can be moved
+    /// to match the new PSR-4 location.
+    fn compute_class_file_move(&self, old_fqn: &str, new_fqn: &str) -> Option<(Url, Url)> {
+        if !self.supports_file_rename.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let def_uri_str = self.fqn_uri_index.read().get(old_fqn).cloned()?;
+        let old_url = Url::parse(&def_uri_str).ok()?;
+
+        let workspace_root = self.workspace_root().read().clone()?;
+        let mappings = self.psr4_mappings().read().clone();
+
+        let new_short = crate::util::short_name(new_fqn);
+        let new_ns = new_fqn.rfind('\\').map(|i| &new_fqn[..i]);
+
+        let new_path = compute_psr4_path(&mappings, &workspace_root, new_ns, new_short)?;
+        let new_url = Url::from_file_path(&new_path).ok()?;
+
+        if old_url == new_url {
+            return None;
+        }
+
+        Some((old_url, new_url))
+    }
+
     /// Extract the renameable symbol name and its source range.
     ///
     /// Returns `None` for symbols that cannot be renamed.
@@ -560,6 +805,7 @@ impl Backend {
             SymbolKind::FunctionCall { name, .. } => Some((name.clone(), range)),
             SymbolKind::ConstantReference { name } => Some((name.clone(), range)),
             SymbolKind::NamespaceDeclaration { name } => Some((name.clone(), range)),
+            SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
             SymbolKind::LaravelStringKey { .. }
             | SymbolKind::Keyword
@@ -667,13 +913,29 @@ impl Backend {
         new_segments[segment_idx] = new_segment;
         let new_prefix: String = new_segments[..=segment_idx].join("\\");
 
+        self.build_namespace_prefix_rename_edit(&old_prefix, &new_prefix)
+    }
+
+    fn build_namespace_prefix_rename_edit(
+        &self,
+        old_prefix: &str,
+        new_prefix: &str,
+    ) -> Option<WorkspaceEdit> {
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
-        // Scan all known files via namespace_map, use_map, and symbol_maps.
+        // Scan all known files. The live per-file maps only contain files
+        // that have been fully parsed through update_ast, but workspace
+        // scanning can index many more class files via uri_classes_index.
+        // Include those URIs too so namespace rename updates references in
+        // unopened workspace files.
         let all_uris: Vec<String> = {
             let nmap = self.file_namespaces.read();
             let umap = self.file_imports.read();
             let smap = self.symbol_maps.read();
+            let cmap = self.uri_classes_index.read();
+            let ofiles = self.open_files.read();
+            let workspace_root = self.workspace_root.read().clone();
+            let vendor_dir_paths = self.vendor_dir_paths.lock().clone();
             let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
             for uri in nmap.keys() {
                 uris.insert(uri.clone());
@@ -684,6 +946,21 @@ impl Backend {
             for uri in smap.keys() {
                 uris.insert(uri.clone());
             }
+            for uri in cmap.keys() {
+                uris.insert(uri.clone());
+            }
+            for uri in ofiles.keys() {
+                uris.insert(uri.clone());
+            }
+
+            if let Some(root) = workspace_root {
+                for path in crate::util::collect_php_files_gitignore(&root, &vendor_dir_paths) {
+                    if let Ok(uri) = Url::from_file_path(&path) {
+                        uris.insert(uri.to_string());
+                    }
+                }
+            }
+
             uris.into_iter().collect()
         };
 
@@ -714,17 +991,17 @@ impl Backend {
             //    Find lines like `namespace App\Bar\Service;` or
             //    `namespace App\Bar\Service {` where the namespace
             //    starts with `old_prefix`.
-            self.collect_namespace_decl_edits(&content, &old_prefix, &new_prefix, &mut file_edits);
+            self.collect_namespace_decl_edits(&content, old_prefix, new_prefix, &mut file_edits);
 
             // 2. Update `use` statements.
-            self.collect_use_statement_edits(&content, &old_prefix, &new_prefix, &mut file_edits);
+            self.collect_use_statement_edits(&content, old_prefix, new_prefix, &mut file_edits);
 
             // 3. Update inline FQN references from the symbol map.
             self.collect_fqn_reference_edits(
                 file_uri,
                 &content,
-                &old_prefix,
-                &new_prefix,
+                old_prefix,
+                new_prefix,
                 &mut file_edits,
             );
 
@@ -750,7 +1027,7 @@ impl Backend {
 
         // PSR-4 directory rename: if a mapping exists, emit RenameFile
         // operations to move the directory.
-        if let Some(ops) = self.build_namespace_psr4_rename_ops(&old_prefix, &new_prefix)
+        if let Some(ops) = self.build_namespace_psr4_rename_ops(old_prefix, new_prefix)
             && !ops.is_empty()
             && self.supports_file_rename.load(Ordering::Acquire)
         {
@@ -1263,4 +1540,58 @@ fn build_use_line(
     } else {
         format!("use {};", new_fqn)
     }
+}
+
+/// Compute the PSR-4 file path for a given namespace + class name.
+fn compute_psr4_path(
+    mappings: &[crate::composer::Psr4Mapping],
+    workspace_root: &Path,
+    namespace: Option<&str>,
+    class_name: &str,
+) -> Option<PathBuf> {
+    let fqn = match namespace {
+        Some(ns) => format!("{}\\{}", ns, class_name),
+        None => class_name.to_string(),
+    };
+
+    for mapping in mappings {
+        let relative = if mapping.prefix.is_empty() {
+            Some(fqn.as_str())
+        } else {
+            fqn.strip_prefix(&mapping.prefix)
+        };
+
+        if let Some(relative_class) = relative {
+            let relative_path = relative_class.replace('\\', "/");
+            let file_path = workspace_root
+                .join(&mapping.base_path)
+                .join(format!("{}.php", relative_path));
+            return Some(file_path);
+        }
+    }
+
+    None
+}
+
+/// Find the line number after `<?php` (and any `declare` statements)
+/// where a `namespace` declaration should be inserted.
+fn find_namespace_insert_line(content: &str) -> u32 {
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<?php") {
+            return (i + 1) as u32;
+        }
+        if trimmed.starts_with("declare(") || trimmed.starts_with("declare (") {
+            continue;
+        }
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("//")
+            && !trimmed.starts_with("/*")
+            && !trimmed.starts_with("*")
+            && !trimmed.starts_with("<?")
+        {
+            return i as u32;
+        }
+    }
+    1
 }

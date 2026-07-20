@@ -110,6 +110,21 @@ struct MixinDedup {
     constants: HashSet<String>,
 }
 
+/// The substitution environment for a single [`collect_mixin_members`] level.
+///
+/// Groups the two maps used to resolve a `@mixin` name that is a template
+/// parameter into a concrete class, keeping the argument count of
+/// [`collect_mixin_members`] within clippy's limit.
+struct MixinSubs<'a> {
+    /// Concrete type per template param (from generic arguments provided by
+    /// a subclass via `@extends`/`@mixin` generics).  Checked first.
+    subs: &'a HashMap<String, PhpType>,
+    /// Upper bound per template param (from `@template T of Bound`).  Used
+    /// as a fallback when no concrete type is bound, so a `@mixin T` still
+    /// resolves members through the constraint.
+    bounds: &'a crate::atom::AtomMap<PhpType>,
+}
+
 use super::{VirtualMemberProvider, VirtualMembers};
 
 /// Virtual member provider for `@method`, `@property`, and `@mixin` docblock tags.
@@ -333,7 +348,12 @@ impl VirtualMemberProvider for PHPDocProvider {
 
                 // Build a substitution map for this parent level from
                 // the child's `@extends` generics.
-                let level_subs = build_mixin_substitution_map(&current, &parent, &active_subs);
+                let level_subs = build_mixin_substitution_map(
+                    &current,
+                    &parent,
+                    &active_subs,
+                    &class.template_param_bounds,
+                );
 
                 if let Some(doc_text) = parent.class_docblock.as_deref()
                     && !doc_text.is_empty()
@@ -485,7 +505,10 @@ impl VirtualMemberProvider for PHPDocProvider {
             &class.mixin_generics,
             class_loader,
             &mut collector,
-            &HashMap::new(),
+            &MixinSubs {
+                subs: &HashMap::new(),
+                bounds: &class.template_param_bounds,
+            },
             0,
             cache,
         );
@@ -517,7 +540,12 @@ impl VirtualMemberProvider for PHPDocProvider {
 
             // Build the substitution map for this parent level,
             // analogous to `build_substitution_map` in inheritance.rs.
-            let level_subs = build_mixin_substitution_map(&current_ancestor, &parent, &active_subs);
+            let level_subs = build_mixin_substitution_map(
+                &current_ancestor,
+                &parent,
+                &active_subs,
+                &class.template_param_bounds,
+            );
 
             if !parent.mixins.is_empty() {
                 // Apply the accumulated substitution map to the
@@ -542,7 +570,10 @@ impl VirtualMemberProvider for PHPDocProvider {
                     &resolved_mixin_generics,
                     class_loader,
                     &mut collector,
-                    &level_subs,
+                    &MixinSubs {
+                        subs: &level_subs,
+                        bounds: &parent.template_param_bounds,
+                    },
                     0,
                     cache,
                 );
@@ -583,13 +614,15 @@ fn collect_mixin_members(
     mixin_generics: &[(Atom, Vec<PhpType>)],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     collector: &mut MixinCollector,
-    template_subs: &HashMap<String, PhpType>,
+    subs: &MixinSubs<'_>,
     depth: u32,
     cache: Option<&super::ResolvedClassCache>,
 ) {
     if depth > MAX_MIXIN_DEPTH {
         return;
     }
+
+    let template_subs = subs.subs;
 
     for mixin_name in mixin_names {
         // If the mixin name is a template parameter, substitute it
@@ -600,6 +633,20 @@ fn collect_mixin_members(
             } else {
                 // The concrete type is a scalar, union, or other
                 // non-class type — cannot be used as a mixin.
+                continue;
+            }
+        } else if let Some(bound) = subs.bounds.get(mixin_name) {
+            // The mixin name is a template parameter with no concrete
+            // binding (e.g. `@mixin TNode` on a class declaring
+            // `@template TNode of Engine`).  Resolve members through the
+            // template's upper bound so the class itself still exposes the
+            // bound's public API.  A concrete subclass that provides a
+            // real binding via `@extends` overrides this through the
+            // substitution path above.
+            if let Some(base) = bound.base_name() {
+                base.to_string()
+            } else {
+                // The bound is a scalar, union, or other non-class type.
                 continue;
             }
         } else {
@@ -625,42 +672,51 @@ fn collect_mixin_members(
             })
             .map(|(_, args)| args.as_slice());
 
-        // Resolve the mixin class with its own inheritance so we see
-        // all of its inherited/trait members too.  Use base resolution
-        // (not resolve_class_fully) to avoid circular provider calls.
+        // Resolve the mixin class *fully* so that its own virtual members
+        // (Laravel relationship properties, scopes, casts, accessors, and
+        // `@method` / `@property` tags) are exposed on the consuming class,
+        // not just its real declared members.  A `@mixin` proxies the whole
+        // public API via magic methods, so a model's synthesized members
+        // must come through as well.
         //
-        // Results are cached in a thread-local map so that the same
-        // mixin (e.g. Builder) is only resolved once per thread.
-        ensure_mixin_cache_fresh();
+        // The re-entrancy guard in `resolve_class_fully_inner` breaks any
+        // cyclic `@mixin` chain by returning a base-only result on re-entry,
+        // so this cannot recurse unboundedly.  Eager resolution populates the
+        // shared cache in dependency order (mixin targets before their
+        // dependents), so on the warm path this is a cache hit.
+        //
+        // Prefer the caller-supplied cache, falling back to the thread-local
+        // active cache so consumers that reach this path through the uncached
+        // `resolve_class_fully` still share resolved results.
         let resolved_mixin = if let Some(c) = cache {
-            let cached = {
-                let map = c.read();
-                map.get(&(Atom::from(&resolved_mixin_name), Vec::new()))
-                    .map(Arc::clone)
-            };
+            // The shared cache memoizes the full resolution, so resolve
+            // directly and let it serve repeat lookups.
+            super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, Some(c))
+        } else if let Some(active) = super::active_resolved_class_cache() {
+            super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, Some(active))
+        } else {
+            // No shared cache is active — memoize per thread so that a deep
+            // mixin (e.g. the Eloquent query builder) is fully resolved at
+            // most once per thread.  The full resolution runs virtual member
+            // providers, which recurse back into this function for nested
+            // mixins, so it must happen *outside* the cache borrow: get,
+            // release, resolve, then insert.
+            ensure_mixin_cache_fresh();
+            let cached = MIXIN_CACHE
+                .with(|thread_cache| thread_cache.borrow().1.get(&resolved_mixin_name).cloned());
             if let Some(cached) = cached {
                 cached
             } else {
+                let resolved =
+                    super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, None);
                 MIXIN_CACHE.with(|thread_cache| {
-                    let mut map = thread_cache.borrow_mut();
-                    Arc::clone(map.1.entry(resolved_mixin_name.clone()).or_insert_with(|| {
-                        Arc::new(crate::inheritance::resolve_class_with_inheritance(
-                            &mixin_class,
-                            class_loader,
-                        ))
-                    }))
-                })
+                    thread_cache
+                        .borrow_mut()
+                        .1
+                        .insert(resolved_mixin_name.clone(), Arc::clone(&resolved));
+                });
+                resolved
             }
-        } else {
-            MIXIN_CACHE.with(|thread_cache| {
-                let mut map = thread_cache.borrow_mut();
-                Arc::clone(map.1.entry(resolved_mixin_name.clone()).or_insert_with(|| {
-                    Arc::new(crate::inheritance::resolve_class_with_inheritance(
-                        &mixin_class,
-                        class_loader,
-                    ))
-                }))
-            })
         };
 
         // Build a substitution map from the mixin class's template params
@@ -677,6 +733,20 @@ fn collect_mixin_members(
             HashMap::new()
         };
 
+        // Known values for the mixin class's template parameters: explicit
+        // `@mixin Foo<...>` generic args, falling back to each param's
+        // declared default (`@template T of bool = false`).  A bare
+        // `@mixin Foo` therefore behaves like `@mixin Foo<default>`, which
+        // lets conditional return types keyed on those params (e.g.
+        // `(TAsync is false ? Response : PromiseInterface)`) collapse to a
+        // concrete branch instead of defaulting to the else type.
+        let mut template_values = subs.clone();
+        for (name, default) in mixin_class.template_param_defaults.iter() {
+            template_values
+                .entry(name.to_string())
+                .or_insert_with(|| default.clone());
+        }
+
         // Only merge public members — mixins proxy via magic methods
         // which only expose public API.
         for method in &resolved_mixin.methods {
@@ -691,6 +761,23 @@ fn collect_mixin_members(
             let mut method = (**method).clone();
             if !subs.is_empty() {
                 inheritance::apply_substitution_to_method(&mut method, &subs);
+            }
+            // Collapse a conditional return type keyed on one of the mixin
+            // class's template params now that their values are known (from
+            // generic args or defaults).  Without this, the conditional's
+            // subject template is unresolvable at the call site — the mixin
+            // origin is lost once the method is merged into the consumer —
+            // and resolution falls back to the else branch.
+            if !template_values.is_empty()
+                && let Some(cond) = method.conditional_return.as_ref()
+                && let Some(resolved) =
+                    crate::completion::conditional_resolution::resolve_conditional_from_values(
+                        cond,
+                        &template_values,
+                    )
+            {
+                method.return_type = Some(resolved);
+                method.conditional_return = None;
             }
             // `@return $this` / `self` / `static` in mixin methods are
             // left as-is.  When the method is later called on the
@@ -781,7 +868,10 @@ fn collect_mixin_members(
                 &mixin_class.mixin_generics,
                 class_loader,
                 collector,
-                &HashMap::new(),
+                &MixinSubs {
+                    subs: &HashMap::new(),
+                    bounds: &mixin_class.template_param_bounds,
+                },
                 depth + 1,
                 cache,
             );
@@ -860,7 +950,10 @@ pub fn resolve_template_param_mixins(
         &original_class.mixin_generics,
         class_loader,
         &mut collector,
-        template_subs,
+        &MixinSubs {
+            subs: template_subs,
+            bounds: &original_class.template_param_bounds,
+        },
         0,
         None,
     );
@@ -956,6 +1049,7 @@ fn build_mixin_substitution_map(
     current: &ClassInfo,
     parent: &ClassInfo,
     active_subs: &HashMap<String, PhpType>,
+    origin_bounds: &crate::atom::AtomMap<PhpType>,
 ) -> HashMap<String, PhpType> {
     if parent.template_params.is_empty() {
         return active_subs.clone();
@@ -1010,10 +1104,22 @@ fn build_mixin_substitution_map(
 
             // Fall back to the template bound only when the parent
             // uses the template param directly as a mixin name.
+            //
+            // Prefer the bound declared on the walk-origin class (the
+            // most-derived class whose members are being resolved) over
+            // the intermediate level's bound.  In a straight-through chain
+            // (`@extends Parent<TNode>` at every level) each class may
+            // tighten the constraint, e.g. `AbstractNode<TNode of ASTNode>`
+            // → `CallableNode<TNode of AbstractCallable>`.  The mixin lives
+            // on the ancestor with the loosest bound, but the concrete
+            // members available come from the origin's tighter bound, so
+            // that is the one to resolve against.
             if parent_has_template_param_mixin
                 && let Some(name) = resolved.base_name()
                 && let Some(tp) = current.template_params.iter().find(|t| t.as_str() == name)
-                && let Some(bound) = current.template_param_bounds.get(tp)
+                && let Some(bound) = origin_bounds
+                    .get(tp)
+                    .or_else(|| current.template_param_bounds.get(tp))
             {
                 resolved = bound.clone();
             }

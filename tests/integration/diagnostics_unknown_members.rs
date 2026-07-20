@@ -1,8 +1,14 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_exception_stubs,
+    create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
+    create_test_backend_with_exception_stubs, create_test_backend_with_stubs,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
+
+/// A minimal global SPL `Iterator` stub: it deliberately does NOT declare
+/// `accept()`, so any diagnostic flagging `accept` proves the instance was
+/// wrongly resolved to the global stub instead of the project class.
+static ITERATOR_STUB: &str = "<?php\ninterface Iterator { public function next(): void; }\n";
 
 // ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
 
@@ -356,7 +362,7 @@ $name = Foo::class;
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn diagnostic_when_class_has_magic_call_but_chain_continues() {
+fn no_diagnostic_when_class_has_magic_call() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -373,21 +379,10 @@ class Consumer {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert_eq!(
-        diags.len(),
-        2,
-        "Should flag unknown methods even when __call exists, got: {:?}",
+    assert!(
+        diags.is_empty(),
+        "Methods dispatched through __call are valid and must not be flagged, got: {:?}",
         diags
-    );
-    assert!(
-        diags[0].message.contains("anything"),
-        "First diagnostic should mention 'anything', got: {}",
-        diags[0].message
-    );
-    assert!(
-        diags[1].message.contains("whatever"),
-        "Second diagnostic should mention 'whatever', got: {}",
-        diags[1].message
     );
 }
 
@@ -417,7 +412,7 @@ class Consumer {
 }
 
 #[test]
-fn diagnostic_when_class_has_magic_call_static_but_chain_continues() {
+fn no_diagnostic_when_class_has_magic_call_static() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -429,21 +424,10 @@ StaticMagic::anything();
 StaticMagic::whatever();
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert_eq!(
-        diags.len(),
-        2,
-        "Should flag unknown static methods even when __callStatic exists, got: {:?}",
+    assert!(
+        diags.is_empty(),
+        "Static methods dispatched through __callStatic are valid and must not be flagged, got: {:?}",
         diags
-    );
-    assert!(
-        diags[0].message.contains("anything"),
-        "First diagnostic should mention 'anything', got: {}",
-        diags[0].message
-    );
-    assert!(
-        diags[1].message.contains("whatever"),
-        "Second diagnostic should mention 'whatever', got: {}",
-        diags[1].message
     );
 }
 
@@ -480,7 +464,7 @@ class Consumer {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn diagnostic_when_parent_has_magic_call_but_chain_continues() {
+fn no_diagnostic_when_parent_has_magic_call() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -498,16 +482,10 @@ class Consumer {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert_eq!(
-        diags.len(),
-        1,
-        "Should flag unknown method even when parent has __call, got: {:?}",
-        diags
-    );
     assert!(
-        diags[0].message.contains("anything"),
-        "Diagnostic should mention 'anything', got: {}",
-        diags[0].message
+        diags.is_empty(),
+        "Method inherited through a parent's __call is valid and must not be flagged, got: {:?}",
+        diags
     );
 }
 
@@ -2062,6 +2040,62 @@ function test(Application $app): void {
             .iter()
             .any(|d| d.message.contains("set") && d.message.contains("could not be resolved")),
         "expected unresolved-member-access diagnostic for $app['config']->set(), got: {diags:?}",
+    );
+}
+
+/// An `assertInstanceOf`-style `@phpstan-assert` on an array-index subject
+/// (`assertInstanceOf(X::class, $arr['k'])`) must narrow that index so a
+/// following member access on it resolves.  Without keying narrowing by the
+/// printed subject expression, `$constants['C']->getImage()` was reported as
+/// an unresolved member access.
+#[test]
+fn assert_instanceof_narrows_array_index_subject() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class ASTNode {
+    public function getImage(): string { return ''; }
+}
+
+class BaseAssert
+{
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void {}
+}
+
+class MyTest extends BaseAssert
+{
+    /**
+     * @param array<string, mixed> $constants
+     */
+    public function testIt(array $constants): void
+    {
+        static::assertInstanceOf(ASTNode::class, $constants['C']);
+        $constants['C']->getImage();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "assertInstanceOf should narrow $constants['C'] to ASTNode, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("getImage")),
+        "getImage is a valid method on ASTNode, got: {diags:?}",
     );
 }
 
@@ -3634,10 +3668,11 @@ class ProductRepository {
 }
 
 #[test]
-fn scope_on_standalone_bare_builder_param_flags_warning_chain_continues() {
+fn scope_on_standalone_bare_builder_param_not_flagged_chain_continues() {
     // When a function parameter is typed as bare `Builder` (no callable
     // inference context), scope methods cannot be verified statically.
-    // They are flagged via MagicFallback (__call exists), but the chain
+    // Because `Builder` defines `__call`, the call is dispatched through
+    // it at runtime and must not be flagged (matching PHPStan). The chain
     // continues because Builder's __call return type is patched to
     // `static` during resolution.
     let (backend, _dir) = create_psr4_workspace(
@@ -3713,15 +3748,15 @@ function filterProducts(Builder $query): void {
     let mut diags = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
-    // Scope method IS flagged — no callable inference to refine the
-    // bare Builder to Builder<Product>.
+    // Scope method is NOT flagged — Builder defines __call, so the call
+    // is valid and dynamically dispatched even without knowing the model.
     assert!(
-        diags.iter().any(|d| d.message.contains("whereIsLuxury")),
-        "Scope method on standalone bare Builder param should be flagged, got: {:?}",
+        !diags.iter().any(|d| d.message.contains("whereIsLuxury")),
+        "Scope method dispatched through Builder's __call must not be flagged, got: {:?}",
         diags
     );
 
-    // Chain continues — known methods after the unknown scope call
+    // Chain continues — known methods after the scope call
     // should NOT be flagged because __call returns static.
     assert!(
         !diags.iter().any(|d| d.message.contains("orderBy")),
@@ -4145,6 +4180,284 @@ class Consumer {
     );
 }
 
+/// A generic `@phpstan-assert` on a static method declared on a base
+/// class must narrow when called through a subclass via `$this->`,
+/// `static::`, and `self::` (the PHPUnit `assertInstanceOf` shape).
+/// Previously the metadata was only found when the call named the
+/// declaring class directly, producing false `unresolved-member-access`
+/// positives across PHPUnit-based test suites.
+#[test]
+fn scope_cache_phpstan_assert_inherited_narrows_via_this_static_self() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Node {
+    public function getName(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void {}
+}
+class NodeTest extends BaseAssert {
+    public function testThis(mixed $v): void {
+        $this->assertInstanceOf(Node::class, $v);
+        $v->getName();
+    }
+    public function testStatic(mixed $v): void {
+        static::assertInstanceOf(Node::class, $v);
+        $v->getName();
+    }
+    public function testSelf(mixed $v): void {
+        self::assertInstanceOf(Node::class, $v);
+        $v->getName();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("getName")),
+        "No diagnostic expected for 'getName' after inherited assertInstanceOf via \
+         $this->/static::/self::, got: {diags:?}",
+    );
+}
+
+/// A variable assigned by list-destructuring from an unresolvable RHS
+/// (e.g. a bare `array` parameter) must still be narrowable by a later
+/// `assertInstanceOf`.  Previously the destructured variables were never
+/// recorded in scope when the RHS type could not be resolved, so the
+/// assert narrowing loop skipped them and `$type->getImage()` produced a
+/// bogus `type of '$type' could not be resolved` diagnostic.
+#[test]
+fn assert_narrows_variable_destructured_from_unresolvable_rhs() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testDestructure(array $declarations): void {
+        [$type, $variable] = $declarations[0];
+        static::assertInstanceOf(Wanted::class, $type);
+        $type->getImage();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow a list-destructured variable from an \
+         unresolvable RHS, got: {diags:?}",
+    );
+}
+
+/// A variable holding a `::class` literal (e.g. `$cls = Wanted::class;`)
+/// used as the class-string argument to `assertInstanceOf` must narrow
+/// the subject the same way the inlined `Wanted::class` literal does.
+#[test]
+fn assert_narrows_via_variable_class_string_argument() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testDestructure(array $declarations): void {
+        $expectedTypeClass = Wanted::class;
+        [$type, $variable] = $declarations[0];
+        static::assertInstanceOf($expectedTypeClass, $type);
+        $type->getImage();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow via a variable holding a ::class literal, got: {diags:?}",
+    );
+}
+
+/// A variable holding a `::class` literal that is assigned *inside a braced
+/// block* (e.g. a `foreach (...) { $cls = Wanted::class; ... }` body) must
+/// still resolve for `assertInstanceOf` narrowing.  This is the PHPUnit
+/// data-provider loop shape: assign the expected class in the loop body, then
+/// assert the subject against it and call a method on the narrowed subject.
+#[test]
+fn assert_narrows_via_variable_class_string_assigned_in_foreach_body() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, mixed $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testTypedProperties(array $declarations, array $items): void {
+        foreach ($items as $index => $expected) {
+            $expectedTypeClass = $expected[2] ?? Wanted::class;
+            [$type, $variable] = $declarations[$index];
+            static::assertInstanceOf(
+                $expectedTypeClass,
+                $type,
+                "message"
+            );
+            $type->getImage();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow via a variable assigned a ::class literal inside \
+         a foreach body, got: {diags:?}",
+    );
+}
+
+/// The expected-class argument to `assertInstanceOf` may be list-destructured
+/// out of a foreach source array (the PHPUnit data-provider loop shape):
+/// `[$a, $b, $expectedTypeClass] = $expected;` where `$expected` iterates
+/// `$items = [[..., ..., Wanted::class]]`.  The destructured variable holds a
+/// `class-string<Wanted>` value, so the assert must narrow the subject to
+/// `Wanted` and calling a method on it must not emit an unresolved-member
+/// diagnostic.
+#[test]
+fn assert_narrows_via_variable_class_string_list_destructured_from_foreach() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Wanted {
+    public function getImage(): string { return ''; }
+}
+class BaseAssert {
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, mixed $actual): void {}
+}
+class ParserTest extends BaseAssert {
+    public function testTypedProperties(array $declarations): void {
+        $items = [
+            ['null|int|float', '$number', Wanted::class],
+        ];
+        foreach ($items as $index => $expected) {
+            [$expectedType, $expectedVariable, $expectedTypeClass] = $expected;
+            [$type, $variable] = $declarations[$index];
+            static::assertInstanceOf(
+                $expectedTypeClass,
+                $type,
+                "message"
+            );
+            $type->getImage();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        "assertInstanceOf must narrow via a variable list-destructured from a foreach \
+         source array, got: {diags:?}",
+    );
+}
+
+/// An exact-type assertion `@phpstan-assert =Type $x` must not emit a
+/// bogus `Class '=Type' not found` diagnostic on the docblock.
+#[test]
+fn exact_type_assertion_prefix_does_not_emit_unknown_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foobar {
+    public function fooMethod(): void {}
+}
+class Asserter {
+    /**
+     * @phpstan-assert =Foobar $actual
+     */
+    public function assertIsFoobar(object $actual): void {}
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("=Foobar")),
+        "No unknown-class diagnostic expected for the `=` exact-type prefix, got: {diags:?}",
+    );
+}
+
 /// Members accessed BEFORE the assert should still be diagnosed when
 /// they don't exist on the pre-assert type.
 #[test]
@@ -4259,6 +4572,96 @@ class Renderer {
     assert!(
         !diags.iter().any(|d| d.message.contains("radius")),
         "No diagnostic expected for 'radius' inside if-instanceof branch, got: {:?}",
+        diags
+    );
+}
+
+/// Short-circuit narrowing: the right operand of `||` executes only
+/// when the left is false, so `!$s instanceof Circle || $s->radius()`
+/// sees `$s` narrowed to `Circle` in the right operand.
+#[test]
+fn scope_cache_or_short_circuit_narrows_right_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///test_or_shortcircuit.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s): void {
+        if (!$s instanceof Circle || $s->radius() > 0.0) {
+            return;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' in the right operand of ||, got: {:?}",
+        diags
+    );
+}
+
+/// Short-circuit narrowing mirror: the right operand of `&&` executes
+/// only when the left is true, so `$s instanceof Circle && $s->radius()`
+/// sees `$s` narrowed to `Circle` in the right operand.
+#[test]
+fn scope_cache_and_short_circuit_narrows_right_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///test_and_shortcircuit.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s): void {
+        if ($s instanceof Circle && $s->radius() > 0.0) {
+            return;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' in the right operand of &&, got: {:?}",
+        diags
+    );
+}
+
+/// Nested `&&` inside the right operand of `||`: the inner `&&` chain
+/// narrows independently on top of the outer short-circuit context.
+/// `$node !== $other || ($s instanceof Circle && !$s->radius())` narrows
+/// `$s` to `Circle` for the `$s->radius()` access.
+#[test]
+fn scope_cache_and_chain_inside_or_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///test_and_in_or.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s, int $node, int $other): bool {
+        return $node !== $other
+            || ($s instanceof Circle && $s->radius() > 0.0);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' in nested && inside ||, got: {:?}",
         diags
     );
 }
@@ -5029,5 +5432,1090 @@ class MyController {
         with_diags.is_empty(),
         "redirect()->with()/withErrors() should resolve to RedirectResponse. Got: {:?}",
         with_diags
+    );
+}
+
+// ─── Issue #168: instanceof narrowing must not leak into elseif body ────────
+
+#[test]
+fn no_false_unknown_member_in_elseif_after_instanceof() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class KnownDateLike {
+    public function format(): string { return 'formatted'; }
+}
+
+function formatDateLike(object $value): string {
+    if ($value instanceof KnownDateLike) {
+        $value = $value->format();
+    } elseif (is_callable([$value, 'getTime'])) {
+        $value = (string) $value->getTime();
+    }
+
+    return (string) $value;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, php);
+    assert!(
+        diags.is_empty(),
+        "instanceof narrowing from if-branch must not leak into elseif (issue #168): {:?}",
+        diags
+    );
+}
+
+// ─── Reassignment in if-branch must not leak into the elseif *condition* ────
+
+#[test]
+fn no_false_unknown_member_in_elseif_condition_after_reassign() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // The then-branch reassigns `$value` to a type without `format()`.  A
+    // member access in the following elseif *condition* must resolve
+    // `$value` against the clean pre-branch scope (where it is still
+    // `HasFormat`), not the leaked then-branch type.  This exercises the
+    // scope snapshot recorded at the elseif condition boundary — the body
+    // snapshots recorded by the forward walker do not cover the condition.
+    let php = r#"<?php
+class HasFormat {
+    public function format(): string { return 'formatted'; }
+}
+class NoFormat {
+    public function other(): string { return 'other'; }
+}
+
+function test(HasFormat $value, bool $flag): string {
+    if ($flag) {
+        $value = new NoFormat();
+    } elseif ($value->format() === 'x') {
+        return 'a';
+    }
+
+    return 'b';
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, php);
+    assert!(
+        diags.is_empty(),
+        "reassignment in if-branch must not leak into the elseif condition: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn enum_name_and_value_properties_are_known() {
+    // Every enum exposes a readonly `name` property, and backed enums also
+    // expose a `value` property. Neither should be flagged as unknown.
+    let backend = create_test_backend();
+    let uri = "file:///enum_props.php";
+    let php = r#"<?php
+enum Suit: string {
+    case Hearts = 'H';
+    case Spades = 'S';
+}
+
+enum Direction {
+    case North;
+    case South;
+}
+
+function backed(Suit $s): string {
+    return $s->value . $s->name;
+}
+
+function pure(Direction $d): string {
+    return $d->name;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, php);
+    assert!(
+        diags.is_empty(),
+        "enum ->name and backed enum ->value must not be flagged unknown: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ternary condition narrows property / method-call subjects
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `$this->node instanceof Foo ? $this->node->fooMethod() : null` must
+/// narrow the `$this->node` property to `Foo` inside the then-branch, so
+/// that a method only declared on `Foo` is not flagged as unknown on the
+/// declared property type.
+#[test]
+fn ternary_instanceof_narrows_property_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Node {}
+class Artifact implements Node {
+    public function getCompilationUnit(): string { return ''; }
+}
+class AbstractNode {
+    private Node $node;
+    public function getCompilationUnit(): ?string {
+        return $this->node instanceof Artifact
+            ? $this->node->getCompilationUnit()
+            : null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("getCompilationUnit")),
+        "No diagnostic expected for 'getCompilationUnit' inside the ternary then-branch, got: {:?}",
+        diags
+    );
+}
+
+/// The type of a ternary whose then-branch narrows a property must be the
+/// union of both branches, not just the else-branch.  Here the assigned
+/// variable should be `string|null`, so a later truthy-guarded member
+/// access must not report member access on `null`.
+#[test]
+fn ternary_property_narrowing_does_not_collapse_to_else_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Node {}
+class CompilationUnit {
+    public function getFileName(): string { return ''; }
+}
+class Artifact implements Node {
+    public function getCompilationUnit(): CompilationUnit { return new CompilationUnit(); }
+}
+class AbstractNode {
+    private Node $node;
+    public function getFileName(): ?string {
+        $unit = $this->node instanceof Artifact
+            ? $this->node->getCompilationUnit()
+            : null;
+        return $unit
+            ? $unit->getFileName()
+            : null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Ternary result must be CompilationUnit|null (not just null), so 'getFileName' must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+/// A nullable method-call subject inside a truthy ternary condition is
+/// narrowed to its non-null type in the then-branch, so a member declared
+/// on that type is not flagged.
+#[test]
+fn ternary_truthy_narrows_method_call_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class User {
+    public int $id = 1;
+}
+class Request {
+    public function user(): ?User { return new User(); }
+}
+class Handler {
+    public function handle(Request $request): ?int {
+        return $request->user()
+            ? $request->user()->id
+            : null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Nullable method-call subject narrowed to User in ternary then-branch; 'id' must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+/// Guard against over-narrowing: a genuinely missing member inside the
+/// ternary then-branch must still be flagged after narrowing.
+#[test]
+fn ternary_instanceof_still_flags_missing_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Node {}
+class Artifact implements Node {
+    public function realMethod(): string { return ''; }
+}
+class AbstractNode {
+    private Node $node;
+    public function run(): ?string {
+        return $this->node instanceof Artifact
+            ? $this->node->missingMethod()
+            : null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("missingMethod")),
+        "A missing method on the narrowed type must still be flagged, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Same-namespace class wins over a global stub of the same short name
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `new Iterator()` inside `namespace App\Input` must resolve to the
+/// project's `App\Input\Iterator`, not the global SPL `\Iterator` stub, so
+/// members declared on the project class are recognised.  PHP resolves an
+/// unqualified class reference against the current namespace before falling
+/// back to the global scope.
+#[test]
+fn new_same_namespace_class_wins_over_global_stub() {
+    let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
+    let project_iterator = "<?php\nnamespace App\\Input;\nclass Iterator {\n    public function accept(): bool { return true; }\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/Input/Iterator.php", project_iterator)],
+        &[("Iterator", ITERATOR_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace App\\Input;\nclass Consumer {\n    public function run(): void {\n        $it = new Iterator();\n        $it->accept();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("accept")),
+        "`new Iterator()` must resolve to the same-namespace App\\Input\\Iterator, \
+         so `accept()` is a known method, got: {diags:?}"
+    );
+}
+
+/// The guard against regressing global resolution: when a namespace has no
+/// class of the given short name, `new Iterator()` must still resolve to the
+/// global SPL stub, so a member the stub does not declare is flagged.
+#[test]
+fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
+
+    // No project `App\Other\Iterator` exists, so the global stub is correct.
+    let (backend, _dir) =
+        create_psr4_workspace_with_stubs(composer_json, &[], &[("Iterator", ITERATOR_STUB)]);
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace App\\Other;\nclass Consumer {\n    public function run(): void {\n        $it = new Iterator();\n        $it->accept();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("accept")),
+        "`new Iterator()` with no same-namespace class must resolve to the \
+         global stub, which has no `accept()`, got: {diags:?}"
+    );
+}
+
+// ─── Array callables are data, not member accesses ──────────────────────────
+
+/// A `[Class::class, 'method']` pair nested in a returned array is plain
+/// data (a `list<list<string>>`), not a callable, so its second element
+/// must not be validated as a static method.
+#[test]
+fn array_of_class_string_pairs_is_not_validated_as_callables() {
+    let backend = create_test_backend();
+    let uri = "file:///pairs.php";
+    let text = concat!(
+        "<?php\n",
+        "class Chart {}\n",
+        "class Report {}\n",
+        "class Registry {\n",
+        "    public function names(): array {\n",
+        "        return [\n",
+        "            [Chart::class, 'svg'],\n",
+        "            [Report::class, 'xml'],\n",
+        "        ];\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "data pairs like [Chart::class, 'svg'] must not be validated as method calls, got: {diags:?}"
+    );
+}
+
+/// A `[$var, 'method']` pair passed as the data argument of `array_filter`
+/// (whose first parameter is the array, not the callback) must not be
+/// validated as an instance method call on the variable.
+#[test]
+fn array_data_argument_to_builtin_is_not_validated_as_callable() {
+    let backend = create_test_backend();
+    let uri = "file:///data_arg.php";
+    let text = concat!(
+        "<?php\n",
+        "function build(string $prefix): array {\n",
+        "    return array_filter([$prefix, 'match']);\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a data array passed to array_filter must not be validated as a method call, got: {diags:?}"
+    );
+}
+
+// ─── Mockery verification chains resolve through the real return type ──────
+
+/// `Mockery\LegacyMockInterface::shouldHaveReceived()` is declared
+/// `@return self`, but the concrete mock always builds a
+/// `Mockery\VerificationDirector`. Honouring the declared `self` sends
+/// the chained `->with()` call back to the mock interface (which has no
+/// `with()`), producing a false-positive unknown-member diagnostic.
+#[test]
+fn mockery_should_have_received_chain_resolves_to_verification_director() {
+    let backend = create_test_backend();
+    let uri = "file:///mockery_verification.php";
+    let text = r#"<?php
+namespace Mockery {
+    interface LegacyMockInterface {
+        /** @return self */
+        public function shouldHaveReceived($method, $args = null);
+    }
+    interface MockInterface extends LegacyMockInterface {}
+    class VerificationDirector {
+        public function with(...$args): self { return $this; }
+        public function once(): self { return $this; }
+    }
+}
+namespace App {
+    class ProductCacheService {}
+
+    class TestBase {
+        /**
+         * @param string $abstract
+         * @return \Mockery\MockInterface
+         */
+        protected function mock($abstract) {}
+    }
+
+    class ExampleTest extends TestBase {
+        public function test(): void {
+            $service = $this->mock(ProductCacheService::class);
+            $service->shouldHaveReceived('store')->with([10, 20], [])->once();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("with")),
+        "shouldHaveReceived()->with(...) must resolve through VerificationDirector, got: {diags:?}"
+    );
+}
+
+#[test]
+fn this_in_anonymous_class_resolves_to_anon_not_outer() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Test
+{
+    public function make(): object
+    {
+        return new class (5) {
+            public function __construct(private readonly int $value) {}
+
+            public function get(): int
+            {
+                return $this->value;
+            }
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("value")),
+        "$this->value inside the anonymous class must resolve to the anon class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn this_method_call_in_anonymous_class_resolves_to_anon() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // `$this->helper()` inside the anonymous class must resolve against
+    // the anonymous class, and a member missing on the anonymous class
+    // (but present on the outer class) must still be flagged.
+    let text = r#"<?php
+class Outer
+{
+    public function outerOnly(): void {}
+
+    public function make(): object
+    {
+        return new class {
+            public function helper(): int { return 1; }
+
+            public function run(): void
+            {
+                $this->helper();
+                $this->outerOnly();
+            }
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("helper")),
+        "$this->helper() must resolve on the anonymous class, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("outerOnly")),
+        "$this->outerOnly() (defined only on Outer) must be flagged inside the anon class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn this_after_anonymous_class_still_resolves_to_outer() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // After the anonymous class body, `$this` must return to the outer
+    // class so its own members still resolve.
+    let text = r#"<?php
+class Outer
+{
+    public function outerProp(): void {}
+
+    public function make(): void
+    {
+        $x = new class {
+            public function inner(): void {}
+        };
+        $this->outerProp();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("outerProp")),
+        "$this->outerProp() after the anon class must resolve on Outer, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// property_exists() / method_exists() narrowing
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Inside `if (property_exists($x, 'Name'))`, accessing `$x->Name` must
+/// not be flagged — the guard proves the (dynamically populated) property
+/// exists.  PHPStan models this as `object&hasProperty(Name)`.
+#[test]
+fn property_exists_guard_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        if ($response->MerchantErrorMessage && is_string($response->MerchantErrorMessage)) {
+            throw new \RuntimeException($response->MerchantErrorMessage);
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "property_exists guard must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// A `&&` chain of two property_exists guards proves both properties
+/// (the api-php AltaPay pattern).
+#[test]
+fn property_exists_and_chain_allows_both_properties() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'CardHolderErrorMessage') && property_exists($response, 'CardHolderMessageMustBeShown')) {
+        if ($response->CardHolderMessageMustBeShown && is_string($response->CardHolderErrorMessage)) {
+            throw new \RuntimeException($response->CardHolderErrorMessage);
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("CardHolder")),
+        "chained property_exists guards must allow both properties, got: {diags:?}"
+    );
+}
+
+/// Without the guard the unknown property is still flagged — the
+/// narrowing must not leak outside the guarded branch.
+#[test]
+fn property_access_outside_property_exists_guard_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        echo 'ok';
+    }
+    echo $response->MerchantErrorMessage;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "access after the guarded branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// A property other than the guarded one is still flagged inside the
+/// branch.
+#[test]
+fn property_exists_guard_only_proves_the_guarded_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        echo $response->SomethingElse;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("SomethingElse")),
+        "unguarded property inside the branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// The else branch of a positive guard proves nothing — the member is
+/// absent there, so access is still flagged.
+#[test]
+fn property_exists_else_branch_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (property_exists($response, 'MerchantErrorMessage')) {
+        echo 'ok';
+    } else {
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "else branch of property_exists must still flag the property, got: {diags:?}"
+    );
+}
+
+/// After a guard clause `if (!property_exists($x, 'p')) { return; }`,
+/// the property is known to exist.
+#[test]
+fn negated_property_exists_guard_clause_allows_access_after() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response): void {
+    if (!property_exists($response, 'MerchantErrorMessage')) {
+        return;
+    }
+    echo $response->MerchantErrorMessage;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "negated property_exists guard clause must allow access after it, got: {diags:?}"
+    );
+}
+
+/// `method_exists($x, 'name')` proves the method inside the branch.
+#[test]
+fn method_exists_guard_allows_method_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Handler {
+    public function run(): void {}
+}
+function check(Handler $handler): void {
+    if (method_exists($handler, 'customHook')) {
+        $handler->customHook();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("customHook")),
+        "method_exists guard must allow the guarded method, got: {diags:?}"
+    );
+}
+
+/// A dynamic (non-literal) member name proves the existence of *some*
+/// member but not which one — nothing is added, and other accesses stay
+/// flagged.
+#[test]
+fn property_exists_with_dynamic_name_adds_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public int $code = 0;
+}
+function check(Response $response, string $name): void {
+    if (property_exists($response, $name)) {
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "dynamic property_exists must not prove arbitrary properties, got: {diags:?}"
+    );
+}
+
+/// PHPUnit's `assertTrue()` carries `@phpstan-assert true $condition`, so
+/// `assertTrue(property_exists($x, 'p'))` re-exports the inner condition
+/// exactly like `if (property_exists($x, 'p'))`: the guarded property must
+/// not be flagged afterwards.
+#[test]
+fn assert_true_property_exists_reexports_the_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class Response {
+    public int $code = 0;
+}
+class ResponseTest extends TestCase {
+    public function check(Response $response): void {
+        self::assertTrue(property_exists($response, 'MerchantErrorMessage'));
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "assertTrue(property_exists(...)) must prove the property, got: {diags:?}"
+    );
+}
+
+/// The `@psalm-assert` spelling of the re-export tag is handled the same
+/// as `@phpstan-assert`.
+#[test]
+fn assert_true_property_exists_reexports_the_guard_psalm_notation() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @psalm-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class Response {
+    public int $code = 0;
+}
+class ResponseTest extends TestCase {
+    public function check(Response $response): void {
+        self::assertTrue(property_exists($response, 'MerchantErrorMessage'));
+        echo $response->MerchantErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("MerchantErrorMessage")),
+        "@psalm-assert true must re-export like @phpstan-assert, got: {diags:?}"
+    );
+}
+
+/// The re-exported proof is scoped to the assertion: without it, the
+/// unknown property is still flagged.  This guards against the narrowing
+/// leaking to every property on the class.
+#[test]
+fn assert_true_property_exists_only_proves_the_guarded_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class Response {
+    public int $code = 0;
+}
+class ResponseTest extends TestCase {
+    public function check(Response $response): void {
+        self::assertTrue(property_exists($response, 'MerchantErrorMessage'));
+        echo $response->CardHolderErrorMessage;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("CardHolderErrorMessage")),
+        "only the guarded property is proven, got: {diags:?}"
+    );
+}
+
+/// The full backoffice pattern: `viewData()` returns `mixed`,
+/// `assertIsObject()` (a `@psalm-assert object` guard) narrows it to
+/// `object`, and `assertTrue(property_exists(...))` re-exports the
+/// property proof.  Member access on the result must not be flagged as an
+/// unresolved type.
+#[test]
+fn assert_is_object_then_assert_true_property_exists() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert object $actual */
+    public static function assertIsObject(mixed $actual): void {}
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void {}
+}
+class ControllerTest extends TestCase {
+    public function testEdit(): void {
+        $model = $this->viewData();
+        self::assertIsObject($model);
+        self::assertTrue(property_exists($model, 'value'));
+        echo $model->value;
+    }
+    public function viewData(): mixed { return null; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("$model")),
+        "assertIsObject + assertTrue(property_exists) must resolve the subject, got: {diags:?}"
+    );
+}
+
+/// `isset($obj->prop)` in an `if` proves the property exists inside the
+/// branch, exactly like `property_exists($obj, 'prop')`.
+#[test]
+fn isset_property_guard_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeIsset(CanApply $item): int {
+    if (isset($item->salesCampaignGroupId)) {
+        return $item->salesCampaignGroupId;
+    }
+    return 0;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("salesCampaignGroupId")),
+        "isset($item->prop) guard must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// The property guarded by `isset` must still be flagged outside the
+/// branch — the proof does not leak past the `if`.
+#[test]
+fn property_access_outside_isset_guard_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeIsset(CanApply $item): int {
+    if (isset($item->salesCampaignGroupId)) {
+        echo 'ok';
+    }
+    return $item->salesCampaignGroupId;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("salesCampaignGroupId")),
+        "access after the isset branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// `isset($obj->prop)` in a ternary condition proves the property inside
+/// the then-branch.
+#[test]
+fn isset_property_ternary_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeTernary(CanApply $item): mixed {
+    return isset($item->qty) ? $item->qty : 1;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("qty")),
+        "isset($item->qty) ternary must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// `property_exists($obj, 'prop')` in a ternary condition proves the
+/// property inside the then-branch, exactly like the `if` form.
+#[test]
+fn property_exists_ternary_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeTernary(CanApply $item): mixed {
+    return property_exists($item, 'qty') ? $item->qty : 1;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("qty")),
+        "property_exists ternary must allow the guarded property, got: {diags:?}"
+    );
+}
+
+/// The else-branch of a `property_exists` ternary proves nothing — the
+/// guarded property is still flagged there.
+#[test]
+fn property_exists_ternary_else_branch_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class CanApply {
+    public int $id = 0;
+}
+function probeTernary(CanApply $item): mixed {
+    return property_exists($item, 'qty') ? 1 : $item->qty;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("qty")),
+        "else-branch of a property_exists ternary must still flag the property, got: {diags:?}"
+    );
+}
+
+/// `assertFalse()` carries `@phpstan-assert false $condition`, so
+/// `assertFalse(is_string($x))` re-exports the inverse of the guard —
+/// after it, a `string|Foo` union is narrowed to `Foo`.
+#[test]
+fn assert_false_reexports_the_inverse_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TestCase {
+    /** @phpstan-assert false $condition */
+    public static function assertFalse(mixed $condition): void {}
+}
+class Widget {
+    public function render(): string { return ''; }
+}
+class WidgetTest extends TestCase {
+    public function check(string|Widget $value): void {
+        self::assertFalse(is_string($value));
+        echo $value->render();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("render")),
+        "assertFalse(is_string($value)) must narrow away the string branch, got: {diags:?}"
+    );
+}
+
+/// PHPUnit's `assertIs*` / `assertIsNot*` family (`@phpstan-assert <scalar>`)
+/// narrows a `string|Widget` union like the matching `is_*()` guard: a
+/// positive object/array assertion keeps or drops the class member, and the
+/// `assertIsNot*` negations drop or keep it symmetrically.  The scalar
+/// pseudo-types name no class, so they must route through the type-guard
+/// machinery rather than being treated as class narrowings.
+#[test]
+fn phpunit_scalar_type_asserts_narrow_a_union() {
+    let stubs = r#"
+class TestCase {
+    /** @phpstan-assert object $actual */
+    public static function assertIsObject(mixed $actual): void {}
+    /** @phpstan-assert !object $actual */
+    public static function assertIsNotObject(mixed $actual): void {}
+    /** @phpstan-assert string $actual */
+    public static function assertIsString(mixed $actual): void {}
+    /** @phpstan-assert !string $actual */
+    public static function assertIsNotString(mixed $actual): void {}
+    /** @phpstan-assert array<mixed> $actual */
+    public static function assertIsArray(mixed $actual): void {}
+}
+class Widget { public function render(): string { return ''; } }
+"#;
+    // (assertion body, whether `render()` should be flagged as invalid).
+    // When Widget is dropped, `$x` narrows to `string`, so `render()` is a
+    // scalar-member-access error rather than an unknown member — hence the
+    // test inspects all slow diagnostics, not only `unknown_member`.
+    let cases: [(&str, bool); 5] = [
+        // Keeps Widget → render valid.
+        ("self::assertIsObject($x);", false),
+        ("self::assertIsNotString($x);", false),
+        // Drops Widget → render on the surviving `string`, flagged.
+        ("self::assertIsNotObject($x);", true),
+        ("self::assertIsString($x);", true),
+        ("self::assertIsArray($x);", true),
+    ];
+    for (body, should_flag) in cases {
+        let backend = create_test_backend();
+        {
+            let mut cfg = backend.config();
+            cfg.diagnostics.unresolved_member_access = Some(true);
+            backend.set_config(cfg);
+        }
+        let uri = "file:///test.php";
+        let text = format!(
+            "<?php\n{stubs}\nclass T extends TestCase {{ public function check(string|Widget $x): void {{ {body} $x->render(); }} }}\n"
+        );
+        backend.update_ast(uri, &text);
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri, &text, &mut diags);
+        let flagged = diags.iter().any(|d| d.message.contains("render"));
+        assert_eq!(
+            flagged, should_flag,
+            "case `{body}` expected render flagged={should_flag}, got {flagged}: {diags:?}"
+        );
+    }
+}
+
+/// Indexing a call result inline (`call(...)[0]->member`) must resolve
+/// the element type of the return so member access on it is checked.
+///
+/// A method declared `@return T[]` with a `class-string<T>` argument
+/// binds `T` from the call-site argument, so
+/// `$a->findChildrenOfType(Attr::class)[0]` is an `Attr`: a real method
+/// on `Attr` must not be flagged, but an unknown one must be.
+#[test]
+fn inline_indexed_template_call_resolves_element_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Node {
+    public function getParent(): ?Node { return null; }
+}
+class Attr extends Node {
+    public function attrName(): string { return ''; }
+}
+class Holder {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T[]
+     */
+    public function findChildrenOfType(string $type): array { return []; }
+}
+function run(Holder $a): void {
+    $a->findChildrenOfType(Attr::class)[0]->attrName();
+    $a->findChildrenOfType(Attr::class)[0]->bogusMethod();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("attrName")),
+        "real method on the inferred element type must not be flagged, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("bogusMethod")),
+        "unknown method on the inferred element type must be flagged, got: {diags:?}"
+    );
+}
+
+/// `EnumName::cases()[0]->member` must resolve to the enum instance so
+/// member access is checked, because `cases()` returns a list of the
+/// enum's own instances even though the stub declares it `: array`.
+#[test]
+fn inline_indexed_enum_cases_resolves_element_member() {
+    let backend = create_test_backend_with_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+enum Priority: int
+{
+    case Low = 1;
+    case High = 3;
+}
+function run(): void {
+    echo Priority::cases()[0]->value;
+    echo Priority::cases()[0]->bogusProp;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'value'")),
+        "backed-enum 'value' property must not be flagged, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("bogusProp")),
+        "unknown property on the enum instance must be flagged, got: {diags:?}"
     );
 }

@@ -964,11 +964,21 @@ fn apply_providers_same_specificity_preserves_high_priority() {
 
 #[test]
 fn default_providers_has_laravel_and_phpdoc() {
-    let providers = default_providers();
+    let providers = default_providers(true);
     assert_eq!(
         providers.len(),
         3,
         "should have LaravelModelProvider, LaravelFactoryProvider, and PHPDocProvider registered"
+    );
+}
+
+#[test]
+fn default_providers_omits_laravel_when_not_laravel() {
+    let providers = default_providers(false);
+    assert_eq!(
+        providers.len(),
+        1,
+        "non-Laravel projects should only register the PHPDoc provider"
     );
 }
 

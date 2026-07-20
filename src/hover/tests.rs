@@ -387,3 +387,77 @@ fn extract_constant_value_comma_inside_string_not_confused() {
         Some("'hello, world'".to_string())
     );
 }
+
+// ── html_to_markdown ────────────────────────────────────────────────
+
+#[test]
+fn html_to_markdown_bold_and_italic() {
+    assert_eq!(
+        formatting::html_to_markdown("<b>bold</b> and <i>italic</i>"),
+        "**bold** and *italic*"
+    );
+}
+
+#[test]
+fn html_to_markdown_strong_and_em() {
+    assert_eq!(
+        formatting::html_to_markdown("<strong>bold</strong> and <em>italic</em>"),
+        "**bold** and *italic*"
+    );
+}
+
+#[test]
+fn html_to_markdown_code() {
+    assert_eq!(
+        formatting::html_to_markdown("use <code>foo()</code> instead"),
+        "use `foo()` instead"
+    );
+}
+
+#[test]
+fn html_to_markdown_br_variants() {
+    assert_eq!(formatting::html_to_markdown("a<br>b"), "a\nb");
+    assert_eq!(formatting::html_to_markdown("a<br/>b"), "a\nb");
+    assert_eq!(formatting::html_to_markdown("a<br />b"), "a\nb");
+}
+
+#[test]
+fn html_to_markdown_paragraph() {
+    assert_eq!(
+        formatting::html_to_markdown("first<p>second</p>"),
+        "first\n\nsecond"
+    );
+}
+
+#[test]
+fn html_to_markdown_unordered_list() {
+    let input = "Values:<ul><li>one</li><li>two</li><li>three</li></ul>done";
+    let expected = "Values:\n- one\n- two\n- three\n\ndone";
+    assert_eq!(formatting::html_to_markdown(input), expected);
+}
+
+#[test]
+fn html_to_markdown_ordered_list() {
+    let input = "Steps:<ol><li>first</li><li>second</li></ol>";
+    let expected = "Steps:\n- first\n- second\n\n";
+    assert_eq!(formatting::html_to_markdown(input), expected);
+}
+
+#[test]
+fn html_to_markdown_definition_list() {
+    assert_eq!(
+        formatting::html_to_markdown("<dl><dt>Term</dt><dd>Definition</dd></dl>"),
+        "\n\n**Term**\n  Definition\n"
+    );
+}
+
+#[test]
+fn html_to_markdown_span_stripped() {
+    assert_eq!(formatting::html_to_markdown("<span>text</span>"), "text");
+}
+
+#[test]
+fn html_to_markdown_no_html() {
+    let plain = "No HTML here.";
+    assert_eq!(formatting::html_to_markdown(plain), plain);
+}

@@ -62,9 +62,53 @@
 //! machine.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use memchr::{memchr, memmem};
+use memmap2::Mmap;
+
+// ─── File reading ────────────────────────────────────────────────────────────
+
+/// Bytes of a file made available to the byte-level scanners.
+///
+/// [`read_for_scan`] prefers a memory-mapped view so the OS page cache
+/// is shared without copying the file into the heap, falling back to a
+/// heap read when mapping is not possible (empty files cannot be mapped,
+/// and some filesystems do not support it).
+pub(crate) enum FileBytes {
+    /// A read-only memory map of the file's pages.
+    Mapped(Mmap),
+    /// A heap copy of the file's contents (mapping fallback).
+    Owned(Vec<u8>),
+}
+
+impl Deref for FileBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            FileBytes::Mapped(map) => map,
+            FileBytes::Owned(bytes) => bytes,
+        }
+    }
+}
+
+/// Read a file's bytes for scanning, preferring a memory-mapped view.
+///
+/// The scanners read the returned bytes synchronously and drop them
+/// before returning, so the map never outlives the scan.
+pub(crate) fn read_for_scan(path: &Path) -> std::io::Result<FileBytes> {
+    let file = std::fs::File::open(path)?;
+    // SAFETY: The map is read synchronously and dropped before this
+    // scan returns. A concurrent truncation could raise SIGBUS, but
+    // index scanning does not run while the user is deleting files; the
+    // heap-read fallback covers filesystems that reject mapping.
+    match unsafe { Mmap::map(&file) } {
+        Ok(map) => Ok(FileBytes::Mapped(map)),
+        Err(_) => std::fs::read(path).map(FileBytes::Owned),
+    }
+}
 
 // ─── Data structures ────────────────────────────────────────────────────────
 
@@ -90,10 +134,16 @@ pub struct ScanResult {
 pub struct WorkspaceScanResult {
     /// FQN → file path for classes, interfaces, traits, and enums.
     pub classmap: HashMap<String, PathBuf>,
+    /// FQN → completion origin tier.
+    pub(crate) class_origins: HashMap<String, crate::ClassCompletionOrigin>,
     /// FQN → file path for standalone functions.
     pub function_index: HashMap<String, PathBuf>,
+    /// FQN → completion origin tier for standalone functions.
+    pub(crate) function_origins: HashMap<String, crate::ClassCompletionOrigin>,
     /// Constant name → file path for `define()` and top-level `const`.
     pub constant_index: HashMap<String, PathBuf>,
+    /// Constant name → completion origin tier.
+    pub(crate) constant_origins: HashMap<String, crate::ClassCompletionOrigin>,
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -104,7 +154,7 @@ pub struct WorkspaceScanResult {
 /// Returns an empty `Vec` when the file cannot be read, is empty, or
 /// contains no class-like declarations.
 pub fn scan_file(path: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read(path) else {
+    let Ok(content) = read_for_scan(path) else {
         return Vec::new();
     };
     if content.is_empty() {
@@ -131,7 +181,7 @@ pub fn scan_content(content: &[u8]) -> Vec<String> {
 /// Returns an empty [`ScanResult`] when the file cannot be read or is
 /// empty.
 pub fn scan_file_full(path: &Path) -> ScanResult {
-    let Ok(content) = std::fs::read(path) else {
+    let Ok(content) = read_for_scan(path) else {
         return ScanResult::default();
     };
     if content.is_empty() {
@@ -168,15 +218,22 @@ pub fn scan_directories(
     dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
 ) -> HashMap<String, PathBuf> {
-    let mut php_files: Vec<PathBuf> = Vec::new();
+    let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
     let skip_paths = HashSet::new();
     for dir in dirs {
         if !dir.is_dir() {
             continue;
         }
-        collect_php_files(dir, vendor_dir_paths, &skip_paths, &mut php_files);
+        collect_php_files(
+            dir,
+            vendor_dir_paths,
+            &skip_paths,
+            &mut php_files,
+            crate::ClassCompletionOrigin::Project,
+        );
     }
-    scan_files_parallel_classes(&php_files)
+    let paths: Vec<PathBuf> = php_files.into_iter().map(|(p, _)| p).collect();
+    scan_files_parallel_classes(&paths)
 }
 
 /// Build a classmap by scanning all `.php` files under the given
@@ -216,7 +273,7 @@ pub fn scan_psr4_directories_with_skip(
     skip_paths: &HashSet<PathBuf>,
 ) -> HashMap<String, PathBuf> {
     // ── PSR-4 directories: collect (path, expected_fqn) pairs ───────
-    let mut psr4_files: Vec<(PathBuf, String)> = Vec::new();
+    let mut psr4_files: Vec<(PathBuf, String, crate::ClassCompletionOrigin)> = Vec::new();
     for (prefix, base_path) in psr4 {
         if !base_path.is_dir() {
             continue;
@@ -227,21 +284,31 @@ pub fn scan_psr4_directories_with_skip(
             vendor_dir_paths,
             skip_paths,
             &mut psr4_files,
+            crate::ClassCompletionOrigin::Project,
         );
     }
 
     // ── Plain classmap directories ──────────────────────────────────
-    let mut plain_files: Vec<PathBuf> = Vec::new();
+    let mut plain_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
     for dir in classmap_dirs {
         if !dir.is_dir() {
             continue;
         }
-        collect_php_files(dir, vendor_dir_paths, skip_paths, &mut plain_files);
+        collect_php_files(
+            dir,
+            vendor_dir_paths,
+            skip_paths,
+            &mut plain_files,
+            crate::ClassCompletionOrigin::Project,
+        );
     }
 
     // ── Scan all files in parallel ──────────────────────────────────
-    let mut classmap = scan_files_parallel_psr4(&psr4_files);
-    let plain_classmap = scan_files_parallel_classes(&plain_files);
+    let psr4_pairs: Vec<(PathBuf, String)> =
+        psr4_files.into_iter().map(|(p, s, _)| (p, s)).collect();
+    let mut classmap = scan_files_parallel_psr4(&psr4_pairs);
+    let plain_paths: Vec<PathBuf> = plain_files.into_iter().map(|(p, _)| p).collect();
+    let plain_classmap = scan_files_parallel_classes(&plain_paths);
     for (fqcn, path) in plain_classmap {
         classmap.entry(fqcn).or_insert(path);
     }
@@ -255,7 +322,71 @@ pub fn scan_psr4_directories_with_skip(
 /// package's autoload directories.  Supports PSR-4 and classmap
 /// entries.
 pub fn scan_vendor_packages(workspace_root: &Path, vendor_dir: &str) -> WorkspaceScanResult {
-    scan_vendor_packages_with_skip(workspace_root, vendor_dir, &HashSet::new())
+    scan_vendor_packages_with_skip(workspace_root, vendor_dir, &HashSet::new(), &HashSet::new())
+}
+
+/// Classify a Composer package name into its completion origin.
+///
+/// Symfony polyfill packages (`symfony/polyfill-*`) backport PHP core
+/// classes and extension functions (e.g. `symfony/polyfill-php83`
+/// ships `\Override`), so they are treated as core stubs and sort and
+/// display like built-in PHP symbols. Everything else is an explicit
+/// dependency when it appears in the root `composer.json`, or a
+/// transitive dependency otherwise.
+pub(crate) fn classify_package_origin(
+    pkg_name: &str,
+    explicit_deps: &HashSet<String>,
+) -> crate::ClassCompletionOrigin {
+    if pkg_name.starts_with("symfony/polyfill-") {
+        crate::ClassCompletionOrigin::CoreStub
+    } else if explicit_deps.contains(pkg_name) {
+        crate::ClassCompletionOrigin::VendorExplicit
+    } else {
+        crate::ClassCompletionOrigin::VendorTransitive
+    }
+}
+
+pub(crate) fn vendor_package_roots(
+    workspace_root: &Path,
+    vendor_dir: &str,
+    explicit_deps: &HashSet<String>,
+) -> Vec<(PathBuf, crate::ClassCompletionOrigin, String)> {
+    let vendor_path = workspace_root.join(vendor_dir);
+    let installed_path = vendor_path.join("composer").join("installed.json");
+    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    let packages = if let Some(arr) = json.as_array() {
+        arr.as_slice()
+    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
+        pkgs.as_slice()
+    } else {
+        return Vec::new();
+    };
+    let composer_dir = vendor_path.join("composer");
+    let mut roots = Vec::new();
+    for package in packages {
+        let pkg_name = package
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("unknown/unknown");
+        let origin = classify_package_origin(pkg_name, explicit_deps);
+        let pkg_path =
+            if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
+                composer_dir.join(install_path)
+            } else {
+                vendor_path.join(pkg_name)
+            };
+        let pkg_path = pkg_path.canonicalize().unwrap_or(pkg_path);
+        if pkg_path.is_dir() {
+            roots.push((pkg_path, origin, pkg_name.to_string()));
+        }
+    }
+    roots.sort_by_key(|(p, _, _)| std::cmp::Reverse(p.components().count()));
+    roots
 }
 
 /// Like [`scan_vendor_packages`] but accepts a set of absolute file
@@ -265,6 +396,7 @@ pub fn scan_vendor_packages_with_skip(
     workspace_root: &Path,
     vendor_dir: &str,
     skip_paths: &HashSet<PathBuf>,
+    explicit_deps: &HashSet<String>,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
     let installed_path = vendor_path.join("composer").join("installed.json");
@@ -296,10 +428,15 @@ pub fn scan_vendor_packages_with_skip(
 
     // Phase 1: collect all file paths from all packages (sequential
     // walk, but no file I/O beyond stat calls).
-    let mut psr4_files: Vec<(PathBuf, String)> = Vec::new();
-    let mut plain_files: Vec<PathBuf> = Vec::new();
+    let mut psr4_files: Vec<(PathBuf, String, crate::ClassCompletionOrigin)> = Vec::new();
+    let mut plain_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
 
     for package in packages {
+        let origin = package
+            .get("name")
+            .and_then(|n| n.as_str())
+            .map(|name| classify_package_origin(name, explicit_deps))
+            .unwrap_or(crate::ClassCompletionOrigin::VendorTransitive);
         // Locate the package on disk.  Composer 2's installed.json
         // includes an `install-path` field that is relative to the
         // `vendor/composer/` directory.  This is the authoritative
@@ -349,6 +486,7 @@ pub fn scan_vendor_packages_with_skip(
                             &vendor_dir_paths,
                             skip_paths,
                             &mut psr4_files,
+                            origin,
                         );
                     }
                 }
@@ -367,12 +505,12 @@ pub fn scan_vendor_packages_with_skip(
                     {
                         // Check if this file registers a custom autoloader.
                         if !has_custom_autoloader
-                            && let Ok(content) = std::fs::read(&file)
+                            && let Ok(content) = read_for_scan(&file)
                             && memmem::find(&content, b"spl_autoload_register").is_some()
                         {
                             has_custom_autoloader = true;
                         }
-                        plain_files.push(file);
+                        plain_files.push((file, origin));
                     }
                 }
             }
@@ -383,7 +521,13 @@ pub fn scan_vendor_packages_with_skip(
             // do a full scan of the package directory to discover all
             // classes it provides.
             if has_custom_autoloader {
-                collect_php_files(&pkg_path, &vendor_dir_paths, skip_paths, &mut plain_files);
+                collect_php_files(
+                    &pkg_path,
+                    &vendor_dir_paths,
+                    skip_paths,
+                    &mut plain_files,
+                    origin,
+                );
             }
         }
 
@@ -393,12 +537,18 @@ pub fn scan_vendor_packages_with_skip(
                 if let Some(dir_str) = entry.as_str() {
                     let dir = pkg_path.join(dir_str);
                     if dir.is_dir() {
-                        collect_php_files(&dir, &vendor_dir_paths, skip_paths, &mut plain_files);
+                        collect_php_files(
+                            &dir,
+                            &vendor_dir_paths,
+                            skip_paths,
+                            &mut plain_files,
+                            origin,
+                        );
                     } else if dir.is_file()
                         && dir.extension().is_some_and(|ext| ext == "php")
                         && !skip_paths.contains(&dir)
                     {
-                        plain_files.push(dir);
+                        plain_files.push((dir, origin));
                     }
                 }
             }
@@ -406,10 +556,38 @@ pub fn scan_vendor_packages_with_skip(
     }
 
     // Phase 2: scan all collected files in parallel
-    let mut all_files: Vec<PathBuf> = psr4_files.into_iter().map(|(path, _)| path).collect();
-    all_files.extend(plain_files);
+    let mut all_files: Vec<PathBuf> = psr4_files.iter().map(|(path, _, _)| path.clone()).collect();
+    all_files.extend(plain_files.iter().map(|(path, _)| path.clone()));
 
-    scan_files_parallel_full(&all_files)
+    let mut result = scan_files_parallel_full(&all_files);
+    let mut class_origins = HashMap::new();
+    let mut function_origins = HashMap::new();
+    let mut constant_origins = HashMap::new();
+    for (path, expected_fqn, origin) in psr4_files {
+        if let Ok(content) = read_for_scan(&path) {
+            for fqn in scan_content(&content) {
+                if fqn == expected_fqn {
+                    class_origins.entry(fqn).or_insert(origin);
+                }
+            }
+        }
+    }
+    for (path, origin) in plain_files {
+        let symbols = scan_file_full(&path);
+        for fqn in symbols.classes {
+            class_origins.entry(fqn).or_insert(origin);
+        }
+        for fqn in symbols.functions {
+            function_origins.entry(fqn).or_insert(origin);
+        }
+        for name in symbols.constants {
+            constant_origins.entry(name).or_insert(origin);
+        }
+    }
+    result.class_origins = class_origins;
+    result.function_origins = function_origins;
+    result.constant_origins = constant_origins;
+    result
 }
 
 /// Scan all `.php` files under the workspace root using the PSR-4
@@ -444,7 +622,7 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
     if files.len() <= 4 {
         let mut classmap = HashMap::new();
         for path in files {
-            if let Ok(content) = std::fs::read(path) {
+            if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     classmap.entry(fqcn).or_insert_with(|| path.clone());
                 }
@@ -463,7 +641,7 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
                     for path in chunk {
-                        if let Ok(content) = std::fs::read(path) {
+                        if let Ok(content) = read_for_scan(path) {
                             for fqcn in scan_content(&content) {
                                 local.push((fqcn, path.clone()));
                             }
@@ -508,7 +686,7 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
     if files.len() <= 4 {
         let mut classmap = HashMap::new();
         for (path, expected_fqn) in files {
-            if let Ok(content) = std::fs::read(path) {
+            if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     if &fqcn == expected_fqn {
                         classmap.entry(fqcn).or_insert_with(|| path.clone());
@@ -529,7 +707,7 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
                     for (path, expected_fqn) in chunk {
-                        if let Ok(content) = std::fs::read(path) {
+                        if let Ok(content) = read_for_scan(path) {
                             for fqcn in scan_content(&content) {
                                 if &fqcn == expected_fqn {
                                     local.push((fqcn, path.clone()));
@@ -573,7 +751,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
     if files.len() <= 4 {
         let mut result = WorkspaceScanResult::default();
         for path in files {
-            if let Ok(content) = std::fs::read(path) {
+            if let Ok(content) = read_for_scan(path) {
                 let scan = find_symbols(&content);
                 for fqcn in scan.classes {
                     let class_short_name = fqcn_short_name(&fqcn).to_owned();
@@ -617,7 +795,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
                 s.spawn(move || {
                     let mut local: Vec<(ScanResult, PathBuf)> = Vec::new();
                     for path in chunk {
-                        if let Ok(content) = std::fs::read(path) {
+                        if let Ok(content) = read_for_scan(path) {
                             let scan = find_symbols(&content);
                             if !scan.classes.is_empty()
                                 || !scan.functions.is_empty()
@@ -1750,7 +1928,8 @@ fn collect_php_files(
     dir: &Path,
     vendor_dir_paths: &[PathBuf],
     skip_paths: &HashSet<PathBuf>,
-    out: &mut Vec<PathBuf>,
+    out: &mut Vec<(PathBuf, crate::ClassCompletionOrigin)>,
+    origin: crate::ClassCompletionOrigin,
 ) {
     use ignore::WalkBuilder;
 
@@ -1779,7 +1958,7 @@ fn collect_php_files(
         if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
             let owned = path.to_path_buf();
             if !skip_paths.contains(&owned) {
-                out.push(owned);
+                out.push((owned, origin));
             }
         }
     }
@@ -1795,7 +1974,8 @@ fn collect_psr4_php_files(
     namespace_prefix: &str,
     vendor_dir_paths: &[PathBuf],
     skip_paths: &HashSet<PathBuf>,
-    out: &mut Vec<(PathBuf, String)>,
+    out: &mut Vec<(PathBuf, String, crate::ClassCompletionOrigin)>,
+    origin: crate::ClassCompletionOrigin,
 ) {
     use ignore::WalkBuilder;
 
@@ -1841,7 +2021,7 @@ fn collect_psr4_php_files(
             // Convert path separators to namespace separators
             let expected_fqn = format!("{}{}", namespace_prefix, stem.replace('/', "\\"));
 
-            out.push((owned, expected_fqn));
+            out.push((owned, expected_fqn, origin));
         }
     }
 }
@@ -2327,6 +2507,119 @@ class Real {}
 
         let result = scan_vendor_packages(dir.path(), "vendor");
         assert!(result.classmap.contains_key("Helper"));
+    }
+
+    #[test]
+    fn scan_vendor_packages_custom_autoloader_full_scans_package() {
+        // Mirrors Rector: the package's only autoload entry is a `files`
+        // bootstrap that registers its own `spl_autoload_register`
+        // callback. No PSR-4 or classmap entry covers the real classes,
+        // which live in `src/` and `rules/` under the `Rector\`
+        // namespace. Because we cannot execute the runtime autoloader,
+        // the scanner must full-scan the package directory to discover
+        // them.
+        let dir = tempfile::tempdir().unwrap();
+        let vendor = dir.path().join("vendor");
+        let composer_dir = vendor.join("composer");
+        std::fs::create_dir_all(&composer_dir).unwrap();
+
+        let pkg = vendor.join("rector").join("rector");
+        std::fs::create_dir_all(pkg.join("src").join("Config")).unwrap();
+        std::fs::create_dir_all(pkg.join("rules").join("CodingStyle")).unwrap();
+        std::fs::write(
+            pkg.join("bootstrap.php"),
+            "<?php\nspl_autoload_register(function (string $class): void {});",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("src").join("Config").join("RectorConfig.php"),
+            "<?php\nnamespace Rector\\Config;\nclass RectorConfig {}",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("rules").join("CodingStyle").join("SomeRector.php"),
+            "<?php\nnamespace Rector\\CodingStyle;\nclass SomeRector {}",
+        )
+        .unwrap();
+
+        let installed = serde_json::json!({
+            "packages": [
+                {
+                    "name": "rector/rector",
+                    "install-path": "../rector/rector",
+                    "autoload": {
+                        "files": ["bootstrap.php"]
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            composer_dir.join("installed.json"),
+            serde_json::to_string(&installed).unwrap(),
+        )
+        .unwrap();
+
+        let result = scan_vendor_packages(dir.path(), "vendor");
+        assert!(
+            result.classmap.contains_key("Rector\\Config\\RectorConfig"),
+            "classes under src/ must be discovered via the full-scan fallback"
+        );
+        assert!(
+            result
+                .classmap
+                .contains_key("Rector\\CodingStyle\\SomeRector"),
+            "classes under rules/ must be discovered via the full-scan fallback"
+        );
+    }
+
+    #[test]
+    fn scan_vendor_packages_files_autoload_without_autoloader_is_not_full_scanned() {
+        // A plain `files` autoload (no spl_autoload_register) must NOT
+        // trigger a full package scan — only the listed file is indexed.
+        // This guards against regressing the custom-autoloader heuristic
+        // into an unconditional full scan of every `files` package.
+        let dir = tempfile::tempdir().unwrap();
+        let vendor = dir.path().join("vendor");
+        let composer_dir = vendor.join("composer");
+        std::fs::create_dir_all(&composer_dir).unwrap();
+
+        let pkg = vendor.join("acme").join("helpers");
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("functions.php"),
+            "<?php\nfunction acme_helper(): void {}",
+        )
+        .unwrap();
+        // A class that is only reachable via a real PSR-4 autoloader —
+        // there is none declared, so it must stay undiscovered.
+        std::fs::write(
+            pkg.join("src").join("Internal.php"),
+            "<?php\nnamespace Acme\\Helpers;\nclass Internal {}",
+        )
+        .unwrap();
+
+        let installed = serde_json::json!({
+            "packages": [
+                {
+                    "name": "acme/helpers",
+                    "install-path": "../acme/helpers",
+                    "autoload": {
+                        "files": ["functions.php"]
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            composer_dir.join("installed.json"),
+            serde_json::to_string(&installed).unwrap(),
+        )
+        .unwrap();
+
+        let result = scan_vendor_packages(dir.path(), "vendor");
+        assert!(
+            !result.classmap.contains_key("Acme\\Helpers\\Internal"),
+            "a plain files autoload must not trigger a full package scan"
+        );
     }
 
     #[test]

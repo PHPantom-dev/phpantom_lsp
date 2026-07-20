@@ -567,3 +567,147 @@ async fn test_instanceof_narrows_array_access_expression() {
         methods
     );
 }
+
+// ── Reassignment inside a guard branch with a partially-unresolved
+//    initial type ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_guard_reassignment_keeps_narrowed_fallthrough_enum() {
+    // `$type` starts as `Country|mixed` (the `mixed` from a call whose
+    // return type is unknown).  The guard reassigns only the null /
+    // non-Country path; after it, `$type` must still be `Country` so its
+    // members complete.  Before the fix the unresolved `mixed` component
+    // caused the narrowed fall-through (`Country`) to be dropped, leaving
+    // no type at all.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///guard_reassign_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Country {\n",
+        "    case ADMIN;\n",
+        "    public function getFlagImageName(): string { return 'x'; }\n",
+        "}\n",
+        "class M {\n",
+        "    public function grab(): mixed { return null; }\n",
+        "}\n",
+        "class C {\n",
+        "    public function m(bool $b, M $m): void {\n",
+        "        $type = $b ? Country::ADMIN : $m->grab();\n",
+        "        if (!$type || !$type instanceof Country) {\n",
+        "            $type = Country::ADMIN;\n",
+        "        }\n",
+        "        $type->\n",
+        "    }\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 14, 15).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getFlagImageName"),
+        "After the guard reassignment, `$type` should be `Country`; got: {methods:?}",
+    );
+}
+
+#[tokio::test]
+async fn test_guard_reassignment_keeps_narrowed_fallthrough_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///guard_reassign_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Country {\n",
+        "    public function getFlagImageName(): string { return 'x'; }\n",
+        "}\n",
+        "class M {\n",
+        "    public function grab(): mixed { return null; }\n",
+        "}\n",
+        "class C {\n",
+        "    public function m(bool $b, M $m): void {\n",
+        "        $type = $b ? new Country() : $m->grab();\n",
+        "        if (!$type || !$type instanceof Country) {\n",
+        "            $type = new Country();\n",
+        "        }\n",
+        "        $type->\n",
+        "    }\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 13, 15).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getFlagImageName"),
+        "After the guard reassignment, `$type` should be `Country`; got: {methods:?}",
+    );
+}
+
+// ── array<T>|false union keeps element type after narrowing ──────────────
+
+#[tokio::test]
+async fn test_array_false_union_keeps_element_after_is_array_guard() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///array_false_is_array.php").unwrap();
+    // A native `array|false` return refined by a `array<int, self>|false`
+    // docblock. After `if (!is_array(...)) return;` the element type must
+    // survive so the foreach value resolves to the class.
+    let text = concat!(
+        "<?php\n",
+        "class Col {\n",
+        "    public function value(): int { return 0; }\n",
+        "    /** @return array<int, self>|false */\n",
+        "    public static function getColumns(bool $x): array|false { return false; }\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function run(bool $x): void {\n",
+        "        $columns = Col::getColumns($x);\n",
+        "        if (!is_array($columns)) {\n",
+        "            return;\n",
+        "        }\n",
+        "        foreach ($columns as $column) {\n",
+        "            $column->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 13, 21).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"value"),
+        "After !is_array() guard on array<int, self>|false, foreach element should be Col; got: {:?}",
+        methods
+    );
+}
+
+#[tokio::test]
+async fn test_array_false_union_keeps_element_after_false_check() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///array_false_eqeq.php").unwrap();
+    // Same as above, but guarding with `=== false` instead of `is_array`.
+    let text = concat!(
+        "<?php\n",
+        "class Col {\n",
+        "    public function value(): int { return 0; }\n",
+        "    /** @return array<int, self>|false */\n",
+        "    public static function getColumns(bool $x): array|false { return false; }\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function run(bool $x): void {\n",
+        "        $columns = Col::getColumns($x);\n",
+        "        if ($columns === false) {\n",
+        "            return;\n",
+        "        }\n",
+        "        foreach ($columns as $column) {\n",
+        "            $column->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 13, 21).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"value"),
+        "After `=== false` guard on array<int, self>|false, foreach element should be Col; got: {:?}",
+        methods
+    );
+}

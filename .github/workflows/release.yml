@@ -1,22 +1,31 @@
 name: Release
 
+# Releases are immutable once published, so assets must exist before
+# the Publish button is pressed. Pushing a version tag builds the
+# assets and attaches them to a draft release (creating the draft if
+# one does not already exist). Publish the draft from the website
+# once all assets are present.
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build assets for'
+        required: true
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    # Assets can only be attached while the release is a draft, so
-    # skip the build entirely for releases created already-published.
-    if: github.event.release.draft
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +53,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # For workflow_dispatch, build the requested tag rather than
+          # whatever ref the workflow was dispatched from.
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -65,10 +78,9 @@ jobs:
           RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64-v3' || '' }}
           CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
           CARGO_PROFILE_RELEASE_LTO: "thin"
-          # Embed the release tag as the version. The tag itself does
-          # not exist until the release is published, so `git describe`
-          # cannot produce it while building a draft's assets.
-          PHPANTOM_GIT_VERSION: ${{ github.event.release.tag_name }}
+          # Embed the tag as the version explicitly; actions/checkout
+          # fetches a shallow clone, so `git describe` may not see it.
+          PHPANTOM_GIT_VERSION: ${{ env.RELEASE_TAG }}
         run: cargo build --release --target ${{ matrix.target }}
 
       # --- macOS: import certificate and sign the binary ---
@@ -167,8 +179,6 @@ jobs:
     name: Attach assets to draft
     needs: build
     runs-on: ubuntu-latest
-    # Only attach assets while the release is still a draft.
-    if: github.event.release.draft
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -179,17 +189,23 @@ jobs:
       - name: Attach assets to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          UPLOAD_URL: ${{ github.event.release.upload_url }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          # Strip the "{?name,label}" template suffix from the upload URL.
-          url="${UPLOAD_URL%%\{*}"
-          for file in artifacts/*; do
-            name="$(basename "$file")"
-            echo "Uploading $name"
-            curl --fail --silent --show-error \
-              -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary @"$file" \
-              "$url?name=$name"
-          done
+          tag="$RELEASE_TAG"
+          # If a draft with this tag name already exists (e.g. written
+          # by hand on the website before pushing the tag), attach the
+          # assets to it without touching its notes. Otherwise create a
+          # fresh draft with auto-generated notes. A release that is
+          # already published is immutable; fail loudly in that case.
+          if gh release view "$tag" --json isDraft --jq .isDraft > /tmp/is_draft 2>/dev/null; then
+            if [ "$(cat /tmp/is_draft)" != "true" ]; then
+              echo "::error::Release $tag is already published and immutable; assets cannot be attached." >&2
+              exit 1
+            fi
+            echo "Uploading assets to existing draft $tag"
+            gh release upload "$tag" artifacts/* --clobber
+          else
+            echo "Creating draft release $tag"
+            gh release create "$tag" artifacts/* \
+              --draft --verify-tag --title "$tag" --generate-notes
+          fi

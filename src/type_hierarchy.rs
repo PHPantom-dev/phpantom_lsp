@@ -146,7 +146,7 @@ impl Backend {
         // other children live in files discovered on disk but not yet
         // parsed.  `find_implementors` uses `gti_index` as its first phase
         // and then scans for the rest, so it returns the complete set.
-        let implementors = self.find_implementors(short, &fqn, &class_loader, true, true);
+        let implementors = self.find_implementors(short, &fqn, &class_loader, true, true, false);
 
         let mut result = Vec::new();
         for imp in &implementors {

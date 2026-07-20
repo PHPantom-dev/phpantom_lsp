@@ -12,19 +12,21 @@
 //! structured via [`emit_type_spans`] which uses `mago-type-syntax` to
 //! parse types and walk the AST with accurate span information.
 
-use bumpalo::Bump;
+use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
 use mago_docblock::document::TagKind;
 use mago_span::{HasSpan, Position, Span};
-use mago_syntax::ast::*;
-use mago_type_syntax::ast as type_ast;
+use mago_syntax::cst::*;
+use mago_type_syntax::cst as type_ast;
 
 use crate::docblock::parser::parse_docblock;
 use crate::docblock::types::split_type_token;
 use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
-use super::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolSpan};
+use super::{
+    ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolSpan, self_static_parent_kind,
+};
 use crate::util::strip_fqn_prefix;
 
 // ─── Navigability filter ────────────────────────────────────────────────────
@@ -171,7 +173,7 @@ const TYPE_FIRST_KINDS: &[TagKind] = &[
 /// listed here because `mago-docblock` now maps them to dedicated
 /// `TagKind::PsalmReturn` / `PsalmParam` / `PsalmVar` variants (handled
 /// in `TYPE_FIRST_KINDS` above).
-const TYPE_FIRST_OTHER_NAMES: &[&str] = &[];
+const TYPE_FIRST_OTHER_NAMES: &[&str] = &["phpstan-sealed"];
 
 use crate::docblock::templates::{TEMPLATE_KINDS, variance_for};
 
@@ -289,7 +291,10 @@ fn emit_type_first_tag(
     let raw = &docblock[desc_start_in_docblock..];
     let first_nl = raw.find('\n').unwrap_or(raw.len());
     let first_line = &raw[..first_nl];
-    let trimmed = first_line.trim_start();
+    // Skip leading `@phpstan-assert` / `@psalm-assert` type modifiers
+    // (`!` negation, `=` exact-type) so they aren't emitted as bogus
+    // class-name references (e.g. `Class '=T' not found`).
+    let trimmed = first_line.trim_start().trim_start_matches(['!', '=']);
     if trimmed.is_empty() {
         return;
     }
@@ -363,6 +368,47 @@ pub(super) fn extract_param_var_spans(docblock: &str, base_offset: u32) -> Vec<(
                 let name = rest[1..name_end].to_string();
                 let file_offset = desc_file_start + dollar_pos as u32;
                 results.push((name, file_offset));
+            }
+        }
+    }
+
+    // Also scan @return / @phpstan-return / @psalm-return tags for
+    // parameter references in conditional return types, e.g.
+    //   @return ($strict is true ? Result : ($fallback is true ? Result : ?Result))
+    // The `$strict` and `$fallback` tokens must be renamed together with
+    // the function parameters.
+    for tag in &info.tags {
+        let is_return = matches!(
+            tag.kind,
+            TagKind::Return | TagKind::PhpstanReturn | TagKind::PsalmReturn
+        );
+        if !is_return {
+            continue;
+        }
+
+        let desc_file_start = tag.description_span.start.offset;
+        let desc_in_doc_start = (desc_file_start - base_offset) as usize;
+        let desc_in_doc_end =
+            ((tag.description_span.end.offset - base_offset) as usize).min(docblock.len());
+        let raw_desc = &docblock[desc_in_doc_start..desc_in_doc_end];
+
+        // Find all `($varName` patterns — these are conditional type
+        // subjects.  Conditionals can be nested, so scan the entire
+        // description.
+        let bytes = raw_desc.as_bytes();
+        for i in 0..raw_desc.len().saturating_sub(1) {
+            if bytes[i] == b'(' && bytes[i + 1] == b'$' {
+                let dollar_pos = i + 1;
+                let rest = &raw_desc[dollar_pos..];
+                let name_end = rest[1..]
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .map(|j| j + 1)
+                    .unwrap_or(rest.len());
+                if name_end > 1 {
+                    let name = rest[1..name_end].to_string();
+                    let file_offset = desc_file_start + dollar_pos as u32;
+                    results.push((name, file_offset));
+                }
             }
         }
     }
@@ -555,9 +601,13 @@ pub(super) fn emit_type_spans(
         Position::new(effective_token.len() as u32),
     );
 
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let effective_token = arena.alloc_slice_copy(effective_token.as_bytes());
-    match mago_type_syntax::parse_str(&arena, parse_span, effective_token) {
+    // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
+    // the migration is tracked as a separate task.
+    #[allow(deprecated)]
+    let parsed = mago_type_syntax::parse_str(&arena, parse_span, effective_token);
+    match parsed {
         Ok(ty) => {
             let mut local_spans: Vec<SymbolSpan> = Vec::new();
             emit_type_spans_from_ast(&ty, 0, &mut local_spans);
@@ -966,15 +1016,9 @@ fn emit_type_spans_from_ast(
             // `static`, `self`, and `parent` are parsed as keywords by
             // mago but should still produce SelfStaticParent spans.
             let name = bytes_to_str(k.value);
-            if name == "static" || name == "self" || name == "parent" {
+            if let Some(ssp_kind) = self_static_parent_kind(name) {
                 let start = base_offset + k.span.start.offset;
                 let end = base_offset + k.span.end.offset;
-                let ssp_kind = match name {
-                    "self" => SelfStaticParentKind::Self_,
-                    "static" => SelfStaticParentKind::Static,
-                    "parent" => SelfStaticParentKind::Parent,
-                    _ => unreachable!(),
-                };
                 spans.push(SymbolSpan {
                     start,
                     end,
@@ -1008,13 +1052,7 @@ fn emit_type_spans_from_ast(
 fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<SymbolSpan>) {
     // Handle `self`, `static`, `parent` — they're class-like but get
     // a special span kind.
-    if name == "static" || name == "self" || name == "parent" {
-        let ssp_kind = match name {
-            "self" => SelfStaticParentKind::Self_,
-            "static" => SelfStaticParentKind::Static,
-            "parent" => SelfStaticParentKind::Parent,
-            _ => unreachable!(),
-        };
+    if let Some(ssp_kind) = self_static_parent_kind(name) {
         spans.push(SymbolSpan {
             start,
             end,
@@ -1402,7 +1440,9 @@ fn extract_inline_see_symbols(docblock: &str, base_offset: u32, spans: &mut Vec<
 /// - `ClassName::method()` → `MemberAccess` (method call)
 /// - `ClassName::$property` → `MemberAccess` (static property)
 /// - `ClassName::CONSTANT` → `MemberAccess` (static constant)
-/// - `function()` → `FunctionCall` (standalone function, no `::`)
+/// - `ClassName#method()` → `MemberAccess` (legacy phpDocumentor instance
+///   member fragment syntax)
+/// - `function()` → `FunctionCall` (standalone function, no `::` or `#`)
 /// - `http://...` / `https://...` → skipped (URLs)
 fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolSpan>) {
     // Skip URLs.
@@ -1440,18 +1480,25 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             return;
         }
 
-        // Skip non-navigable class names (scalars, etc.).
+        // Accept regular class names and self/static/parent.
         let clean_class = class_part.trim_start_matches('\\');
-        if !is_navigable_type(clean_class) {
+        let is_self_like = self_static_parent_kind(clean_class).is_some();
+        if !is_self_like && !is_navigable_type(clean_class) {
             return;
         }
 
-        // Emit a ClassReference span for the class portion. Lengths and the
-        // separator position were measured on the prefixed string, so undo
-        // the synthetic prefix to land on the original source bytes.
+        // Emit a ClassReference or SelfStaticParent span for the class
+        // portion. Lengths and the separator position were measured on the
+        // prefixed string, so undo the synthetic prefix to land on the
+        // original source bytes.
         let class_start = file_offset;
         let class_end = file_offset + class_part.len() as u32 - prefix_len;
-        spans.push(class_ref_span(class_start, class_end, class_part));
+        // Pass `class_part` (which keeps any leading `\`, including the
+        // synthetic one prepended above) so the emitted ClassReference
+        // carries the correct `is_fqn` flag. Passing the stripped
+        // `clean_class` would drop the flag and make downstream
+        // consumers re-prefix the current namespace, doubling it.
+        emit_identifier_span(class_part, class_start, class_end, spans);
 
         // Emit a MemberAccess span for the member portion.
         let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
@@ -1472,15 +1519,58 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                     is_static: true,
                     is_method_call: false,
                     is_docblock_reference: true,
+                    is_array_callable: false,
                 },
             });
         }
+    } else if let Some(sep_pos) = reference.find('#') {
+        // Legacy phpDocumentor fragment syntax: `Class#member` refers to
+        // an instance property or method, unlike `Class::member`.
+        let class_part = &reference[..sep_pos];
+        let member_part = &reference[sep_pos + 1..];
+
+        if class_part.is_empty() || member_part.is_empty() {
+            return;
+        }
+
+        let clean_class = class_part.trim_start_matches('\\');
+        let is_self_like = self_static_parent_kind(clean_class).is_some();
+        if !is_self_like && !is_navigable_type(clean_class) {
+            return;
+        }
+
+        let class_start = file_offset;
+        let class_end = file_offset + class_part.len() as u32 - prefix_len;
+        emit_identifier_span(class_part, class_start, class_end, spans);
+
+        let member_start = file_offset + sep_pos as u32 + 1 - prefix_len;
+        let member_end = member_start + member_part.len() as u32;
+        spans.push(SymbolSpan {
+            start: member_start,
+            end: member_end,
+            kind: SymbolKind::MemberAccess {
+                subject_text: clean_class.to_string(),
+                member_name: member_part.to_string(),
+                is_static: false,
+                is_method_call: false,
+                is_docblock_reference: true,
+                is_array_callable: false,
+            },
+        });
     } else {
-        // No `::` — either a class name or a standalone function.
+        // No `::` or `#` — either a class name or a standalone function.
         // If it looks like a class (starts with uppercase or `\`),
         // emit as ClassReference; otherwise skip.
         let clean = reference.trim_start_matches('\\');
-        if clean.is_empty() || !is_navigable_type(clean) {
+        let self_like = self_static_parent_kind(clean);
+        if clean.is_empty() || (self_like.is_none() && !is_navigable_type(clean)) {
+            return;
+        }
+
+        if self_like.is_some() {
+            let start = file_offset;
+            let end = file_offset + reference.len() as u32 - prefix_len;
+            emit_identifier_span(clean, start, end, spans);
             return;
         }
 

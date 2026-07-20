@@ -4,7 +4,7 @@
 /// definitions and `define('NAME', value)` constant declarations from
 /// the PHP AST.
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, atom_bytes, bytes_to_str};
@@ -122,14 +122,21 @@ impl Backend {
                     // Check for a #[LanguageLevelTypeAware] override on the
                     // function's return type.  When present, it replaces the
                     // native type hint with the version-appropriate string.
-                    let native_return_type = if let Some(ctx) = doc_ctx
+                    let lang_level_return = if let Some(ctx) = doc_ctx
                         && let Some(ver) = ctx.php_version
                     {
                         super::extract_language_level_type(&func.attribute_lists, ctx, ver)
-                            .or(raw_native_return_type)
                     } else {
-                        raw_native_return_type
+                        None
                     };
+                    // The `#[LanguageLevelTypeAware]` attribute is JetBrains'
+                    // authoritative, version-resolved return type.  When it is
+                    // present the accompanying `@return` docblock is legacy
+                    // text (e.g. `resource|false` left over from before the
+                    // handle→object migration) and must not be allowed to
+                    // widen the attribute type back to the old value.
+                    let return_from_lang_level = lang_level_return.is_some();
+                    let native_return_type = lang_level_return.or(raw_native_return_type);
 
                     // Apply PHPDoc `@return` override for the function.
                     // Also extract PHPStan conditional return types,
@@ -162,10 +169,14 @@ impl Backend {
                             .as_ref()
                             .and_then(docblock::extract_return_type_from_info);
 
-                        let effective = docblock::resolve_effective_type_typed(
-                            native_return_type.as_ref(),
-                            parsed_doc_return.as_ref(),
-                        );
+                        let effective = if return_from_lang_level {
+                            native_return_type.clone()
+                        } else {
+                            docblock::resolve_effective_type_typed(
+                                native_return_type.as_ref(),
+                                parsed_doc_return.as_ref(),
+                            )
+                        };
 
                         // If the effective return type is bare `array` (or
                         // nullable/union containing array) and the function
@@ -389,29 +400,55 @@ impl Backend {
                         }
                     }
 
+                    // A docblock `@param` merge above may have overwritten
+                    // `type_hint` with a non-nullable docblock type. Re-fold
+                    // null for parameters whose default value is `null`.
+                    for param in &mut parameters {
+                        param.apply_null_default();
+                    }
+
                     let func_tpl_atoms: Vec<crate::atom::Atom> =
                         func_template_params.iter().map(|s| atom(s)).collect();
-                    functions.push(FunctionInfo {
-                        name,
-                        name_offset,
-                        parameters,
-                        native_return_type,
-                        return_type,
-                        description,
-                        return_description,
-                        links: link_urls,
-                        see_refs,
-                        namespace: current_namespace.clone(),
-                        conditional_return,
-                        type_assertions,
-                        deprecation_message,
-                        deprecated_replacement,
-                        template_params: func_tpl_atoms,
-                        template_param_bounds: func_template_param_bounds,
-                        template_bindings: func_template_bindings,
-                        throws,
-                        is_polyfill: false,
-                    });
+                    // Merge overloaded function declarations: when a
+                    // function with the same name already exists (common
+                    // in phpstorm-stubs for functions like `strtr`,
+                    // `implode`, `array_keys`), add the new parameter
+                    // list as an overload instead of pushing a duplicate.
+                    if let Some(existing) = functions.iter_mut().find(|f| {
+                        f.name.eq_ignore_ascii_case(&name)
+                                && f.namespace == *current_namespace
+                                // Only merge when parameter counts differ —
+                                // true overloads (strtr, implode) always
+                                // differ in arity.  Same-name functions
+                                // with the same param count are version
+                                // variants, not overloads.
+                                && f.parameters.len() != parameters.len()
+                    }) {
+                        existing.overloads.push(parameters);
+                    } else {
+                        functions.push(FunctionInfo {
+                            name,
+                            name_offset,
+                            parameters,
+                            native_return_type,
+                            return_type,
+                            description,
+                            return_description,
+                            links: link_urls,
+                            see_refs,
+                            namespace: current_namespace.clone(),
+                            conditional_return,
+                            type_assertions,
+                            deprecation_message,
+                            deprecated_replacement,
+                            template_params: func_tpl_atoms,
+                            template_param_bounds: func_template_param_bounds,
+                            template_bindings: func_template_bindings,
+                            throws,
+                            is_polyfill: false,
+                            overloads: Vec::new(),
+                        });
+                    }
                 }
                 Statement::Namespace(namespace) => {
                     let ns_name = namespace

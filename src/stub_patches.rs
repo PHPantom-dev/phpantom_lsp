@@ -28,6 +28,23 @@
 //! 1. **`range`** -- phpstorm-stubs return bare `array`.  We patch with a
 //!    conditional return type: `($start is string ? list<string> : list<int|float>)`.
 //!
+//! 2. **`stream_bucket_make_writeable`** -- phpstorm-stubs type the
+//!    return as `object|null` below PHP 8.4 (the `StreamBucket` class
+//!    only exists from 8.4 onward). Bare `object` in a union is not
+//!    recognised as the universal-container case, so property access
+//!    on the result is unverifiable. We override the pre-8.4 case to
+//!    `stdClass|null`, matching PHPStan's function map.
+//!
+//! 3. **`array_map`** / **`array_filter`** -- phpstorm-stubs type the
+//!    callback as bare `callable` and the array as bare `array`, so a
+//!    closure passed to them (`array_map(fn($x) => …, $items)`) leaves
+//!    its parameter untyped. We add `@template TValue`, retype the
+//!    callback's first parameter as `TValue`, the array as
+//!    `array<TValue>`, and bind `TValue` from the array argument. Only
+//!    the callback's *input* type is patched here; the callback's
+//!    return type (and thus the function's own return) stays in the
+//!    value-inspecting logic in `raw_type_inference.rs`.
+//!
 //! ### Class patches
 //!
 //! 1. **`WeakMap`** -- phpstorm-stubs have `@template TKey of object`,
@@ -76,9 +93,84 @@ use crate::types::{ClassInfo, FunctionInfo};
 /// cached in `global_functions`.  Only functions with known deficiencies
 /// are patched; all others pass through unchanged.
 pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
-    if func.name.as_str() == "range" {
-        patch_range(func);
+    match func.name.as_str() {
+        "range" => patch_range(func),
+        "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
+        "array_map" => patch_array_map(func),
+        "array_filter" => patch_array_filter(func),
+        _ => {}
     }
+}
+
+/// Link `array_map`'s callback parameter to the input array's element
+/// type so a closure passed to it gets its parameter typed.
+///
+/// phpstorm-stubs declare the callback as bare `callable|null` and the
+/// array as bare `array`, so `array_map(fn($x) => $x->foo(), $items)`
+/// leaves `$x` untyped.  We add `@template TValue`, retype the callback
+/// as `callable(TValue): mixed`, and the array as `array<TValue>`, then
+/// bind `TValue` from the array argument.  The callback's *return* type
+/// (and thus `array_map`'s own return) is still resolved by the
+/// value-inspecting logic in `raw_type_inference.rs`, which this patch
+/// leaves untouched by keeping the bare `array` return type.
+fn patch_array_map(func: &mut FunctionInfo) {
+    // Expected stub shape: `array_map(?callable $callback, array $array, …)`.
+    let callback_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$callback" => p.name,
+        _ => return,
+    };
+    let array_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$array" => p.name,
+        _ => return,
+    };
+    link_callback_to_array_element(func, callback_name, array_name, "mixed");
+}
+
+/// Link `array_filter`'s callback parameter to the input array's element
+/// type (the callback receives each element and returns a boolean).
+///
+/// Unlike `array_map`, `array_filter` takes the array first and the
+/// callback second: `array_filter(array $array, ?callable $callback, …)`.
+fn patch_array_filter(func: &mut FunctionInfo) {
+    let array_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$array" => p.name,
+        _ => return,
+    };
+    let callback_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$callback" => p.name,
+        _ => return,
+    };
+    link_callback_to_array_element(func, callback_name, array_name, "bool");
+}
+
+/// Shared helper: give `func` a single `TValue` template bound from the
+/// array parameter, and retype the callback as
+/// `callable(TValue): <callback_return>` so a closure argument's first
+/// parameter is inferred as the array's element type.
+fn link_callback_to_array_element(
+    func: &mut FunctionInfo,
+    callback_name: crate::atom::Atom,
+    array_name: crate::atom::Atom,
+    callback_return: &str,
+) {
+    const TVALUE: &str = "TValue";
+    let callback_hint = PhpType::parse(&format!("callable({}): {}", TVALUE, callback_return));
+    let array_hint = PhpType::parse(&format!("array<{}>", TVALUE));
+
+    for param in &mut func.parameters {
+        if param.name == callback_name {
+            param.type_hint = Some(callback_hint.clone());
+        } else if param.name == array_name {
+            param.type_hint = Some(array_hint.clone());
+        }
+    }
+
+    func.template_params = vec![atom(TVALUE)];
+    func.template_param_bounds = Default::default();
+    // Bind `TValue` from the array argument only.  The callback argument
+    // (an unannotated closure) can't bind it, and listing it would just
+    // add a no-op binding attempt.
+    func.template_bindings = vec![(atom(TVALUE), array_name)];
 }
 
 /// Patch `range()` to have a conditional return type.
@@ -98,6 +190,41 @@ fn patch_range(func: &mut FunctionInfo) {
             PhpType::float(),
         ]))),
     });
+}
+
+/// Override the pre-8.4 return type of `stream_bucket_make_writeable()`.
+///
+/// phpstorm-stubs resolve the return type to bare `object|null` for PHP
+/// versions before 8.4 (the `StreamBucket` class was only introduced in
+/// 8.4). Bare `object` inside a union is not recognised by the type
+/// engine's universal-container fallback the way `object` or `?object`
+/// alone are, so `$bucket->data` / `$bucket->datalen` become
+/// unverifiable. PHPStan's function map overrides this same case to
+/// `stdClass|null`, which the type engine already treats as accepting
+/// arbitrary properties. The real PHP 8.4+ `StreamBucket|null` type is
+/// left untouched.
+fn patch_stream_bucket_make_writeable(func: &mut FunctionInfo) {
+    if func.return_type.as_ref().is_some_and(is_pre_84_object_type) {
+        func.return_type = Some(PhpType::parse("stdClass|null"));
+    }
+    if func
+        .native_return_type
+        .as_ref()
+        .is_some_and(is_pre_84_object_type)
+    {
+        func.native_return_type = Some(PhpType::parse("stdClass|null"));
+    }
+}
+
+/// Whether `ty` is the pre-8.4 `object|null` (or bare `object`) shape,
+/// as opposed to the real `StreamBucket|null` type used from 8.4 on.
+fn is_pre_84_object_type(ty: &PhpType) -> bool {
+    match ty {
+        PhpType::Named(name) => name.eq_ignore_ascii_case("object"),
+        PhpType::Nullable(inner) => is_pre_84_object_type(inner),
+        PhpType::Union(members) => members.iter().any(is_pre_84_object_type),
+        _ => false,
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -451,6 +578,31 @@ mod tests {
         }
     }
 
+    fn empty_function(name: &str) -> FunctionInfo {
+        FunctionInfo {
+            name: atom(name),
+            name_offset: 0,
+            parameters: Vec::new(),
+            return_type: None,
+            native_return_type: None,
+            description: None,
+            return_description: None,
+            links: Vec::new(),
+            see_refs: Vec::new(),
+            namespace: None,
+            conditional_return: None,
+            type_assertions: Vec::new(),
+            deprecation_message: None,
+            deprecated_replacement: None,
+            throws: Vec::new(),
+            template_params: Vec::new(),
+            template_param_bounds: Default::default(),
+            template_bindings: Vec::new(),
+            is_polyfill: false,
+            overloads: Vec::new(),
+        }
+    }
+
     #[test]
     fn weak_map_gets_array_access_generics() {
         let mut class = empty_class("WeakMap");
@@ -502,33 +654,121 @@ mod tests {
         );
     }
 
+    fn param(name: &str, type_hint: &str) -> crate::types::ParameterInfo {
+        crate::types::ParameterInfo {
+            name: atom(name),
+            is_required: true,
+            type_hint: Some(PhpType::parse(type_hint)),
+            native_type_hint: Some(PhpType::parse(type_hint)),
+            description: None,
+            default_value: None,
+            is_variadic: false,
+            is_reference: false,
+            closure_this_type: None,
+        }
+    }
+
+    #[test]
+    fn array_map_links_callback_to_array_element() {
+        let mut func = empty_function("array_map");
+        func.parameters = vec![param("$callback", "callable"), param("$array", "array")];
+        func.return_type = Some(PhpType::parse("array"));
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.template_params, vec![atom("TValue")]);
+        assert_eq!(
+            func.template_bindings,
+            vec![(atom("TValue"), atom("$array"))]
+        );
+        // The callback's first parameter is now `TValue`.
+        let callback = &func.parameters[0];
+        assert_eq!(
+            callback.type_hint,
+            Some(PhpType::parse("callable(TValue): mixed"))
+        );
+        // The array is `array<TValue>`.
+        assert_eq!(
+            func.parameters[1].type_hint,
+            Some(PhpType::parse("array<TValue>"))
+        );
+        // The return type is left bare so the value-inspecting element
+        // logic in raw_type_inference.rs stays authoritative.
+        assert_eq!(func.return_type, Some(PhpType::parse("array")));
+    }
+
+    #[test]
+    fn array_filter_links_callback_to_array_element() {
+        let mut func = empty_function("array_filter");
+        func.parameters = vec![param("$array", "array"), param("$callback", "callable")];
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.template_params, vec![atom("TValue")]);
+        assert_eq!(
+            func.template_bindings,
+            vec![(atom("TValue"), atom("$array"))]
+        );
+        assert_eq!(
+            func.parameters[0].type_hint,
+            Some(PhpType::parse("array<TValue>"))
+        );
+        assert_eq!(
+            func.parameters[1].type_hint,
+            Some(PhpType::parse("callable(TValue): bool"))
+        );
+    }
+
+    #[test]
+    fn array_map_unexpected_shape_not_patched() {
+        // A hand-written `@method array_map(...)` or a differently-shaped
+        // stub must not be rewritten.
+        let mut func = empty_function("array_map");
+        func.parameters = vec![param("$other", "array")];
+
+        apply_function_stub_patches(&mut func);
+
+        assert!(func.template_params.is_empty());
+        assert!(func.template_bindings.is_empty());
+    }
+
     #[test]
     fn range_gets_conditional_return() {
-        let mut func = FunctionInfo {
-            name: atom("range"),
-            name_offset: 0,
-            parameters: Vec::new(),
-            return_type: None,
-            native_return_type: None,
-            description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
-            namespace: None,
-            conditional_return: None,
-            type_assertions: Vec::new(),
-            deprecation_message: None,
-            deprecated_replacement: None,
-            throws: Vec::new(),
-            template_params: Vec::new(),
-            template_param_bounds: Default::default(),
-            template_bindings: Vec::new(),
-            is_polyfill: false,
-        };
+        let mut func = empty_function("range");
         apply_function_stub_patches(&mut func);
         assert!(
             func.conditional_return.is_some(),
             "range() should have a conditional return type after patching"
+        );
+    }
+
+    #[test]
+    fn stream_bucket_make_writeable_pre_84_becomes_stdclass() {
+        let mut func = empty_function("stream_bucket_make_writeable");
+        func.return_type = Some(PhpType::parse("object|null"));
+        func.native_return_type = Some(PhpType::parse("object|null"));
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.return_type, Some(PhpType::parse("stdClass|null")));
+        assert_eq!(
+            func.native_return_type,
+            Some(PhpType::parse("stdClass|null"))
+        );
+    }
+
+    #[test]
+    fn stream_bucket_make_writeable_84_plus_unchanged() {
+        let mut func = empty_function("stream_bucket_make_writeable");
+        func.return_type = Some(PhpType::parse("StreamBucket|null"));
+        func.native_return_type = Some(PhpType::parse("StreamBucket|null"));
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.return_type, Some(PhpType::parse("StreamBucket|null")));
+        assert_eq!(
+            func.native_return_type,
+            Some(PhpType::parse("StreamBucket|null"))
         );
     }
 }

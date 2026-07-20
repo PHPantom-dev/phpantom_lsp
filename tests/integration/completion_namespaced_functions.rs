@@ -92,6 +92,7 @@ fn register_namespaced_function(
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );
@@ -126,6 +127,7 @@ fn register_global_function(backend: &phpantom_lsp::Backend, name: &str, uri: &s
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );
@@ -875,6 +877,7 @@ async fn test_use_function_namespaced_detail_shows_signature() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );
@@ -975,6 +978,7 @@ async fn test_deprecated_namespaced_function() {
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,
+                    overloads: vec![],
                 },
             ),
         );

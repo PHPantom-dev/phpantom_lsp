@@ -403,7 +403,7 @@ fn parse_variable_element_access() {
         SubjectExpr::parse("$list[0]"),
         SubjectExpr::ArrayAccess {
             base: Box::new(SubjectExpr::Variable("$list".to_string())),
-            segments: vec![BracketSegment::ElementAccess],
+            segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }
@@ -416,7 +416,7 @@ fn parse_variable_chained_bracket_access() {
             base: Box::new(SubjectExpr::Variable("$response".to_string())),
             segments: vec![
                 BracketSegment::StringKey("items".to_string()),
-                BracketSegment::ElementAccess,
+                BracketSegment::IntKey("0".to_string()),
             ],
         }
     );
@@ -441,7 +441,7 @@ fn parse_inline_array_literal() {
         SubjectExpr::parse("[Customer::first()][0]"),
         SubjectExpr::InlineArray {
             elements: vec!["Customer::first()".to_string()],
-            index_segments: vec![BracketSegment::ElementAccess],
+            index_segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }
@@ -452,7 +452,7 @@ fn parse_inline_array_literal_multiple_elements() {
         SubjectExpr::parse("[$a, $b][0]"),
         SubjectExpr::InlineArray {
             elements: vec!["$a".to_string(), "$b".to_string()],
-            index_segments: vec![BracketSegment::ElementAccess],
+            index_segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
 }
@@ -558,11 +558,12 @@ fn round_trip_chained_method_calls() {
 
 #[test]
 fn round_trip_array_access() {
-    // Numeric index `[0]` is parsed as `ElementAccess` and
-    // round-trips to `[]` (the index value is not preserved).
+    // Numeric index `[0]` is parsed as `IntKey` and round-trips
+    // preserving the index value so positional shape entries can be
+    // addressed downstream.
     assert_eq!(
         SubjectExpr::parse("$response['items'][0]").to_subject_text(),
-        "$response['items'][]"
+        "$response['items'][0]"
     );
 }
 
@@ -1009,4 +1010,60 @@ fn parse_this_prop_bracket_arrow_bracket() {
         }
         other => panic!("Expected PropertyChain, got: {other:?}"),
     }
+}
+
+// ── Local variable collection (cache-key scope discrimination) ────────
+
+#[test]
+fn collect_local_vars_from_arg() {
+    // `$this->parse($stmt)` — the receiver is class-relative but the
+    // argument is a local variable, so its type governs the result.
+    let parsed = SubjectExpr::parse("$this->parse($stmt)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert_eq!(vars, vec!["$stmt".to_string()]);
+    assert!(parsed.references_local_variable());
+}
+
+#[test]
+fn collect_local_vars_ignores_this() {
+    // `$this->foo($this->bar)` references only `$this`, which is
+    // class-relative, not a local variable.
+    let parsed = SubjectExpr::parse("$this->foo($this->bar)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert!(vars.is_empty(), "expected no local vars, got: {vars:?}");
+    assert!(!parsed.references_local_variable());
+}
+
+#[test]
+fn collect_local_vars_from_receiver_and_args() {
+    // `$q->where($col, $val)` — receiver and both arguments are locals.
+    let parsed = SubjectExpr::parse("$q->where($col, $val)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    vars.sort();
+    assert_eq!(
+        vars,
+        vec!["$col".to_string(), "$q".to_string(), "$val".to_string()]
+    );
+}
+
+#[test]
+fn collect_local_vars_none_for_static_call() {
+    // `Foo::make(Bar::class)` — no local variables at all.
+    let parsed = SubjectExpr::parse("Foo::make(Bar::class)");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert!(vars.is_empty(), "expected no local vars, got: {vars:?}");
+    assert!(!parsed.references_local_variable());
+}
+
+#[test]
+fn collect_local_vars_nested_call_args() {
+    // `$this->outer($this->inner($stmt))` — nested call argument variable.
+    let parsed = SubjectExpr::parse("$this->outer($this->inner($stmt))");
+    let mut vars = Vec::new();
+    parsed.collect_local_variables(&mut vars);
+    assert_eq!(vars, vec!["$stmt".to_string()]);
 }

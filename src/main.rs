@@ -5,6 +5,7 @@ use clap::builder::Styles;
 use clap::builder::styling::AnsiColor;
 use phpantom_lsp::Backend;
 use phpantom_lsp::LSP_CONCURRENCY;
+use phpantom_lsp::PARSE_WORKER_STACK_SIZE;
 use phpantom_lsp::config;
 use tokio::net::TcpListener;
 use tower_lsp::{LspService, Server};
@@ -180,8 +181,24 @@ impl From<FormatArg> for phpantom_lsp::analyse::OutputFormat {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Build the Tokio runtime by hand (rather than `#[tokio::main]`) so
+    // its worker and blocking threads get a larger stack. LSP request
+    // handlers parse and walk PHP ASTs on these threads (didOpen runs
+    // `update_ast`; completion and hover run the forward walker), and the
+    // recursive `mago-syntax` parser and our AST walkers overflow the
+    // 2 MB default that Tokio threads otherwise receive. A parse-triggered
+    // stack overflow aborts the whole server, so give every runtime thread
+    // the same headroom as the analyse workers. See `PARSE_WORKER_STACK_SIZE`.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(PARSE_WORKER_STACK_SIZE)
+        .build()
+        .expect("failed to build Tokio runtime");
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     let cli = Cli::parse();
 
     match cli.command {

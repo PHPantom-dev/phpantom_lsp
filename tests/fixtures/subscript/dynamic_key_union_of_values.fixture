@@ -1,0 +1,24 @@
+// test: dynamic key on a heterogeneous shape yields the union of value types
+// feature: hover
+// expect_hover: $tool => Pen
+// expect_hover: $tool => Pencil
+---
+<?php
+
+class Pen {
+    public function write(): void {}
+}
+class Pencil {
+    public function sketch(): void {}
+}
+
+class Kit {
+    /** @return array{pen: Pen, pencil: Pencil} */
+    private function getKit(): array { return []; }
+
+    public function pick(string $which): void {
+        $kit = $this->getKit();
+        $tool = $kit[$which];
+        $tool-><>
+    }
+}

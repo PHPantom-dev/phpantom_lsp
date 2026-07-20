@@ -15,6 +15,9 @@
 ///   - `$var instanceof Foo ? $var->method() : …` — ternary narrowing
 ///   - `$var instanceof Foo && $var->method()` — inline `&&` narrowing
 ///     (the RHS of `&&` sees the narrowed type from the LHS)
+///   - `!$var instanceof Foo || $var->method()` — inline `||`
+///     short-circuit narrowing (the RHS of `||` sees the *inverse* of
+///     the LHS, so `$var` is `Foo` where the right operand executes)
 ///   - Guard clauses: `if (!$var instanceof Foo) { return; }` — narrows
 ///     after the if block when the body unconditionally exits via
 ///     `return`, `throw`, `continue`, or `break`.
@@ -30,7 +33,8 @@ use crate::atom::{Atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, ResolvedType, TypeAssertion};
 
-use mago_syntax::ast::*;
+use mago_span::HasSpan;
+use mago_syntax::cst::*;
 
 use super::conditional::extract_class_string_from_expr;
 use crate::completion::resolver::VarResolutionCtx;
@@ -112,33 +116,50 @@ pub(in crate::completion) fn expr_to_subject_key(expr: &Expression<'_>) -> Optio
             let key = array_access_key_as_string(aa)?;
             Some(format!("{}[\"{}\"]", base, key))
         }
+        // See through parentheses so `($x instanceof Foo)` and grouped
+        // subjects resolve to the same key as the bare form.
+        Expression::Parenthesized(inner) => expr_to_subject_key(inner.expression),
+        // Inline assignment as a subject: `($node = expr()) instanceof Foo`
+        // narrows the assigned variable, so key on the assignment target.
+        Expression::Assignment(assign) => expr_to_subject_key(assign.lhs),
         _ => None,
     }
 }
 
-/// Extract a string-literal key from an array access expression.
+/// Extract a literal key from an array access expression.
 ///
-/// Returns the unquoted key string for `$a["test"]` or `$a['test']`,
-/// and `None` for non-literal keys like `$a[$i]`.
+/// Returns the key string for `$a["test"]`, `$a['test']`, and `$a[0]`
+/// (integer indices are stringified, matching PHP's integer/string key
+/// coercion so `$a[0]` and `$a["0"]` narrow the same subject).  Returns
+/// `None` for non-literal keys like `$a[$i]`.
 pub(in crate::completion) fn array_access_key_as_string(
-    aa: &mago_syntax::ast::ArrayAccess<'_>,
+    aa: &mago_syntax::cst::ArrayAccess<'_>,
 ) -> Option<String> {
-    use mago_syntax::ast::Literal;
-    if let Expression::Literal(Literal::String(s)) = aa.index {
-        // `value` is the unquoted content; fall back to stripping quotes
-        // from `raw`.
-        let key = s
-            .value
-            .map(|v| bytes_to_str(v).to_string())
-            .unwrap_or_else(|| {
-                let raw_str = bytes_to_str(s.raw);
-                crate::util::unquote_php_string(raw_str)
-                    .unwrap_or(raw_str)
-                    .to_string()
-            });
-        Some(key)
-    } else {
-        None
+    use mago_syntax::cst::Literal;
+    match aa.index {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the unquoted content; fall back to stripping
+            // quotes from `raw`.
+            let key = s
+                .value
+                .map(|v| bytes_to_str(v).to_string())
+                .unwrap_or_else(|| {
+                    let raw_str = bytes_to_str(s.raw);
+                    crate::util::unquote_php_string(raw_str)
+                        .unwrap_or(raw_str)
+                        .to_string()
+                });
+            Some(key)
+        }
+        Expression::Literal(Literal::Integer(i)) => {
+            // PHP normalises integer-like keys, so `$a[0]` narrows the
+            // same subject as `$a["0"]`.  Prefer the parsed value; fall
+            // back to the raw token when it overflowed.
+            i.value
+                .map(|v| v.to_string())
+                .or_else(|| Some(bytes_to_str(i.raw).to_string()))
+        }
+        _ => None,
     }
 }
 
@@ -260,12 +281,20 @@ pub(in crate::completion) fn try_apply_instanceof_narrowing_inverse(
 /// When `exact` is `true` (`get_class($x) === Foo::class` or
 /// `$x::class === Foo::class`), the variable is narrowed to exactly
 /// that class regardless of the current results.
+///
+/// Always returns `true`: every path through this function reaches a
+/// definite conclusion about the variable's type (including the
+/// unresolvable-target case, which definitely concludes "untyped").
+/// Callers feeding the result through [`ResolvedType::apply_narrowing`]
+/// use this to drop leftover non-class entries (e.g. `mixed`) that the
+/// instanceof check has proven cannot hold, even when the narrowed
+/// class was already present in the pre-narrowing union.
 pub(in crate::completion) fn apply_instanceof_inclusion(
     ty: &PhpType,
     exact: bool,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) {
+) -> bool {
     let narrowed: Vec<ClassInfo> = super::resolution::type_hint_to_classes_typed(
         ty,
         &ctx.current_class.name,
@@ -287,7 +316,7 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
         // suppressed by the diagnostic engine, eliminating the false
         // positives without losing any information we actually had.
         results.clear();
-        return;
+        return true;
     }
 
     // For non-exact checks (instanceof / is_a), keep existing results
@@ -310,7 +339,7 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
             // class, so the instanceof check is satisfied without
             // widening.
             *results = already_subtypes;
-            return;
+            return true;
         }
     }
 
@@ -349,7 +378,7 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
                         results.push(cls);
                     }
                 }
-                return;
+                return true;
             }
         }
     }
@@ -362,14 +391,20 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
             results.push(cls);
         }
     }
+    true
 }
 
 /// Remove the resolved classes for `ty` from `results`.
+///
+/// Always returns `false`: exclusion only rules out one possibility and
+/// never concludes the variable's full type, so leftover non-class
+/// entries (e.g. `mixed`) that [`ResolvedType::apply_narrowing`] tracks
+/// separately must survive.
 pub(in crate::completion) fn apply_instanceof_exclusion(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) {
+) -> bool {
     let excluded: Vec<ClassInfo> = super::resolution::type_hint_to_classes_typed(
         ty,
         &ctx.current_class.name,
@@ -382,6 +417,7 @@ pub(in crate::completion) fn apply_instanceof_exclusion(
     if !excluded.is_empty() {
         results.retain(|r| !excluded.iter().any(|e| e.name == r.name));
     }
+    false
 }
 
 /// If `expr` is `$var instanceof ClassName` and the variable name
@@ -535,6 +571,175 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<PhpT
     }
 }
 
+/// Detect a class-string narrowing guard on `var_name`:
+///
+///   - `is_a($var, ClassName::class, true)` — the `allow_string` third
+///     argument lets `$var` be a class-string as well as an object, so
+///     a string-typed `$var` narrows to `class-string<ClassName>`
+///     rather than an instance of `ClassName`.
+///   - `class_exists($var)`, `interface_exists($var)`, `enum_exists($var)`,
+///     `trait_exists($var)` — confirms `$var` names *some* declared
+///     class-like, narrowing a string to the generic `class-string`
+///     (the target class is not known statically).
+///
+/// Returns `Some((target, negated))` where `target` is `Some(name)` for
+/// `is_a()` with a resolvable second argument, or `None` for the generic
+/// `*_exists()` forms.  `negated` is `true` when the guard is wrapped in
+/// `!`.
+pub(in crate::completion) fn try_extract_class_string_guard(
+    expr: &Expression<'_>,
+    var_name: &str,
+) -> Option<(Option<String>, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_class_string_guard(inner.expression, var_name)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            try_extract_class_string_guard(prefix.operand, var_name)
+                .map(|(target, negated)| (target, !negated))
+        }
+        Expression::Call(Call::Function(func_call)) => {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => bytes_to_str(ident.value()),
+                _ => return None,
+            };
+            let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
+            match func_name {
+                "is_a" => {
+                    if args.len() < 3 {
+                        return None;
+                    }
+                    if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                        return None;
+                    }
+                    if !argument_value(args[2]).is_true() {
+                        return None;
+                    }
+                    let target = extract_class_string_from_expr(argument_value(args[1]));
+                    Some((target, false))
+                }
+                "class_exists" | "interface_exists" | "enum_exists" | "trait_exists" => {
+                    if args.is_empty() {
+                        return None;
+                    }
+                    if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                        return None;
+                    }
+                    Some((None, false))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Detect a member-existence guard on `var_name`:
+///
+///   - `property_exists($var, 'name')` — proves `$var` has a property
+///     called `name` in the branch where the guard is true.  PHPStan
+///     models this as an `object&hasProperty(name)` intersection.
+///   - `method_exists($var, 'name')` — same for a method called `name`.
+///   - `isset($var->name)` — proves `$var` has a property called `name`
+///     (and that it is non-null) in the branch where the guard is true.
+///     PHPStan treats this as an existence proof for the guarded access.
+///
+/// Only literal member names are recognised — a dynamic name proves the
+/// existence of *some* member but not which one, so nothing can be added
+/// to the type.
+///
+/// Returns `Some((member_name, is_method, negated))`; `negated` is `true`
+/// when the guard is wrapped in `!`.
+pub(in crate::completion) fn try_extract_member_exists_guard(
+    expr: &Expression<'_>,
+    var_name: &str,
+) -> Option<(String, bool, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_member_exists_guard(inner.expression, var_name)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            try_extract_member_exists_guard(prefix.operand, var_name)
+                .map(|(name, is_method, negated)| (name, is_method, !negated))
+        }
+        // `isset($var->name)` proves the property exists on `$var`.  An
+        // `isset()` may carry several arguments; the first whose subject
+        // is `var_name` and whose member name is a literal identifier
+        // proves that member.  Only direct property access on `var_name`
+        // counts (a chained `$var->a->b` proves nothing about `$var`).
+        Expression::Construct(Construct::Isset(isset)) => {
+            for value in isset.values.iter() {
+                let (object, property) = match value {
+                    Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+                    Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+                    _ => continue,
+                };
+                if expr_to_subject_key(object).as_deref() != Some(var_name) {
+                    continue;
+                }
+                if let ClassLikeMemberSelector::Identifier(ident) = property {
+                    return Some((bytes_to_str(ident.value).to_string(), false, false));
+                }
+            }
+            None
+        }
+        Expression::Call(Call::Function(func_call)) => {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => bytes_to_str(ident.value()),
+                _ => return None,
+            };
+            let is_method = match func_name {
+                "property_exists" => false,
+                "method_exists" => true,
+                _ => return None,
+            };
+            let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
+            if args.len() < 2 {
+                return None;
+            }
+            if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                return None;
+            }
+            let member = string_literal_value(argument_value(args[1]))?;
+            Some((member, is_method, false))
+        }
+        _ => None,
+    }
+}
+
+/// Extract the unquoted value of a string literal expression.
+///
+/// Returns `None` for anything that is not a plain string literal
+/// (interpolated strings, concatenations, variables, ...).
+fn string_literal_value(expr: &Expression<'_>) -> Option<String> {
+    use mago_syntax::cst::Literal;
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the unquoted content; fall back to stripping
+            // quotes from `raw`.
+            Some(
+                s.value
+                    .map(|v| bytes_to_str(v).to_string())
+                    .unwrap_or_else(|| {
+                        let raw_str = bytes_to_str(s.raw);
+                        crate::util::unquote_php_string(raw_str)
+                            .unwrap_or(raw_str)
+                            .to_string()
+                    }),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Extract the value expression from a positional or named argument.
+fn argument_value<'b>(arg: &'b Argument<'b>) -> &'b Expression<'b> {
+    match arg {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
+    }
+}
+
 /// Detect `get_class($var) === ClassName::class` (or `==`) and
 /// `$var::class === ClassName::class` (or `==`).
 ///
@@ -685,37 +890,181 @@ fn extract_call_assertions<'a>(
             })
         }
         Call::StaticMethod(static_call) => {
-            let class_name = match static_call.class {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-                Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-                _ => return None,
-            };
             let method_name = match &static_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
+                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
                 _ => return None,
             };
-            let class_info = (ctx.class_loader)(&class_name)?;
-            let method = class_info
-                .methods
-                .iter()
-                .find(|m| m.name == method_name && m.is_static)?
-                .clone();
-            if method.type_assertions.is_empty() {
-                return None;
-            }
-            // Leak MethodInfo to get a stable reference for the duration
-            // of this narrowing pass.
-            let method = Box::leak(Box::new(method));
-            Some(CallAssertionInfo {
-                assertions: &method.type_assertions,
-                parameters: &method.parameters,
-                argument_list: &static_call.argument_list,
-                template_params: &method.template_params,
-                template_bindings: &method.template_bindings,
-            })
+            let class_info = resolve_static_receiver_class(static_call.class, ctx)?;
+            build_method_assertion_info(&class_info, method_name, &static_call.argument_list, ctx)
+        }
+        Call::Method(method_call) => {
+            let method_name = match &method_call.method {
+                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
+                _ => return None,
+            };
+            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
+            build_method_assertion_info(&class_info, method_name, &method_call.argument_list, ctx)
+        }
+        Call::NullSafeMethod(method_call) => {
+            let method_name = match &method_call.method {
+                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
+                _ => return None,
+            };
+            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
+            build_method_assertion_info(&class_info, method_name, &method_call.argument_list, ctx)
+        }
+    }
+}
+
+/// Resolve the receiver class of a static method call (the `X` in
+/// `X::method()`) to a loaded [`ClassInfo`].
+///
+/// Handles class-name identifiers (including subclass names), `self`,
+/// `static`, and `parent`.  The returned class is the raw parsed class;
+/// callers resolve inheritance separately so that methods declared on an
+/// ancestor (e.g. PHPUnit's `Assert::assertInstanceOf`) are found.
+fn resolve_static_receiver_class(
+    class_expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Arc<ClassInfo>> {
+    match class_expr {
+        Expression::Identifier(ident) => {
+            let name = bytes_to_str(ident.value());
+            let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
+            (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
+        }
+        Expression::Self_(_) | Expression::Static(_) => (ctx.class_loader)(&ctx.current_class.name),
+        Expression::Parent(_) => {
+            let parent = ctx.current_class.parent_class.as_ref()?;
+            (ctx.class_loader)(parent)
         }
         _ => None,
     }
+}
+
+/// Resolve the receiver class of an instance method call (the `$x` in
+/// `$x->method()`) to a loaded [`ClassInfo`].
+///
+/// `$this` resolves to the enclosing class.  Other variables are resolved
+/// through the forward walker's scope so that, for example,
+/// `$test->assertInstanceOf(...)` narrows correctly.
+fn resolve_instance_receiver_class(
+    object_expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Arc<ClassInfo>> {
+    let Expression::Variable(Variable::Direct(dv)) = object_expr else {
+        return None;
+    };
+    // Variable names carry the leading `$` (e.g. `$this`, `$obj`).
+    let name = bytes_to_str(dv.name);
+    if name == "$this" {
+        return (ctx.class_loader)(&ctx.current_class.name);
+    }
+    let resolver = ctx.scope_var_resolver?;
+    let first = resolver(name).into_iter().next()?;
+    (ctx.class_loader)(&first.type_string.to_string())
+}
+
+/// Build [`CallAssertionInfo`] for a method call once the receiver class
+/// has been resolved.
+///
+/// Walks the receiver's trait and parent chain (using raw class loads) so
+/// that assertion annotations declared on an ancestor are found — e.g.
+/// PHPUnit's `assertInstanceOf`, declared on the base `Assert` class and
+/// called through a `TestCase` subclass.  Returns `None` when no
+/// reachable definition of the method carries assertions.
+///
+/// A full inheritance merge is deliberately avoided here: this runs inside
+/// the forward walker while the enclosing class may itself be mid-resolution,
+/// and `resolve_class_fully` would write a partial result into the shared
+/// resolved-class cache, corrupting later member lookups.
+fn build_method_assertion_info<'a>(
+    class: &ClassInfo,
+    method_name: &str,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallAssertionInfo<'a>> {
+    let method =
+        find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
+    // Leak MethodInfo to get a stable reference for the duration of this
+    // narrowing pass.
+    let method = Box::leak(Box::new(method));
+    Some(CallAssertionInfo {
+        assertions: &method.type_assertions,
+        parameters: &method.parameters,
+        argument_list,
+        template_params: &method.template_params,
+        template_bindings: &method.template_bindings,
+    })
+}
+
+/// Find the definition of `method_name` that carries `@phpstan-assert`
+/// metadata, searching the class's own methods, its traits, and its parent
+/// chain (in PHP resolution order).  Uses raw class loads only, so it never
+/// mutates the shared resolved-class cache.
+///
+/// Returns an owned clone of the first matching method that has non-empty
+/// `type_assertions`.  A `visited` set and `depth` bound guard against
+/// cyclic hierarchies.
+pub(in crate::completion) fn find_assertion_method_in_chain(
+    class: &ClassInfo,
+    method_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visited: &mut Vec<Atom>,
+    depth: usize,
+) -> Option<crate::types::MethodInfo> {
+    if depth > 15 {
+        return None;
+    }
+    let fqn = class.fqn();
+    if visited.contains(&fqn) {
+        return None;
+    }
+    visited.push(fqn);
+
+    // Own methods first: the most-derived definition wins.  A derived
+    // override with its own assertions takes precedence; an override with
+    // no docblock falls through so an ancestor's assertions can apply
+    // (matching how inheritance propagates assertion metadata).
+    if let Some(method) = class
+        .methods
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case(method_name))
+        && !method.type_assertions.is_empty()
+    {
+        return Some(method.as_ref().clone());
+    }
+
+    // Traits mixed into this class.
+    for trait_name in &class.used_traits {
+        if let Some(trait_class) = class_loader(trait_name)
+            && let Some(method) = find_assertion_method_in_chain(
+                &trait_class,
+                method_name,
+                class_loader,
+                visited,
+                depth + 1,
+            )
+        {
+            return Some(method);
+        }
+    }
+
+    // Parent class chain.
+    if let Some(parent) = class.parent_class.as_ref()
+        && let Some(parent_class) = class_loader(parent)
+        && let Some(method) = find_assertion_method_in_chain(
+            &parent_class,
+            method_name,
+            class_loader,
+            visited,
+            depth + 1,
+        )
+    {
+        return Some(method);
+    }
+
+    None
 }
 
 /// Apply narrowing from `@phpstan-assert` / `@psalm-assert` annotations
@@ -724,23 +1073,73 @@ fn extract_call_assertions<'a>(
 /// Only `AssertionKind::Always` assertions are applied here — the
 /// `IfTrue` / `IfFalse` variants are handled by
 /// `try_apply_assert_condition_narrowing`.
+///
+/// Map a bare scalar / pseudo-type to the type-guard kind that narrows it.
+///
+/// So `@phpstan-assert string $x` (PHPUnit's `assertIsString`) narrows like
+/// `is_string($x)`, and its negation excludes `string`.  Returns `None` for
+/// class names and for pseudo-types without a corresponding guard —
+/// `iterable`, `resource`, and `null` (the last handled separately by the
+/// not-null path) — so those fall through to the class-based narrowing.
+fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
+    match ty {
+        PhpType::Array(_) | PhpType::ArrayShape(_) => Some(TypeGuardKind::Array),
+        PhpType::Generic(name, _) if crate::php_type::is_array_like_name(name) => {
+            // `iterable` is array-like by name but has no `is_iterable` guard
+            // kind, so it must not map to the array guard.
+            (!name.eq_ignore_ascii_case("iterable")).then_some(TypeGuardKind::Array)
+        }
+        PhpType::Named(n) => match n.to_ascii_lowercase().as_str() {
+            "array" | "list" | "non-empty-array" | "non-empty-list" => Some(TypeGuardKind::Array),
+            "string" => Some(TypeGuardKind::String),
+            "int" | "integer" => Some(TypeGuardKind::Int),
+            "float" | "double" => Some(TypeGuardKind::Float),
+            "bool" | "boolean" => Some(TypeGuardKind::Bool),
+            "object" => Some(TypeGuardKind::Object),
+            "numeric" => Some(TypeGuardKind::Numeric),
+            "callable" => Some(TypeGuardKind::Callable),
+            "scalar" => Some(TypeGuardKind::Scalar),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Scalar and pseudo-type assertions (PHPUnit's `assertIsString`,
+/// `assertIsObject`, `assertIsArray`, and their negations) name no class, so
+/// they cannot be narrowed through `apply_instanceof_*`.  When one is
+/// detected, `*type_guard` is set to `(kind, exclude)` and the caller applies
+/// [`apply_type_guard_inclusion`] / [`apply_type_guard_exclusion`] on the full
+/// resolved types instead, matching how the corresponding `is_*()` guard
+/// narrows.  The same channel carries the `object` fallback for a template
+/// assertion whose bound `class-string` argument could not be resolved
+/// (e.g. `assertInstanceOf($variableClass, $x)`): the subject is still known
+/// to be an object, so it is narrowed to `object` rather than cleared.
+///
+/// Returns `true` when a definite (inclusion-style) narrowing was
+/// applied to `results` — see [`ResolvedType::apply_narrowing`]. The
+/// scalar/pseudo-type and template-deferral branches signal through
+/// `type_guard` instead and do not affect `results` here, so they
+/// contribute `false`.
 pub(in crate::completion) fn try_apply_custom_assert_narrowing(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) {
+    type_guard: &mut Option<(TypeGuardKind, bool)>,
+) -> bool {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
     };
     let call = match expr {
         Expression::Call(c) => c,
-        _ => return,
+        _ => return false,
     };
     let info = match extract_call_assertions(call, ctx) {
         Some(info) => info,
-        None => return,
+        None => return false,
     };
+    let mut definite = false;
     for assertion in info.assertions {
         if assertion.kind != AssertionKind::Always {
             continue;
@@ -756,13 +1155,148 @@ pub(in crate::completion) fn try_apply_custom_assert_narrowing(
             let effective_type =
                 resolve_assertion_template_type(&assertion.asserted_type, &info, ctx);
 
+            // The substitution failed when the effective type is still a
+            // template parameter — the bound `class-string` argument was a
+            // variable whose concrete class could not be determined.  A
+            // positive assertion still guarantees the subject is an object,
+            // so defer to the caller's `object` narrowing instead of
+            // clearing the subject's prior type.
+            if !assertion.negated
+                && matches!(&effective_type, PhpType::Named(n) if info.template_params.iter().any(|t| t == n))
+            {
+                *type_guard = Some((TypeGuardKind::Object, false));
+                continue;
+            }
+
+            // Scalar / pseudo-type assertions (`assertIsString`,
+            // `assertIsObject`, `assertIsArray`, and their `assertIsNot*`
+            // negations) are type guards, not class narrowings.  The named
+            // pseudo-type resolves to no class, so `apply_instanceof_inclusion`
+            // would clear the subject and `apply_instanceof_exclusion` would
+            // exclude nothing.  Route them through the type-guard machinery.
+            if let Some(kind) = scalar_assert_guard_kind(&effective_type) {
+                *type_guard = Some((kind, assertion.negated));
+                continue;
+            }
+
             if assertion.negated {
                 apply_instanceof_exclusion(&effective_type, ctx, results);
             } else {
-                apply_instanceof_inclusion(&effective_type, false, ctx, results);
+                definite |= apply_instanceof_inclusion(&effective_type, false, ctx, results);
             }
         }
     }
+    definite
+}
+
+/// Collect argument expressions that an assert-style call proves to be
+/// `true` or `false` by re-exporting an inner condition.
+///
+/// PHPUnit's `assertTrue()` carries `@phpstan-assert true $condition` and
+/// `assertFalse()` carries `@phpstan-assert false $condition` (the
+/// `@psalm-assert` spelling is treated identically).  When the matching
+/// argument is itself a boolean condition expression (e.g.
+/// `property_exists($model, 'value')`), asserting that it is `true` /
+/// `false` is equivalent to entering an `if` guarded by that condition.
+///
+/// Returns each such argument expression paired with the polarity the
+/// assertion proves: `true` means the expression is proven true (apply
+/// truthy condition narrowing), `false` means proven false (apply the
+/// inverse).  The caller feeds each expression into the standard
+/// condition-narrowing pipeline so every guard form (`instanceof`,
+/// `is_*`, `property_exists`, null checks, …) is honoured uniformly.
+pub(in crate::completion) fn collect_assert_reexport_conditions<'a>(
+    expr: &'a Expression<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<(&'a Expression<'a>, bool)> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Call(call) = expr else {
+        return Vec::new();
+    };
+    let Some(info) = extract_call_assertions(call, ctx) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for assertion in info.assertions {
+        if assertion.kind != AssertionKind::Always {
+            continue;
+        }
+        // Only a bare `true` / `false` literal assertion re-exports a
+        // condition.  `@phpstan-assert true $c` (negated `!true` ⇒ false)
+        // proves the argument true; `@phpstan-assert false $c` proves it
+        // false.
+        let asserts_true = if assertion.asserted_type.is_true() {
+            !assertion.negated
+        } else if assertion.asserted_type.is_false() {
+            assertion.negated
+        } else {
+            continue;
+        };
+        if let Some(arg_expr) =
+            assertion_arg_expression(info.argument_list, &assertion.param_name, info.parameters)
+        {
+            out.push((arg_expr, asserts_true));
+        }
+    }
+    out
+}
+
+/// Return the call-site argument expression bound to `param_name`.
+///
+/// Unlike [`find_assertion_arg_variable`], which reduces the argument to a
+/// subject key (and so discards non-subject expressions like nested
+/// calls), this returns the raw expression so the caller can treat it as a
+/// re-exported condition.
+fn assertion_arg_expression<'a>(
+    argument_list: &'a ArgumentList<'a>,
+    param_name: &str,
+    parameters: &[crate::types::ParameterInfo],
+) -> Option<&'a Expression<'a>> {
+    let param_idx = parameters.iter().position(|p| p.name == param_name)?;
+    let arg = argument_list.arguments.iter().nth(param_idx)?;
+    Some(match arg {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
+    })
+}
+
+/// Report whether a call expression carries an unconditional not-null
+/// assertion (`@phpstan-assert !null $param`, e.g. PHPUnit's
+/// `assertNotNull`) whose argument resolves to `ctx.var_name`.
+///
+/// The class-based [`apply_instanceof_exclusion`] cannot remove the `null`
+/// pseudo-type (it isn't a class), so callers use this to strip `null` from
+/// a subject's [`ResolvedType`] list directly.  Returns `true` when such an
+/// assertion applies to the current subject.
+pub(in crate::completion) fn call_asserts_not_null(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> bool {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Call(call) = expr else {
+        return false;
+    };
+    let Some(info) = extract_call_assertions(call, ctx) else {
+        return false;
+    };
+    info.assertions.iter().any(|assertion| {
+        assertion.kind == AssertionKind::Always
+            && assertion.negated
+            && assertion.asserted_type.is_null()
+            && find_assertion_arg_variable(
+                info.argument_list,
+                &assertion.param_name,
+                info.parameters,
+            )
+            .as_deref()
+                == Some(ctx.var_name)
+    })
 }
 
 /// If `asserted_type` is a template parameter name, resolve it to a
@@ -825,16 +1359,41 @@ fn resolve_assertion_template_type(
         return PhpType::Named(fqn);
     }
 
-    // Try to resolve a variable argument's class-string type.
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
         let var_name = bytes_to_str(dv.name).to_string();
+
+        // Prefer the shared forward walker's tracked type for the variable.
+        // When the walker is driving this narrowing it has already processed
+        // the statements leading up to the assert, so a variable holding a
+        // `class-string<Wanted>` value (whether assigned directly, via
+        // null-coalesce, or list-destructured out of a foreach source array)
+        // is in scope with that type.  Reusing it keeps class-string-value
+        // resolution on the single shared pipeline instead of a parallel
+        // special-purpose walk that only recognizes direct assignments.
+        if let Some(scope_resolver) = ctx.scope_var_resolver {
+            for resolved in scope_resolver(&var_name) {
+                if let Some(PhpType::Named(name)) = resolved.type_string.unwrap_class_string_inner()
+                {
+                    return PhpType::Named(name.clone());
+                }
+            }
+        }
+
+        // Fall back to the class-string resolver for consumers without a live
+        // forward-walk scope (e.g. a completion request resolving the subject
+        // directly).  Resolve it at the argument's own offset rather than
+        // `ctx.cursor_offset`: the latter is `u32::MAX` during whole-method
+        // diagnostics walks, which defeats the class-body detection in
+        // `resolve_class_string_targets` (its `cursor <= class_end` bound never
+        // holds), and using the call site is more precise anyway (a later
+        // reassignment of the variable must not fold back into the assertion).
         let targets =
             crate::completion::variable::class_string_resolution::resolve_class_string_targets(
                 &var_name,
                 ctx.current_class,
                 ctx.all_classes,
                 ctx.content,
-                ctx.cursor_offset,
+                arg_expr.span().start.offset,
                 ctx.class_loader,
             );
         if let Some(first) = targets.into_iter().next() {
@@ -861,10 +1420,12 @@ pub(in crate::completion) fn unwrap_condition_negation<'b>(
 }
 
 /// Given a function's argument list and a parameter name (with `$`
-/// prefix), find the variable name passed at that parameter's position.
+/// prefix), find the subject key passed at that parameter's position.
 ///
-/// Returns `Some("$varName")` if the argument at the matching position
-/// is a simple direct variable.
+/// Returns the subject key for a direct variable (`$var`), a property
+/// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
+/// assertion narrowing applies to non-variable subjects, not just plain
+/// variables.
 pub(in crate::completion) fn find_assertion_arg_variable(
     argument_list: &ArgumentList<'_>,
     param_name: &str,
@@ -880,11 +1441,7 @@ pub(in crate::completion) fn find_assertion_arg_variable(
         Argument::Named(named) => named.value,
     };
 
-    // The argument must be a simple variable
-    match arg_expr {
-        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
-        _ => None,
-    }
+    expr_to_subject_key(arg_expr)
 }
 
 /// If `expr` is `assert($var instanceof ClassName)` (or the negated
@@ -895,11 +1452,14 @@ pub(in crate::completion) fn find_assertion_arg_variable(
 /// `assert()` narrows unconditionally for all subsequent code in the
 /// same scope — the statement being before the cursor is already
 /// guaranteed by the caller.
+///
+/// Returns `true` when a definite (inclusion-style) narrowing was
+/// applied — see [`ResolvedType::apply_narrowing`].
 pub(in crate::completion) fn try_apply_assert_instanceof_narrowing(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) {
+) -> bool {
     // ── Compound OR inside assert: `assert($x instanceof A || $x instanceof B)` ──
     if let Some(classes) = try_extract_assert_compound_or_instanceof(expr, ctx.var_name)
         && !classes.is_empty()
@@ -908,18 +1468,20 @@ pub(in crate::completion) fn try_apply_assert_instanceof_narrowing(
         if !union.is_empty() {
             results.clear();
             *results = union;
+            return true;
         }
-        return;
+        return false;
     }
 
     if let Some(mut extraction) = try_extract_assert_instanceof(expr, ctx.var_name) {
         resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
-        if extraction.negated {
-            apply_instanceof_exclusion(&extraction.class_type, ctx, results);
+        return if extraction.negated {
+            apply_instanceof_exclusion(&extraction.class_type, ctx, results)
         } else {
-            apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
-        }
+            apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results)
+        };
     }
+    false
 }
 
 /// If `expr` is `assert($var instanceof ClassName)` (or the negated
@@ -1013,8 +1575,8 @@ pub(in crate::completion) fn statement_unconditionally_exits(stmt: &Statement<'_
         Statement::Expression(es) => matches!(
             es.expression,
             Expression::Throw(_)
-                | Expression::Construct(mago_syntax::ast::Construct::Exit(_))
-                | Expression::Construct(mago_syntax::ast::Construct::Die(_))
+                | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
+                | Expression::Construct(mago_syntax::cst::Construct::Die(_))
         ),
         // A block exits if its last statement exits.
         Statement::Block(block) => block
@@ -1149,6 +1711,43 @@ pub(in crate::completion) fn apply_guard_clause_narrowing(
         return;
     }
 
+    // ── Heterogeneous OR guard clause ───────────────────────────────
+    // `if (!$a instanceof A || !$a->b instanceof B) { return; }`
+    // De Morgan: after the guard every disjunct's negation holds, so
+    // each disjunct narrows its own subject.  Apply the guard-inverse
+    // for whichever disjunct is an instanceof on the current subject
+    // (`ctx.var_name`).  This complements the same-subject compound OR
+    // handler above, which returns early when it matches.
+    {
+        let operands = collect_or_operands(if_stmt.condition);
+        if operands.len() > 1 {
+            let mut narrowed = false;
+            for operand in &operands {
+                if let Some(mut extraction) =
+                    try_extract_instanceof_with_negation(operand, ctx.var_name)
+                {
+                    resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
+                    // Positive disjunct → excluded after the guard;
+                    // negated disjunct → included after the guard.
+                    if extraction.negated {
+                        apply_instanceof_inclusion(
+                            &extraction.class_type,
+                            extraction.exact,
+                            ctx,
+                            results,
+                        );
+                    } else {
+                        apply_instanceof_exclusion(&extraction.class_type, ctx, results);
+                    }
+                    narrowed = true;
+                }
+            }
+            if narrowed {
+                return;
+            }
+        }
+    }
+
     // ── instanceof / is_a / get_class / ::class narrowing ──
     // The then-body exits, so subsequent code is the "else" — apply
     // the inverse of the condition.
@@ -1203,6 +1802,32 @@ pub(in crate::completion) fn apply_guard_clause_narrowing(
 }
 
 // ── Compound instanceof helpers ─────────────────────────────────
+
+/// Flatten a `||` / `or` chain into its leaf operands.
+///
+/// Parenthesised sub-chains are unwrapped; a non-`||` expression yields a
+/// single-element vec.  Used by the guard-clause narrowing to apply the
+/// De Morgan inverse to each disjunct's own subject.
+fn collect_or_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    fn walk<'b>(expr: &'b Expression<'b>, out: &mut Vec<&'b Expression<'b>>) {
+        match expr {
+            Expression::Parenthesized(inner) => walk(inner.expression, out),
+            Expression::Binary(bin)
+                if matches!(
+                    bin.operator,
+                    BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+                ) =>
+            {
+                walk(bin.lhs, out);
+                walk(bin.rhs, out);
+            }
+            _ => out.push(expr),
+        }
+    }
+    let mut out = Vec::new();
+    walk(expr, &mut out);
+    out
+}
 
 /// Extract all instanceof class names from a compound `||` condition.
 ///
@@ -1595,6 +2220,7 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
 /// `null|list<Request>|Request`, the result is narrowed to
 /// `list<Request>`.
 pub(crate) fn apply_type_guard_inclusion(kind: TypeGuardKind, results: &mut Vec<ResolvedType>) {
+    let had_types = !results.is_empty();
     for rt in results.iter_mut() {
         let filtered = filter_type_by_guard(&rt.type_string, kind, true);
         if let Some(narrowed) = filtered {
@@ -1603,6 +2229,20 @@ pub(crate) fn apply_type_guard_inclusion(kind: TypeGuardKind, results: &mut Vec<
     }
     // Remove entries that became empty (no union member matched).
     results.retain(|rt| !rt.type_string.is_empty_sentinel());
+
+    // When the guard's assertion fully contradicts every statically known
+    // candidate — e.g. `is_object($file)` where `$file` was inferred as
+    // plain `string` because upstream inference (a foreach over a custom
+    // iterator) missed a possible member — trust the runtime check over
+    // the incomplete static type instead of silently discarding all type
+    // information.  Only fires when *every* entry was eliminated; a
+    // single stale/duplicate entry among several valid ones is dropped
+    // as before.
+    if had_types && results.is_empty() {
+        results.push(ResolvedType::from_type_string(guard_kind_to_narrowed_type(
+            kind,
+        )));
+    }
 }
 
 /// Narrow `results` to only the union members that do NOT match the
@@ -1635,6 +2275,14 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
     // correctly narrows to `string`.
     if let Some(expanded) = expand_pseudo_type_for_guard(ty) {
         return filter_type_by_guard(&expanded, kind, keep_matching);
+    }
+
+    // `is_numeric()` also returns true for numeric strings, not just
+    // `int`/`float`.  Narrow string-like members to `numeric-string`
+    // instead of dropping them or widening to bare `int|float`, so the
+    // narrowed type stays a subtype of the original `string`.
+    if kind == TypeGuardKind::Numeric && keep_matching {
+        return Some(narrow_to_numeric_inclusive(ty));
     }
 
     match ty {
@@ -1717,4 +2365,47 @@ fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
         "numeric" | "number" => Some(PhpType::Union(vec![PhpType::int(), PhpType::float()])),
         _ => None,
     }
+}
+
+/// Narrow a type to what `is_numeric()` guarantees, keeping string-like
+/// members within `numeric-string` rather than widening them to `int|float`
+/// or dropping them.
+fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
+    match ty {
+        PhpType::Union(members) => {
+            let narrowed: Vec<PhpType> = members
+                .iter()
+                .filter_map(narrow_single_type_to_numeric)
+                .collect();
+            match narrowed.len() {
+                0 => PhpType::empty_sentinel(),
+                1 => narrowed.into_iter().next().unwrap(),
+                _ => PhpType::Union(narrowed),
+            }
+        }
+        // `null` never satisfies `is_numeric()`; narrow the inner type only.
+        PhpType::Nullable(inner) => {
+            narrow_single_type_to_numeric(inner).unwrap_or_else(PhpType::empty_sentinel)
+        }
+        other => narrow_single_type_to_numeric(other).unwrap_or_else(PhpType::empty_sentinel),
+    }
+}
+
+/// Narrow a single (non-union) type to what `is_numeric()` guarantees.
+/// Returns `None` when the type can never be numeric (e.g. an object).
+fn narrow_single_type_to_numeric(ty: &PhpType) -> Option<PhpType> {
+    if ty.is_mixed() {
+        return Some(PhpType::Union(vec![
+            PhpType::int(),
+            PhpType::float(),
+            PhpType::parse("numeric-string"),
+        ]));
+    }
+    if type_matches_guard(ty, TypeGuardKind::Numeric) {
+        return Some(ty.clone());
+    }
+    if ty.is_subtype_of(&PhpType::string()) {
+        return Some(PhpType::parse("numeric-string"));
+    }
+    None
 }

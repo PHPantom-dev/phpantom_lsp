@@ -15,10 +15,10 @@ use crate::php_type::PhpType;
 use crate::symbol_map::extract_symbol_map;
 use crate::types::TypeAliasDef;
 
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
@@ -26,11 +26,11 @@ use crate::types::ClassInfo;
 
 use super::DocblockCtx;
 
-/// Run `f` with a parsing arena, reusing a thread-local `Bump` across
+/// Run `f` with a parsing arena, reusing a thread-local `LocalArena` across
 /// calls instead of allocating a fresh one each time.
 ///
 /// `update_ast_inner` is invoked on every keystroke (each `didChange`),
-/// so a fresh `Bump::new()` per call returns its backing pages to the OS
+/// so a fresh `LocalArena::new()` per call returns its backing pages to the OS
 /// via `munmap` on drop and re-acquires them via `mmap` on the next
 /// parse. Reusing one arena and `reset()`ing it (an O(1) bump-pointer
 /// rewind that keeps the pages allocated) eliminates those syscalls
@@ -39,11 +39,11 @@ use super::DocblockCtx;
 /// Resolution can trigger a nested parse on the same thread (e.g.
 /// `find_or_load_function` calls `update_ast` while the outer parse is
 /// still using the arena). Such re-entrant calls fall back to a throwaway
-/// `Bump` so the shared arena is never aliased — the borrow held for the
+/// `LocalArena` so the shared arena is never aliased — the borrow held for the
 /// duration of `f` makes `try_borrow_mut` fail for the nested call.
-fn with_reusable_arena<R>(f: impl FnOnce(&Bump) -> R) -> R {
+fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
     thread_local! {
-        static ARENA: RefCell<Bump> = RefCell::new(Bump::with_capacity(512 * 1024));
+        static ARENA: RefCell<LocalArena> = const { RefCell::new(LocalArena::new()) };
     }
 
     ARENA.with(|cell| match cell.try_borrow_mut() {
@@ -51,7 +51,7 @@ fn with_reusable_arena<R>(f: impl FnOnce(&Bump) -> R) -> R {
             arena.reset();
             f(&arena)
         }
-        Err(_) => f(&Bump::new()),
+        Err(_) => f(&LocalArena::new()),
     })
 }
 
@@ -80,6 +80,10 @@ impl Backend {
             content.to_string()
         };
 
+        self.laravel_string_key_cache
+            .write()
+            .invalidate_for_uri(uri);
+
         // The mago-syntax parser contains `unreachable!()` and `.expect()`
         // calls that can panic on malformed PHP (e.g. partially-written
         // heredocs/nowdocs, which are common while editing).  Wrap the
@@ -95,6 +99,10 @@ impl Backend {
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.update_ast_inner(&uri_owned, &content_owned)
         });
+
+        // Keep the Laravel macro index coherent with edits to files that
+        // register macros.  Cheap no-op for files without a `macro(` call.
+        self.refresh_laravel_macros(uri, content);
 
         match result {
             Some(changed) => changed,
@@ -306,6 +314,7 @@ impl Backend {
             // Extract standalone functions (including those inside if-guards
             // like `if (! function_exists('...'))`) using the shared helper
             // which recurses into if/block statements.
+            let mut any_function_changed = false;
             let mut functions = Vec::new();
             // Update doc_ctx with the file's use-map and namespace so that
             // parameter default values (e.g. `Application::class`) can be
@@ -323,6 +332,40 @@ impl Backend {
                 &namespace,
                 Some(&func_doc_ctx),
             );
+
+            // Apply stub patches when parsing embedded stub content
+            // (e.g. a constant lookup routes its stub source through
+            // `update_ast` under a `phpantom-stub://const/…` URI).  The
+            // same stub file often defines functions and classes too;
+            // without patching here, those register with unpatched
+            // signatures and overwrite (or preempt) the patched entries
+            // from the stub-function and stub-class loaders — silently
+            // dropping e.g. `array_map`'s template parameters and
+            // breaking closure parameter inference for the rest of the
+            // session.
+            if uri.starts_with("phpantom-stub") {
+                for func in &mut functions {
+                    crate::stub_patches::apply_function_stub_patches(func);
+                }
+                for (cls, _) in &mut classes_with_ns {
+                    crate::stub_patches::apply_class_stub_patches(cls);
+                }
+            }
+            // Recall the standalone functions and defines this file contributed
+            // on its previous parse so that symbols the edit deleted or renamed
+            // can be evicted from the global maps.  Without this, deleting or
+            // renaming a `function foo()` or `define('X', …)` leaves the old
+            // entry behind for the whole session (stale completion, hover, and
+            // go-to-definition).
+            let (old_function_fqns, old_define_names) = self
+                .uri_globals_index
+                .read()
+                .get(uri)
+                .cloned()
+                .unwrap_or_default();
+            let mut new_function_fqns: Vec<String> = Vec::new();
+            let mut new_define_names: Vec<String> = Vec::new();
+
             if !functions.is_empty() {
                 // Resolve class-like names in function return types and
                 // parameter type hints to FQNs so that cross-file consumers
@@ -372,11 +415,33 @@ impl Backend {
                         }
                     }
                 }
+            }
 
+            // Only take the write lock when this parse contributes functions
+            // or the previous parse did (so removals can be evicted).  The
+            // common case — a class file with no standalone functions that
+            // never had any — skips the lock and the eviction scan entirely.
+            if !functions.is_empty() || !old_function_fqns.is_empty() {
                 let mut fmap = self.global_functions.write();
+
+                // Snapshot old functions declared in this file before
+                // overwriting, so we can detect signature changes and
+                // trigger cross-file diagnostic invalidation.
+                let old_functions: Vec<(String, crate::types::FunctionInfo)> = fmap
+                    .iter()
+                    .filter(|(_, (file_uri, _))| file_uri == uri)
+                    .map(|(fqn, (_, info))| (fqn.to_string(), info.clone()))
+                    .collect();
+
+                // Remove old function entries for this URI so that
+                // renamed/deleted functions don't linger.
+                for (old_fqn, _) in &old_functions {
+                    fmap.remove(old_fqn);
+                }
+
                 for func_info in functions {
                     let fqn = if let Some(ref ns) = func_info.namespace {
-                        format!("{}\\{}", ns, &func_info.name)
+                        format!("{}\\{}", ns, func_info.name)
                     } else {
                         func_info.name.to_string()
                     };
@@ -396,13 +461,77 @@ impl Backend {
                         continue;
                     }
 
+                    // Check whether this function's signature changed
+                    // compared to the previous parse.  A change (or a
+                    // new function) means other open files that call it
+                    // may have stale diagnostics.
+                    //
+                    // **First-parse fast path**: when `old_functions` is
+                    // empty the file has never been parsed before.  New
+                    // functions appearing on first parse are not changes
+                    // — they mirror the class first-parse fast path.
+                    if !any_function_changed && !old_functions.is_empty() {
+                        match old_functions
+                            .iter()
+                            .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
+                        {
+                            Some((_, old_info)) => {
+                                if !old_info.signature_eq(&func_info) {
+                                    any_function_changed = true;
+                                }
+                            }
+                            None => {
+                                // New function — may affect callers.
+                                any_function_changed = true;
+                            }
+                        }
+                    }
+
                     // Insert under the FQN only.  For namespaced functions
                     // the FQN is `Namespace\name`; for global functions it
                     // is just the bare name.  `resolve_function_name` already
                     // builds namespace-qualified candidates, so a short-name
                     // fallback entry is unnecessary and would cause collisions
                     // when two namespaces define the same short name.
+                    new_function_fqns.push(fqn.clone());
                     fmap.insert(fqn, (uri.to_string(), func_info));
+                }
+
+                // A function was removed from this file — callers may
+                // now reference an unknown function.
+                if !any_function_changed && !old_functions.is_empty() {
+                    let new_count = fmap
+                        .iter()
+                        .filter(|(_, (file_uri, _))| file_uri == uri)
+                        .count();
+                    if new_count != old_functions.len() {
+                        any_function_changed = true;
+                    }
+                }
+            } else {
+                // The file has no functions now.  If it previously had
+                // functions, remove the stale entries and flag a change
+                // so callers get fresh diagnostics.
+                //
+                // Scan under a read lock first: files that never declared
+                // a top-level function (most class files) hit this branch
+                // on every keystroke, and taking a write lock there would
+                // needlessly contend with the diagnostic threads reading
+                // the map.  Only escalate to a write lock when there is
+                // stale state to remove.
+                let old_fqns: Vec<String> = {
+                    let fmap = self.global_functions.read();
+                    fmap.iter()
+                        .filter(|(_, (file_uri, _))| file_uri == uri)
+                        .map(|(fqn, _)| fqn.to_string())
+                        .collect()
+                };
+                if !old_fqns.is_empty() {
+                    let mut fmap = self.global_functions.write();
+                    for fqn in &old_fqns {
+                        fmap.remove(fqn);
+                    }
+                    any_function_changed = true;
                 }
             }
 
@@ -416,16 +545,46 @@ impl Backend {
                 &mut define_entries,
                 content,
             );
-            if !define_entries.is_empty() {
+            if !define_entries.is_empty() || !old_define_names.is_empty() {
                 let mut dmap = self.global_defines.write();
                 for (name, offset, value) in define_entries {
-                    dmap.entry(name)
-                        .or_insert_with(|| crate::types::DefineInfo {
+                    // Overwrite rather than `or_insert_with` so edits to an
+                    // existing `define`/`const` propagate: changing the value
+                    // updates hover, and inserting lines above it updates the
+                    // go-to-definition offset.
+                    new_define_names.push(name.clone());
+                    dmap.insert(
+                        name,
+                        crate::types::DefineInfo {
                             file_uri: uri.to_string(),
                             name_offset: offset,
                             value,
-                        });
+                        },
+                    );
                 }
+
+                // Evict names this file used to contribute but no longer does,
+                // guarding on the stored URI so a constant redefined in another
+                // file is not clobbered.
+                for old_name in &old_define_names {
+                    if new_define_names.contains(old_name) {
+                        continue;
+                    }
+                    if dmap.get(old_name).is_some_and(|d| d.file_uri == uri) {
+                        dmap.remove(old_name);
+                    }
+                }
+            }
+
+            // Record what this parse contributed so the next parse can evict
+            // whatever it removes.  Drop the entry entirely when the file has
+            // no globals, to avoid accumulating empty records for class files.
+            if new_function_fqns.is_empty() && new_define_names.is_empty() {
+                self.uri_globals_index.write().remove(uri);
+            } else {
+                self.uri_globals_index
+                    .write()
+                    .insert(uri.to_string(), (new_function_fqns, new_define_names));
             }
 
             // Post-process: resolve parent_class short names to fully-qualified
@@ -538,7 +697,7 @@ impl Backend {
                         continue;
                     }
                     let fqn = if let Some(ns) = class_ns {
-                        format!("{}\\{}", ns, &class.name)
+                        format!("{}\\{}", ns, class.name)
                     } else {
                         class.name.to_string()
                     };
@@ -731,11 +890,13 @@ impl Backend {
                 );
             }
 
-            if any_signature_changed {
+            let changed = any_signature_changed || any_function_changed;
+
+            if changed {
                 self.member_completion_cache.lock().clear();
             }
 
-            any_signature_changed
+            changed
         })
     }
 
@@ -780,6 +941,13 @@ impl Backend {
                 .iter()
                 .map(|i| atom(&Self::resolve_name(i, use_map, namespace)))
                 .collect();
+
+            // Resolve the `@phpstan-require-extends` base class to its
+            // fully-qualified name so it is loadable cross-file.
+            if let Some(ref required) = class.require_extends {
+                class.require_extends =
+                    Some(atom(&Self::resolve_name(required, use_map, namespace)));
+            }
 
             // Resolve trait names in `insteadof` precedence adaptations
             for prec in &mut class.trait_precedences {
@@ -937,8 +1105,8 @@ impl Backend {
             // Resolve class-like names in method return types and property
             // type hints so that cross-file resolution works correctly.
             // For example, if a method returns `Country` and the file has
-            // `use Luxplus\Core\Enums\Country`, the return type becomes
-            // the FQN `Luxplus\Core\Enums\Country`.
+            // `use Acme\Core\Enums\Country`, the return type becomes
+            // the FQN `Acme\Core\Enums\Country`.
             //
             // Template params and type alias names are excluded to avoid
             // mangling generic types and locally-defined type aliases.
@@ -1266,5 +1434,145 @@ impl Backend {
         } else {
             name.to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Backend;
+
+    /// Changing a function's parameter type should cause `update_ast` to
+    /// return `true` (signature changed), triggering cross-file
+    /// diagnostic invalidation.  This is the exact scenario from
+    /// GitHub issue #123.
+    #[test]
+    fn update_ast_detects_function_param_type_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///test2.php";
+
+        let v1 = "<?php\nfunction bar(null $x) {\n    return $x;\n}\n";
+        let changed = backend.update_ast(uri, v1);
+        // First parse — no old functions to compare against.
+        assert!(!changed, "First parse should not report a change");
+
+        let v2 = "<?php\nfunction bar(string $x) {\n    return $x;\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(
+            changed,
+            "Changing parameter type null→string must be detected"
+        );
+    }
+
+    /// Changing a function's return type should be detected.
+    #[test]
+    fn update_ast_detects_function_return_type_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction helper(): int {\n    return 42;\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction helper(): string {\n    return 'hello';\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Changing return type int→string must be detected");
+    }
+
+    /// Changing only the function body (not the signature) should NOT
+    /// trigger cross-file invalidation.
+    #[test]
+    fn update_ast_ignores_function_body_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction helper(int $x): int {\n    return $x + 1;\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction helper(int $x): int {\n    return $x + 2;\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(
+            !changed,
+            "Body-only change should not report a signature change"
+        );
+    }
+
+    /// Adding a new function should be detected as a change.
+    #[test]
+    fn update_ast_detects_new_function() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction foo(): void {}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction foo(): void {}\nfunction bar(): void {}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Adding a new function must be detected");
+    }
+
+    /// Removing a function should be detected as a change.
+    #[test]
+    fn update_ast_detects_removed_function() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction foo(): void {}\nfunction bar(): void {}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction foo(): void {}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Removing a function must be detected");
+    }
+
+    /// Adding a parameter to a function should be detected.
+    #[test]
+    fn update_ast_detects_added_parameter() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction greet(string $name): string {\n    return $name;\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nfunction greet(string $name, string $greeting = 'Hello'): string {\n    return \"$greeting $name\";\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(changed, "Adding a parameter must be detected");
+    }
+
+    /// Verify that stale function entries are cleaned up when a file
+    /// is re-parsed without the function.
+    #[test]
+    fn update_ast_cleans_up_stale_functions() {
+        let backend = Backend::new_test();
+        let uri = "file:///helpers.php";
+
+        let v1 = "<?php\nfunction old_helper(): void {}\n";
+        backend.update_ast(uri, v1);
+        assert!(
+            backend.global_functions.read().get("old_helper").is_some(),
+            "Function should be registered after first parse"
+        );
+
+        let v2 = "<?php\n// function removed\n";
+        backend.update_ast(uri, v2);
+        assert!(
+            backend.global_functions.read().get("old_helper").is_none(),
+            "Stale function should be removed after re-parse"
+        );
+    }
+
+    /// Class signature changes should still be detected (regression guard).
+    #[test]
+    fn update_ast_still_detects_class_signature_change() {
+        let backend = Backend::new_test();
+        let uri = "file:///MyClass.php";
+
+        let v1 = "<?php\nclass MyClass {\n    public function foo(): int { return 1; }\n}\n";
+        backend.update_ast(uri, v1);
+
+        let v2 = "<?php\nclass MyClass {\n    public function foo(): string { return 'a'; }\n}\n";
+        let changed = backend.update_ast(uri, v2);
+        assert!(
+            changed,
+            "Class method return type change must still be detected"
+        );
     }
 }

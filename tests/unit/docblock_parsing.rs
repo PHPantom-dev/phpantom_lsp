@@ -305,6 +305,38 @@ fn return_type_conditional_is_skipped() {
     assert_eq!(extract_return_type(doc), None);
 }
 
+// ── extract_return_type (parenthesized type groups) ─────────────────
+// A leading `(` opens either a conditional (handled above) or a
+// parenthesized type group.  DNF and grouped types must be parsed as
+// normal return types, not mistaken for conditionals and dropped.
+
+#[test]
+fn return_type_dnf_intersection_with_shape() {
+    let doc = "/** @return (Related&object{pivot: Pivot})|null */";
+    assert_eq!(
+        extract_return_type(doc),
+        Some(PhpType::parse("(Related&object{pivot: Pivot})|null"))
+    );
+}
+
+#[test]
+fn return_type_parenthesized_union_intersection() {
+    let doc = "/** @return (Foo|Bar)&Baz */";
+    assert_eq!(
+        extract_return_type(doc),
+        Some(PhpType::parse("(Foo|Bar)&Baz"))
+    );
+}
+
+#[test]
+fn return_type_dnf_with_trailing_description() {
+    let doc = "/** @return (Related&object{pivot: Pivot})|null The first result */";
+    assert_eq!(
+        extract_return_type(doc),
+        Some(PhpType::parse("(Related&object{pivot: Pivot})|null"))
+    );
+}
+
 // ── extract_return_type ─────────────────────────────────────────────
 
 #[test]
@@ -667,6 +699,17 @@ fn override_mixed_with_class() {
 }
 
 #[test]
+fn override_object_string_union_with_class_string_union() {
+    // The phpstorm-stubs `ReflectionClass::__construct` native hint resolves
+    // to `object|string`; its docblock `@param class-string<T>|T` must still
+    // refine that union so the class template `T` binds to the object type.
+    assert!(should_override_type_typed(
+        &PhpType::parse("class-string<T>|T"),
+        &PhpType::parse("object|string")
+    ));
+}
+
+#[test]
 fn override_class_with_subclass() {
     assert!(should_override_type_typed(
         &PhpType::parse("ConcreteSession"),
@@ -741,6 +784,27 @@ fn override_nullable_array_with_class() {
         &PhpType::parse("list<User>"),
         &PhpType::parse("?array")
     ));
+}
+
+#[test]
+fn override_array_false_union_with_generic() {
+    // Native `array|false` refined by `array<int, User>|false`. The bare
+    // `array` member is a broad container the docblock refines, so the
+    // whole union must override (keeping the element type). `false` is not
+    // stripped by nullable-unwrapping the way `null` is, so this exercises
+    // the union branch directly.
+    assert!(should_override_type_typed(
+        &PhpType::parse("array<int, User>|false"),
+        &PhpType::parse("array|false")
+    ));
+    assert_eq!(
+        resolve_effective_type_typed(
+            Some(&PhpType::parse("array|false")),
+            Some(&PhpType::parse("array<int, User>|false"))
+        )
+        .map(|t| t.to_string()),
+        Some("array<int, User>|false".to_string())
+    );
 }
 
 #[test]
@@ -1239,6 +1303,47 @@ fn mixin_tag_simple() {
     let doc = concat!("/**\n", " * @mixin ShoppingCart\n", " */",);
     let mixins = extract_mixin_tags(doc);
     assert_eq!(mixins, vec![("ShoppingCart".to_string(), vec![])]);
+}
+
+#[test]
+fn require_extends_tag_simple() {
+    let doc = concat!("/**\n", " * @phpstan-require-extends TestCase\n", " */",);
+    assert_eq!(extract_require_extends(doc), Some("TestCase".to_string()));
+}
+
+#[test]
+fn require_extends_tag_fqn() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-extends \\Tests\\TestCase\n",
+        " */",
+    );
+    assert_eq!(
+        extract_require_extends(doc),
+        Some("\\Tests\\TestCase".to_string())
+    );
+}
+
+#[test]
+fn require_extends_tag_psalm_variant() {
+    let doc = concat!("/**\n", " * @psalm-require-extends BaseCase\n", " */",);
+    assert_eq!(extract_require_extends(doc), Some("BaseCase".to_string()));
+}
+
+#[test]
+fn require_extends_tag_strips_generic_arguments() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-extends Collection<int, string>\n",
+        " */",
+    );
+    assert_eq!(extract_require_extends(doc), Some("Collection".to_string()));
+}
+
+#[test]
+fn require_extends_tag_absent() {
+    let doc = concat!("/**\n", " * @mixin ShoppingCart\n", " */",);
+    assert_eq!(extract_require_extends(doc), None);
 }
 
 #[test]

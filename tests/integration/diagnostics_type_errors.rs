@@ -1,4 +1,7 @@
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{
+    create_test_backend, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs,
+};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -8,7 +11,7 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -17,7 +20,29 @@ fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics(uri, php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
+    out
+}
+
+fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
+    out
+}
+
+/// Collect diagnostics through the full slow-diagnostic pipeline so that
+/// the chain resolution cache is active (as it is during real analysis
+/// and LSP requests).  Needed for tests that exercise cross-call-site
+/// caching behaviour.
+fn collect_slow(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
     out
 }
 
@@ -123,6 +148,20 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_usleep_with_valid_integer_literal() {
+    let php = r#"<?php
+function test(): void {
+    usleep(10_000);
+}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag integer literal within stub int range, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_string_to_string() {
     let php = r#"<?php
 function takes_string(string $x): void {}
@@ -154,6 +193,68 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "Should not flag null passed to nullable param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_when_docblock_overrides_nullable_native() {
+    // A `@param Item[]` docblock overriding a native `?array` still
+    // accepts null at runtime, so passing null must not be flagged.
+    let php = r#"<?php
+class Item {}
+
+class Component {
+    /**
+     * @param Item[] $items
+     */
+    public function __construct(?array $items) {}
+}
+
+function test(): void {
+    new Component(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag null passed to a docblock-overridden nullable param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_when_default_is_null() {
+    // A parameter with a literal `null` default accepts null even when
+    // the native hint is non-nullable (the pre-8.4 implicit-nullable form).
+    let php = r#"<?php
+function takes_default_null(string $baseurl = null): void {}
+
+function test(): void {
+    takes_default_null(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag null passed to a param with a null default, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_when_docblock_type_and_default_null() {
+    // Combines both facets: docblock type plus a `null` default.
+    let php = r#"<?php
+class Item {}
+
+function takes_items(array $items = null): void {}
+
+function test(): void {
+    takes_items(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag null passed to a param with a null default and array hint, got: {diags:?}"
     );
 }
 
@@ -368,6 +469,56 @@ function test(): void {
     assert!(
         has_type_error(&diags),
         "Expected a type error for Cat passed to Dog param, got: {diags:?}"
+    );
+}
+
+// ─── No diagnostic: class named `Number` is not the `number` pseudo-type ─────
+
+#[test]
+fn no_diagnostic_for_class_named_number() {
+    // `number` is a PHPDoc-only pseudo-type, but PHP allows a real class named
+    // `Number` (e.g. PHP 8.4's `BcMath\Number`). The class must not be shadowed
+    // by the pseudo-type, otherwise a valid argument is wrongly flagged.
+    let php = r#"<?php
+namespace App;
+
+class Number {
+    public function __construct(public string $value) {}
+}
+
+function scale(Number $n): void {}
+
+function test(string $v): void {
+    scale(new Number($v));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A `Number` argument passed to a `Number` param must not be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_type_to_number_class_param() {
+    // The `Number` class must still participate in genuine mismatch detection:
+    // passing an unrelated class where a `Number` is expected is an error.
+    let php = r#"<?php
+namespace App;
+
+class Number {}
+class Money {}
+
+function scale(Number $n): void {}
+
+function test(): void {
+    scale(new Money());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Passing Money to a Number param should be flagged, got: {diags:?}"
     );
 }
 
@@ -1404,6 +1555,323 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_string_literal_naming_subclass() {
+    let php = r#"<?php
+class Animal {}
+class Cat extends Animal {}
+
+/** @param class-string<Animal> $cls */
+function takes_animal_class(string $cls): void {}
+
+function test(): void {
+    takes_animal_class('Cat');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag string literal 'Cat' passed to class-string<Animal>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_string_literal_naming_bound_class_itself() {
+    let php = r#"<?php
+class Animal {}
+
+/** @param class-string<Animal> $cls */
+function takes_animal_class(string $cls): void {}
+
+function test(): void {
+    takes_animal_class('Animal');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag string literal 'Animal' passed to class-string<Animal>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_unresolvable_string_literal_class_string() {
+    let php = r#"<?php
+class Animal {}
+
+/** @param class-string<Animal> $cls */
+function takes_animal_class(string $cls): void {}
+
+function test(): void {
+    takes_animal_class('SomeUnknownClass');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should stay silent when the string literal can't be resolved to a class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_string_literal_naming_unrelated_class() {
+    let php = r#"<?php
+class Animal {}
+class Vehicle {}
+
+/** @param class-string<Animal> $cls */
+function takes_animal_class(string $cls): void {}
+
+function test(): void {
+    takes_animal_class('Vehicle');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Should flag string literal 'Vehicle' passed to class-string<Animal>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_union_of_class_strings_bound_by_template() {
+    // Regression: `$className` iterated over a class-constant array is a
+    // union of `class-string`s.  Passing it to a `@template T of Bound`
+    // parameter typed `class-string<T>` must bind `T` to the union of the
+    // inner classes (checking each against the bound), not fall back to the
+    // declared bound.  When the bound is a short name imported from another
+    // namespace, that fallback produces a false positive because the short
+    // bound name cannot be resolved to its FQN during the hierarchy walk.
+    use crate::common::create_psr4_workspace;
+
+    let files = vec![
+        (
+            "src/Models/Models.php",
+            r#"<?php
+namespace App\Models;
+
+abstract class AbstractEntity {}
+abstract class AbstractRenderable extends AbstractEntity {}
+class Page extends AbstractRenderable {}
+class CustomPage extends AbstractEntity {}
+"#,
+        ),
+        (
+            "src/Services/OrmService.php",
+            r#"<?php
+namespace App\Services;
+
+use App\Models\AbstractEntity;
+
+class OrmService {
+    /**
+     * @template T of AbstractEntity
+     * @param class-string<T> $class
+     * @return T[]
+     */
+    public function getByQuery(string $class, string $query): array { return []; }
+}
+"#,
+        ),
+        (
+            "src/Http/ExplorerController.php",
+            r#"<?php
+namespace App\Http;
+
+use App\Models\CustomPage;
+use App\Models\Page;
+use App\Services\OrmService;
+
+class ExplorerController {
+    public function run(OrmService $orm): void {
+        foreach ([Page::class, CustomPage::class] as $className) {
+            $rows = $orm->getByQuery($className, 'SELECT 1');
+        }
+    }
+}
+"#,
+        ),
+    ];
+
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    // Index every file up front, mirroring the CLI's eager scan so the
+    // call target and its `@template` docblock are available.
+    for (rel_path, php) in &files {
+        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        backend.update_ast(&file_uri, php);
+    }
+    let uri = format!(
+        "file://{}/src/Http/ExplorerController.php",
+        dir.path().display()
+    );
+    let content = files[2].1;
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag a union of class-strings satisfying a template bound, got: {}",
+        type_error_messages(&diags).join(", ")
+    );
+}
+
+#[test]
+fn no_diagnostic_for_class_string_union_param_bound_by_template() {
+    // A variable declared `class-string<A|B>` passed to a `class-string<T>`
+    // template parameter must bind `T` to the whole union `A|B`, not truncate
+    // it to the first member.  Truncation produced a bogus "expects
+    // class-string<A>, got A|B" mismatch.
+    let php = r#"<?php
+class FunctionNode {}
+class MethodNode {}
+
+class Builder {
+    /**
+     * @template T of object
+     * @param class-string<T> $className
+     * @return T
+     */
+    public function build(string $className): object { return new $className(); }
+}
+
+/** @param class-string<FunctionNode|MethodNode> $mockBuilder */
+function demo(Builder $b, string $mockBuilder): void
+{
+    $b->build($mockBuilder);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag class-string<A|B> passed to class-string<T>, got: {}",
+        type_error_messages(&diags).join(", ")
+    );
+}
+
+#[test]
+fn no_diagnostic_for_string_literal_class_name_expect_exception() {
+    let php = r#"<?php
+class TestCase {
+    /** @param class-string<\Throwable> $exception */
+    function expectException(string $exception): void {}
+
+    function test(): void {
+        $this->expectException('RuntimeException');
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag 'RuntimeException' passed to class-string<Throwable>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_string_literal_binding_class_string_template() {
+    // A string literal naming a class must bind the template `T` to the
+    // class it names, not to the literal's own `string` type. Binding to
+    // `string` would produce the absurd `class-string<string>` parameter
+    // and a guaranteed mismatch against the literal argument.
+    let php = r#"<?php
+class TestCase {
+    /**
+     * @template T
+     * @param class-string<T> $expected
+     * @param mixed $actual
+     */
+    function assertInstanceOf(string $expected, $actual): void {}
+
+    function test(): void {
+        $this->assertInstanceOf('Iterator', $this);
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag string literal 'Iterator' bound through class-string<T>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_class_const_binding_class_string_template() {
+    // The `::class` argument path must keep binding `T` to the named
+    // class, matching the string-literal path.
+    let php = r#"<?php
+class Animal {}
+
+/**
+ * @template T
+ * @param class-string<T> $expected
+ */
+function assert_class(string $expected): void {}
+
+function test(): void {
+    assert_class(Animal::class);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag Animal::class bound through class-string<T>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_class_const_binding_bare_template() {
+    // A template param bound directly from a `::class` argument
+    // (`@param T $expected`, no `class-string<>` wrapper) must infer
+    // `class-string<T>` — the argument's actual type — not the bare
+    // class name. Binding to the bare class produces a spurious
+    // "expects Carbon, got class-string<Carbon>" mismatch because the
+    // parameter type is compared against the very argument that bound
+    // it. This is the `Mockery::type(SomeClass::class)` pattern.
+    let php = r#"<?php
+class Carbon {}
+
+class Matcher {
+    /**
+     * @template TExpectedType
+     * @param TExpectedType $expected
+     */
+    public static function type($expected): void {}
+}
+
+function test(): void {
+    Matcher::type(Carbon::class);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag Carbon::class bound through bare @param T, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_class_const_binding_bare_template_function() {
+    // The same self-referential binding for a function-level template.
+    let php = r#"<?php
+class Carbon {}
+
+/**
+ * @template TExpectedType
+ * @param TExpectedType $expected
+ */
+function matcher($expected): void {}
+
+function test(): void {
+    matcher(Carbon::class);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag Carbon::class bound through bare @param T function, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: iterable<...> accepts arrays
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1528,6 +1996,43 @@ class MyTest extends TestCase {
         !has_type_error(&diags),
         "Should not flag enum cases, variables, property access, or int literals \
          passed to self::assertSame @template param, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_self_assert_same_with_untyped_class_const() {
+    // Real-world PHPUnit pattern: static::assertSame(Command::INVALID, $x)
+    // where INVALID is an *untyped* class constant with an int value.
+    // The template param must bind to the constant's value type (int),
+    // not the constant's owning class (Command).
+    let php = r#"<?php
+class Command {
+    const SUCCESS = 0;
+    const INVALID = 23;
+}
+
+class TestCase {
+    /**
+     * @template ExpectedType
+     * @param ExpectedType $expected
+     */
+    final public static function assertSame(mixed $expected, mixed $actual, string $message = ''): void {}
+}
+
+class MyTest extends TestCase {
+    public function testExitCode(): void {
+        $exitCode = 23;
+        static::assertSame(Command::INVALID, $exitCode);
+        self::assertSame(Command::SUCCESS, 0);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        !has_type_error(&diags),
+        "Untyped class constant argument should bind the template param to \
+         its value type (int), not the owning class, got: {msgs:?}"
     );
 }
 
@@ -2704,6 +3209,55 @@ function test(): void {
 }
 
 #[test]
+fn no_false_positive_for_conditionable_when_with_integer_and_callback_param() {
+    let php = r#"<?php
+trait Conditionable {
+    /**
+     * @template TWhenParameter
+     * @template TWhenReturnType
+     * @param (\Closure($this): TWhenParameter)|TWhenParameter|null $value
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $callback
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $default
+     * @return $this|TWhenReturnType
+     */
+    public function when($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+}
+
+class Request {
+    public function integer(string $key): int {
+        return 1;
+    }
+}
+
+class Builder {
+    use Conditionable;
+
+    public function whereHas(string $relation, callable $callback): self {
+        return $this;
+    }
+
+    public function whereKey(int $id): self {
+        return $this;
+    }
+}
+
+function test(Request $request, Builder $builder): void {
+    $builder->when(
+        $request->integer('root_ancestor_id'),
+        fn (Builder $q, int $id) => $q->whereHas('rootAncestor', fn (Builder $q) => $q->whereKey($id)),
+    );
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag int passed to when() with callback param template, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_template_null_default_no_overwrite() {
     // When a template param is resolved from one binding, a later
     // binding with a missing arg and null default should not
@@ -3714,7 +4268,7 @@ class TestCase {
     let uri = format!("file://{}/src/TestCase.php", dir.path().display());
     let content = files[3].1;
     let mut diags = Vec::new();
-    backend.collect_type_error_diagnostics(&uri, content, &mut diags);
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
     let msgs = type_error_messages(&diags);
     // The argument to ClassNode::__construct is the return value of
     // getNodeForCallingTestCase which returns ASTNode.  The diagnostic
@@ -3814,7 +4368,7 @@ class MyException extends NativeException {}
     backend.update_ast("file:///test.php", php);
 
     let mut out = Vec::new();
-    backend.collect_type_error_diagnostics("file:///test.php", php, &mut out);
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
     let msgs = type_error_messages(&out);
     assert!(
         msgs.is_empty(),
@@ -4028,5 +4582,1456 @@ function test(): void {
     assert!(
         msgs.is_empty(),
         "Hex literal 0x2 should match decimal literal 2 in union, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_binary_and_octal_literals_matching_decimal_literal_union() {
+    let php = r#"<?php
+/** @param 2|8|10 $mode */
+function setMode(int $mode): void {}
+
+function test(): void {
+    setMode(0b10);
+    setMode(0o10);
+    setMode(1_0);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Binary, octal, and underscored int literals should match decimal literal unions, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_scientific_float_literal_matching_decimal_literal_union() {
+    let php = r#"<?php
+/** @param 1000.0|2000.0 $value */
+function setValue(float $value): void {}
+
+function test(): void {
+    setValue(1e3);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Scientific float literal 1e3 should match decimal literal 1000.0 in union, got: {msgs:?}"
+    );
+}
+#[test]
+fn no_false_positive_for_single_quoted_string_matching_double_quoted_literal_union() {
+    let php = r#"<?php
+/** @param "select"|"from"|"join" $type */
+function addBinding(array $bindings, string $type): void {}
+
+function test(): void {
+    addBinding([], 'select');
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Single-quoted string literal should match double-quoted literal union member, got: {msgs:?}"
+    );
+}
+
+// ─── array_map callback return type (#147) ──────────────────────────────────
+
+#[test]
+fn no_false_positive_for_array_map_with_scalar_return_type() {
+    // array_map(fn(Item): string => ..., $items) should produce
+    // list<string>, not list<Item>.  The callback's return type
+    // determines the output element type.
+    let php = r#"<?php
+class Item {
+    public function __construct(public string $id) {}
+}
+
+/** @param list<string> $ids */
+function takesStrings(array $ids): void {}
+
+/** @param list<Item> $items */
+function run(array $items): void {
+    takesStrings(array_map(fn(Item $item): string => $item->id, $items));
+}
+"#;
+    let diags = collect_with_stubs(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "array_map with scalar return type should infer list<string>, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_array_map_inferred_return_type() {
+    // array_map(fn($item) => $item->id, $items) — no explicit return
+    // type hint.  The LSP should infer the return type from the body
+    // expression: $item->id is string, so the result is list<string>.
+    let php = r#"<?php
+class Item {
+    public function __construct(public string $id) {}
+}
+
+/** @param list<string> $ids */
+function takesStrings(array $ids): void {}
+
+/** @param list<Item> $items */
+function run(array $items): void {
+    takesStrings(array_map(fn($item) => $item->id, $items));
+}
+"#;
+    let diags = collect_with_stubs(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "array_map should infer return type from body expression, got: {msgs:?}"
+    );
+}
+
+// ─── strict_types=1 detection ───────────────────────────────────────────────
+
+#[test]
+fn strict_types_flags_int_passed_to_string() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_string(string $s): void {}
+
+function test(): void {
+    $x = 42;
+    takes_string($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, int passed to string should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_int_passed_to_string() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(): void {
+    $x = 42;
+    takes_string($x);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Without strict_types, int passed to string should be allowed, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn strict_types_allows_int_passed_to_float() {
+    // int → float is the one exception under strict_types=1
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_float(float $f): void {}
+
+function test(): void {
+    $x = 42;
+    takes_float($x);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Under strict_types=1, int passed to float should still be allowed, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_numeric_string_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param numeric-string $v */
+function takes_numeric(string $v): void {}
+
+function test(): void {
+    takes_int(42);
+}
+
+function takes_int(int $n): void {}
+
+function test2(): void {
+    $x = '42';
+    takes_int($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, string passed to int should be flagged even if numeric, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_does_not_affect_concatenation() {
+    // strict_types only affects scalar type declarations (function params,
+    // return types, property assignments).  String concatenation with `.`
+    // always coerces implicitly regardless of strict_types.
+    let php = r#"<?php
+declare(strict_types=1);
+
+function test(): void {
+    $x = 42;
+    $s = 'count: ' . $x;
+    echo $s;
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Concatenation should not be affected by strict_types, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_int_literal_passed_to_string_param() {
+    // Even an integer literal (not just a variable) should be flagged
+    // under strict_types=1 when passed to a string parameter.
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_string(string $s): void {}
+
+function test(): void {
+    takes_string(42);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, int literal 42 passed to string param should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_float_passed_to_string() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_string(string $s): void {}
+
+function test(): void {
+    $x = 3.14;
+    takes_string($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, float passed to string should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_float_passed_to_string() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(): void {
+    takes_string(1.0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, float passed to string should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_numeric_string_literal_to_int() {
+    let php = r#"<?php
+function takes_int(int $n): void {}
+
+function test(): void {
+    takes_int('42');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, numeric string literal passed to int should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_numeric_string_literal_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $n): void {}
+
+function test(): void {
+    takes_int('42');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Under strict_types=1, numeric string literal passed to int should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn int_range_rejects_float_literal() {
+    let php = r#"<?php
+/** @param int<0, max> $micros */
+function takes_range($micros): void {}
+
+function test(): void {
+    takes_range(1.0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Float literal should not satisfy int range parameter, got: {diags:?}"
+    );
+}
+
+#[test]
+fn int_range_accepts_hex_integer_literal() {
+    let php = r#"<?php
+/** @param int<0, 32> $value */
+function takes_range($value): void {}
+
+function test(): void {
+    takes_range(0x10);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Hex integer literal within range should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn int_range_accepts_binary_octal_and_underscored_integer_literals() {
+    let php = r#"<?php
+/** @param int<0, 32> $value */
+function takes_range($value): void {}
+
+function test(): void {
+    takes_range(0b10000);
+    takes_range(0o20);
+    takes_range(1_6);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Binary, octal, and underscored integer literals within range should be allowed, got: {diags:?}"
+    );
+}
+
+#[test]
+fn string_literal_argument_ignores_quote_style() {
+    // A double-quoted argument literal must match a single-quoted docblock
+    // literal (and vice versa) when their unquoted contents are identical.
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function order_by(string $column, string $direction): void {}
+
+function test(): void {
+    order_by('id', "desc");
+    order_by('id', 'desc');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "String literal argument should match docblock literal regardless of quote style, got: {diags:?}"
+    );
+}
+
+#[test]
+fn string_literal_argument_still_flags_wrong_value() {
+    // Normalising quote style must not swallow genuinely mismatched values.
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function order_by(string $column, string $direction): void {}
+
+function test(): void {
+    order_by('id', "nope");
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A string literal outside the allowed set should still be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_string_indexed_assignment() {
+    // When a string variable is modified via bracket-index assignment
+    // (`$str[0] = 'z'`), the variable should remain a `string` — it
+    // must NOT be widened to `array<int, string>`.
+    // See: https://github.com/PHPantom-dev/phpantom_lsp/issues/207
+    let php = r#"<?php
+function test(): void {
+    $x = "abc";
+    $x[0] = "z";
+    echo bin2hex($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "String indexed assignment should preserve string type, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_ternary_with_array_access_branch() {
+    // When a ternary expression has an array-access branch that resolves
+    // to `mixed` (from `array<string, mixed>`), the resulting variable
+    // type should be `mixed|null`, not just `null`.
+    // See: https://github.com/PHPantom-dev/phpantom_lsp/issues/206
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+/**
+ * @param array<string, mixed> $body
+ */
+function myFunction(array $body): void {
+    $statementHandle = true ? $body['statementHandle'] : null;
+
+    takes_string($statementHandle);
+}
+"#;
+    let diags = collect(php);
+    // `$statementHandle` is `mixed|null`; `mixed` is a supertype of `string`,
+    // so passing it to a `string` parameter should NOT be flagged.
+    // The bug was that the ternary resolved to just `null`.
+    assert!(
+        !has_type_error(&diags),
+        "Ternary with array access branch should resolve to mixed|null, not null: {diags:?}"
+    );
+}
+
+// ─── Resource → object migrated handles (phpstorm-stubs) ─────────────────────
+
+#[test]
+fn no_diagnostic_for_finfo_handle_after_false_check() {
+    // finfo_open() returns `finfo|false` on PHP 8.1+ (via a
+    // `#[LanguageLevelTypeAware]` attribute), even though its `@return`
+    // docblock still says the legacy `resource|false`. After narrowing away
+    // `false`, the handle is a `finfo`, which finfo_file()/finfo_close()
+    // accept. No `type_mismatch_argument` should fire.
+    let php = r#"<?php
+function check_finfo(): void
+{
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    if ($finfo === false) {
+        throw new RuntimeException('finfo_open failed');
+    }
+
+    finfo_file($finfo, __FILE__);
+    finfo_close($finfo);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "finfo handle should resolve to finfo, not resource|false: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_pgsql_result_handle_after_false_check() {
+    // pg_query() returns `PgSql\Result|false` on PHP 8.1+; pg_fetch_assoc()
+    // and pg_free_result() expect `PgSql\Result`. Chained handle migration.
+    let php = r#"<?php
+function check_pgsql(): void
+{
+    $connection = pg_connect('host=localhost dbname=test');
+    if ($connection === false) {
+        throw new RuntimeException('pg_connect failed');
+    }
+
+    $result = pg_query($connection, 'select 1');
+    if ($result === false) {
+        throw new RuntimeException('pg_query failed');
+    }
+
+    pg_fetch_assoc($result);
+    pg_free_result($result);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "pg handles should resolve to their 8.1+ object types: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── int<0,max> passed to non-negative-int — no diagnostic (#170) ──────────
+
+#[test]
+fn no_diagnostic_for_int_range_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function addCount(int $count): void {}
+
+function test(array $items): void {
+    /** @var int<0, max> $count */
+    $count = 5;
+    addCount($count);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "int<0,max> should be compatible with non-negative-int (issue #170): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── positive-int passed to non-negative-int — no diagnostic ───────────────
+
+#[test]
+fn no_diagnostic_for_positive_int_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function addCount(int $count): void {}
+
+/**
+ * @param positive-int $n
+ */
+function test(int $n): void {
+    addCount($n);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "positive-int should be compatible with non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── int<1,100> passed to non-negative-int — no diagnostic ─────────────────
+
+#[test]
+fn no_diagnostic_for_bounded_int_range_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function addCount(int $count): void {}
+
+function test(): void {
+    /** @var int<1, 100> $count */
+    $count = 50;
+    addCount($count);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "int<1,100> should be compatible with non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Integer literals passed to named refined-int pseudo-types (B50) ───────
+
+#[test]
+fn no_diagnostic_for_int_literal_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function takesNonNeg(int $count): void {}
+
+function test(): void {
+    takesNonNeg(1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "literal 1 should satisfy non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_int_literal_passed_to_positive_int() {
+    let php = r#"<?php
+/**
+ * @param positive-int $count
+ */
+function takesPositive(int $count): void {}
+
+function test(): void {
+    takesPositive(1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "literal 1 should satisfy positive-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn type_error_for_zero_literal_passed_to_positive_int() {
+    let php = r#"<?php
+/**
+ * @param positive-int $count
+ */
+function takesPositive(int $count): void {}
+
+function test(): void {
+    takesPositive(0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "literal 0 should violate positive-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn type_error_for_negative_literal_passed_to_non_negative_int() {
+    let php = r#"<?php
+/**
+ * @param non-negative-int $count
+ */
+function takesNonNeg(int $count): void {}
+
+function test(): void {
+    takesNonNeg(-1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "literal -1 should violate non-negative-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_diagnostic_for_int_literal_passed_to_non_zero_int() {
+    let php = r#"<?php
+/**
+ * @param non-zero-int $count
+ */
+function takesNonZero(int $count): void {}
+
+function test(): void {
+    takesNonZero(1);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "literal 1 should satisfy non-zero-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn type_error_for_zero_literal_passed_to_non_zero_int() {
+    let php = r#"<?php
+/**
+ * @param non-zero-int $count
+ */
+function takesNonZero(int $count): void {}
+
+function test(): void {
+    takesNonZero(0);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "literal 0 should violate non-zero-int: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #167: assignment in if-branch must not leak into elseif condition ─
+
+#[test]
+fn no_false_positive_for_var_reassigned_in_if_branch() {
+    let php = r#"<?php
+function normalizeBooleanString(string $value): bool
+{
+    if (mb_strtolower($value) === 't') {
+        $value = true;
+    } elseif (mb_strtolower($value) === 'f') {
+        $value = false;
+    }
+
+    return (bool) $value;
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Assignment in if-branch must not affect elseif condition (issue #167): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #173: iterator_to_array must return array, not iterator ──────────
+
+#[test]
+fn no_false_positive_for_iterator_to_array_with_class_element() {
+    let php = r#"<?php
+class Foo {}
+
+function take_array(array $array): void {}
+
+/** @param \Iterator<Foo> $iterator */
+function make_array(\Iterator $iterator): array {
+    return take_array(iterator_to_array($iterator));
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "iterator_to_array should return array, not Iterator (issue #173): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_iterator_to_array_with_scalar_element() {
+    let php = r#"<?php
+function take_array(array $array): void {}
+
+/** @param \Iterator<string> $iterator */
+function make_array(\Iterator $iterator): array {
+    return take_array(iterator_to_array($iterator));
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "iterator_to_array with scalar element should also return array: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #165: strtr() with replace-pairs array — overloaded signature ────
+
+#[test]
+fn no_false_positive_for_strtr_with_array() {
+    let php = r#"<?php
+$result = strtr('Hello :name', [
+    ':name' => 'Alex',
+]);
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "strtr() with array replace_pairs should be valid (issue #165): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #167 (variant): simpler reproduction without stubs ───────────────
+
+#[test]
+fn no_false_positive_for_var_reassigned_in_if_branch_simple() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(string $value): void
+{
+    if ($value === 't') {
+        $value = true;
+    } elseif ($value === 'f') {
+        takes_string($value);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "After $value = $value[0], type should no longer be array|false (issue #169): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_is_numeric_narrowed_string_param() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(mixed $value): void
+{
+    if (is_numeric($value)) {
+        takes_string($value);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "is_numeric($value) should narrow to numeric-string|int|float, still valid for a string param: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_is_a_allow_string_narrowed_array_key() {
+    let php = r#"<?php
+class Extension {}
+
+/**
+ * @param class-string<Extension> $className
+ */
+function takes_extension_class_string(string $className): void {}
+
+/**
+ * @param array{class: string} $config
+ */
+function activate(array $config): void
+{
+    if (!is_a($config['class'], Extension::class, true)) {
+        throw new RuntimeException('not an Extension');
+    }
+
+    takes_extension_class_string($config['class']);
+}
+"#;
+    // Use the slow pipeline so the forward-walked diagnostic scope cache
+    // is active, matching real analysis where array-index narrowing keys
+    // are recorded.
+    let diags = collect_slow(php);
+    assert!(
+        !has_type_error(&diags),
+        "is_a($config['class'], Extension::class, true) guard should narrow to class-string<Extension>: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #166: @phpstan-type aliases must not trigger false positives ──────
+
+#[test]
+fn no_false_positive_for_phpstan_type_alias_to_array() {
+    let php = r#"<?php
+/**
+ * @phpstan-type Payload = array{name: string, phone: string}
+ */
+final class Api {
+    /** @var Payload */
+    private array $payload;
+
+    public function __construct() {
+        $this->payload = ['name' => 'Alex', 'phone' => '123'];
+    }
+
+    public function submit(): array {
+        return Sender::post('/lead', $this->payload);
+    }
+}
+
+final class Sender {
+    public static function post(string $url, ?array $postData = null): array {
+        return [];
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "@phpstan-type Payload alias should be compatible with ?array (issue #166): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_for_phpstan_type_alias_to_string_union() {
+    let php = r#"<?php
+/**
+ * @phpstan-type Field = 'id'|'name'
+ */
+final class Filter {
+    /**
+     * @param Field $field
+     */
+    public function isDefined($field): bool {
+        return property_exists($this, $field);
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "@phpstan-type Field alias should be compatible with string (issue #166): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Issue #169: reassign from own array offset must update type ────────────
+
+#[test]
+fn no_false_positive_after_reassign_from_array_offset() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(string $input): void
+{
+    /** @var list<string>|false $value */
+    $value = ['a', 'b'];
+    $value = $value[0];
+    takes_string($value);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "After $value = $value[0], type should no longer be array|false (issue #169): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Narrower intersection passed to broader intersection — no diagnostic ───
+
+#[test]
+fn no_diagnostic_for_narrower_intersection_argument() {
+    // A value typed with *more* intersection members satisfies a
+    // parameter typed with a subset of those members. This is the
+    // common Mockery pattern where `Mockery::mock()` returns
+    // `TheClass&MockInterface&LegacyMockInterface` and is passed to a
+    // parameter typed `TheClass&MockInterface`.
+    let php = r#"<?php
+interface AA {}
+interface BB {}
+interface CC {}
+
+function takes(AA&BB $value): void {}
+
+/**
+ * @param AA&BB&CC $value
+ */
+function test(mixed $value): void {
+    takes($value);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A narrower intersection (AA&BB&CC) must satisfy a broader one (AA&BB): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Framework testing mock() helper resolves to the mock intersection ──────
+
+#[test]
+fn testing_mock_helper_satisfies_array_and_typed_params() {
+    // Laravel's `TestCase::mock()` is declared as returning a bare
+    // `Mockery\MockInterface`, discarding the mocked class. The patch
+    // makes it generic so `$this->mock(IRule::class)` resolves to
+    // `MockInterface&IRule`, which then satisfies both an
+    // `array<IRule>` element type and a plain `IRule` parameter. The
+    // helper is inherited from a base class, matching the real
+    // framework layout.
+    let php = r#"<?php
+namespace Mockery {
+    interface LegacyMockInterface {}
+    interface MockInterface extends LegacyMockInterface {}
+}
+namespace App {
+    interface IRule { public function check(): bool; }
+
+    class Consumer {
+        /** @param array<IRule> $rules */
+        public function __construct(array $rules) {}
+    }
+
+    class Needs {
+        public function handle(IRule $rule): void {}
+    }
+
+    class TestBase {
+        /**
+         * @param string $abstract
+         * @return \Mockery\MockInterface
+         */
+        protected function mock($abstract) {}
+    }
+
+    class ExampleTest extends TestBase {
+        public function test(): void {
+            $rule = $this->mock(IRule::class);
+            new Consumer([$rule]);
+            (new Needs())->handle($rule);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "a mock of IRule must satisfy array<IRule> and IRule parameters: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── String literal naming a function is a valid callable ───────────────────
+
+#[test]
+fn no_false_positive_string_literal_passed_to_callable_param() {
+    // A string literal that names a function (e.g. 'trim', 'intval') is a
+    // valid PHP callable and must not be flagged when passed to a
+    // `callable` / `?callable` parameter.
+    let php = r#"<?php
+function apply(?callable $callback, array $items): array
+{
+    return $callback === null ? $items : array_map($callback, $items);
+}
+
+function test(array $items): void
+{
+    apply('intval', $items);
+    apply('trim', $items);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A string literal naming a function must satisfy a ?callable parameter: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Conditional return through @mixin uses the mixin's template default ─────
+
+#[test]
+fn conditional_return_via_mixin_uses_template_default() {
+    // `@mixin Req` where `Req` is `@template TAsync of bool = false` behaves
+    // like `@mixin Req<false>`, so a conditional return keyed on `TAsync`
+    // collapses to the then-branch. Without the default the merged method
+    // loses the mixin origin and resolution falls to the else-branch,
+    // producing a false argument type mismatch.
+    let php = r#"<?php
+/**
+ * @template TAsync of bool = false
+ */
+class Req
+{
+    /**
+     * @phpstan-return (TAsync is false ? \DateTime : \Exception)
+     */
+    public function get()
+    {
+        return new \DateTime();
+    }
+}
+
+/**
+ * @mixin Req
+ */
+class Fac {}
+
+function takesDate(\DateTime $d): void {}
+
+function test(Fac $f): void
+{
+    $response = $f->get();
+    takesDate($response);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Conditional return through @mixin must resolve TAsync to its default (false): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── class-string<T>|T union binds T to the class, not the class-string ─────
+
+#[test]
+fn variadic_class_string_or_instance_union_binds_inner_class() {
+    // The Mockery pattern: `mock(...$args)` declares
+    // `@param array<class-string<TMock>|TMock|...> $args`. Passing
+    // `Foo::class` must bind TMock to Foo (matching the
+    // `class-string<TMock>` alternative), not to `class-string<Foo>`,
+    // so the returned mock satisfies a parameter typed `Foo`.
+    let php = r#"<?php
+interface LegacyMockInterface {}
+interface MockInterface {}
+interface Connector {}
+
+class MockFactory
+{
+    /**
+     * @template TMock of object
+     *
+     * @param array<class-string<TMock>|TMock|Closure(LegacyMockInterface&MockInterface&TMock):LegacyMockInterface&MockInterface&TMock|array<TMock>> $args
+     *
+     * @return LegacyMockInterface&MockInterface&TMock
+     */
+    public static function mock(...$args) {}
+}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    $mock = MockFactory::mock(Connector::class);
+    takes($mock);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "TMock must bind to Connector, not class-string<Connector>: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn variadic_class_string_or_instance_union_binds_instance_directly() {
+    // Same union hint, but passing an object instance instead of a
+    // `::class` constant must bind TMock directly to the instance type.
+    let php = r#"<?php
+interface LegacyMockInterface {}
+interface MockInterface {}
+interface Connector {}
+class RealConnector implements Connector {}
+
+class MockFactory
+{
+    /**
+     * @template TMock of object
+     *
+     * @param array<class-string<TMock>|TMock|array<TMock>> $args
+     *
+     * @return LegacyMockInterface&MockInterface&TMock
+     */
+    public static function mock(...$args) {}
+}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    $mock = MockFactory::mock(new RealConnector());
+    takes($mock);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "TMock must bind to RealConnector when given an instance: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn unwrapped_class_string_or_instance_union_binds_inner_class() {
+    // The container pattern without an array wrapper:
+    // `@param class-string<T>|T $abstract` with `Foo::class` must bind
+    // T to Foo, not to class-string<Foo>.
+    let php = r#"<?php
+interface Connector {}
+
+class Container
+{
+    /**
+     * @template T of object
+     *
+     * @param class-string<T>|T $abstract
+     *
+     * @return T
+     */
+    public static function make($abstract) {}
+}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    $instance = Container::make(Connector::class);
+    takes($instance);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "T must bind to Connector, not class-string<Connector>: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+// ─── Template bindings must not leak across call sites ───────────────────────
+
+#[test]
+fn template_binding_does_not_leak_across_call_sites() {
+    // Two methods each pass a differently-typed local variable (both named
+    // `$stmt`) through a pair of `@template T` identity helpers.  The chain
+    // resolution cache keys call chains by subject text, so without a scope
+    // discriminator the binding `T => ForNode` from the first method would
+    // leak into the second, wrongly flagging the second call's argument.
+    let php = r#"<?php
+class Node {}
+class Stmt extends Node {}
+class ForNode extends Stmt {}
+class WhileNode extends Stmt {}
+
+class Parser
+{
+    /**
+     * @template T of Node
+     * @param T $node
+     * @return T
+     */
+    protected function setPositions(Node $node): Node
+    {
+        return $node;
+    }
+
+    /**
+     * @template T of Stmt
+     * @param T $stmt
+     * @return T
+     */
+    private function parseBody(Stmt $stmt): Stmt
+    {
+        return $stmt;
+    }
+
+    private function parseFor(): ForNode
+    {
+        $stmt = new ForNode();
+        return $this->setPositions($this->parseBody($stmt));
+    }
+
+    private function parseWhile(): WhileNode
+    {
+        $stmt = new WhileNode();
+        return $this->setPositions($this->parseBody($stmt));
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    assert!(
+        !has_type_error(&diags),
+        "Template bindings leaked across call sites: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn per_site_binding_still_flags_real_mismatch() {
+    // Same identity-helper call text at two sites with differently-typed
+    // `$node`.  The first site is well-typed; the second passes the wrong
+    // type onward.  The per-site cache discriminator must keep the second
+    // site's binding distinct so the real mismatch is still reported (and
+    // not masked by sharing the first site's clean result).
+    let php = r#"<?php
+class Alpha {}
+class Beta {}
+
+function needsAlpha(Alpha $a): void {}
+
+class Helper
+{
+    /**
+     * @template T
+     * @param T $node
+     * @return T
+     */
+    public function identity($node)
+    {
+        return $node;
+    }
+
+    public function ok(): void
+    {
+        $node = new Alpha();
+        needsAlpha($this->identity($node));
+    }
+
+    public function bad(): void
+    {
+        $node = new Beta();
+        needsAlpha($this->identity($node));
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected exactly one mismatch (the Beta site), got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("Alpha") && msgs[0].contains("Beta"),
+        "Expected Alpha/Beta mismatch, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_imported_type_alias_param_with_two_leading_spaces() {
+    // A method typed `@param CountParams $query`, where `CountParams` is
+    // declared via `@phpstan-type` on another class and pulled in with
+    // `@phpstan-import-type`, must not be treated as a class reference.
+    // The import tag is written with two spaces after the asterisk — the
+    // style found in real vendor code — which previously caused the tag
+    // to be dropped, leaving the alias to be namespace-resolved as a
+    // class and flagged against the passed array shape.
+    use crate::common::create_psr4_workspace;
+
+    let files = vec![
+        (
+            "src/Types.php",
+            r#"<?php
+namespace App;
+
+/**
+ * @phpstan-type CountParams array{
+ *     index: string,
+ *     body?: array<mixed>,
+ * }
+ */
+class ElasticsearchTypes {}
+"#,
+        ),
+        (
+            "src/Service.php",
+            r#"<?php
+namespace App;
+
+/**
+ *  @phpstan-import-type CountParams from ElasticsearchTypes
+ */
+class Service {
+    /**
+     * @param CountParams $query
+     */
+    public function count(array $query = []): int { return 0; }
+}
+"#,
+        ),
+        (
+            "src/Caller.php",
+            r#"<?php
+namespace App;
+
+class Caller {
+    public function run(Service $service): void {
+        $service->count([
+            'index' => 'foo',
+            'body' => ['x' => 1],
+        ]);
+    }
+}
+"#,
+        ),
+    ];
+
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    for (rel_path, php) in &files {
+        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        backend.update_ast(&file_uri, php);
+    }
+    let uri = format!("file://{}/src/Caller.php", dir.path().display());
+    let content = files[2].1;
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
+    assert!(
+        !has_type_error(&diags),
+        "Imported type alias parameter must not be treated as a class, got: {}",
+        type_error_messages(&diags).join(", ")
+    );
+}
+
+/// A `new ReflectionClass($classString)` where the argument is a
+/// `class-string<T>` binds the class template parameter `T` to the object
+/// type, not the class-string itself.  The phpstorm-stubs constructor is
+/// annotated `@param class-string<T>|T $objectOrClass` but its native hint
+/// comes from a `#[LanguageLevelTypeAware]` attribute resolving to
+/// `object|string`.  The docblock type must still refine that native union
+/// so `$reflection->newInstanceArgs(...)` resolves to `T|null` (the
+/// instance), not `class-string<T>|null`.
+#[test]
+fn no_false_positive_for_reflection_class_new_instance_args() {
+    const REFLECTION_STUB: &str = r#"<?php
+/**
+ * @template T of object
+ */
+class ReflectionClass {
+    /** @param class-string<T>|T $objectOrClass */
+    public function __construct(#[LanguageLevelTypeAware(['8.0' => 'object|string'], default: '')] $objectOrClass) {}
+    /** @return T|null */
+    public function newInstanceArgs(array $args = []): ?object {}
+}
+"#;
+    let mut class_stubs: std::collections::HashMap<&'static str, &'static str> =
+        std::collections::HashMap::new();
+    class_stubs.insert("ReflectionClass", REFLECTION_STUB);
+    let backend = phpantom_lsp::Backend::new_test_with_all_stubs(
+        class_stubs,
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+    );
+    let uri = "file:///reflection.php";
+    let content = r#"<?php
+class AbstractASTNode {}
+class ASTAnonymousClass {}
+
+class Test {
+    protected function createNodeInstance(): AbstractASTNode|ASTAnonymousClass
+    {
+        /** @var class-string<AbstractASTNode|ASTAnonymousClass> */
+        $class = substr(static::class, 0, -4);
+
+        $reflection = new ReflectionClass($class);
+
+        return $reflection->newInstanceArgs([__METHOD__]);
+    }
+}
+"#;
+
+    backend.update_ast(uri, content);
+    let mut out = Vec::new();
+    backend.collect_return_type_diagnostics(uri, content, &mut out);
+    assert!(
+        out.is_empty(),
+        "newInstanceArgs on ReflectionClass<T> should resolve to the instance type, \
+         not a class-string, got: {out:?}"
     );
 }

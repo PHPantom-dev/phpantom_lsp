@@ -17,7 +17,7 @@
 //! without borrowing from the arena.  This keeps the arena lifetime
 //! contained within each call.
 
-use bumpalo::Bump;
+use mago_allocator::{Arena, LocalArena};
 use mago_docblock::document::{Element, TagKind, TextSegment};
 use mago_span::Span;
 
@@ -92,16 +92,116 @@ impl DocblockInfo {
 ///   work with standalone strings), pass [`Span::default()`] or a
 ///   zero-offset span.
 pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
-    let arena = Bump::new();
+    let arena = LocalArena::new();
+
+    // Work around a `mago-docblock` lexer quirk before parsing (see
+    // `normalize_tag_indentation`).  The rewrite is length-preserving,
+    // so `base_span` and every span derived from it stay valid.
+    let normalized = normalize_tag_indentation(docblock);
 
     // `parse_phpdoc_with_span` requires `content: &'arena [u8]`.
     // We allocate the bytes into the arena so that the borrow lives
     // long enough.
-    let content: &[u8] = arena.alloc_slice_copy(docblock.as_bytes());
+    let content: &[u8] = arena.alloc_slice_copy(normalized.as_bytes());
 
+    // `mago-docblock` is deprecated in favour of `mago-phpdoc-syntax`;
+    // the migration is tracked as a separate task.
+    #[allow(deprecated)]
     let document = mago_docblock::parse_phpdoc_with_span(&arena, content, base_span).ok()?;
 
     Some(collect_tags(&document))
+}
+
+/// Work around a `mago-docblock` lexer quirk that silently drops tags.
+///
+/// The lexer strips the leading asterisk and exactly one following
+/// whitespace character from each docblock line.  A line written with two
+/// or more spaces between the asterisk and the tag (`*  @param`) therefore
+/// reaches the parser with a leading space still attached, and the parser
+/// classifies the leading-whitespace line as an indented code block rather
+/// than a tag.  The tag (and everything it declares: `@param`, `@return`,
+/// `@phpstan-type`, `@phpstan-import-type`, …) is dropped entirely.  PHPDoc
+/// treats any amount of whitespace after the `*` as insignificant, so
+/// `*  @param` must parse exactly like `* @param`.
+///
+/// This rewrites the prefix of each affected line so that exactly one space
+/// separates the asterisk from the `@`, moving the surplus whitespace
+/// *before* the asterisk instead of deleting it.  Because no bytes are added
+/// or removed, the byte offset of the `@` (and of every character after it)
+/// is unchanged, so spans computed against the returned text still map back
+/// to the original source correctly.  Lines that do not match the pattern
+/// are left untouched, and indented code examples (which do not start with
+/// `@` after the asterisk) are unaffected.
+fn normalize_tag_indentation(docblock: &str) -> std::borrow::Cow<'_, str> {
+    // Fast path: bail out unless some line actually needs rewriting.
+    if !needs_tag_indentation_fix(docblock) {
+        return std::borrow::Cow::Borrowed(docblock);
+    }
+
+    let mut out = String::with_capacity(docblock.len());
+    for line in docblock.split_inclusive('\n') {
+        // Separate the (possible) trailing newline so it is preserved.
+        let (body, newline) = match line.strip_suffix('\n') {
+            Some(rest) => (rest, "\n"),
+            None => (line, ""),
+        };
+        match rewrite_tag_line(body) {
+            Some(rewritten) => out.push_str(&rewritten),
+            None => out.push_str(body),
+        }
+        out.push_str(newline);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// Return `true` when any line matches the `*  @tag` (2+ spaces) pattern.
+fn needs_tag_indentation_fix(docblock: &str) -> bool {
+    docblock
+        .split('\n')
+        .any(|line| rewrite_tag_line(line.strip_suffix('\r').unwrap_or(line)).is_some())
+}
+
+/// If `line` has the form `<ws>*<2+ ws>@…`, return the length-preserving
+/// rewrite `<ws>* @…`.  Otherwise return `None`.
+fn rewrite_tag_line(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+
+    // Leading indentation (spaces or tabs).
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+
+    // Require the docblock asterisk.
+    if i >= bytes.len() || bytes[i] != b'*' {
+        return None;
+    }
+    i += 1;
+
+    // Whitespace between the asterisk and the tag.
+    let ws_start = i;
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+
+    // Only a surplus (2+) triggers the mago quirk; a single space is fine.
+    if i - ws_start < 2 {
+        return None;
+    }
+
+    // The content must be a tag; leave indented code examples alone.
+    if i >= bytes.len() || bytes[i] != b'@' {
+        return None;
+    }
+
+    // Rewrite the prefix `[0, i)` as `<spaces>* ` so the `@` at index `i`
+    // (and everything after it) keeps its byte offset.  `i >= 3` here, so
+    // `i - 2` never underflows.
+    let mut rewritten = String::with_capacity(line.len());
+    rewritten.push_str(&" ".repeat(i - 2));
+    rewritten.push_str("* ");
+    rewritten.push_str(&line[i..]);
+    Some(rewritten)
 }
 
 /// Walk a parsed `Document` and collect all `Tag` elements into owned
@@ -113,7 +213,7 @@ fn collect_tags(document: &mago_docblock::document::Document<'_>) -> DocblockInf
     let mut description_parts: Vec<String> = Vec::new();
     let mut seen_tag = false;
 
-    for element in &document.elements {
+    for element in document.elements {
         match element {
             Element::Tag(tag) => {
                 seen_tag = true;
@@ -126,7 +226,7 @@ fn collect_tags(document: &mago_docblock::document::Document<'_>) -> DocblockInf
                 });
             }
             Element::Text(text) if !seen_tag => {
-                for seg in &text.segments {
+                for seg in text.segments {
                     match seg {
                         TextSegment::Paragraph { content, .. } => {
                             description_parts.push(bytes_to_str(content).to_owned());
@@ -520,6 +620,56 @@ mod tests {
     }
 
     #[test]
+    fn parse_tag_with_two_spaces_after_asterisk() {
+        // A line written with two spaces between the asterisk and the tag
+        // must parse exactly like one written with a single space.
+        let doc = "/**\n *  @param string $foo A description\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert_eq!(info.tags.len(), 1, "tag should not be dropped");
+        assert_eq!(info.tags[0].kind, TagKind::Param);
+        assert_eq!(info.tags[0].description, "string $foo A description");
+    }
+
+    #[test]
+    fn parse_import_type_with_two_spaces_after_asterisk() {
+        let doc = "/**\n *  @phpstan-import-type Money from PriceCalculator\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let tag = info
+            .first_tag_by_kind(TagKind::PhpstanImportType)
+            .expect("import-type must still be found with two leading spaces");
+        assert!(tag.description.contains("Money"));
+        assert!(tag.description.contains("PriceCalculator"));
+    }
+
+    #[test]
+    fn tag_indentation_fix_preserves_byte_offsets() {
+        // The rewrite that repairs `*  @tag` must not shift the byte
+        // offset of the tag content, or spans would point at the wrong
+        // source text.  Parse the same docblock with one and two leading
+        // spaces and assert the description spans are identical.
+        let one = "/**\n * @return string The value\n */";
+        let two = "/**\n *  @return string The value\n */";
+        let info_one = parse_docblock_for_tags(one).expect("should parse");
+        let info_two = parse_docblock_for_tags(two).expect("should parse");
+        // The `@` sits one byte later in `two`, so the spans differ by
+        // exactly one byte — the surplus space moved before the asterisk
+        // keeps everything else aligned.
+        assert_eq!(
+            info_two.tags[0].description_span.start.offset,
+            info_one.tags[0].description_span.start.offset + 1,
+        );
+    }
+
+    #[test]
+    fn indented_code_example_is_not_treated_as_tag() {
+        // An indented code block inside a description (which does not
+        // start with `@` after the asterisk) must be left untouched.
+        let doc = "/**\n * Example:\n *\n *     $x = compute();\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert!(info.tags.is_empty(), "no tags in this docblock");
+    }
+
+    #[test]
     fn parse_param_closure_this_tag() {
         let doc = "/** @param-closure-this \\App\\Route $callback */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
@@ -571,6 +721,18 @@ mod tests {
             "description span should be non-empty: {:?}",
             info.tags[0].description_span
         );
+    }
+
+    #[test]
+    fn phpstan_sealed_tag_parsed() {
+        let doc = "/**\n * @phpstan-sealed FooClass|BarClass\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert_eq!(info.tags.len(), 1);
+        // mago-docblock doesn't have a dedicated variant for @phpstan-sealed,
+        // so it falls through to TagKind::Other.
+        assert_eq!(info.tags[0].kind, TagKind::Other);
+        assert_eq!(info.tags[0].name, "phpstan-sealed");
+        assert_eq!(info.tags[0].description, "FooClass|BarClass");
     }
 
     #[test]

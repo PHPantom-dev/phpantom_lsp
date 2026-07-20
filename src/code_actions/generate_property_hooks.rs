@@ -21,8 +21,8 @@
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::property::Property;
-use mago_syntax::ast::modifier::Modifier;
+use mago_syntax::cst::class_like::property::Property;
+use mago_syntax::cst::modifier::Modifier;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{
@@ -273,14 +273,13 @@ impl Backend {
                         // For multi-variable declarations like
                         // `public int $a, $b;`, use the first variable name.
                         // Multi-variable declarations can't have hooks anyway.
-                        if let Some(first_item) = plain.items.first() {
+                        {
+                            let first_item = plain.items.first()?;
                             let var = first_item.variable();
                             bytes_to_str(var.name)
                                 .strip_prefix('$')
                                 .unwrap_or(bytes_to_str(var.name))
                                 .to_string()
-                        } else {
-                            return None;
                         }
                     }
                     Property::Hooked(hooked) => {

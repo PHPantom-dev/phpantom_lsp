@@ -82,6 +82,9 @@ mod extract_constant;
 mod extract_function;
 mod extract_interface;
 mod extract_variable;
+mod fix_class_case;
+mod fix_class_name;
+mod fix_namespace;
 mod generate_constructor;
 mod generate_getter_setter;
 mod generate_property_hooks;
@@ -99,8 +102,8 @@ mod simplify_null;
 mod update_docblock;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::sequence::Sequence;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::sequence::Sequence;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 
@@ -248,6 +251,15 @@ impl Backend {
 
         // ── Convert switch to match expression ──────────────────────────
         self.collect_convert_switch_to_match_actions(uri, content, params, &mut actions);
+
+        // ── Fix namespace (PSR-4 mismatch) ──────────────────────────────
+        self.collect_fix_namespace_actions(uri, content, params, &mut actions);
+
+        // ── Fix class name (filename mismatch) ──────────────────────────
+        self.collect_fix_class_name_actions(uri, content, params, &mut actions);
+
+        // ── Fix class-reference case (PSR-4 autoload safety) ────────────
+        self.collect_fix_class_case_actions(uri, content, params, &mut actions);
 
         // ── Extract interface ────────────────────────────────────────────
         self.collect_extract_interface_actions(uri, content, params, &mut actions);

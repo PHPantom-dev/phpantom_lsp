@@ -110,7 +110,7 @@ That makes it useful in a few situations:
 > [!NOTE]
 > There are still occasional false positives, though they are getting
 > fewer with each release. If you hit one, please
-> [report it](https://github.com/AJenbo/phpantom_lsp/issues).
+> [report it](https://github.com/PHPantom-dev/phpantom_lsp/issues).
 
 ### Usage
 
@@ -312,7 +312,7 @@ jobs:
 
       - name: Install PHPantom
         run: |
-          curl -sL https://github.com/AJenbo/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          curl -sL https://github.com/PHPantom-dev/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz
           chmod +x phpantom_lsp
 
       - name: Check type coverage

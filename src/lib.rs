@@ -53,9 +53,12 @@
 //!   - `code_actions::generate_getter_setter` — Generate `getX()`/`setX()`
 //!     accessor methods (or `isX()` for `bool` properties) from a property
 //!     declaration
-//! - [`diagnostics`] — Diagnostic collection and delivery.  Supports both
-//!   pull diagnostics (`textDocument/diagnostic`, LSP 3.17) and push
-//!   diagnostics (`textDocument/publishDiagnostics`) as a fallback.
+//! - [`diagnostics`] — Diagnostic collection and delivery.  Native
+//!   diagnostics prefer the pull model (`textDocument/diagnostic`, LSP
+//!   3.17) whenever the client supports it.  Push diagnostics
+//!   (`textDocument/publishDiagnostics`) are a compatibility fallback for
+//!   clients that do not support pull diagnostics; the server should not
+//!   mix both native delivery models for the same client.
 //!   Currently implemented providers:
 //!   - `diagnostics::deprecated` — `@deprecated` usage diagnostics (strikethrough
 //!     via `DiagnosticTag::Deprecated` on references to deprecated symbols)
@@ -80,6 +83,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -95,6 +99,12 @@ use ci_map::{CiMap, CiSet};
 /// Stored per file in [`Backend::parse_errors`] during `update_ast` and
 /// consumed by the syntax-error diagnostic collector.
 pub(crate) type ParseErrorEntry = (String, u32, u32);
+
+/// The standalone-function FQNs and `define()`/`const` names a single file
+/// contributed to the global symbol maps on its most recent parse:
+/// `(function_fqns, define_names)`.  Stored per URI in
+/// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
+pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
@@ -112,6 +122,26 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 /// thread pool, so real CPU parallelism is bounded there; this only governs how
 /// many requests may be in flight.
 pub const LSP_CONCURRENCY: usize = 128;
+
+/// Stack size for threads that parse or walk PHP ASTs.
+///
+/// The `mago-syntax` parser is recursive descent: it recurses once per
+/// expression-nesting level (bounded by its own `MAX_RECURSION_DEPTH`,
+/// but that bound is calibrated for an 8 MB stack). Our AST consumers
+/// (`extract_symbol_map`, the forward walker, the diagnostic collectors)
+/// are likewise recursive and walk the same depth. A deeply nested
+/// expression — common in generated/bundled code such as WordPress'
+/// bundled getID3 library, whose codec tables nest hundreds of levels
+/// deep — exhausts the 2 MB default that spawned threads receive, and a
+/// stack overflow aborts the whole process (it is a `SIGSEGV`, not a
+/// catchable panic).
+///
+/// Rust only gives the *main* thread the 8 MB OS default; threads
+/// spawned via `std::thread` and the Tokio runtime default to 2 MB. Any
+/// thread that reaches [`update_ast`](Backend::update_ast) or the type
+/// resolver must therefore set this explicitly. 8 MB matches the stack
+/// `mago` itself uses for the same parser.
+pub const PARSE_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 pub mod analyse;
 pub mod atom;
@@ -203,6 +233,31 @@ pub use virtual_members::resolve_class_fully;
 ///   `collect_deprecated_diagnostics`, `collect_unused_import_diagnostics`,
 ///   `collect_unknown_class_diagnostics`,
 ///   `collect_unknown_member_diagnostics` (includes unresolved-member-access logic)
+#[derive(Default)]
+pub(crate) struct LaravelStringKeyCache {
+    pub route_names: Option<Vec<String>>,
+    pub config_keys: Option<Vec<String>>,
+    pub view_names: Option<Vec<String>>,
+    pub trans_keys: Option<Vec<String>>,
+}
+
+impl LaravelStringKeyCache {
+    fn invalidate_for_uri(&mut self, uri: &str) {
+        if uri.contains("/routes/") {
+            self.route_names = None;
+        }
+        if uri.contains("/config/") {
+            self.config_keys = None;
+        }
+        if uri.contains("/resources/views/") {
+            self.view_names = None;
+        }
+        if uri.contains("/lang/") || uri.contains("/resources/lang/") {
+            self.trans_keys = None;
+        }
+    }
+}
+
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -288,6 +343,17 @@ pub struct Backend {
     /// `define()` calls or `const` statements.  Used for constant name
     /// completions, hover (showing the value), and go-to-definition.
     pub(crate) global_defines: Arc<RwLock<HashMap<String, DefineInfo>>>,
+    /// Per-URI record of the standalone-function FQNs and `define()`/`const`
+    /// names contributed to [`global_functions`](Self::global_functions) and
+    /// [`global_defines`](Self::global_defines) by the most recent parse of
+    /// each file.
+    ///
+    /// Value is `(function_fqns, define_names)`.  On re-parse this lets
+    /// [`update_ast`](Self::update_ast) evict the symbols an edit deleted or
+    /// renamed in `O(old + new)` — a targeted eviction analogous to the
+    /// `old_fqns` class eviction — instead of scanning the whole global maps
+    /// on every keystroke.
+    pub(crate) uri_globals_index: Arc<RwLock<HashMap<String, UriGlobals>>>,
     /// Autoload function index: function FQN → file path on disk.
     ///
     /// Populated by the lightweight `find_symbols` byte-level scan
@@ -299,6 +365,8 @@ pub struct Backend {
     /// `update_ast` on first access instead of eagerly parsing every
     /// file at startup.
     pub(crate) autoload_function_index: Arc<RwLock<CiMap<PathBuf>>>,
+    /// Completion provenance for autoloaded function symbols.
+    pub(crate) autoload_function_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
     /// Autoload constant index: constant name → file path on disk.
     ///
     /// Populated alongside `autoload_function_index` by the
@@ -307,6 +375,8 @@ pub struct Backend {
     /// the file that defines them for lazy resolution via
     /// `update_ast` on first access.
     pub(crate) autoload_constant_index: Arc<RwLock<HashMap<String, PathBuf>>>,
+    /// Completion provenance for autoloaded constant symbols.
+    pub(crate) autoload_constant_origin_index: Arc<RwLock<HashMap<String, ClassCompletionOrigin>>>,
     /// Paths of all files discovered through Composer's
     /// `autoload_files.php` (and their `require_once` chains).
     ///
@@ -339,6 +409,12 @@ pub struct Backend {
     /// - Entries from Composer's `autoload_classmap.php` (merged during
     ///   server initialization).
     pub(crate) fqn_uri_index: Arc<RwLock<CiMap<String>>>,
+    /// Completion provenance for fully-qualified class names.
+    ///
+    /// Used only for ranking class-name completion candidates.  Tracks
+    /// whether a class comes from project code, core/stubs, an explicit
+    /// Composer dependency, or a transitive vendor dependency.
+    pub(crate) fqn_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
     /// Secondary index mapping fully-qualified class names directly to
     /// their parsed `ClassInfo`.
     ///
@@ -381,9 +457,10 @@ pub struct Backend {
     ///
     /// Used by [`parse_and_cache_file`](Self::parse_and_cache_file) to avoid
     /// redundant concurrent parses of the same file.  Before parsing, the URI
-    /// is inserted; if it was already present, the calling thread waits for
-    /// the result to appear in `uri_classes_index` instead of re-parsing.
-    pub(crate) parse_inflight: Arc<Mutex<HashSet<String>>>,
+    /// is claimed; if another thread already holds the claim, the calling
+    /// thread blocks until that parse completes and then reads the result
+    /// from `uri_classes_index` instead of re-parsing.
+    pub(crate) parse_inflight: Arc<resolution::ParseInflight>,
     /// Embedded PHP stubs for built-in classes/interfaces (e.g. `UnitEnum`,
     /// `BackedEnum`, `Iterator`, `Countable`, …).
     /// Maps class short name → raw PHP source code.
@@ -403,6 +480,60 @@ pub struct Backend {
     /// `parse_and_cache_content`) so that stale results never survive
     /// an edit.
     pub(crate) resolved_class_cache: virtual_members::ResolvedClassCache,
+    /// Memoized authenticated-user model type, derived from `config/auth.php`.
+    ///
+    /// Keyed by guard name (an empty string denotes the default guard).
+    /// Populated lazily when an auth-user access is resolved and cleared
+    /// whenever files are re-parsed, so edits to `config/auth.php` take
+    /// effect without a restart.
+    pub(crate) auth_user_type_cache: Arc<RwLock<HashMap<String, Option<crate::php_type::PhpType>>>>,
+    /// Memoized Laravel alias tables, parsed from the installed framework
+    /// source (`registerCoreContainerAliases()`, `Facade::defaultAliases()`)
+    /// and the project's `config/app.php`.
+    ///
+    /// `None` means "not yet computed"; an inner empty map means "computed and
+    /// this project has no such aliases" (e.g. a non-Laravel project). Cleared
+    /// whenever files are re-parsed so edits to `config/app.php` take effect
+    /// without a restart.
+    pub(crate) laravel_aliases: Arc<RwLock<Option<Arc<virtual_members::laravel::LaravelAliases>>>>,
+    /// Laravel `Target::macro('name', closure)` registrations discovered from
+    /// project source, keyed by the FQN of the class each macro attaches to.
+    ///
+    /// Built during `initialized` for Laravel projects and refreshed when a
+    /// contributing file changes.  Consulted when a class is loaded so that
+    /// macro methods appear in completion, hover, and signature help.  Empty
+    /// for non-Laravel projects.
+    pub(crate) laravel_macros: Arc<RwLock<virtual_members::laravel::LaravelMacroIndex>>,
+    /// Fast gate for [`laravel_macros`](Self::laravel_macros): `true` only
+    /// when the index holds at least one macro, so the hot class-load path
+    /// skips the lock entirely for the common (no-macro) case.
+    pub(crate) laravel_has_macros: Arc<std::sync::atomic::AtomicBool>,
+    /// Laravel macro seed files (service providers plus the app's provider
+    /// registration files), mapped to the class references each contributed
+    /// at the last macro-index build.  An edit that changes a seed's
+    /// references triggers a full index rebuild; every other edit takes the
+    /// cheap single-file refresh path.
+    pub(crate) laravel_macro_seeds: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Concrete date class selected by the project's `Date::use()` call.
+    ///
+    /// The outer option is `None` until startup discovery completes; the inner
+    /// option is `None` when discovery found no project override.
+    pub(crate) laravel_date_class: Arc<RwLock<Option<Option<String>>>>,
+    /// URIs whose edits can change the configured date class: every registered
+    /// service provider scanned by [`build_laravel_date_class`], plus the app's
+    /// provider-registration files (which decide *which* providers are
+    /// registered).  Populated by that scan and consulted by the single-file
+    /// refresh so a `Date::use()` added, changed, or removed in one of these
+    /// files re-runs the full scan, while an edit to any other file is ignored.
+    ///
+    /// [`build_laravel_date_class`]: crate::Backend::build_laravel_date_class
+    pub(crate) laravel_date_seed_uris: Arc<RwLock<std::collections::HashSet<String>>>,
+    /// Cached Laravel string key enumerations (route names, config keys,
+    /// view names, translation keys).  `None` = not yet computed.
+    /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
+    /// or `lang/` is updated.
+    pub(crate) laravel_provider_resources: Arc<RwLock<virtual_members::laravel::ProviderResources>>,
+    pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
     /// Per-target member completion cache.
     ///
     /// Typing `$model->wh...` triggers a completion request for each
@@ -477,6 +608,12 @@ pub struct Backend {
     /// vendor directory.  For single-project workspaces, contains
     /// exactly one entry.
     pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
+    /// Canonical vendor package roots paired with completion provenance.
+    ///
+    /// Used to classify function/constant/class symbols by whether they
+    /// originate from explicit or transitive Composer dependencies.
+    pub(crate) vendor_package_origin_roots:
+        Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin, String)>>>,
     /// Monotonically increasing version counter for diagnostic debouncing.
     ///
     /// Bumped on every `did_change`.  A background diagnostic task
@@ -628,6 +765,15 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `workspace/semanticTokens/refresh`.
+    ///
+    /// Set during `initialize` based on the client's
+    /// `workspace.semanticTokens.refreshSupport` capability.  When `true`,
+    /// the server asks the client to re-pull semantic tokens after a
+    /// background `didChange` parse commits a new symbol map — without
+    /// this, editors keep showing tokens computed from the pre-edit
+    /// symbol map until the next unrelated request.
+    pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
     /// Shared flag set to `true` when the LSP `shutdown` request is
     /// received.  Background workers (diagnostic, PHPStan, PHPCS) check this
     /// flag on each iteration and exit their loops.  The PHPStan
@@ -667,6 +813,26 @@ pub struct Backend {
     /// files, but the flag lets us log the difference between initial and
     /// refresh scans.
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClassCompletionOrigin {
+    #[default]
+    Project,
+    CoreStub,
+    VendorExplicit,
+    VendorTransitive,
+}
+
+impl ClassCompletionOrigin {
+    pub(crate) fn sort_tier(self) -> char {
+        match self {
+            Self::Project => '0',
+            Self::CoreStub => '1',
+            Self::VendorExplicit => '2',
+            Self::VendorTransitive => '3',
+        }
+    }
 }
 
 /// Request-coalescing state for expensive whole-file requests (semantic
@@ -758,25 +924,43 @@ impl Backend {
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
             global_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
+            uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
+            autoload_function_origin_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
+            autoload_constant_origin_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
             fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
+            fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
-            parse_inflight: Arc::new(Mutex::new(HashSet::new())),
+            parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: RwLock::new(CiMap::from(stubs::build_stub_class_index())),
             stub_function_index: RwLock::new(CiMap::from(stubs::build_stub_function_index())),
             stub_constant_index: RwLock::new(stubs::build_stub_constant_index()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
+            auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
+            laravel_aliases: Arc::new(RwLock::new(None)),
+            laravel_macros: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelMacroIndex::default(),
+            )),
+            laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
+            laravel_date_class: Arc::new(RwLock::new(None)),
+            laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            laravel_provider_resources: Arc::new(RwLock::new(
+                virtual_members::laravel::ProviderResources::default(),
+            )),
+            laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -808,6 +992,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
@@ -840,25 +1025,43 @@ impl Backend {
             workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
             global_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
+            uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
+            autoload_function_origin_index: Arc::new(RwLock::new(CiMap::new())),
             autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
+            autoload_constant_origin_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
             fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
+            fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
-            parse_inflight: Arc::new(Mutex::new(HashSet::new())),
+            parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: RwLock::new(CiMap::new()),
             stub_function_index: RwLock::new(CiMap::new()),
             stub_constant_index: RwLock::new(HashMap::new()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
+            auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
+            laravel_aliases: Arc::new(RwLock::new(None)),
+            laravel_macros: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelMacroIndex::default(),
+            )),
+            laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
+            laravel_date_class: Arc::new(RwLock::new(None)),
+            laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            laravel_provider_resources: Arc::new(RwLock::new(
+                virtual_members::laravel::ProviderResources::default(),
+            )),
+            laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -889,6 +1092,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
@@ -1030,6 +1234,14 @@ impl Backend {
         &self.psr4_mappings
     }
 
+    /// Borrow the configured Laravel date class (used by integration tests
+    /// to verify that provider edits keep the `Date::use()` selection
+    /// current).  The outer option is `None` until startup discovery runs;
+    /// the inner option is `None` when no project override was found.
+    pub fn laravel_date_class(&self) -> &Arc<RwLock<Option<Option<String>>>> {
+        &self.laravel_date_class
+    }
+
     /// Borrow the set of parsed file URIs (used by integration tests to
     /// mark a workspace file as already loaded, mirroring a lazy parse).
     pub fn parsed_uris(&self) -> &Arc<RwLock<HashSet<String>>> {
@@ -1042,6 +1254,12 @@ impl Backend {
         &self,
     ) -> parking_lot::RwLockReadGuard<'_, HashMap<&'static str, &'static str>> {
         self.stub_constant_index.read()
+    }
+
+    pub fn stub_function_index_mut(
+        &self,
+    ) -> parking_lot::RwLockWriteGuard<'_, CiMap<&'static str>> {
+        self.stub_function_index.write()
     }
 
     /// Write-access the stub constant index (used by integration tests
@@ -1058,10 +1276,20 @@ impl Backend {
         &self.autoload_function_index
     }
 
+    pub fn autoload_function_origin_index(&self) -> &Arc<RwLock<CiMap<ClassCompletionOrigin>>> {
+        &self.autoload_function_origin_index
+    }
+
     /// Borrow the autoload constant index (used by integration tests to
     /// populate discovered constant entries for non-Composer projects).
     pub fn autoload_constant_index(&self) -> &Arc<RwLock<HashMap<String, PathBuf>>> {
         &self.autoload_constant_index
+    }
+
+    pub fn autoload_constant_origin_index(
+        &self,
+    ) -> &Arc<RwLock<HashMap<String, ClassCompletionOrigin>>> {
+        &self.autoload_constant_origin_index
     }
 
     /// Borrow the autoload file paths list (used by integration tests
@@ -1074,6 +1302,76 @@ impl Backend {
     /// file content without going through the LSP `didOpen` path).
     pub fn open_files(&self) -> &Arc<RwLock<HashMap<String, Arc<String>>>> {
         &self.open_files
+    }
+
+    pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
+        self.package_info_for_uri(uri).0
+    }
+
+    /// Return the completion origin **and** the Composer package name
+    /// (e.g. `"laravel/framework"`) for the given file path.
+    ///
+    /// Returns `(ClassCompletionOrigin::Project, None)` for project files,
+    /// `(ClassCompletionOrigin::CoreStub, None)` for stubs, and
+    /// `(origin, Some(package_name))` for vendor files.
+    pub(crate) fn package_info_for_path(
+        &self,
+        path: &Path,
+    ) -> (ClassCompletionOrigin, Option<String>) {
+        let vendor_paths = self.vendor_dir_paths.lock();
+        let is_under_vendor = vendor_paths.iter().any(|vp| path.starts_with(vp));
+        drop(vendor_paths);
+
+        let roots = self.vendor_package_origin_roots.read();
+
+        if is_under_vendor {
+            for (root, origin, pkg_name) in roots.iter() {
+                if path.starts_with(root) {
+                    return (*origin, Some(pkg_name.clone()));
+                }
+            }
+            return (ClassCompletionOrigin::VendorTransitive, None);
+        }
+
+        // Path is outside vendor/.  This is usually project code, but
+        // it can also be a symlinked path-repository package whose
+        // canonical path resolved outside vendor/.  Check whether any
+        // vendor package root matches.  If so, treat it as project code
+        // only when the root is inside the workspace (a local module);
+        // otherwise show the package provenance.
+        for (root, origin, pkg_name) in roots.iter() {
+            if path.starts_with(root) {
+                let ws = self.workspace_root.read();
+                if let Some(ref workspace) = *ws {
+                    let canonical_ws = workspace
+                        .canonicalize()
+                        .unwrap_or_else(|_| workspace.clone());
+                    if root.starts_with(&canonical_ws) {
+                        return (ClassCompletionOrigin::Project, None);
+                    }
+                }
+                return (*origin, Some(pkg_name.clone()));
+            }
+        }
+
+        (ClassCompletionOrigin::Project, None)
+    }
+
+    /// Return the completion origin **and** the Composer package name
+    /// for the given file URI.
+    pub(crate) fn package_info_for_uri(
+        &self,
+        uri: &str,
+    ) -> (ClassCompletionOrigin, Option<String>) {
+        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+            return (ClassCompletionOrigin::CoreStub, None);
+        }
+        if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)
+            && let Ok(path) = url.to_file_path()
+        {
+            return self.package_info_for_path(&path);
+        }
+        (ClassCompletionOrigin::Project, None)
     }
 
     /// Borrow the PHPStan diagnostics cache (used by integration tests
@@ -1269,6 +1567,11 @@ impl Backend {
             self.clear_file_maps(uri_str);
             self.uri_classes_index.write().remove(uri_str);
             self.parsed_uris.write().remove(uri_str);
+            // The global_functions/global_defines entries for these URIs were
+            // just retained out above; drop the per-URI tracking record too so
+            // deleted files don't leave a stale entry behind.  Created/changed
+            // files rebuild it when re-parsed below.
+            self.uri_globals_index.write().remove(uri_str);
         }
 
         // Re-add current symbols for created/changed files.  Deleted files
@@ -1341,10 +1644,14 @@ impl Backend {
             file_namespaces: Arc::clone(&self.file_namespaces),
             global_functions: Arc::clone(&self.global_functions),
             global_defines: Arc::clone(&self.global_defines),
+            uri_globals_index: Arc::clone(&self.uri_globals_index),
             autoload_function_index: Arc::clone(&self.autoload_function_index),
+            autoload_function_origin_index: Arc::clone(&self.autoload_function_origin_index),
             autoload_constant_index: Arc::clone(&self.autoload_constant_index),
+            autoload_constant_origin_index: Arc::clone(&self.autoload_constant_origin_index),
             autoload_file_paths: Arc::clone(&self.autoload_file_paths),
             fqn_uri_index: Arc::clone(&self.fqn_uri_index),
+            fqn_origin_index: Arc::clone(&self.fqn_origin_index),
             fqn_class_index: Arc::clone(&self.fqn_class_index),
             phar_archives: Arc::clone(&self.phar_archives),
             parsed_uris: Arc::clone(&self.parsed_uris),
@@ -1352,6 +1659,15 @@ impl Backend {
             class_not_found_cache: Arc::clone(&self.class_not_found_cache),
             stub_index: RwLock::new(self.stub_index.read().clone()),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
+            auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
+            laravel_aliases: Arc::clone(&self.laravel_aliases),
+            laravel_macros: Arc::clone(&self.laravel_macros),
+            laravel_has_macros: Arc::clone(&self.laravel_has_macros),
+            laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
+            laravel_date_class: Arc::clone(&self.laravel_date_class),
+            laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
+            laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
+            laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             method_store: Arc::clone(&self.method_store),
             gti_index: Arc::clone(&self.gti_index),
@@ -1360,6 +1676,7 @@ impl Backend {
             php_version: Mutex::new(self.php_version()),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
+            vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             diag_version: Arc::clone(&self.diag_version),
             diag_notify: Arc::clone(&self.diag_notify),
             diag_pending_uris: Arc::clone(&self.diag_pending_uris),
@@ -1387,6 +1704,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             config: Mutex::new(self.config.lock().clone()),

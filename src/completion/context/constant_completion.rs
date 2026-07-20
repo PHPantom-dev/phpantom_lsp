@@ -8,6 +8,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::builder::deprecation_tag;
+use crate::completion::context::symbol_ranking::{flat_symbol_sort_text, origin_sort_tier};
 use crate::completion::resolve::CompletionItemData;
 use crate::util::strip_fqn_prefix;
 
@@ -119,7 +120,12 @@ impl Backend {
                 items.push(build_constant_item(
                     name.clone(),
                     info.value.clone(),
-                    format!("5_{}", name.to_lowercase()),
+                    flat_symbol_sort_text(
+                        name,
+                        &prefix_lower,
+                        origin_sort_tier(self.completion_origin_for_uri(&info.file_uri)),
+                        '0',
+                    ),
                     false,
                     uri,
                     replace_range,
@@ -137,7 +143,7 @@ impl Backend {
         {
             let idx = self.autoload_constant_index.read();
             let dmap = self.global_defines.read();
-            for (name, _path) in idx.iter() {
+            for name in idx.keys() {
                 if !name.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }
@@ -148,10 +154,16 @@ impl Backend {
                 // its value.  Otherwise leave it as None — the resolve
                 // handler will fill it in when the user selects the item.
                 let value = dmap.get(name.as_str()).and_then(|info| info.value.clone());
+                let origin = self
+                    .autoload_constant_origin_index
+                    .read()
+                    .get(name)
+                    .copied()
+                    .unwrap_or(crate::ClassCompletionOrigin::Project);
                 items.push(build_constant_item(
                     name.clone(),
                     value,
-                    format!("5_{}", name.to_lowercase()),
+                    flat_symbol_sort_text(name, &prefix_lower, origin_sort_tier(origin), '1'),
                     false,
                     uri,
                     replace_range,
@@ -173,7 +185,12 @@ impl Backend {
             items.push(build_constant_item(
                 name.to_string(),
                 None,
-                format!("6_{}", name.to_lowercase()),
+                flat_symbol_sort_text(
+                    name,
+                    &prefix_lower,
+                    origin_sort_tier(crate::ClassCompletionOrigin::CoreStub),
+                    '0',
+                ),
                 false,
                 uri,
                 replace_range,

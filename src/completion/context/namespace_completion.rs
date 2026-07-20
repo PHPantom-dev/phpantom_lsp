@@ -31,9 +31,9 @@ struct InferredNamespace {
 ///
 /// Returns all matching mappings ordered by specificity (longest match
 /// first).  For a file at `src/core/Brands/Services/Fred.php` with
-/// mappings `"Luxplus\\Core\\" => "src/core/"` and
-/// `"Luxplus\\Core\\Tasks\\" => "src/tasks/"`, only the first mapping
-/// matches, producing `Luxplus\Core\Brands\Services`.
+/// mappings `"Acme\\Core\\" => "src/core/"` and
+/// `"Acme\\Core\\Tasks\\" => "src/tasks/"`, only the first mapping
+/// matches, producing `Acme\Core\Brands\Services`.
 fn infer_namespaces_from_path(
     file_path: &Path,
     workspace_root: &Path,
@@ -217,7 +217,7 @@ impl Backend {
         // ── 3. uri_classes_index namespace portions ───────────────────────────
         {
             let amap = self.uri_classes_index.read();
-            for (_uri, classes) in amap.iter() {
+            for classes in amap.values() {
                 for cls in classes {
                     if let Some(ns) = &cls.file_namespace {
                         let fqn = format!("{}\\{}", ns, cls.name);
@@ -376,14 +376,14 @@ mod tests {
     fn multiple_mappings_longest_match_first() {
         let root = PathBuf::from("/project");
         let mappings = vec![
-            mapping("Luxplus\\Core\\", "src/core/"),
-            mapping("Luxplus\\Core\\Database\\", "src/database/"),
+            mapping("Acme\\Core\\", "src/core/"),
+            mapping("Acme\\Core\\Database\\", "src/database/"),
         ];
         let file = PathBuf::from("/project/src/core/Brands/Services/Fred.php");
 
         let result = infer_namespaces_from_path(&file, &root, &mappings);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].namespace, "Luxplus\\Core\\Brands\\Services");
+        assert_eq!(result[0].namespace, "Acme\\Core\\Brands\\Services");
     }
 
     #[test]
@@ -393,7 +393,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mappings = vec![
             mapping(
-                "Database\\Factories\\Luxplus\\Core\\Database\\",
+                "Database\\Factories\\Acme\\Core\\Database\\",
                 "database/factories/",
             ),
             mapping("Database\\Seeders\\", "database/seeders/"),
@@ -404,25 +404,25 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0].namespace,
-            "Database\\Factories\\Luxplus\\Core\\Database"
+            "Database\\Factories\\Acme\\Core\\Database"
         );
     }
 
     #[test]
     fn file_in_subdirectory_of_two_matching_bases() {
         // `src/core/Database/Foo.php` matches both:
-        //   - `Luxplus\Core\` => `src/core/`       → `Luxplus\Core\Database`
-        //   - `Luxplus\Core\Database\` => `src/database/` → NO (path doesn't start with `src/database/`)
+        //   - `Acme\Core\` => `src/core/`       → `Acme\Core\Database`
+        //   - `Acme\Core\Database\` => `src/database/` → NO (path doesn't start with `src/database/`)
         let root = PathBuf::from("/project");
         let mappings = vec![
-            mapping("Luxplus\\Core\\", "src/core/"),
-            mapping("Luxplus\\Core\\Database\\", "src/database/"),
+            mapping("Acme\\Core\\", "src/core/"),
+            mapping("Acme\\Core\\Database\\", "src/database/"),
         ];
         let file = PathBuf::from("/project/src/core/Database/Foo.php");
 
         let result = infer_namespaces_from_path(&file, &root, &mappings);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].namespace, "Luxplus\\Core\\Database");
+        assert_eq!(result[0].namespace, "Acme\\Core\\Database");
     }
 
     #[test]
@@ -456,25 +456,25 @@ mod tests {
     }
 
     #[test]
-    fn real_world_luxplus_example() {
+    fn real_world_multi_mapping_example() {
         let root = PathBuf::from("/project");
         let mappings = vec![
-            mapping("Luxplus\\Core\\", "src/core/"),
-            mapping("Luxplus\\Decimal\\", "src/decimal/"),
+            mapping("Acme\\Core\\", "src/core/"),
+            mapping("Acme\\Decimal\\", "src/decimal/"),
             mapping(
-                "Database\\Factories\\Luxplus\\Core\\Database\\",
+                "Database\\Factories\\Acme\\Core\\Database\\",
                 "database/factories/",
             ),
             mapping("Database\\Seeders\\", "database/seeders/"),
-            mapping("EchoEcho\\Coolrunner\\", "src/coolrunner-client/"),
-            mapping("EchoEcho\\ElasticClient\\", "src/elasticsearch-client/"),
-            mapping("EchoEcho\\Klaviyo\\", "src/klaviyo-client/"),
-            mapping("EchoEcho\\Shared\\Common\\", "src/common/"),
-            mapping("Luxplus\\Core\\Database\\", "src/database/"),
-            mapping("Luxplus\\Core\\Elasticsearch\\", "src/elasticsearch/"),
-            mapping("Luxplus\\Core\\Enums\\", "src/enums/"),
-            mapping("Luxplus\\Core\\Tasks\\", "src/tasks/"),
-            mapping("Luxplus\\Web\\", "src/web/"),
+            mapping("Vendor\\Coolrunner\\", "src/coolrunner-client/"),
+            mapping("Vendor\\ElasticClient\\", "src/elasticsearch-client/"),
+            mapping("Vendor\\Klaviyo\\", "src/klaviyo-client/"),
+            mapping("Vendor\\Shared\\Common\\", "src/common/"),
+            mapping("Acme\\Core\\Database\\", "src/database/"),
+            mapping("Acme\\Core\\Elasticsearch\\", "src/elasticsearch/"),
+            mapping("Acme\\Core\\Enums\\", "src/enums/"),
+            mapping("Acme\\Core\\Tasks\\", "src/tasks/"),
+            mapping("Acme\\Web\\", "src/web/"),
             mapping("Tests\\Support\\", "tests/Support/"),
             mapping("Tests\\", "tests/"),
         ];
@@ -482,12 +482,12 @@ mod tests {
         let file = PathBuf::from("/project/src/core/Brands/Services/Fred.php");
         let result = infer_namespaces_from_path(&file, &root, &mappings);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].namespace, "Luxplus\\Core\\Brands\\Services");
+        assert_eq!(result[0].namespace, "Acme\\Core\\Brands\\Services");
 
         let file2 = PathBuf::from("/project/src/tasks/Import/RunImport.php");
         let result2 = infer_namespaces_from_path(&file2, &root, &mappings);
         assert_eq!(result2.len(), 1);
-        assert_eq!(result2[0].namespace, "Luxplus\\Core\\Tasks\\Import");
+        assert_eq!(result2[0].namespace, "Acme\\Core\\Tasks\\Import");
 
         let file3 = PathBuf::from("/project/tests/Support/Helpers/TestHelper.php");
         let result3 = infer_namespaces_from_path(&file3, &root, &mappings);

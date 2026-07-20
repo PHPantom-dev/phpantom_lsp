@@ -1,0 +1,20 @@
+// test: array_filter callback parameter infers from a method-call array argument
+// feature: completion
+// expect: getName(
+---
+<?php
+
+class Method {
+    public function getName(): string { return ''; }
+}
+
+class Klass {
+    /** @return array<int, Method> */
+    public function getMethods(): array { return []; }
+}
+
+class Analyzer {
+    public function run(Klass $class): void {
+        array_filter($class->getMethods(), static fn($method) => $method-><>);
+    }
+}

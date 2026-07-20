@@ -1,0 +1,30 @@
+---
+name: Publish
+
+on:
+  push:
+    tags: ["*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  crates:
+    name: Publish Rust package
+    runs-on: ubuntu-latest
+    container:
+      image: rust:latest
+    environment:
+      name: crates
+      url: https://crates.io/crates/phpantom_lsp
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Install toml-cli
+        run: cargo install toml-cli
+      - name: Check version
+        run: test "$(toml get -r Cargo.toml package.version)" = "${{ github.ref_name }}"
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

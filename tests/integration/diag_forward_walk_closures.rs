@@ -1,4 +1,6 @@
-use crate::common::create_test_backend;
+use crate::common::{
+    create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -347,5 +349,306 @@ class Parser {
     assert!(
         diags.is_empty(),
         "Expected no unknown_member diagnostics, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Assert narrowing on $this inside a top-level closure propagates to
+// assignment RHS resolution (Pest test pattern).
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn assert_instanceof_this_in_top_level_closure_propagates_to_assignment_rhs() {
+    let backend = create_test_backend();
+
+    let collection_uri = "file:///Collection.php";
+    let collection_text = r#"<?php
+class Collection {
+    /** @return mixed */
+    public function firstOrFail() {
+        return null;
+    }
+}
+"#;
+    backend.update_ast(collection_uri, collection_text);
+
+    let test_case_uri = "file:///TestCase.php";
+    let test_case_text = r#"<?php
+class TestCase {
+    public function createProductCollection(int $count): Collection {
+        return new Collection();
+    }
+}
+"#;
+    backend.update_ast(test_case_uri, test_case_text);
+
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    // Top-level Pest-style closure: `$this` is unbound and only narrowed
+    // via `assert($this instanceof TestCase)`.
+    let uri = "file:///PestTest.php";
+    let text = r#"<?php
+function it(string $name, callable $closure): void {}
+
+it('does a thing', function (): void {
+    assert($this instanceof TestCase);
+    $products = $this->createProductCollection(5);
+    $first = $products->firstOrFail();
+});
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    // Filter to unknown_member and unresolved_member_access diagnostics
+    let relevant_diags: Vec<_> = diags
+        .into_iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(
+                    c,
+                    tower_lsp::lsp_types::NumberOrString::String(s)
+                        if s == "unresolved_member_access" || s == "unknown_member"
+                )
+            })
+        })
+        .collect();
+
+    // The `assert($this instanceof TestCase)` narrows `$this` to `TestCase`,
+    // so `$this->createProductCollection(5)` returns `Collection`, and
+    // `$products->firstOrFail()` resolves.  No member should be unknown or
+    // unresolved.
+    assert!(
+        relevant_diags.is_empty(),
+        "Expected no unknown/unresolved member diagnostics after assert($this instanceof TestCase) in top-level closure, got: {:?}",
+        relevant_diags
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Self-referencing reassignment: RHS use resolves against pre-assignment scope
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When a variable is reassigned and the RHS references the same variable
+/// after an arrow function / closure literal, the reference must resolve
+/// against the pre-assignment type, not the reassigned result type.
+///
+/// Regression test: `$variables` starts as `array`, gets reassigned to
+/// `implode()`'s `string` result.  The `$variables` passed to
+/// `array_map()` sits *after* the arrow function in source, and used to
+/// pick up the post-assignment `string` type from the scope snapshot the
+/// closure walk recorded after the arrow body, producing a false
+/// "expects array, got string" diagnostic.
+#[test]
+fn self_referencing_reassignment_uses_pre_assignment_scope() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///self_ref_reassign.php";
+    let text = r#"<?php
+function render(array $variables): string {
+    $variables = implode(', ', array_map(fn (string $v): string => "\${$v}", $variables));
+    return $variables;
+}
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let type_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.message.clone())
+        .collect();
+
+    assert!(
+        type_errors.is_empty(),
+        "Expected no argument type mismatch: the $variables passed to array_map() \
+         should resolve to its pre-assignment `array` type, got: {type_errors:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure param with a declared union type must not collapse to one arm
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When the subject is a union of differently-parameterized collections,
+/// the closure parameter's own declared union type must be preserved
+/// rather than collapsing to the first collection's element type.
+#[test]
+fn closure_param_declared_union_wins_over_inferred_element() {
+    let backend = create_test_backend();
+
+    let collection_uri = "file:///Collection.php";
+    let collection_text = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ */
+class Collection {
+    /**
+     * @param callable(TValue): bool $callback
+     * @return static
+     */
+    public function filter(callable $callback): static { return $this; }
+}
+"#;
+    backend.update_ast(collection_uri, collection_text);
+
+    let support_uri = "file:///Support.php";
+    let support_text = r#"<?php
+class CanApply {}
+class ViewModel { public int $viewId = 0; }
+"#;
+    backend.update_ast(support_uri, support_text);
+
+    let service_uri = "file:///Service.php";
+    let service_text = r#"<?php
+class Service {
+    /** @param Collection<int, CanApply>|Collection<int, ViewModel>|Collection<int, \stdClass> $items */
+    public function probe(Collection $items): void
+    {
+        $items->filter(function (CanApply|ViewModel|\stdClass $item): bool {
+            return $item->viewId === 1;
+        });
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, service_uri, service_text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics: the declared union param type \
+         (CanApply|ViewModel|stdClass) must be preserved, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Nested return-type inference must not pollute the diagnostic scope cache
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Regression test: while building the diagnostic scope cache for one file,
+/// resolving an assignment whose right-hand side calls a method with an
+/// inferred (body-derived) return type re-enters the forward walker to look
+/// up a variable in the callee's body. That nested walk uses a fresh scope
+/// and, before the fix, recorded its own scope snapshots into the still
+/// active diagnostic scope cache. Because the cache is keyed only by byte
+/// offset, the callee's snapshots (from a different file) could land at an
+/// offset inside the caller's call chain, dropping the local query-builder
+/// variable and producing a false "type could not be resolved" diagnostic
+/// on one branch of a method but not an adjacent, identical one.
+///
+/// Here `Factory::query()` has no declared return type, so its type is
+/// inferred from `return $b;`. Resolving `$query = $this->factory->query()`
+/// in `Runner::ids()` triggers that inference. The single-line
+/// `whereBetween('id', [...])->pluck('id')` branch used to be flagged while
+/// the multi-line `whereBetween('created', [...])` branch resolved cleanly.
+#[test]
+fn nested_return_type_inference_does_not_clobber_outer_scope() {
+    // `Factory::query()` has no declared return type, so its type is
+    // inferred from `return $b;`.  It is declared in the *same* file as
+    // `Builder` (after it) so that the inference walk of `query()`'s body
+    // records snapshots at byte offsets that collide with `Runner::ids()`'s
+    // call chain in the other file — reproducing the cross-file offset
+    // collision that made this a "1 error, not reproduced in isolation"
+    // bug in the wild.
+    let builder_src = r#"<?php
+namespace App;
+
+class Builder {
+    public function whereBetween(string $c, array $r): Builder { return $this; }
+    public function pluck(string $k): array { return []; }
+    public function select(string $c): Builder { return $this; }
+}
+
+class Factory {
+    public function query() {
+        $b = new Builder();
+        return $b;
+    }
+}
+"#;
+    let runner_src = r#"<?php
+namespace App;
+
+class Runner {
+    private Factory $factory;
+
+    public function ids(bool $x, bool $y): array {
+        $query = $this->factory->query();
+        if ($x) {
+            return $query->select('id')->pluck('id');
+        }
+        if ($x && $y) {
+            return $query->whereBetween('id', [$this->n('a'), $this->n('b')])->pluck('id');
+        }
+        if ($x && $y) {
+            return $query->whereBetween('created', [
+                $this->n('c'),
+                $this->n('d'),
+            ])->pluck('id');
+        }
+        return [];
+    }
+
+    private function n(string $s): int { return 1; }
+}
+"#;
+
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "app/" } } }"#,
+        &[
+            ("app/Builder.php", builder_src),
+            ("app/Runner.php", runner_src),
+        ],
+    );
+
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    // Register both files under their real on-disk URIs so that the
+    // body-return-type inferrer can read `Factory`'s source via
+    // `get_file_content` (which falls back to reading the file path).
+    let builder_uri = format!("file://{}/app/Builder.php", dir.path().display());
+    let runner_uri = format!("file://{}/app/Runner.php", dir.path().display());
+    backend.update_ast(&builder_uri, builder_src);
+    backend.update_ast(&runner_uri, runner_src);
+
+    let runner_text = runner_src;
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&runner_uri, runner_text, &mut diags);
+
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(
+                    c,
+                    NumberOrString::String(s)
+                        if s == "unresolved_member_access" || s == "unknown_member"
+                )
+            })
+        })
+        .map(|d| d.message.clone())
+        .collect();
+
+    assert!(
+        unresolved.is_empty(),
+        "Expected no unresolved/unknown member diagnostics on the query-builder \
+         chain: nested return-type inference must not clobber `$query` in the \
+         diagnostic scope cache, got: {unresolved:?}"
     );
 }

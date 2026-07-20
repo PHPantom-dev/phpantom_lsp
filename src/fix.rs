@@ -48,7 +48,8 @@ use crate::{Backend, composer, config};
 /// Options for the fix command.
 #[derive(Debug)]
 pub struct FixOptions {
-    /// Workspace root (project directory containing composer.json).
+    /// Workspace root.  Usually a Composer project directory; a plain
+    /// PHP tree without a composer.json is fixed by walking the root.
     pub workspace_root: PathBuf,
     /// Optional path filter: only fix files under this path.
     pub path_filter: Option<PathBuf>,
@@ -199,10 +200,15 @@ fn apply_text_edits(content: &str, edits: &[TextEdit]) -> String {
 pub async fn run(options: FixOptions) -> i32 {
     let root = &options.workspace_root;
 
+    // A missing composer.json is not an error: plain PHP trees fix
+    // fine — classes are indexed by scanning the tree and files are
+    // discovered by walking the root.  Note it on stderr so a mistyped
+    // --project-root does not silently fix the wrong directory.
     if !root.join("composer.json").is_file() {
-        eprintln!("Error: no composer.json found in {}", root.display());
-        eprintln!("The fix command currently only supports single Composer projects.");
-        return 1;
+        eprintln!(
+            "Note: no composer.json found in {} — treating it as a plain PHP project.",
+            root.display()
+        );
     }
 
     // ── Validate rules ──────────────────────────────────────────────
@@ -318,6 +324,15 @@ pub async fn run(options: FixOptions) -> i32 {
             "\r\x1b[2K {}\n",
             progress_bar(file_count, file_count, "Parsing")
         );
+    }
+
+    // Discover the configured Laravel date class now that every user file
+    // is parsed, so the `now()`/`today()` helpers and the Date facade
+    // resolve to a concrete class instead of nothing.  Matches the LSP
+    // `initialized` handler and the `analyze` pipeline; without it, fixes
+    // could be driven by false-positive return-type diagnostics.
+    if backend.resolved_class_cache.read().is_laravel() {
+        backend.build_laravel_date_class();
     }
 
     // ── Phase 2: Fix files (parallel) ───────────────────────────────

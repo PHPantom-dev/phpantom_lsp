@@ -12,9 +12,9 @@
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::access::Access;
-use mago_syntax::ast::call::Call;
-use mago_syntax::ast::*;
+use mago_syntax::cst::access::Access;
+use mago_syntax::cst::call::Call;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -451,7 +451,7 @@ mod tests {
     use super::*;
 
     fn find_conversion(php: &str) -> Option<String> {
-        let arena = bumpalo::Bump::new();
+        let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
 

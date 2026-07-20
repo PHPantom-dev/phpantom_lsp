@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -827,7 +827,7 @@ mod tests {
         offset: u32,
         php_version: PhpVersion,
     ) -> Option<(Simplification, u32, u32)> {
-        let arena = bumpalo::Bump::new();
+        let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
 
@@ -1061,7 +1061,7 @@ mod tests {
 
     #[test]
     fn null_literal_detected() {
-        let arena = bumpalo::Bump::new();
+        let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php $x = null;";
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());

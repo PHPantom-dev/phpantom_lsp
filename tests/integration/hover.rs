@@ -3912,6 +3912,31 @@ class Repo {
     );
 }
 
+/// A property assigned `new stdClass()` resolves to stdClass when read
+/// again, so hovering a later read of the property path shows stdClass.
+#[test]
+fn hover_nested_stdclass_property_resolves() {
+    let backend = create_test_backend_with_stdclass_stub();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(): void {
+    $settings = new stdClass();
+    $settings->cache = new stdClass();
+    $x = $settings->cache;
+}
+"#;
+
+    // Hover on `$x`, assigned from the read `$settings->cache` (line 4).
+    // The read resolves to stdClass via the assignment two lines up.
+    let hover = hover_at(&backend, uri, content, 4, 5).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("stdClass"),
+        "a variable assigned from a property that was assigned new stdClass() should resolve to stdClass, got: {}",
+        text
+    );
+}
+
 /// A user-defined class with a `@link` tag should display the URL in hover.
 #[test]
 fn hover_class_with_link_tag() {
@@ -8523,6 +8548,88 @@ function test(string $role): void {
     );
 }
 
+// ── Alternate if:/endif; syntax: inverse narrowing in branch merge ──────
+
+/// After an `if (…): … endif;` written in the alternate colon syntax, the
+/// scope merged past the block must reflect inverse narrowing from the
+/// (failed) condition, just like the brace syntax does.  Here the then-body
+/// reassigns `$acct` to a non-null `Account`, and the implicit "condition was
+/// false" path (`$acct === null` was false, so `$acct` is not null) also
+/// yields `Account`.  Both merge to a plain `Account`, not `Account|null`.
+#[test]
+fn hover_colon_syntax_merges_inverse_narrowing_after_endif() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class Account {
+    public function name(): string { return ''; }
+}
+function test(?Account $acct): void {
+    if ($acct === null):
+        $acct = new Account();
+    endif;
+    $acct;
+}
+"#;
+    // Hover on `$acct` at line 8 (the bare `$acct;` after `endif;`).
+    let hover = hover_at(&backend, uri, php, 8, 5);
+    assert!(
+        hover.is_some(),
+        "should produce hover for $acct after endif"
+    );
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("Account"),
+        "hover should resolve $acct to Account after endif, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("?Account") && !text.contains("null"),
+        "the implicit else path (`$acct === null` was false) narrows away null, got: {}",
+        text
+    );
+}
+
+/// In the alternate colon syntax, the `else:` branch walked during the
+/// branch merge must have the inverse of every preceding condition applied
+/// (the `if` condition and each `elseif` condition).  Here the `else` branch
+/// reassigns `$y` from `$x`, which is only reachable when `$x` is neither
+/// `Cat` nor `Dog`, so it must narrow to `Bird`.
+#[test]
+fn hover_colon_syntax_else_branch_inverse_narrows_from_elseif() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class Cat {}
+class Dog {}
+class Bird {}
+function test(Cat|Dog|Bird $x): void {
+    if ($x instanceof Cat):
+        $y = 'cat';
+    elseif ($x instanceof Dog):
+        $y = 'dog';
+    else:
+        $y = $x;
+    endif;
+    $y;
+}
+"#;
+    // Hover on `$y` at line 12 (the bare `$y;` after `endif;`).
+    let hover = hover_at(&backend, uri, php, 12, 5);
+    assert!(hover.is_some(), "should produce hover for $y after endif");
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("Bird"),
+        "$y in the else branch should narrow $x to Bird, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("Cat") && !text.contains("Dog"),
+        "the else branch excludes Cat (if) and Dog (elseif), got: {}",
+        text
+    );
+}
+
 /// When a method returns `TValue|null` and `TValue` is substituted with
 /// a concrete class, the `|null` component must be preserved in hover output.
 #[test]
@@ -9212,6 +9319,26 @@ function test(int|string $x): void {
 }
 
 #[test]
+fn hover_bare_truthy_check_strips_null() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(?string $x): void {
+    if ($x) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 2, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string") && !text.contains("null"),
+        "inside `if ($x)`, $x should be string (null stripped), got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_array_shape_key_null_guard_clause() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -9260,6 +9387,112 @@ function test(): void {
     assert!(
         text.contains("ClassResolvesBack") && !text.contains("ClassResolvesBackChild"),
         "after instanceof + reassignment, $a should be ClassResolvesBack, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_numeric_on_string_narrows_to_numeric_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(string $s): void {
+    if (is_numeric($s)) {
+        $s;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("numeric-string"),
+        "is_numeric($s) on a string should narrow to numeric-string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_numeric_on_mixed_keeps_numeric_string_option() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param mixed $s
+ */
+function test($s): void {
+    if (is_numeric($s)) {
+        $s;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 6, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("numeric-string"),
+        "is_numeric() on mixed should include numeric-string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_a_allow_string_narrows_string_to_class_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Extension {}
+function test(string $x): void {
+    if (is_a($x, Extension::class, true)) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 4, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string<Extension>"),
+        "is_a($x, Extension::class, true) should narrow string to class-string<Extension>, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_class_exists_narrows_string_to_class_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(string $x): void {
+    if (class_exists($x)) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string") && !text.contains("class-string<"),
+        "class_exists($x) should narrow string to bare class-string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_guard_clause_negated_is_a_allow_string_narrows_to_class_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Extension {}
+function test(string $x): void {
+    if (!is_a($x, Extension::class, true)) {
+        throw new \RuntimeException('nope');
+    }
+    $x;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 6, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string<Extension>"),
+        "guard clause on !is_a(..., true) should narrow $x to class-string<Extension> after, got: {}",
         text
     );
 }
@@ -11510,5 +11743,888 @@ function test(): void {
         text.contains("string") && !text.contains("CarbonLike"),
         "$date after reassignment should be string, got: {}",
         text
+    );
+}
+
+/// `PDOStatement::fetch()` carries a PHPStan conditional return type keyed
+/// on the fetch-mode class constant. Passing the mode directly selects the
+/// matching branch (object for `FETCH_OBJ`, array for `FETCH_ASSOC`, and
+/// `mixed` for modes with no dedicated branch or when no mode is passed).
+#[test]
+fn hover_pdo_fetch_mode_dependent_return_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///pdo_fetch.php";
+    let content = r#"<?php
+function probe(\PDOStatement $stmt): void {
+    $obj = $stmt->fetch(\PDO::FETCH_OBJ);
+    $obj;
+    $assoc = $stmt->fetch(\PDO::FETCH_ASSOC);
+    $assoc;
+    $col = $stmt->fetch(\PDO::FETCH_COLUMN);
+    $col;
+    $default = $stmt->fetch();
+    $default;
+}
+"#;
+
+    // FETCH_OBJ selects the `\stdClass|false` branch.
+    let obj = hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $obj")).to_string();
+    assert!(
+        obj.contains("stdClass"),
+        "FETCH_OBJ should be stdClass: {obj}"
+    );
+
+    // FETCH_ASSOC selects the associative-array branch.
+    let assoc =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $assoc")).to_string();
+    assert!(
+        assoc.contains("array"),
+        "FETCH_ASSOC should be an array: {assoc}"
+    );
+    assert!(
+        !assoc.contains("stdClass"),
+        "FETCH_ASSOC should not select the object branch: {assoc}"
+    );
+
+    // FETCH_COLUMN has no dedicated branch → falls through to `mixed`.
+    let col = hover_text(&hover_at(&backend, uri, content, 7, 6).expect("hover $col")).to_string();
+    assert!(
+        !col.contains("stdClass") && !col.contains("array<"),
+        "FETCH_COLUMN should not resolve to a specific branch: {col}"
+    );
+
+    // No mode argument → the conditional cannot be resolved statically.
+    let default =
+        hover_text(&hover_at(&backend, uri, content, 9, 6).expect("hover $default")).to_string();
+    assert!(
+        !default.contains("stdClass") && !default.contains("array<"),
+        "fetch() without a mode should not resolve to a branch: {default}"
+    );
+}
+
+/// `PDOStatement::fetchAll()` resolves to a `list<...>` whose element type
+/// depends on the fetch mode. The element type flows through to `foreach`.
+#[test]
+fn hover_pdo_fetch_all_mode_dependent_element_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///pdo_fetch_all.php";
+    let content = r#"<?php
+function probe(\PDOStatement $stmt): void {
+    foreach ($stmt->fetchAll(\PDO::FETCH_OBJ) as $item) {
+        $item;
+    }
+}
+"#;
+
+    let item =
+        hover_text(&hover_at(&backend, uri, content, 3, 9).expect("hover $item")).to_string();
+    assert!(
+        item.contains("stdClass"),
+        "fetchAll(FETCH_OBJ) elements should be stdClass: {item}"
+    );
+}
+
+/// `+=` on arrays is an array union in PHP, not numeric addition.
+/// The inferred type must be `array`, not `int|float`.
+#[test]
+fn hover_array_plus_assign_infers_array() {
+    let backend = create_test_backend();
+    let uri = "file:///array_plus_assign.php";
+    let content = r#"<?php
+function test(): void {
+    $array = ['a' => 1];
+    $array += ['foo' => 'bar'];
+    $array;
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $array")).to_string();
+    assert!(
+        result.contains("array"),
+        "$array after += with array literal should be array, got: {result}"
+    );
+    assert!(
+        !result.contains("int|float"),
+        "$array after += should not be int|float: {result}"
+    );
+}
+
+/// Numeric `+=` should still infer `int|float` (regression guard).
+#[test]
+fn hover_numeric_plus_assign_still_infers_numeric() {
+    let backend = create_test_backend();
+    let uri = "file:///numeric_plus_assign.php";
+    let content = r#"<?php
+function test(): void {
+    $n = 1;
+    $n += 2;
+    $n;
+}
+"#;
+
+    let result = hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $n")).to_string();
+    assert!(
+        result.contains("int"),
+        "$n after numeric += should contain int, got: {result}"
+    );
+    assert!(
+        !result.contains("array"),
+        "$n after numeric += should not be array: {result}"
+    );
+}
+
+/// `ReflectionFunctionAbstract::getAttributes()` has a docblock return type
+/// of `ReflectionAttribute<T>[]`.  The `[]` suffix after a generic type must
+/// be preserved so the result is inferred as an array, not a single
+/// `ReflectionAttribute`.
+#[test]
+fn hover_reflection_get_attributes_returns_array() {
+    let backend = create_test_backend();
+    let uri = "file:///reflection_attrs.php";
+
+    // Provide a minimal stub inline so the test is self-contained.
+    let stub_uri = "file:///reflection_stub.php";
+    let stub = r#"<?php
+/**
+ * @template T
+ */
+class ReflectionAttribute {}
+class ReflectionFunctionAbstract {
+    /**
+     * @template T
+     * @param class-string<T>|null $name
+     * @return ReflectionAttribute<T>[]
+     */
+    public function getAttributes(?string $name = null, int $flags = 0): array {}
+}
+class ReflectionMethod extends ReflectionFunctionAbstract {}
+"#;
+    backend.update_ast(stub_uri, stub);
+
+    let content = r#"<?php
+function test(ReflectionMethod $ref): void {
+    $attrs = $ref->getAttributes();
+    $attrs;
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $attrs")).to_string();
+    assert!(
+        result.contains("array") || result.contains("[]"),
+        "$attrs from getAttributes() should be an array type, got: {result}"
+    );
+    assert!(
+        !result.contains("ReflectionAttribute<")
+            || result.contains("[]")
+            || result.contains("array"),
+        "$attrs should not be a bare ReflectionAttribute without array wrapper: {result}"
+    );
+}
+
+/// Foreach key type should be extracted from a class's
+/// `implements_generics` when the iterable is a bare class name
+/// (e.g. Finder implementing `IteratorAggregate<non-empty-string, SplFileInfo>`).
+#[test]
+fn hover_foreach_key_from_iterator_aggregate_generics() {
+    let backend = create_test_backend();
+    let uri = "file:///foreach_key_iface.php";
+
+    let stub_uri = "file:///finder_stub.php";
+    let stub = r#"<?php
+class SplFileInfo {}
+
+/** @implements \IteratorAggregate<non-empty-string, SplFileInfo> */
+class Finder implements \IteratorAggregate, \Countable {
+    public function getIterator(): \Iterator {}
+    public function count(): int {}
+}
+"#;
+    backend.update_ast(stub_uri, stub);
+
+    let content = r#"<?php
+function test(Finder $files): void {
+    foreach ($files as $filePath => $file) {
+        $filePath;
+    }
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 3, 10).expect("hover $filePath")).to_string();
+    assert!(
+        result.contains("non-empty-string") || result.contains("string"),
+        "$filePath should be non-empty-string (or string), not int|string, got: {result}"
+    );
+    assert!(
+        !result.contains("int|string") && !result.contains("int | string"),
+        "$filePath should not fall back to int|string: {result}"
+    );
+}
+
+/// When a closure containing `yield` expressions is assigned to a variable
+/// and then passed to `LazyCollection::make($closure)`, the closure should
+/// expose a Generator return type and the collection should infer the
+/// `<int, string>` template args from it.
+#[test]
+fn hover_exact_discover_closure_and_paths() {
+    let backend = create_test_backend();
+    let uri = "file:///discover.php";
+
+    let stubs = r#"<?php
+namespace Symfony\Component\Finder;
+class SplFileInfo {
+    public function getRealPath(): string|false {}
+}
+/** @implements \IteratorAggregate<non-empty-string, SplFileInfo> */
+class Finder implements \IteratorAggregate, \Countable {
+    public static function create(): self {}
+    public function files(): self {}
+    public function name(string $pattern): self {}
+    /** @param string|list<string> $path */
+    public function path(string|array $path): self {}
+    public function getIterator(): \Iterator {}
+    public function count(): int {}
+}
+
+namespace Illuminate\Contracts\Support;
+/** @template TKey of array-key
+ *  @template TValue */
+interface Arrayable {}
+
+namespace Illuminate\Support;
+interface Enumerable {}
+/**
+ * @template TKey of array-key
+ * @template-covariant TValue
+ * @implements \Illuminate\Support\Enumerable<TKey, TValue>
+ */
+class LazyCollection implements Enumerable {
+    /**
+     * @var (\Closure(): \Generator<TKey, TValue, mixed, void>)|static|array<TKey, TValue>
+     */
+    public $source;
+
+    /**
+     * @param \Illuminate\Contracts\Support\Arrayable<TKey, TValue>|iterable<TKey, TValue>|(\Closure(): \Generator<TKey, TValue, mixed, void>)|self<TKey, TValue>|array<TKey, TValue>|null $source
+     */
+    public function __construct($source = null) {}
+
+    /**
+     * @template TMakeKey of array-key
+     * @template TMakeValue
+     * @param \Illuminate\Contracts\Support\Arrayable<TMakeKey, TMakeValue>|iterable<TMakeKey, TMakeValue>|(\Closure(): \Generator<TMakeKey, TMakeValue, mixed, void>)|self<TMakeKey, TMakeValue>|array<TMakeKey, TMakeValue>|null $items
+     * @return static<TMakeKey, TMakeValue>
+     */
+    public static function make($items = []) {}
+}
+"#;
+    backend.update_ast("file:///vendor_stubs.php", stubs);
+
+    let content = r#"<?php
+use Illuminate\Support\LazyCollection;
+use Symfony\Component\Finder\Finder;
+
+class Demo {
+    /**
+     * @param string|list<string> $path
+     * @return LazyCollection<int, string>
+     */
+    public function discover(string|array $path): LazyCollection
+    {
+        $closure = function () use ($path) {
+            $files = Finder::create()->files()->name('*.php')->path($path);
+
+            foreach ($files as $filePath => $file) {
+                yield (string) $file->getRealPath();
+            }
+        };
+
+        $paths = LazyCollection::make($closure);
+
+        $closure;
+        $paths;
+    }
+}
+"#;
+
+    let closure_hover =
+        hover_text(&hover_at(&backend, uri, content, 21, 10).expect("hover $closure")).to_string();
+    assert!(
+        closure_hover.contains("Closure")
+            && closure_hover.contains("Generator")
+            && closure_hover.contains("void"),
+        "$closure should include Generator return type, got: {closure_hover}"
+    );
+
+    let paths_hover =
+        hover_text(&hover_at(&backend, uri, content, 22, 10).expect("hover $paths")).to_string();
+    assert!(
+        !paths_hover.contains("Closure"),
+        "$paths should not resolve to Closure generics, got: {paths_hover}"
+    );
+}
+
+#[test]
+fn hover_generator_closure_infers_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///generator_return.php";
+    let content = r#"<?php
+function test(): void {
+    $closure = function () {
+        yield (string) 'x';
+        return 123;
+    };
+    $closure;
+}
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 6, 6).expect("hover $closure")).to_string();
+    assert!(
+        hover.contains("Generator") && hover.contains("string") && hover.contains("int"),
+        "$closure should expose Generator<int, string, mixed, int>-like type, got: {hover}"
+    );
+}
+
+// ─── Package provenance badges ──────────────────────────────────────────────
+
+#[test]
+fn hover_core_class_and_member_show_php_provenance() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$e = new RuntimeException("boom");
+$e->getMessage();
+"#;
+
+    let class_hover =
+        hover_text(&hover_at(&backend, uri, content, 1, 13).expect("hover on class")).to_string();
+    assert!(
+        class_hover.contains("🟣 `PHP`"),
+        "core class hover should show the PHP provenance badge, got: {class_hover}"
+    );
+
+    let method_hover =
+        hover_text(&hover_at(&backend, uri, content, 2, 6).expect("hover on method")).to_string();
+    assert!(
+        method_hover.contains("🟣 `PHP`"),
+        "core method hover should show the PHP provenance badge, got: {method_hover}"
+    );
+}
+
+#[test]
+fn hover_core_function_shows_php_provenance() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$len = strlen("hello");
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 1, 9).expect("hover on strlen")).to_string();
+    assert!(
+        hover.contains("🟣 `PHP`"),
+        "built-in function hover should show the PHP provenance badge, got: {hover}"
+    );
+}
+
+#[test]
+fn hover_project_symbols_show_no_provenance_badge() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class LocalThing {
+    public function spin(): void {}
+}
+function local_helper(): int { return 1; }
+$t = new LocalThing();
+$t->spin();
+local_helper();
+"#;
+
+    for (line, character, what) in [(5, 12, "class"), (6, 6, "method"), (7, 3, "function")] {
+        let hover = hover_text(
+            &hover_at(&backend, uri, content, line, character)
+                .unwrap_or_else(|| panic!("hover on project {what}")),
+        )
+        .to_string();
+        assert!(
+            !hover.contains('🟣') && !hover.contains('🟢') && !hover.contains('🟠'),
+            "project {what} hover should have no provenance badge, got: {hover}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn hover_vendor_class_shows_package_provenance() {
+    use tower_lsp::LanguageServer;
+
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    std::fs::write(
+        dir.path().join("composer.json"),
+        r#"{ "name": "demo/project", "require": { "acme/lib": "*" } }"#,
+    )
+    .expect("write composer.json");
+
+    for (pkg, ns, class) in [
+        ("acme/lib", "Acme\\Lib", "Widget"),
+        ("other/dep", "Other\\Dep", "Gadget"),
+    ] {
+        let file = dir.path().join(format!("vendor/{pkg}/src/{class}.php"));
+        std::fs::create_dir_all(file.parent().unwrap()).expect("mkdir pkg");
+        std::fs::write(
+            &file,
+            format!("<?php\nnamespace {ns};\nclass {class} {{}}\n"),
+        )
+        .expect("write vendor class");
+    }
+
+    let composer_dir = dir.path().join("vendor/composer");
+    std::fs::create_dir_all(&composer_dir).expect("mkdir vendor/composer");
+    std::fs::write(
+        composer_dir.join("installed.json"),
+        r#"{
+            "packages": [
+                { "name": "acme/lib", "install-path": "../acme/lib",
+                  "autoload": { "psr-4": { "Acme\\Lib\\": ["src/"] } } },
+                { "name": "other/dep", "install-path": "../other/dep",
+                  "autoload": { "psr-4": { "Other\\Dep\\": ["src/"] } } }
+            ]
+        }"#,
+    )
+    .expect("write installed.json");
+
+    let backend = create_test_backend_with_full_stubs();
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = "file:///app.php";
+    let content = r#"<?php
+use Acme\Lib\Widget;
+use Other\Dep\Gadget;
+new Widget();
+new Gadget();
+"#;
+
+    let explicit_hover =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover on Widget")).to_string();
+    assert!(
+        explicit_hover.contains("🟢 `acme/lib`"),
+        "explicit dependency hover should show the green package badge, got: {explicit_hover}"
+    );
+
+    let transitive_hover =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover on Gadget")).to_string();
+    assert!(
+        transitive_hover.contains("🟠 `other/dep` *(transitive)*"),
+        "transitive dependency hover should show the orange transitive badge, got: {transitive_hover}"
+    );
+}
+
+// ─── Closure body return-type → template binding ────────────────────────────
+//
+// A method/function template that is bound from a closure's return type
+// (`@param \Closure(): T $cb` + `@return T`) must resolve even when the
+// closure argument has no explicit `: ReturnType` annotation — the return
+// type is inferred from the closure's body expression.
+
+/// `@return T` bound from `@param \Closure(): T` resolves through an
+/// unannotated arrow-function body (`fn() => new Order()`), not just an
+/// annotated closure.
+#[test]
+fn hover_function_template_from_unannotated_closure_body() {
+    let backend = create_test_backend();
+    let uri = "file:///closurebody.php";
+    let content = concat!(
+        "<?php\n",
+        "class Order {}\n",
+        "/**\n",
+        " * @template T\n",
+        " * @param \\Closure(): T $cb\n",
+        " * @return T\n",
+        " */\n",
+        "function myRemember(\\Closure $cb) {}\n",
+        "\n",
+        "$annotated = myRemember(fn(): Order => makeOrder());\n",
+        "$arrow = myRemember(fn() => new Order());\n",
+        "$block = myRemember(function () { return new Order(); });\n",
+    );
+    let h_annotated = hover_at(&backend, uri, content, 9, 2).expect("hover $annotated");
+    let annotated = hover_text(&h_annotated);
+    assert!(
+        annotated.contains("$annotated = Order"),
+        "annotated closure should bind T = Order, got: {annotated}"
+    );
+    let h_arrow = hover_at(&backend, uri, content, 10, 2).expect("hover $arrow");
+    let arrow = hover_text(&h_arrow);
+    assert!(
+        arrow.contains("$arrow = Order"),
+        "unannotated arrow body should bind T = Order, got: {arrow}"
+    );
+    let h_block = hover_at(&backend, uri, content, 11, 2).expect("hover $block");
+    let block = hover_text(&h_block);
+    assert!(
+        block.contains("$block = Order"),
+        "closure `return` body should bind T = Order, got: {block}"
+    );
+}
+
+/// The same binding works through a virtual `@method` tag (facade style),
+/// where the method-level template appears in the tag's inline `<T>`.
+#[test]
+fn hover_virtual_method_template_from_unannotated_closure_body() {
+    let backend = create_test_backend();
+    let uri = "file:///facademethod.php";
+    let content = concat!(
+        "<?php\n",
+        "class Order {}\n",
+        "/**\n",
+        " * @method static T remember<T>(string $key, \\Closure(): T $cb)\n",
+        " */\n",
+        "class Cache {}\n",
+        "\n",
+        "$arrow = Cache::remember('k', fn() => new Order());\n",
+    );
+    let h_arrow = hover_at(&backend, uri, content, 7, 2).expect("hover $arrow");
+    let arrow = hover_text(&h_arrow);
+    assert!(
+        arrow.contains("$arrow = Order"),
+        "virtual @method template should bind from arrow body, got: {arrow}"
+    );
+}
+
+/// `Foo::class` resolves to `class-string<Foo>`, not a plain `string`,
+/// so the class identity survives assignments, array elements, and
+/// `class-string<object>` parameters.
+#[test]
+fn hover_class_constant_resolves_to_class_string() {
+    let backend = create_test_backend();
+    let uri = "file:///classconst.php";
+    let content = concat!(
+        "<?php\n",
+        "class Widget {}\n",
+        "function demo(): void {\n",
+        "    $cls = Widget::class;\n",
+        "    $cls;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 4, 6).expect("hover $cls");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string<Widget>"),
+        "Widget::class should resolve to class-string<Widget>, got: {text}"
+    );
+}
+
+/// A heterogeneous array literal used as a fixed tuple resolves its
+/// foreach element to a union of positional shapes. Indexing a position
+/// that only exists on one arm, combined with a `??` class-string
+/// fallback, keeps the value a `class-string` rather than widening to
+/// `string`.
+#[test]
+fn hover_foreach_heterogeneous_tuple_index_with_null_coalesce() {
+    let backend = create_test_backend();
+    let uri = "file:///tuple_coalesce.php";
+    let content = concat!(
+        "<?php\n",
+        "class ScalarType {}\n",
+        "class ArrayType {}\n",
+        "function demo(): void {\n",
+        "    $items = [['int', '$id'], ['array', '$list', ArrayType::class]];\n",
+        "    foreach ($items as $expected) {\n",
+        "        $cls = $expected[2] ?? ScalarType::class;\n",
+        "        $cls;\n",
+        "    }\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $cls");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string<ArrayType>") && text.contains("class-string<ScalarType>"),
+        "index + ?? fallback should keep both class-strings, got: {text}"
+    );
+    assert!(
+        !text.contains("= string") && !text.contains("|string"),
+        "value must not widen to plain string, got: {text}"
+    );
+}
+
+/// A nested array literal keeps its precise positional (tuple) shape so
+/// that integer-literal indexing resolves the element at that position,
+/// while a top-level literal generalizes to `list<T>`.
+#[test]
+fn hover_nested_array_literal_keeps_positional_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///nested_shape.php";
+    let content = concat!(
+        "<?php\n",
+        "class Pen { public function write(): void {} }\n",
+        "class Pencil { public function sketch(): void {} }\n",
+        "function demo(): void {\n",
+        "    $rows = [[new Pen(), new Pencil()]];\n",
+        "    foreach ($rows as $row) {\n",
+        "        $row;\n",
+        "    }\n",
+        "}\n",
+    );
+    // Top-level `$rows` generalizes to a list of the nested tuple shape.
+    let h_rows = hover_at(&backend, uri, content, 4, 6).expect("hover $rows");
+    let rows = hover_text(&h_rows);
+    assert!(
+        rows.contains("list<") && rows.contains("array{Pen, Pencil}"),
+        "top-level literal should be list of the nested tuple shape, got: {rows}"
+    );
+    // The foreach element is the nested tuple shape itself.
+    let h_row = hover_at(&backend, uri, content, 6, 9).expect("hover $row");
+    let row = hover_text(&h_row);
+    assert!(
+        row.contains("array{Pen, Pencil}"),
+        "foreach element should be the positional tuple shape, got: {row}"
+    );
+}
+
+/// `@template T of Token[]` used as a pass-through (`@param T $tokens` /
+/// `@return T`) is an identity generic: `T` binds to whatever array-like
+/// type the caller passes in.  Hovering on a member accessed through
+/// `end($tokens)->` (an array-element function applied to the
+/// template-typed parameter) should resolve through the declared bound
+/// rather than leaving `T` unresolved.
+#[test]
+fn hover_template_array_bound_identity_generic_resolves_inside_body() {
+    let backend = create_test_backend();
+    let uri = "file:///template_array_bound_identity.php";
+    let content = concat!(
+        "<?php\n",                                                              // 0
+        "class Token {\n",                                                      // 1
+        "    public int $type = 0;\n",                                          // 2
+        "}\n",                                                                  // 3
+        "\n",                                                                   // 4
+        "class Foo {\n",                                                        // 5
+        "    /**\n",                                                            // 6
+        "     * @template T of Token[]\n",                                      // 7
+        "     * @param T $tokens\n",                                            // 8
+        "     * @return T\n",                                                   // 9
+        "     */\n",                                                            // 10
+        "    private function stripTrailingComments(array $tokens): array {\n", // 11
+        "        while ($tokens && end($tokens)->type) {\n",                    // 12
+        "            array_pop($tokens);\n",                                    // 13
+        "        }\n",                                                          // 14
+        "        return $tokens;\n",                                            // 15
+        "    }\n",                                                              // 16
+        "}\n",                                                                  // 17
+    );
+    // Hover on `type` in `end($tokens)->type` at line 12.
+    let hover = hover_at(&backend, uri, content, 12, 42).expect("hover ->type");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "Should resolve T to its bound (Token[]) and show Token::$type as int, got: {text}"
+    );
+}
+
+/// Hovering `$this->value` inside an anonymous class's own method resolves
+/// the property against the anonymous class, not the enclosing method's
+/// class.
+#[test]
+fn hover_this_property_in_anonymous_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Test
+{
+    public function make(): object
+    {
+        return new class (5) {
+            public function __construct(private readonly int $value) {}
+
+            public function get(): int
+            {
+                return $this->value;
+            }
+        };
+    }
+}
+"#;
+    // Hover on `value` in `$this->value` (line 10, the `v` of value).
+    let hover = hover_at(&backend, uri, content, 10, 30).expect("expected hover on $this->value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "$this->value must resolve to the anon class's int property, got: {text}"
+    );
+}
+
+// ─── @param-closure-this hover ──────────────────────────────────────────────
+
+/// When hovering on `$this` inside a closure whose enclosing call site
+/// declares `@param-closure-this Route $callback`, hover should show
+/// `$this = Route` (the overridden type), not the lexically enclosing class.
+#[test]
+fn hover_param_closure_this_overrides_lexical_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test/closure_this_hover.php";
+    let content = r#"<?php
+class Route {
+    public function middleware(string $m): self { return $this; }
+}
+class Router {
+    /**
+     * @param-closure-this Route $callback
+     */
+    public function group(\Closure $callback): void {}
+}
+class AppRoutes {
+    public function register(): void {
+        $router = new Router();
+        $router->group(function () {
+            $this->middleware('auth');
+        });
+    }
+}
+"#;
+    // `$this` is at line 14, col 12 (inside the closure body).
+    let hover = hover_at(&backend, uri, content, 14, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Route"),
+        "$this should resolve to Route via @param-closure-this, got: {text}"
+    );
+    assert!(
+        !text.contains("AppRoutes"),
+        "$this should NOT resolve to the lexical class AppRoutes, got: {text}"
+    );
+}
+
+/// When hovering on `$this` inside a closure without `@param-closure-this`,
+/// it should still resolve to the lexically enclosing class as usual.
+#[test]
+fn hover_this_without_closure_this_tag_falls_back_to_lexical_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test/closure_this_hover_fallback.php";
+    let content = r#"<?php
+class Router {
+    public function group(\Closure $callback): void {}
+}
+class AppRoutes {
+    public function register(): void {
+        $router = new Router();
+        $router->group(function () {
+            $this;
+        });
+    }
+}
+"#;
+    // `$this` is at line 8, col 12.
+    let hover = hover_at(&backend, uri, content, 8, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("AppRoutes"),
+        "$this should fall back to lexical class AppRoutes, got: {text}"
+    );
+}
+
+/// Hover on `$this` inside a closure passed to a standalone function
+/// with `@param-closure-this` should resolve to the declared type.
+#[test]
+fn hover_param_closure_this_standalone_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test/closure_this_hover_fn.php";
+    let content = r#"<?php
+class Config {
+    public function get(string $key): mixed { return null; }
+}
+
+/**
+ * @param-closure-this Config $callback
+ */
+function configure(\Closure $callback): void {}
+
+class App {
+    public function boot(): void {
+        configure(function () {
+            $this->get('key');
+        });
+    }
+}
+"#;
+    // `$this` is at line 13, col 12.
+    let hover = hover_at(&backend, uri, content, 13, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Config"),
+        "$this should resolve to Config via @param-closure-this, got: {text}"
+    );
+}
+
+/// A templated helper whose `class-string<T>` parameter has a `Foo::class`
+/// default binds `T` from that default when called with no arguments, so
+/// `$app = app()` resolves to the default class the same as
+/// `app(Application::class)` would.
+#[test]
+fn hover_class_string_template_helper_binds_from_default_when_no_args() {
+    let backend = create_test_backend();
+    let uri = "file:///app_helper.php";
+    let content = r#"<?php
+class Application {
+    public function basePath(string $path = ''): string { return $path; }
+}
+
+/**
+ * @template T of object
+ * @param class-string<T> $name
+ * @return T
+ */
+function app(string $name = Application::class): object {
+    return new Application();
+}
+
+function test(): void {
+    $app = app();
+    $app;
+}
+"#;
+
+    // Hover `$app` on the line after the assignment.
+    let hover = hover_at(&backend, uri, content, 16, 5).expect("expected hover on $app");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Application"),
+        "$app = app() should resolve to Application via the parameter default, got: {text}"
+    );
+}
+
+/// The same helper called with an explicit `Foo::class` argument still binds
+/// `T` from the argument, not the default.
+#[test]
+fn hover_class_string_template_helper_binds_from_explicit_arg() {
+    let backend = create_test_backend();
+    let uri = "file:///app_helper_arg.php";
+    let content = r#"<?php
+class Application {}
+class Mailer {}
+
+/**
+ * @template T of object
+ * @param class-string<T> $name
+ * @return T
+ */
+function app(string $name = Application::class): object {
+    return new Application();
+}
+
+function test(): void {
+    $mailer = app(Mailer::class);
+    $mailer;
+}
+"#;
+
+    // Hover `$mailer` on the line after the assignment.
+    let hover = hover_at(&backend, uri, content, 15, 5).expect("expected hover on $mailer");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Mailer"),
+        "$mailer = app(Mailer::class) should resolve to Mailer, got: {text}"
     );
 }

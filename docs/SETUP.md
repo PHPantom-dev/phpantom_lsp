@@ -18,7 +18,7 @@ See [phpantom_lsp on crates.io](https://crates.io/crates/phpantom_lsp).
 
 ### Pre-built Binaries
 
-Download the latest binary for your platform from [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest). Available for:
+Download the latest binary for your platform from [GitHub Releases](https://github.com/PHPantom-dev/phpantom_lsp/releases/latest). Available for:
 
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
@@ -100,7 +100,7 @@ Install the [PHPantom extension](https://marketplace.visualstudio.com/items?item
 
 1. **Download PHPantom LSP binary**
 
-   * Get it from [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest)
+   * Get it from [GitHub Releases](https://github.com/PHPantom-dev/phpantom_lsp/releases/latest)
    * Extract the binary to a preferred location
 
 2. **Install and configure LSP plugin**
@@ -210,12 +210,53 @@ Kate (KDE) has built-in LSP support. Open **Settings → Configure Kate → LSP 
   "servers": {
     "php": {
       "command": ["/path/to/phpantom_lsp"],
-      "url": "https://github.com/AJenbo/phpantom_lsp"
+      "url": "https://github.com/PHPantom-dev/phpantom_lsp"
     }
   }
 }
 ```
 
+</details>
+
+## Agent Setup
+
+AI coding agents can use PHPantom for the same code intelligence editors get. The agent starts `phpantom_lsp` over LSP and consults it (diagnostics, go-to-definition, hover types) as it reads and edits PHP, so its changes are grounded in real type information instead of guesses.
+
+<details>
+<summary><b>Claude Code</b></summary>
+
+Install the PHPantom plugin from its marketplace:
+
+```
+/plugin marketplace add PHPantom-dev/phpantom_claude
+/plugin install phpantom@phpantom
+```
+
+Restart Claude Code, then open a PHP file. The plugin starts the language server automatically, downloading the correct `phpantom_lsp` binary for your platform on first use (or using one already on your `PATH`). No Docker, PHP, or Rust toolchain is required.
+
+Beyond per-file code intelligence, the plugin puts `phpantom_lsp` on the agent's `PATH` and bundles a skill that tells Claude when to use its project-wide CLI, so it can run `phpantom_lsp analyze` (type-coverage report) and `phpantom_lsp fix` (automated fixes across the codebase) on its own. It also runs `php -l` after each edit to catch syntax errors immediately.
+
+To use a specific binary instead of the downloaded one, set the `PHPANTOM_SERVER_PATH` environment variable to its path, or put `phpantom_lsp` on your `PATH`.
+
+</details>
+
+<details>
+<summary><b>Opencode</b></summary>
+You can add this to your `opencode.json` file, it will be invoked when the AI uses the edit tool to edit a PHP file from within opencode.
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "php": {
+      "command": ["phpantom_lsp", "--stdio"],
+      "extensions": [".php"]
+    }
+  }
+}
+```
+
+You can add additional extensions to invoke it on if appropriate for your project.  
 </details>
 
 ## Project Configuration
@@ -250,9 +291,39 @@ This creates a `.phpantom.toml` in the current directory. Currently supported se
 #   "self"    - always self-scan, ignore Composer classmap
 #   "none"    - no proactive scanning, Composer classmap only
 # strategy = "composer"
+
+[formatting]
+# Explicit path to an external formatter: always use this tool and skip
+# require-dev auto-detection. Set to "" to disable that tool entirely.
+# pint = "/usr/local/bin/pint"
+# php-cs-fixer = "/usr/local/bin/php-cs-fixer"
+# phpcbf = "/usr/local/bin/phpcbf"
+
+# Timeout for external formatters, in milliseconds (default: 10000).
+# timeout = 10000
 ```
 
 The file is optional. When absent, all settings use their defaults. New settings will be added as features land. Unknown keys are silently ignored, so the file is forward-compatible.
+
+### Code Formatting
+
+PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the box, so `textDocument/formatting` requests are answered without any setup. The formatter is chosen per project in this order:
+
+1. **Explicit config wins.** A tool path set under `[formatting]` in `.phpantom.toml` (`pint`, `php-cs-fixer`, or `phpcbf`) is always used. Setting a tool to `""` disables it.
+2. **Composer `require-dev` wins over the built-in formatter.** If `composer.json` lists `laravel/pint`, `friendsofphp/php-cs-fixer`, or `squizlabs/php_codesniffer` in `require-dev`, PHPantom resolves the binary through Composer's bin-dir and runs it as a subprocess. These tools discover their own project config (`pint.json`, `.php-cs-fixer.php`, `.phpcs.xml`, etc.) as they normally would.
+3. **Otherwise, the built-in formatter is used.**
+
+The built-in formatter defaults to the PER-CS 2.0 style. If a `mago.toml` is present at the workspace root, its `[formatter]` table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:
+
+```toml
+# mago.toml
+[formatter]
+preset = "psr-12"
+print-width = 100
+use-tabs = false
+```
+
+For the full list of `[formatter]` options (presets, brace placement, blank-line handling, casing, and the rest), refer to the upstream Mago documentation: [Formatter configuration reference](https://mago.carthage.software/latest/en/tools/formatter/configuration-reference).
 
 ### Indexing Strategy
 

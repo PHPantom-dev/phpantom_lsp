@@ -52,7 +52,7 @@
 use std::collections::HashSet;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -1147,27 +1147,11 @@ fn collect_compact_from_expr(expr: &Expression<'_>, vars: &mut HashSet<String>) 
             if let Expression::Identifier(ident) = fc.function
                 && ident.value().eq_ignore_ascii_case(b"compact")
             {
-                // Each string argument is a variable name (without $).
+                // Each argument is a variable name (string literal) or
+                // an array of names (possibly nested), matching the
+                // forms compact() accepts.
                 for arg in fc.argument_list.arguments.iter() {
-                    if let Expression::Literal(Literal::String(s)) = arg.value() {
-                        // `value` is the interpreted string content
-                        // (without quotes); fall back to `raw` and
-                        // strip quotes manually if `value` is `None`.
-                        let name: &str = if let Some(v) = s.value {
-                            crate::atom::bytes_to_str(v)
-                        } else {
-                            let raw = crate::atom::bytes_to_str(s.raw);
-                            raw.strip_prefix('\'')
-                                .or_else(|| raw.strip_prefix('"'))
-                                .and_then(|inner| {
-                                    inner.strip_suffix('\'').or_else(|| inner.strip_suffix('"'))
-                                })
-                                .unwrap_or(raw)
-                        };
-                        if !name.is_empty() {
-                            vars.insert(format!("${}", name));
-                        }
-                    }
+                    collect_compact_name_from_arg(arg.value(), vars);
                 }
             }
             // Also recurse into arguments for nested compact() calls.
@@ -1211,6 +1195,53 @@ fn collect_compact_from_expr(expr: &Expression<'_>, vars: &mut HashSet<String>) 
         }
         // Don't recurse into closures/arrow functions.
         _ => {}
+    }
+}
+
+/// Collect variable names from a single `compact()` argument. A string
+/// literal names a variable directly; an array literal is descended
+/// into recursively so `compact(['a', ['b']])` collects both names.
+fn collect_compact_name_from_arg(expr: &Expression<'_>, vars: &mut HashSet<String>) {
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the interpreted string content (without
+            // quotes); fall back to `raw` and strip quotes manually
+            // if `value` is `None`.
+            let name: &str = if let Some(v) = s.value {
+                crate::atom::bytes_to_str(v)
+            } else {
+                let raw = crate::atom::bytes_to_str(s.raw);
+                raw.strip_prefix('\'')
+                    .or_else(|| raw.strip_prefix('"'))
+                    .and_then(|inner| inner.strip_suffix('\'').or_else(|| inner.strip_suffix('"')))
+                    .unwrap_or(raw)
+            };
+            if !name.is_empty() {
+                vars.insert(format!("${}", name));
+            }
+        }
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                collect_compact_name_from_elem(elem, vars);
+            }
+        }
+        Expression::LegacyArray(arr) => {
+            for elem in arr.elements.iter() {
+                collect_compact_name_from_elem(elem, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect variable names from one element of an array passed to
+/// `compact()`. Keys are ignored; values are names or nested arrays.
+fn collect_compact_name_from_elem(elem: &ArrayElement<'_>, vars: &mut HashSet<String>) {
+    match elem {
+        ArrayElement::KeyValue(kv) => collect_compact_name_from_arg(kv.value, vars),
+        ArrayElement::Value(v) => collect_compact_name_from_arg(v.value, vars),
+        ArrayElement::Variadic(s) => collect_compact_name_from_arg(s.value, vars),
+        ArrayElement::Missing(_) => {}
     }
 }
 
@@ -1504,7 +1535,7 @@ fn expr_has_get_defined_vars(expr: &Expression<'_>) -> bool {
         Expression::AnonymousClass(anon) => anon.argument_list.as_ref().is_some_and(|args| {
             args.arguments
                 .iter()
-                .any(|a| expr_has_get_defined_vars(a.value()))
+                .any(|a| a.value().is_some_and(expr_has_get_defined_vars))
         }),
         // Don't recurse into closures/arrow functions.
         Expression::Closure(_) | Expression::ArrowFunction(_) => false,

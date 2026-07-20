@@ -38,7 +38,7 @@
 mod tests;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 
@@ -118,9 +118,9 @@ pub(crate) struct Frame {
     /// Variables explicitly captured via `use($x, &$y)` in closures.
     /// Each entry is `(name_with_dollar, is_by_reference)`.
     ///
-    /// Populated during collection; will be read by Extract Function
+    /// Populated during collection; read by the unused-variable
+    /// diagnostic to skip by-reference captures, and by Extract Function
     /// to detect closure captures that cross extraction boundaries.
-    #[allow(dead_code)] // infrastructure for Extract Function closure-aware extraction
     pub captures: Vec<(String, bool)>,
     /// Parameter names (with `$` prefix) declared on this frame.
     ///
@@ -1021,6 +1021,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
             }
             Call::Method(method_call) => {
                 walk_expression(method_call.object, collector);
+                walk_member_selector_read(&method_call.method, collector);
                 walk_method_call_arguments_inner(
                     method_call.object,
                     &method_call.method,
@@ -1030,6 +1031,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
             }
             Call::NullSafeMethod(method_call) => {
                 walk_expression(method_call.object, collector);
+                walk_member_selector_read(&method_call.method, collector);
                 walk_method_call_arguments_inner(
                     method_call.object,
                     &method_call.method,
@@ -1039,6 +1041,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
             }
             Call::StaticMethod(static_call) => {
                 walk_expression(static_call.class, collector);
+                walk_member_selector_read(&static_call.method, collector);
                 walk_static_method_call_arguments(static_call, collector);
             }
         },
@@ -1046,25 +1049,11 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
         Expression::Access(access) => match access {
             Access::Property(pa) => {
                 walk_expression(pa.object, collector);
-                match &pa.property {
-                    ClassLikeMemberSelector::Identifier(_)
-                    | ClassLikeMemberSelector::Missing(_) => {}
-                    ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
-                    ClassLikeMemberSelector::Expression(selector) => {
-                        walk_expression(selector.expression, collector)
-                    }
-                }
+                walk_member_selector_read(&pa.property, collector);
             }
             Access::NullSafeProperty(pa) => {
                 walk_expression(pa.object, collector);
-                match &pa.property {
-                    ClassLikeMemberSelector::Identifier(_)
-                    | ClassLikeMemberSelector::Missing(_) => {}
-                    ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
-                    ClassLikeMemberSelector::Expression(selector) => {
-                        walk_expression(selector.expression, collector)
-                    }
-                }
+                walk_member_selector_read(&pa.property, collector);
             }
             Access::StaticProperty(spa) => {
                 walk_expression(spa.class, collector);
@@ -1281,7 +1270,7 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
         // ── Anonymous class ──
         Expression::AnonymousClass(anon) => {
             if let Some(ref args) = anon.argument_list {
-                walk_arguments(args, collector);
+                walk_partial_arguments(args, collector);
             }
             // Skip members — anonymous class body is a separate scope.
         }
@@ -1369,23 +1358,11 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
         Expression::Access(Access::Property(pa)) => {
             // `$obj->prop = …` — $obj is read, prop is written.
             walk_expression(pa.object, collector);
-            match &pa.property {
-                ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
-                ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
-                ClassLikeMemberSelector::Expression(selector) => {
-                    walk_expression(selector.expression, collector)
-                }
-            }
+            walk_member_selector_read(&pa.property, collector);
         }
         Expression::Access(Access::NullSafeProperty(pa)) => {
             walk_expression(pa.object, collector);
-            match &pa.property {
-                ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
-                ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
-                ClassLikeMemberSelector::Expression(selector) => {
-                    walk_expression(selector.expression, collector)
-                }
-            }
+            walk_member_selector_read(&pa.property, collector);
         }
         Expression::Access(Access::StaticProperty(spa)) => {
             walk_expression(spa.class, collector);
@@ -1470,6 +1447,15 @@ fn walk_assignment(assignment: &Assignment<'_>, collector: &mut Collector<'_>) {
 fn walk_arguments(args: &ArgumentList<'_>, collector: &mut Collector<'_>) {
     for arg in args.arguments.iter() {
         walk_expression(arg.value(), collector);
+    }
+}
+
+/// Walk partial arguments in a function/method call.
+fn walk_partial_arguments(args: &PartialArgumentList<'_>, collector: &mut Collector<'_>) {
+    for arg in args.arguments.iter() {
+        if let Some(value) = arg.value() {
+            walk_expression(value, collector);
+        }
     }
 }
 
@@ -1598,6 +1584,25 @@ fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Co
         }
         None => {
             walk_arguments(&func_call.argument_list, collector);
+        }
+    }
+}
+
+/// Walk a member-name selector (the `method` in `$obj->{$name}()` or the
+/// property in `$obj->{$name}`) as a read position.  A dynamic selector
+/// references a local variable that must count as used: `Variable`
+/// (`$obj->$name()`) and braced `Expression` (`$obj->{$name}()`) forms
+/// both read whatever variable they contain.  Static `Identifier` and
+/// `Missing` selectors contain no variable reads.
+fn walk_member_selector_read(
+    selector: &ClassLikeMemberSelector<'_>,
+    collector: &mut Collector<'_>,
+) {
+    match selector {
+        ClassLikeMemberSelector::Identifier(_) | ClassLikeMemberSelector::Missing(_) => {}
+        ClassLikeMemberSelector::Variable(var) => walk_variable_read(var, collector),
+        ClassLikeMemberSelector::Expression(selector) => {
+            walk_expression(selector.expression, collector)
         }
     }
 }

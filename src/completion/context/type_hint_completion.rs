@@ -124,12 +124,11 @@ pub(crate) fn detect_type_hint_context(
                 // Verify the preceding parameter is complete (has a `$`
                 // variable name) so we don't trigger mid-type.
                 let text_between: String = chars[open_paren + 1..before - 1].iter().collect();
-                if let Some(last_param) = text_between.rsplit(',').next() {
+                {
+                    let last_param = text_between.rsplit(',').next()?;
                     if !last_param.contains('$') {
                         return None;
                     }
-                } else {
-                    return None;
                 }
             }
             return Some(TypeHintContext {

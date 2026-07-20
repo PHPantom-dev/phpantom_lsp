@@ -1,0 +1,31 @@
+// test: @phpstan-assert on an inherited static method narrows via subclass name
+// feature: completion
+// expect: fooMethod(
+---
+<?php
+
+class Foobar {
+    public function fooMethod(): void {}
+}
+
+class BaseAssert
+{
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void
+    {
+    }
+}
+
+class MyTestCase extends BaseAssert
+{
+}
+
+function test(object $obj): void
+{
+    MyTestCase::assertInstanceOf(Foobar::class, $obj);
+    $obj-><>
+}

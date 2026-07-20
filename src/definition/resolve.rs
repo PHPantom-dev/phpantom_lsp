@@ -264,11 +264,27 @@ impl Backend {
             SymbolKind::ClassDeclaration { name }
             | SymbolKind::MemberDeclaration { name, .. }
             | SymbolKind::NamespaceDeclaration { name } => {
-                // The cursor is on a declaration name.  Return the
-                // symbol's own location so that editors can detect
-                // "definition == current position" and fall back to
-                // Find References (e.g. VS Code's
-                // editor.gotoLocation.alternativeDefinitionCommand).
+                // The cursor is on a declaration name, so "go to
+                // definition" has nowhere to jump — we are already at the
+                // definition.  Implement "Declaration or Usages" by
+                // returning the symbol's usages instead.
+                //
+                // VS Code achieves this by detecting "definition ==
+                // current position" and running Find References itself
+                // (editor.gotoLocation.alternativeDefinitionCommand), but
+                // PHPStorm simply navigates to the returned location and
+                // stops.  Returning the usages directly makes the feature
+                // work uniformly across clients.
+                let usages = self.find_references(uri, content, position, false);
+                if let Some(usages) = usages
+                    && !usages.is_empty()
+                {
+                    return Some(usages);
+                }
+
+                // No usages found: fall back to the declaration's own
+                // location so clients that rely on the self-location
+                // signal (VS Code) still trigger their reference fallback.
                 let parsed_uri = Url::parse(uri).ok()?;
                 let start = crate::util::offset_to_position(content, cursor_offset as usize);
                 let end =
@@ -314,6 +330,11 @@ impl Backend {
                 let locs = laravel::resolve_laravel_string_key(self, kind, key);
                 if locs.is_empty() { None } else { Some(locs) }
             }
+
+            SymbolKind::LaravelMacroString { .. } => Some(vec![point_location(
+                Url::parse(uri).ok()?,
+                crate::util::offset_to_position(content, cursor_offset as usize),
+            )]),
 
             SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => None,
         }
@@ -780,6 +801,22 @@ impl Backend {
             ssp_kind,
             SelfStaticParentKind::Self_ | SelfStaticParentKind::Static | SelfStaticParentKind::This
         ) {
+            // For `$this`, check `@param-closure-this` override first:
+            // when the cursor is inside a closure whose enclosing call
+            // site declares `@param-closure-this`, jump to the
+            // overridden class definition instead of the lexical class.
+            if ssp_kind == SelfStaticParentKind::This
+                && let Some(override_cls) =
+                    self.resolve_closure_this_override(uri, content, cursor_offset)
+            {
+                let fqn = override_cls.fqn();
+                if let Some(loc) =
+                    self.resolve_class_reference(uri, content, &fqn, true, cursor_offset)
+                {
+                    return Some(loc);
+                }
+            }
+
             // Jump to the enclosing class definition in the current file.
             if current_class.keyword_offset == 0 {
                 return None;

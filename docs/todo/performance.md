@@ -51,43 +51,6 @@ threshold (e.g. 8 files).
 
 ---
 
-## P5. `memmap2` for file reads during scanning
-
-**Impact: Low-Medium · Effort: Low**
-
-All file-scanning paths (`scan_files_parallel_classes`,
-`scan_files_parallel_psr4`, `scan_files_parallel_full`, and the
-`find_implementors` pre-filter) use `std::fs::read(path)` which
-copies the entire file into a heap-allocated `Vec<u8>`. When the OS
-page cache already has the file mapped, `memmap2` can provide a
-read-only view of the file's pages without any copy.
-
-### Fix
-
-Add `memmap2` as a dependency. In the parallel scan helpers, replace
-`std::fs::read(path)` with `unsafe { Mmap::map(&file) }`. The
-`find_classes` and `find_symbols` scanners already accept `&[u8]`,
-so the change is confined to the call sites.
-
-### Safety
-
-Memory-mapped reads are `unsafe` because another process could
-truncate the file while the map is live, causing a SIGBUS. In
-practice this does not happen during LSP initialization (the user is
-not deleting PHP files while the editor starts). A fallback to
-`fs::read` on map failure handles edge cases.
-
-### When to implement
-
-Profile first. On Linux with a warm page cache the difference
-between `read` and `mmap` is small for files under ~100 KB (which
-covers most PHP files). The benefit is more pronounced on macOS
-where `read` involves an extra kernel-to-userspace copy. If
-profiling shows that file I/O is no longer the bottleneck after
-parallelisation, this item can be dropped.
-
----
-
 ## P9. `resolved_class_cache` generic-arg specialisation
 
 **Impact: Medium · Effort: Medium**
@@ -553,9 +516,19 @@ isn't needed.
 
 **References:**
 - Psalm: `ClassLikeStorageCacheProvider` in
-  `references/psalm/src/Psalm/Internal/Provider/ClassLikeStorageCacheProvider.php`
+  `Psalm\Internal\Provider\ClassLikeStorageCacheProvider`
 - Psalm: `FileStorageCacheProvider` for the content-hash invalidation
   pattern
+- php-lsp: persists `FileIndex` entries under `~/.cache/php-lsp/`
+  keyed by `blake3(uri || content)`. They originally keyed on
+  `mtime + size` and shipped a cache-staleness bug (a size-preserving
+  edit within the same mtime second was missed) before switching to
+  content hashing. Confirms the content-hash-as-authority choice
+  above; never trust mtime for correctness, at most as a cheap
+  pre-filter to skip hashing unchanged files.
+- php-lsp: `docs/salsa-migration.md` in its own repo (Phases K1-K4)
+  documents their cache-size cap, reset-on-overflow, and
+  LRU-by-mtime eviction plans — useful pitfall list if P20 ships.
 
 ---
 
@@ -599,7 +572,7 @@ diagnostic layer.
 
 **References:**
 - Psalm: `FileDiffer` and `FileStatementsDiffer` in
-  `references/psalm/src/Psalm/Internal/Diff/`
+  `Psalm\Internal\Diff`
 - Psalm: `Analyzer::shiftFileOffsets()` for the offset-shifting logic
 
 ---
@@ -674,38 +647,191 @@ early since it is a few lines.
 
 ---
 
-## P24. Per-file maps that survive `did_close` grow for the whole session
+## P25. `type_mismatch_argument` / `argument_count_mismatch` slow on large single files
 
-**Impact: Low · Effort: Low**
+**Impact: Medium · Effort: Medium**
 
-Two session-lifetime leaks found while auditing map hygiene:
+On very large PHP files with thousands of call sites, the
+`type_mismatch_argument` and `argument_count_mismatch` diagnostic
+passes dominate the per-file time. On PDepend's
+`src/Source/Language/PHP/AbstractPHPParser.php` a single file spent
+~11.7s in `type_mismatch_argument` and ~2.9s in
+`argument_count_mismatch`:
 
-1. **`parse_errors` is never pruned.** `clear_file_maps`
-   (`src/util.rs:1757-1772`) removes `uri_classes_index`,
-   `symbol_maps`, `file_imports`, `resolved_names`, and
-   `file_namespaces`, but not `parse_errors`, and no other path
-   removes entries either (`did_close` and `reindex_files_batch`
-   both delegate to `clear_file_maps`). Every file ever opened
-   (or deleted from disk) keeps its last parse-error vector in
-   memory until restart.
+```
+⚠ slow file (15.6s): src/Source/Language/PHP/AbstractPHPParser.php
+  scope=1.9s, fast=0.0s, unknown_class=0.0s, unknown_member=0.1s,
+  unknown_function=0.0s, argument_count_mismatch=2.9s,
+  type_mismatch_argument=11.6s, deprecated_usage=0.1s,
+  unknown_variable=0.8s, invalid_class_kind=0.0s
+```
 
-2. **`member_completion_cache` has no size bound.** It is cleared
-   wholesale on signature-changing edits
-   (`src/parser/ast_update.rs:735`) and on watched-file changes,
-   but during read-heavy browsing (no edits) it accumulates one
-   `Vec<CompletionItem>` per distinct completion target — for
-   Eloquent models those vectors contain hundreds of fully-built
-   items each.
+Both passes walk every call site and call
+`resolve_callable_target_with_args` / `resolve_callable_target`
+per site. Variable-based calls and calls with argument text are
+resolved fresh at every site (only zero-arg static/function calls
+are cached), so a file with thousands of `$obj->method($args)`
+call sites re-resolves the receiver type once per site. Look at
+memoizing receiver-type resolution per (expression, offset) within
+a file, or sharing the forward-walk scope snapshot across both
+passes so the receiver type is computed once.
+
+---
+
+## P27. `object`/`?object` call-return check re-resolves the subject a second time
+
+**Impact: Medium · Effort: Low**
+
+`resolve_subject_outcome` resolves the whole subject up front (the
+`resolve_target_classes(subject, …)` call at the top). When that
+yields no concrete class, the `object`/`?object` escape-hatch branch
+then calls `resolve_call_raw_return_type(callee, "", ctx)` purely to
+peek at `is_object()`, and that helper re-resolves the callee's base
+chain from scratch. So every method/function call whose result has
+no concrete class pays a second full return-type resolution.
+
+This is exactly the shape of the `diagnostics/fixture/lots_of_missing_methods`
+benchmark (many calls whose results have missing members), and it
+regressed that fixture by ~29% (54ms → 70ms) when the branch was
+added, with a matching drift on hover and go-to-definition, which
+share this path.
 
 ### Fix
 
-Add `self.parse_errors.write().remove(uri)` to `clear_file_maps`.
-For the completion cache, a simple cap (e.g. clear when the map
-exceeds N entries) is enough — the cache exists to serve
-keystroke bursts on one target, so losing cold entries is free.
-While in there, audit the `diag_last_*` / `diag_result_ids` /
-external-tool diagnostic caches for the same keep-after-close
-pattern (they hold per-file diagnostic vectors).
+Fold the `object` detection into the primary resolution pass instead
+of running a separate re-resolution: when `resolve_target_classes`
+is about to return empty for a call subject, check whether the raw
+return type was `object`/`?object` at that point (the base chain is
+already resolved there) and emit the synthetic `stdClass` from the
+same pass. Do not pass `""` for the argument text on a second call;
+reuse the resolution already performed.
+
+---
+
+## P28. `process_assert_narrowing` clones the top-level scope once per variable for every statement
+
+**Impact: Low-Medium · Effort: Low**
+
+The forward walker's assert-narrowing step runs for every statement
+and clones `ctx.top_level_scope` once per variable currently in
+scope, even when the statement is not a call expression and can
+therefore never be an `assert()` / custom type-guard call. On
+methods with many locals and many statements the clones add up to a
+measurable share of the walk.
+
+Add an early-out that skips the per-variable loop when the statement
+cannot be an assertion (not a call expression). This was confirmed
+as an independently worthwhile micro-fix while investigating the
+PclZip return-type-inference hang, but was reverted at the time
+because it did not address that hang's dominant cost (uncached
+body-return inference, since fixed by memoization).
+
+---
+
+## P29. Migrate to `mago-phpdoc-syntax`
+
+**Impact: Medium · Effort: Medium**
+
+As of the 1.42/1.43 mago releases, `mago-docblock` and
+`mago-type-syntax` are both deprecated and frozen at 1.42.0. Upstream
+folded them into a single unified crate, `mago-phpdoc-syntax`, which
+parses docblock comments and their embedded type and constant
+expressions in one pass and is meant to replace both. The deprecation
+notices point at `mago_phpdoc_syntax::PHPDocParser` (for
+`parse_phpdoc_with_span`) and `mago_phpdoc_syntax::parse_type` (for
+`parse_str`).
+
+We currently call the deprecated functions at four sites, each wrapped
+in `#[allow(deprecated)]`:
+
+- `src/docblock/parser.rs` — `mago_docblock::parse_phpdoc_with_span`
+- `src/php_type.rs` — `mago_type_syntax::parse_str` (type-string parse
+  and the round-trip test helper)
+- `src/symbol_map/docblock.rs` — `mago_type_syntax::parse_str`
+
+`mago-phpdoc-syntax` first shipped at 1.44.0, so this migration is
+coupled to bumping the rest of the mago toolchain from 1.43.0 to
+1.44.0 (mixing 1.43 and 1.44 would pull two incompatible copies of the
+shared `mago-span` types). Do the version bump and the API migration
+together, drop `mago-docblock` and `mago-type-syntax` from
+`Cargo.toml`, and remove the `#[allow(deprecated)]` wrappers. The
+unified single-pass parser should also be a small win on the docblock
+parse hot path.
+
+---
+
+## P30. Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`
+
+**Impact: Medium-High · Effort: High**
+
+Mago 1.44.0 introduces `mago-hir`, a new intermediate representation
+that lowers the CST plus PHPDoc comments into a single flat,
+fully-resolved tree in one pass: names are resolved
+(`Local`/`Qualified`/`FullyQualified` + `imported` flag on every
+identifier), docblock tags are parsed into structured annotations
+(`@template`, `@extends`/`@implements` generics, `@mixin`,
+`@method`/`@property`, `@param`/`@return`/`@throws`,
+`@assert`/`@assert-if-true`/`@assert-if-false`, `@param-out`,
+`@self-out`, type aliases), and types are parsed into a full
+PHPStan/Psalm-grade type language (generics with resolved bounds,
+conditional types, `key-of`/`value-of`, array/object shapes,
+int-ranges, class-string variants, int-masks). This is exactly the
+layer PHPantom currently hand-rolls across `parser/`, `names.rs`,
+`docblock/`, and parts of `php_type.rs`.
+
+The IR threads three generic "hole" parameters
+(`IR<'arena, I, S, E>`, defaulting to `()`) through every node so a
+later inference pass can fill in resolved type information at
+item/statement/expression granularity without changing the tree
+shape — this is the "groundwork for the upcoming rule-based checker"
+azjezz described.
+
+Confirmed by reading the 1.44.0 source directly (docs.rs is only
+~1% documented, so don't rely on it): `mago-hir` depends only on
+crates we already use (`mago-syntax`, `mago-syntax-core`,
+`mago-phpdoc-syntax`, `mago-span`, `mago-database`,
+`mago-allocator`) plus the small `mago-flags` crate. It does **not**
+pull in `mago-codex`, `mago-analyzer`, or `mago-reflection`, so
+adopting it would not introduce a second type-resolution engine
+alongside our own (see the "no parallel type resolution systems"
+rule in `CLAUDE.md`) — it would replace the raw-parsing layer that
+currently *feeds* `ClassInfo` construction, not `ClassInfo` itself or
+`resolve_rhs_expression`/`resolve_expression_type`.
+
+Potential payoff if it holds up:
+
+- Deletes a large share of our hand-rolled docblock tag parsing,
+  type-string parsing, and name resolution, replacing it with a
+  single upstream-maintained pass.
+- A natural path to Blade support: lowering Blade's compiled-PHP
+  approximation (see `examples/laravel`/Blade handling) to the same
+  IR would let more code actions and diagnostics work uniformly on
+  Blade files instead of only a subset, as flagged in the Discord
+  discussion with azjezz.
+
+**Do not start this now.** The crate is brand new (shipped in
+1.44.0, not the 1.43.0 this project is currently on), ~19k LOC,
+under active redesign ("final touches... in the next branch" per
+azjezz), and its public API should be expected to move.
+
+**Triggers to revisit — start only once at least two of these hold:**
+
+- `mago-hir` has shipped unchanged (no breaking API changes) across
+  at least 2-3 minor mago releases, indicating the API has settled.
+- Upstream's own rule-based checker/analyzer ships on top of
+  `mago-hir` and is in real use, proving the IR's "holes" mechanism
+  works end-to-end for type inference, not just as a parse target.
+- rustdoc coverage for `mago-hir` is substantially more complete
+  (the 1.44.0 release is ~1% documented), or azjezz confirms the
+  shape is stable enough to build against.
+
+**Before committing to a full migration, prototype first:** feed
+`symbol_map` extraction (or `ClassInfo` construction) for a single
+file from `IR` behind a flag, on a branch, and compare output against
+the current extraction plus wall-clock time. Only proceed to a
+broader migration if the prototype reproduces current behavior and
+shows a real win; otherwise record the findings here and keep
+waiting on the triggers above.
 
 ---
 

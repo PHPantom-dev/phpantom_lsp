@@ -95,7 +95,6 @@ pub type ResolvedClassCacheKey = (Atom, Vec<String>);
 ///
 /// All three structures are kept consistent by going through [`Self::insert`],
 /// [`Self::clear`], and [`evict_fqn`]; callers never mutate the map directly.
-#[derive(Default)]
 pub struct ResolvedCacheInner {
     /// Resolved classes keyed by FQN + concrete generic args.
     map: HashMap<ResolvedClassCacheKey, Arc<ClassInfo>>,
@@ -107,6 +106,30 @@ pub struct ResolvedCacheInner {
     /// fully-qualified name or a short name), mirroring the dual FQN /
     /// short-name matching that eviction performs.
     reverse_deps: HashMap<String, HashSet<ResolvedClassCacheKey>>,
+    /// Whether the current project uses Laravel (or a standalone Illuminate
+    /// component).  When `false`, [`resolve_class_fully_inner`] skips the
+    /// Laravel virtual member providers, the contract to concrete-class
+    /// mixin bindings, and the post-resolution Laravel patches, so a
+    /// non-Laravel project pays none of that scanning cost.
+    ///
+    /// Defaults to `true`: Laravel analysis stays enabled unless the server
+    /// has parsed `composer.json` and confirmed no Laravel/Illuminate
+    /// dependency.  This keeps behaviour unchanged for the CLI test
+    /// backends and any code path that resolves without a project context.
+    /// Not touched by [`Self::clear`] — it reflects the project, not the
+    /// per-edit cache contents.
+    is_laravel: bool,
+}
+
+impl Default for ResolvedCacheInner {
+    fn default() -> Self {
+        ResolvedCacheInner {
+            map: HashMap::new(),
+            fqn_keys: HashMap::new(),
+            reverse_deps: HashMap::new(),
+            is_laravel: true,
+        }
+    }
 }
 
 impl ResolvedCacheInner {
@@ -118,6 +141,21 @@ impl ResolvedCacheInner {
     /// Whether a key is present in the cache.
     pub fn contains_key(&self, key: &ResolvedClassCacheKey) -> bool {
         self.map.contains_key(key)
+    }
+
+    /// Whether the project uses Laravel / Illuminate.  See the
+    /// [`is_laravel`](ResolvedCacheInner::is_laravel) field.
+    pub fn is_laravel(&self) -> bool {
+        self.is_laravel
+    }
+
+    /// Record whether the project uses Laravel / Illuminate.
+    ///
+    /// Set once by the server after parsing `composer.json`.  Left
+    /// untouched by [`Self::clear`] so cache invalidation on file edits
+    /// does not lose the project classification.
+    pub fn set_laravel(&mut self, is_laravel: bool) {
+        self.is_laravel = is_laravel;
     }
 
     /// Number of cached entries (used by eviction tests).
@@ -623,17 +661,23 @@ pub fn apply_virtual_members(
 /// 1. Laravel model provider (highest priority — richest type info)
 /// 2. Laravel factory provider (convention-based create/make methods)
 /// 3. PHPDoc provider (`@method` / `@property` / `@mixin` tags)
-pub fn default_providers() -> Vec<Box<dyn VirtualMemberProvider>> {
-    vec![
+///
+/// When `is_laravel` is `false`, the two Laravel providers are omitted so
+/// that a non-Laravel project does not pay for their parent-chain walks.
+/// The framework-agnostic PHPDoc provider is always included.
+pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
+    let mut providers: Vec<Box<dyn VirtualMemberProvider>> = Vec::new();
+    if is_laravel {
         // Laravel model provider — relationship properties, scopes, Builder
         // forwarding, convention-based factory() method.
-        Box::new(laravel::LaravelModelProvider),
+        providers.push(Box::new(laravel::LaravelModelProvider));
         // Laravel factory provider — convention-based create()/make() methods
         // for factory classes extending Illuminate\Database\Eloquent\Factories\Factory.
-        Box::new(laravel::LaravelFactoryProvider),
-        // PHPDoc provider — @method / @property / @mixin tags.
-        Box::new(phpdoc::PHPDocProvider),
-    ]
+        providers.push(Box::new(laravel::LaravelFactoryProvider));
+    }
+    // PHPDoc provider — @method / @property / @mixin tags.
+    providers.push(Box::new(phpdoc::PHPDocProvider));
+    providers
 }
 
 // ─── Recursion guard ────────────────────────────────────────────────────────
@@ -927,7 +971,15 @@ fn resolve_class_fully_inner(
     // parsed ClassInfo from uri_classes_index/stubs, which has unsubstituted
     // template parameters.  Fall back to the passed-in `class` only
     // when the loader cannot find it (e.g. anonymous classes).
-    let raw_class_arc = class_loader(fqn.as_str());
+    //
+    // Guard against a same-short-name import hijacking the reload: a
+    // global class like `\Redis` has the bare FQN `Redis`, and a file
+    // that imports `use Illuminate\Support\Facades\Redis;` would make
+    // the import-aware `class_loader("Redis")` return the facade
+    // instead.  Only accept the reload when it names the same class;
+    // otherwise keep the already-resolved `class`.
+    let raw_class_arc =
+        class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let effective_class: &ClassInfo = match &raw_class_arc {
         Some(raw) => raw,
         None => class,
@@ -960,23 +1012,43 @@ fn resolve_class_fully_inner(
     // ── Uncached resolution ─────────────────────────────────────────
     let mut merged = resolve_class_with_inheritance(effective_class, class_loader);
 
+    // Whether Laravel-specific resolution should run.  Read from the
+    // project-scoped cache when one is active; otherwise default to `true`
+    // so behaviour is unchanged for cache-less code paths and tests.
+    let is_laravel = cache.map(|c| c.read().is_laravel()).unwrap_or(true);
+
     // ── Pre-provider patches ────────────────────────────────────────
     // Inject missing `@mixin` annotations before virtual member
     // providers run, so that `collect_mixin_members` picks them up.
-    if fqn.as_str() == "Illuminate\\Redis\\Connections\\Connection" {
-        let mixin = atom("Redis");
-        if !merged.mixins.contains(&mixin) {
-            merged.mixins.push(mixin);
+    // All of these target framework classes, so they are skipped
+    // entirely for non-Laravel projects.
+    if is_laravel {
+        if fqn.as_str() == "Illuminate\\Redis\\Connections\\Connection" {
+            let mixin = atom("Redis");
+            if !merged.mixins.contains(&mixin) {
+                merged.mixins.push(mixin);
+            }
         }
-    }
-    if fqn.as_str() == "Illuminate\\Database\\Eloquent\\Builder" {
-        let mixin = atom("Illuminate\\Database\\Query\\Builder");
-        if !merged.mixins.contains(&mixin) {
-            merged.mixins.push(mixin);
+        if fqn.as_str() == "Illuminate\\Database\\Eloquent\\Builder" {
+            let mixin = atom("Illuminate\\Database\\Query\\Builder");
+            if !merged.mixins.contains(&mixin) {
+                merged.mixins.push(mixin);
+            }
+        }
+        // Bind core Illuminate contracts to their default concrete class as
+        // a mixin, so unknown-method diagnostics resolve through the
+        // concrete's `__call` (e.g. `Contracts\View\View` → `View\View`,
+        // which uses `Macroable`).  The concrete is injected pre-provider
+        // so `collect_mixin_members` merges its members.
+        if let Some(concrete) = laravel::patches::contract_concrete_mixin(fqn.as_str()) {
+            let mixin = atom(concrete);
+            if !merged.mixins.contains(&mixin) {
+                merged.mixins.push(mixin);
+            }
         }
     }
 
-    let providers = default_providers();
+    let providers = default_providers(is_laravel);
     if !providers.is_empty() {
         apply_virtual_members(&mut merged, class_loader, &providers, cache);
     }
@@ -1213,8 +1285,11 @@ fn resolve_class_fully_inner(
     // Apply centralized post-resolution patches for Laravel classes.
     // These modify existing members' type information (e.g. fixing
     // return types) rather than adding new members.  See
-    // `laravel/patches.rs` for the full patch inventory.
-    apply_laravel_patches(&mut merged, &fqn);
+    // `laravel/patches.rs` for the full patch inventory.  Skipped for
+    // non-Laravel projects.
+    if is_laravel {
+        apply_laravel_patches(&mut merged, &fqn);
+    }
 
     // ── Cache store ─────────────────────────────────────────────────
     // ── Remove from recursion guard ─────────────────────────────────

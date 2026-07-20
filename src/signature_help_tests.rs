@@ -722,10 +722,10 @@ fn clamp_empty_params() {
 /// Helper: parse PHP source and build a SymbolMap, then call
 /// `detect_call_site_from_map` at the given line/character.
 fn map_detect(content: &str, line: u32, character: u32) -> Option<CallSiteContext> {
-    use bumpalo::Bump;
+    use mago_allocator::LocalArena;
     use mago_database::file::FileId;
 
-    let arena = Bump::new();
+    let arena = LocalArena::new();
     let file_id = FileId::new(b"test.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let sm = crate::symbol_map::extract_symbol_map(program, content);

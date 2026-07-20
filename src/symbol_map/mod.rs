@@ -28,6 +28,8 @@
 pub(crate) mod docblock;
 mod extraction;
 
+use std::collections::HashMap;
+
 use crate::php_type::PhpType;
 
 // Re-export the public entry point from extraction.
@@ -61,6 +63,16 @@ pub(crate) enum SelfStaticParentKind {
     Parent,
     /// The `$this` pseudo-variable.
     This,
+}
+
+pub(crate) fn self_static_parent_kind(name: &str) -> Option<SelfStaticParentKind> {
+    match name {
+        "self" => Some(SelfStaticParentKind::Self_),
+        "static" => Some(SelfStaticParentKind::Static),
+        "parent" => Some(SelfStaticParentKind::Parent),
+        "$this" => Some(SelfStaticParentKind::This),
+        _ => None,
+    }
 }
 
 /// The syntactic context in which a `ClassReference` appears.
@@ -135,6 +147,16 @@ pub(crate) enum SymbolKind {
         /// Diagnostics skip these because the subject is a class name,
         /// not a runtime expression.
         is_docblock_reference: bool,
+        /// `true` when this span was synthesised from a two-element
+        /// `[Class::class, 'method']` / `[$obj, 'method']` array literal
+        /// rather than a real `->`/`::` access.  These spans are a
+        /// best-effort navigation aid: without type-flow analysis we
+        /// cannot tell a callable array from a plain data pair (e.g.
+        /// `return [[Foo::class, 'name'], ...]`), so diagnostics skip
+        /// them to avoid false "method not found" errors.  Navigation,
+        /// hover, and semantic tokens still use them because they only
+        /// surface information when the member actually resolves.
+        is_array_callable: bool,
     },
 
     /// A `$variable` token (usage or definition site).
@@ -220,6 +242,16 @@ pub(crate) enum SymbolKind {
         kind: LaravelStringKind,
         /// The key value, e.g. `"app.name"` or `"users.index"`.
         key: String,
+    },
+
+    /// The string-literal name argument inside a Laravel `::macro('name', ...)`
+    /// registration.
+    ///
+    /// The span covers the string content inside the quotes so find-references
+    /// and rename can link the registration site with macro call sites.
+    LaravelMacroString {
+        /// Macro method name, e.g. `"sumPrices"`.
+        name: String,
     },
 }
 
@@ -440,6 +472,11 @@ pub(crate) enum VarDefKind {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SymbolMap {
     pub spans: Vec<SymbolSpan>,
+    /// Member-access span indices keyed by member name.
+    ///
+    /// This lets references/rename jump straight to relevant `->name` /
+    /// `::name` spans without rescanning the full `spans` vec for each file.
+    pub member_access_indices: HashMap<String, Vec<usize>>,
     /// Variable definition sites, sorted by `(scope_start, offset)`.
     pub var_defs: Vec<VarDefSite>,
     /// Scope boundaries `(start_offset, end_offset)` for functions,
@@ -519,6 +556,14 @@ pub(crate) struct SymbolMap {
 }
 
 impl SymbolMap {
+    /// Indices into [`Self::spans`] for member accesses named `name`.
+    pub fn member_access_indices(&self, name: &str) -> &[usize] {
+        self.member_access_indices
+            .get(name)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// Find the symbol span (if any) that contains `offset`.
     ///
     /// Uses binary search on the sorted `spans` vec.  Returns `None`

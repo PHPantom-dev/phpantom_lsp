@@ -155,7 +155,7 @@ project for PHP parsing and type representation:
 | `mago-type-syntax` | PHPStan/Psalm type expression parsing into `PhpType`   |
 
 `PhpType` (`src/php_type.rs`) is an owned enum that wraps the borrowed
-`mago_type_syntax::ast::Type` AST. Every type-carrying field in the
+`mago_type_syntax::cst::Type` AST. Every type-carrying field in the
 data model (`type_hint`, `return_type`, `native_type_hint`,
 `native_return_type`, `asserted_type`, `template_param_bounds` values,
 generics type arguments, `ResolvedType::type_string`) uses `PhpType`.
@@ -1066,7 +1066,7 @@ Every type check is classified into one of three buckets:
 - **Nullable to non-nullable** (`?Carbon` to `Carbon`). The developer may have null-checked before the call. We cannot see the guard clause from the call site alone.
 - **Bare array to typed array** (`array` to `array<string>`). A bare `array` is untyped. It might contain strings. We cannot prove otherwise.
 - **Stringable objects to string** (`HtmlString` to `string`). PHP calls `__toString()` at runtime. We follow PHP's runtime behaviour.
-- **Int to string**. PHP coerces integers to strings in many contexts and we cannot know the `strict_types` setting.
+- **Int to string** (without `strict_types`). PHP coerces integers to strings in many contexts. When `declare(strict_types=1)` is present in the calling file, this coercion is flagged as a type error.
 - **`list<X>` and `array<int, X>`**. Used interchangeably in practice. array<int, X> might have sequential-keys in actuality.
 - **Interface to concrete subtype** (`CarbonInterface` to `Carbon`). The interface is broader, but in practice the value is almost always the expected concrete type.
 
@@ -1093,6 +1093,22 @@ Diagnostics run in three independent background `tokio::spawn` tasks so they nev
 1. **Native diagnostic worker** — collects fast (syntax errors, unused imports, deprecated usage) and slow (unknown classes/members/functions, argument count, implementation errors) diagnostics. Debounces at 500 ms.
 2. **PHPStan worker** — runs PHPStan in editor mode (`--tmp-file` / `--instead-of`). Debounces at 2 000 ms.
 3. **PHPCS worker** — runs PHP_CodeSniffer via `phpcs --report=json` with stdin piping. Debounces at 2 000 ms.
+
+### Native transport choice
+
+For native diagnostics, PHPantom chooses exactly one LSP delivery model per
+client:
+
+1. **Pull if supported** (`textDocument/diagnostic` / `workspace/diagnostic`)
+2. **Push otherwise** (`textDocument/publishDiagnostics`)
+
+This is intentional, not a client-specific workaround. Pull diagnostics are
+the newer client-driven model and are the preferred path when available.
+Pushing the same native diagnostics alongside pull creates two competing
+streams for one source of truth, which clients may merge, replace, or
+deduplicate differently. The server therefore treats push as a compatibility
+fallback for older clients rather than mixing both transports for the same
+native diagnostic set.
 
 Each worker is created during `initialized` via `clone_for_diagnostic_worker`, which builds a shallow clone of the `Backend`. All `Arc`-wrapped fields (maps, caches, the notify/pending slots) are shared by `Arc::clone`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 

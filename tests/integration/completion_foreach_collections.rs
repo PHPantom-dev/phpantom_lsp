@@ -1,4 +1,6 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -751,6 +753,272 @@ async fn test_foreach_nested_generic_array_property_access() {
     assert!(
         labels.iter().any(|l| l.starts_with("apply")),
         "Should include 'apply' from Rule when iterating nested generic array access. Got: {:?}",
+        labels
+    );
+}
+
+// ─── Foreach over SimpleXMLElement (Iterator without generics) ──────────────
+
+/// `SimpleXMLElement` implements `Iterator` directly (not
+/// `IteratorAggregate`) with no generic annotation. Iterating it (or the
+/// result of `children()`/`attributes()`, both typed `?static`) should
+/// still resolve the value variable by falling back to `current()`'s
+/// return type.
+#[tokio::test]
+async fn test_foreach_simplexmlelement_resolves_via_current_method() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Url::parse("file:///foreach_simplexml.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function process(SimpleXMLElement $xml): void {\n",
+        "    foreach ($xml->children() as $child) {\n",
+        "        $child->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 16).await;
+    let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+
+    assert!(
+        labels.iter().any(|l| l.starts_with("getName")),
+        "Should include 'getName' from SimpleXMLElement when iterating children(). Got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("attributes")),
+        "Should include 'attributes' from SimpleXMLElement when iterating children(). Got: {:?}",
+        labels
+    );
+}
+
+// ─── Foreach over an SPL wrapper-iterator subclass (3 generic params) ────────
+
+/// A class extending `FilterIterator` with
+/// `@extends FilterIterator<int, SplFileInfo, \Iterator<int, SplFileInfo>>`
+/// has three generic arguments: `TKey`, `TValue`, `TIterator`. The value
+/// type is the *second* argument (`SplFileInfo`), not the last (the inner
+/// iterator). Iterating an instance should resolve the value variable to
+/// `SplFileInfo`, exposing `getRealPath()`.
+#[tokio::test]
+async fn test_foreach_filter_iterator_subclass_three_generic_params() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Url::parse("file:///foreach_filter_iterator.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @extends FilterIterator<int, SplFileInfo, \\Iterator<int, SplFileInfo>>\n",
+        " */\n",
+        "class FileIterator extends FilterIterator {\n",
+        "    public function accept(): bool { return true; }\n",
+        "}\n",
+        "function process(FileIterator $files): void {\n",
+        "    foreach ($files as $file) {\n",
+        "        $file->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 9, 15).await;
+    let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+
+    assert!(
+        labels.iter().any(|l| l.starts_with("getRealPath")),
+        "Should include 'getRealPath' from SplFileInfo when iterating a FilterIterator<_, SplFileInfo, _> subclass. Got: {:?}",
+        labels
+    );
+}
+
+// ─── Foreach over a directly-constructed SPL iterator ───────────────────────
+
+/// `foreach (new DirectoryIterator(...) as $file)` should type `$file` as
+/// `DirectoryIterator` (via the `current()` docblock return type), exposing
+/// `SplFileInfo` members like `isFile()` and `getPathname()`.
+#[tokio::test]
+async fn test_foreach_new_directory_iterator() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Url::parse("file:///foreach_directory_iterator.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function process(string $dir): void {\n",
+        "    foreach (new DirectoryIterator($dir) as $file) {\n",
+        "        $file->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 15).await;
+    let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+
+    assert!(
+        labels.iter().any(|l| l.starts_with("isFile")),
+        "Should include 'isFile' when iterating new DirectoryIterator(...). Got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("getPathname")),
+        "Should include 'getPathname' when iterating new DirectoryIterator(...). Got: {:?}",
+        labels
+    );
+}
+
+// ─── Inline `@var` retype of a `mixed` param before foreach ─────────────────
+
+/// A `mixed` closure parameter that is retyped by an inline
+/// `/** @var iterable<Subscription> $subscriptions */` immediately before a
+/// `foreach` should let the loop variable resolve to `Subscription`.  The
+/// `mixed` parameter previously occupied the scope slot and shadowed the
+/// annotation, leaving `$subscription` untyped.
+#[tokio::test]
+async fn test_foreach_inline_var_retypes_mixed_param() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///foreach_inline_var_mixed.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Subscription {\n",
+        "    public int $user_id;\n",
+        "    public function getUserId(): int {}\n",
+        "}\n",
+        "$check = function (mixed $subscriptions): bool {\n",
+        "    /** @var iterable<Subscription> $subscriptions */\n",
+        "    foreach ($subscriptions as $subscription) {\n",
+        "        $subscription->\n",
+        "    }\n",
+        "    return true;\n",
+        "};\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 8, 23).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("user_id")),
+        "Should include 'user_id' from Subscription after inline @var retype. Got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("getUserId")),
+        "Should include 'getUserId' from Subscription after inline @var retype. Got: {:?}",
+        labels
+    );
+}
+
+// ─── Inline `@var` seeds the base variable of a method-chain iterable ───────
+
+/// When the foreach iterable is a method chain (`$users->active()`) and the
+/// base variable is only typed by an inline `/** @var ... $users */`
+/// docblock, the annotation should seed the base variable so the chain
+/// resolves and the loop variable gets the element type.
+#[tokio::test]
+async fn test_foreach_chain_iterable_base_var_seeded_from_inline_var() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///foreach_chain_inline_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getName(): string {}\n",
+        "}\n",
+        "class UserCollection {\n",
+        "    /** @return list<User> */\n",
+        "    public function active(): array {}\n",
+        "}\n",
+        "/** @var UserCollection $users */\n",
+        "foreach ($users->active() as $u) {\n",
+        "    $u->\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 11, 8).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("name")),
+        "Should include 'name' from User via @var-seeded chain base. Got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("getName")),
+        "Should include 'getName' from User via @var-seeded chain base. Got: {:?}",
+        labels
+    );
+}
+
+/// An inline `@var` retypes a `mixed` parameter used as the base of a
+/// method-chain iterable, mirroring the direct-variable case: a broad
+/// pre-existing type does not shadow the explicit annotation.
+#[tokio::test]
+async fn test_foreach_chain_iterable_inline_var_retypes_mixed_param() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///foreach_chain_inline_var_mixed.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getName(): string {}\n",
+        "}\n",
+        "class UserCollection {\n",
+        "    /** @return list<User> */\n",
+        "    public function active(): array {}\n",
+        "}\n",
+        "function process(mixed $users): void {\n",
+        "    /** @var UserCollection $users */\n",
+        "    foreach ($users->active() as $u) {\n",
+        "        $u->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 12, 12).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("getName")),
+        "Should include 'getName' from User after inline @var retype of chain base. Got: {:?}",
+        labels
+    );
+}
+
+/// When the base variable of a method-chain iterable already has a type
+/// from an assignment, a preceding inline `@var` naming a different class
+/// is an explicit developer override and wins, matching the
+/// direct-variable branch's semantics.
+#[tokio::test]
+async fn test_foreach_chain_iterable_inline_var_overrides_assignment_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///foreach_chain_var_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Admin {\n",
+        "    public string $email;\n",
+        "    public function ban(): void {}\n",
+        "}\n",
+        "class Member {\n",
+        "    public string $nickname;\n",
+        "}\n",
+        "class AdminCollection {\n",
+        "    /** @return list<Admin> */\n",
+        "    public function items(): array {}\n",
+        "}\n",
+        "class MemberCollection {\n",
+        "    /** @return list<Member> */\n",
+        "    public function items(): array {}\n",
+        "}\n",
+        "function loadAdmins(): AdminCollection {}\n",
+        "$users = loadAdmins();\n",
+        "/** @var MemberCollection $users */\n",
+        "foreach ($users->items() as $u) {\n",
+        "    $u->\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 20, 8).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("nickname")),
+        "Should include 'nickname' from Member (explicit @var override wins). Got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("ban")),
+        "Should NOT include 'ban' from Admin (the @var overrode the assignment type). Got: {:?}",
         labels
     );
 }

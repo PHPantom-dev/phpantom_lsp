@@ -1,0 +1,18 @@
+// test: new $var with bare @var class-string<T> resolves the instantiated type
+// feature: completion
+// expect: setName(
+---
+<?php
+
+class Rule {
+    public function setName(string $name): void {}
+    public function getPriority(): int {}
+}
+
+function make(mixed $className): void {
+    /** @var class-string<Rule> */
+    $className = (string) $className;
+
+    $rule = new $className();
+    $rule-><>
+}

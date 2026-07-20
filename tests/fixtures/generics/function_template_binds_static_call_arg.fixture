@@ -1,0 +1,26 @@
+// test: array<T> template binds when the argument is a static method call
+// feature: completion
+// expect: address
+---
+<?php
+
+class EmailConfig {
+    public string $address = '';
+}
+
+/**
+ * @template T
+ * @param array<T> $a
+ * @return T
+ */
+function first_config(array $a): mixed {}
+
+class Mailer {
+    /** @return array<string, EmailConfig> */
+    public static function getEmailConfigs(): array { return []; }
+
+    public function run(): void {
+        $email = first_config(self::getEmailConfigs());
+        $email-><>
+    }
+}

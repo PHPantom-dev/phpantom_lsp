@@ -1,0 +1,24 @@
+// test: dynamic (variable) key on an array shape resolves to the union of value types
+// feature: completion
+// expect: toString(
+---
+<?php
+
+class Decimal {
+    public function toString(): string { return ''; }
+    public function add(Decimal $other): Decimal { return $this; }
+}
+
+class PriceService {
+    /** @return array{normalPrice: Decimal, memberPrice: Decimal} */
+    private function getPrices(): array { return []; }
+
+    public function format(string $priceToUse): string {
+        $prices = $this->getPrices();
+        $price = $prices[$priceToUse] ?? null;
+        if ($price === null) {
+            return '';
+        }
+        $price-><>
+    }
+}

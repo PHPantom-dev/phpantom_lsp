@@ -2577,6 +2577,180 @@ async fn test_completion_mixin_template_param_resolved_to_bound() {
     }
 }
 
+/// When a `@mixin TNode` lives on an ancestor whose template parameter is
+/// tightened by a descendant (`AbstractNode<TNode of ASTNode>` →
+/// `CallableNode<TNode of Callable>`), members resolve through the most
+/// derived (tightest) bound, not the ancestor's looser one.  This is the
+/// PHPMD three-level wrapper hierarchy: the mixin is declared on the base
+/// `AbstractNode` (bound `Node`) but `getParameters()` only exists on the
+/// tighter `Callable` bound introduced by `CallableNode`.
+#[tokio::test]
+async fn test_completion_mixin_template_param_tightest_bound_across_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_tightest_bound.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "interface Node {\n",                                   // 1
+        "    public function getName(): string;\n",             // 2
+        "}\n",                                                  // 3
+        "interface Callable_ extends Node {\n",                 // 4
+        "    public function getParameters(): array;\n",        // 5
+        "}\n",                                                  // 6
+        "/**\n",                                                // 7
+        " * @template-covariant TNode of Node\n",               // 8
+        " * @mixin TNode\n",                                    // 9
+        " */\n",                                                // 10
+        "abstract class AbstractNode {}\n",                     // 11
+        "/**\n",                                                // 12
+        " * @template-covariant TNode of Callable_\n",          // 13
+        " * @extends AbstractNode<TNode>\n",                    // 14
+        " */\n",                                                // 15
+        "abstract class CallableNode extends AbstractNode {\n", // 16
+        "    function test() {\n",                              // 17
+        "        $this->\n",                                    // 18
+        "    }\n",                                              // 19
+        "}\n",                                                  // 20
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 18,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // From the loose bound (Node) — available at every level.
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName' from the base bound, got: {:?}",
+                method_names
+            );
+            // Only on the tightest bound (Callable_) introduced by CallableNode.
+            assert!(
+                method_names.contains(&"getParameters"),
+                "Should include 'getParameters' from the tightest bound, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// A `@mixin` naming a template parameter resolves through the template's
+/// upper bound even on the declaring class itself (no concrete subclass
+/// binding required).  This is the PHPMD wrapper pattern where an abstract
+/// `@template TNode of Engine` + `@mixin TNode` class is used directly.
+#[tokio::test]
+async fn test_completion_mixin_template_param_bound_on_declaring_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_template_bound_direct.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                      // 0
+        "interface Engine {\n",                                         // 1
+        "    public function getLabel(): string;\n",                    // 2
+        "    public function getStartLine(): int;\n",                   // 3
+        "}\n",                                                          // 4
+        "/**\n",                                                        // 5
+        " * @template-covariant TNode of Engine\n",                     // 6
+        " * @mixin TNode\n",                                            // 7
+        " */\n",                                                        // 8
+        "abstract class Wrapper {\n",                                   // 9
+        "    public function getWrapped(): object { return $this; }\n", // 10
+        "}\n",                                                          // 11
+        "function test(Wrapper $wrapper): void {\n",                    // 12
+        "    $wrapper->\n",                                             // 13
+        "}\n",                                                          // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // Own method on the abstract class.
+            assert!(
+                method_names.contains(&"getWrapped"),
+                "Should include own method 'getWrapped', got: {:?}",
+                method_names
+            );
+            // Mixin methods resolved through the template's upper bound.
+            assert!(
+                method_names.contains(&"getLabel"),
+                "Should include mixin method 'getLabel' from template bound, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getStartLine"),
+                "Should include mixin method 'getStartLine' from template bound, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 #[tokio::test]
 async fn test_completion_mixin_return_self_resolves_to_consumer_class() {
     let backend = create_test_backend();

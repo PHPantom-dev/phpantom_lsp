@@ -44,16 +44,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::ast::argument::Argument;
-use mago_syntax::ast::sequence::TokenSeparatedSequence;
-use mago_syntax::ast::*;
+use mago_syntax::cst::argument::Argument;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::types::narrowing;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{PhpType, ShapeEntry};
-use crate::types::{AccessKind, ClassInfo, ResolvedType};
+use crate::types::{AccessKind, ClassInfo, MethodInfo, PropertyInfo, ResolvedType};
 
 // ─── Hover scope cache (Phase 3) ────────────────────────────────────────────
 //
@@ -275,12 +275,84 @@ pub(crate) fn is_diagnostic_scope_active() -> bool {
 /// Insert a scope snapshot into the diagnostic scope cache at the given
 /// byte offset.
 fn record_scope_snapshot(offset: u32, scope: &ScopeState) {
+    // Skip recording while a nested variable-resolution walk is in
+    // progress.  Those walks (see [`suspend_snapshot_recording`]) spin up
+    // their own fresh scope to answer a single "what is this variable's
+    // type?" query and must not overwrite the authoritative snapshots
+    // built by the dedicated diagnostic-scope walk.  Their statement
+    // offsets can even come from a different file (e.g. a return-type
+    // inference walking the callee's body) and would otherwise collide
+    // with the outer file's offsets in the shared map.
+    if SUSPEND_SNAPSHOT.with(|c| c.get()) > 0 {
+        return;
+    }
     DIAGNOSTIC_SCOPE.with(|cell| {
         let mut borrow = cell.borrow_mut();
         if let Some(ref mut map) = *borrow {
             map.insert(offset, scope.locals.clone());
         }
     });
+}
+
+thread_local! {
+    /// Non-zero while a nested variable-resolution walk is running.
+    /// Consulted by [`record_scope_snapshot`] to suppress snapshot
+    /// writes that would pollute the authoritative diagnostic scope
+    /// cache.  A counter (rather than a bool) so nested resolution
+    /// walks compose correctly.
+    static SUSPEND_SNAPSHOT: Cell<u32> = const { Cell::new(0) };
+}
+
+/// RAII guard that decrements the [`SUSPEND_SNAPSHOT`] counter on drop.
+struct SnapshotSuspendGuard;
+
+impl Drop for SnapshotSuspendGuard {
+    fn drop(&mut self) {
+        SUSPEND_SNAPSHOT.with(|c| c.set(c.get().saturating_sub(1)));
+    }
+}
+
+/// Suspend diagnostic scope snapshot recording for the lifetime of the
+/// returned guard.
+///
+/// The dedicated diagnostic-scope walk ([`build_diagnostic_scopes`])
+/// resolves assignment right-hand sides and method return types as it
+/// goes.  That resolution can re-enter the forward walker
+/// ([`resolve_in_method_body`], [`resolve_in_top_level`], etc.) to look
+/// up a variable's type, which walks a body with a fresh scope.  Without
+/// this guard those nested walks would record their own snapshots into
+/// the active cache, clobbering the outer scope (dropping variables like
+/// a query builder assigned earlier in the method) and producing
+/// false-positive "type could not be resolved" diagnostics on some
+/// call-chain branches but not others.
+fn suspend_snapshot_recording() -> SnapshotSuspendGuard {
+    SUSPEND_SNAPSHOT.with(|c| c.set(c.get() + 1));
+    SnapshotSuspendGuard
+}
+
+/// RAII guard that restores the saved [`SUSPEND_SNAPSHOT`] value on drop.
+struct SnapshotResumeGuard(u32);
+
+impl Drop for SnapshotResumeGuard {
+    fn drop(&mut self) {
+        SUSPEND_SNAPSHOT.with(|c| c.set(self.0));
+    }
+}
+
+/// Temporarily clear any active snapshot suspension for the lifetime of
+/// the returned guard, restoring it on drop.
+///
+/// Use this around a *dedicated* scope-building walk (e.g. the hover
+/// scope cache population in [`resolve_in_method_body`]) that must record
+/// snapshots even when it happens to run inside a nested variable
+/// resolution that suspended recording via [`suspend_snapshot_recording`].
+fn resume_snapshot_recording() -> SnapshotResumeGuard {
+    let prev = SUSPEND_SNAPSHOT.with(|c| {
+        let v = c.get();
+        c.set(0);
+        v
+    });
+    SnapshotResumeGuard(prev)
 }
 
 /// Walk a sequence of statements for diagnostic scope building.
@@ -304,6 +376,15 @@ fn walk_body_for_diagnostics<'b>(
         // variable types that were established by prior statements.
         record_scope_snapshot(stmt.span().start.offset, scope);
 
+        // Snapshot the pre-statement scope for the closure walk below.
+        // Closures and other references inside this statement's own
+        // expression evaluate *before* the statement's assignment takes
+        // effect, so they must see the pre-assignment types.  E.g. in
+        // `$x = f(fn() => ..., $x)` the trailing `$x` argument must
+        // resolve to `$x`'s type before the reassignment, not `f()`'s
+        // result.
+        let pre_stmt_scope = scope.clone();
+
         process_statement(stmt, scope, ctx);
 
         // Walk closure and arrow function bodies found in this
@@ -314,7 +395,7 @@ fn walk_body_for_diagnostics<'b>(
         // their parameter types added on top.  The body is fully
         // walked so that scope snapshots are recorded for every
         // statement inside the closure/arrow function.
-        walk_closures_in_statement(stmt, scope, ctx);
+        walk_closures_in_statement(stmt, &pre_stmt_scope, ctx);
 
         // Also record at the statement's end offset, which covers
         // member accesses that appear after the last statement in
@@ -515,6 +596,18 @@ fn walk_closures_in_expr<'b>(
             record_scope_snapshot(body_span.start.offset, &arrow_scope);
             record_scope_snapshot(body_span.end.offset, &arrow_scope);
 
+            // The arrow body is a single return-value expression, so
+            // apply the same `&&` / `||` / match / ternary narrowing that
+            // a `return $x instanceof Foo && $x->bar()` statement would
+            // get.  Without this, a member access on a parameter narrowed
+            // by an earlier conjunct (e.g. `fn($x) => $x instanceof Foo
+            // && $x->bar()`) sees the un-narrowed parameter type.
+            record_and_chain_snapshots(arrow.expression, &arrow_scope, ctx);
+            record_or_chain_snapshots(arrow.expression, &arrow_scope, ctx);
+            if is_diagnostic_scope_active() {
+                record_match_ternary_snapshots(arrow.expression, &arrow_scope, ctx);
+            }
+
             // Restore the outer scope after the arrow body (same
             // reasoning as for closures above).
             record_scope_snapshot(body_span.end.offset + 1, outer_scope);
@@ -596,6 +689,22 @@ fn walk_closures_in_expr<'b>(
             if let Some(ref args) = inst.argument_list {
                 walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
             }
+        }
+        Expression::AnonymousClass(anon) => {
+            // Constructor arguments evaluate in the outer scope (with the
+            // outer `$this`), so scan them for closures there.
+            if let Some(ref args) = anon.argument_list {
+                walk_closure_in_partial_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+            }
+            // The anonymous class's own method bodies have their own
+            // `$this` (the anonymous class), so walk them separately.
+            walk_anonymous_class_member_bodies(anon, ctx);
+
+            // Restore the outer scope immediately after the anonymous
+            // class body so that code following it in the same expression
+            // (e.g. a sibling call argument `f(new class {...}, $this->x)`)
+            // sees the outer `$this`, not the anonymous class's.
+            record_scope_snapshot(anon.right_brace.end.offset + 1, outer_scope);
         }
         Expression::Yield(y) => match y {
             Yield::Value(yv) => {
@@ -773,6 +882,45 @@ fn walk_closures_in_call_args<'b, F>(
     }
 }
 
+/// Walk the partial arguments of a call expression, invoking `infer_fn` for
+/// each argument index to get inferred callable parameter types.
+/// When an argument is a closure/arrow function, the inferred types
+/// are passed through so untyped parameters get the correct types.
+fn walk_closure_in_partial_call_args<'b, F>(
+    arguments: &'b TokenSeparatedSequence<'b, PartialArgument<'b>>,
+    outer_scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    infer_fn: F,
+) where
+    F: Fn(usize) -> Vec<PhpType>,
+{
+    for (arg_idx, arg) in arguments.iter().enumerate() {
+        let arg_expr = match arg {
+            PartialArgument::Positional(a) => a.value,
+            PartialArgument::Named(a) => a.value,
+            _ => continue,
+        };
+        match arg_expr {
+            Expression::Closure(_) | Expression::ArrowFunction(_) => {
+                let inferred = infer_fn(arg_idx);
+                walk_closures_in_expr(
+                    arg_expr,
+                    outer_scope,
+                    ctx,
+                    if inferred.is_empty() {
+                        None
+                    } else {
+                        Some(&inferred)
+                    },
+                );
+            }
+            _ => {
+                walk_closures_in_expr(arg_expr, outer_scope, ctx, None);
+            }
+        }
+    }
+}
+
 /// Seed a closure/arrow function scope with parameter types, using
 /// inferred callable types as fallback for untyped parameters.
 ///
@@ -904,7 +1052,18 @@ fn seed_closure_params(
                             ctx.all_classes,
                             ctx.class_loader,
                         );
-                    if !inferred_resolved.is_empty()
+                    // Narrow to the inferred type only when it is a
+                    // genuine refinement of the *whole* declared type:
+                    // every inferred class must be a subtype of some
+                    // declared class (inferred ⊆ declared), AND every
+                    // declared class must be refined by some inferred
+                    // class (declared covered by inferred).  Without the
+                    // second check a declared union like
+                    // `A|B|C` collapses to a single inferred arm (`A`)
+                    // when the subject is a union of differently
+                    // parameterized collections, discarding the other
+                    // declared possibilities.
+                    let inferred_is_subtype = !inferred_resolved.is_empty()
                         && inferred_resolved.iter().all(|inferred_cls| {
                             resolved.iter().any(|explicit_cls| {
                                 crate::util::is_subtype_of_names(
@@ -913,8 +1072,17 @@ fn seed_closure_params(
                                     ctx.class_loader,
                                 )
                             })
+                        });
+                    let inferred_covers_declared = resolved.iter().all(|explicit_cls| {
+                        inferred_resolved.iter().any(|inferred_cls| {
+                            crate::util::is_subtype_of_names(
+                                &inferred_cls.fqn(),
+                                &explicit_cls.fqn(),
+                                ctx.class_loader,
+                            )
                         })
-                    {
+                    });
+                    if inferred_is_subtype && inferred_covers_declared {
                         ResolvedType::from_classes_with_hint(inferred_resolved, inferred.clone())
                     } else {
                         ResolvedType::from_classes_with_hint(resolved, eff.clone())
@@ -975,7 +1143,17 @@ fn seed_closure_params(
             }
         }
 
-        if !param_results.is_empty() {
+        // Closure/arrow-function parameters shadow same-named outer
+        // variables unconditionally.  Even when no type could be
+        // determined, the outer variable's type must not leak into the
+        // closure body — record the parameter as present-but-untyped
+        // and drop any synthetic keys (`$p->x`, `$p["k"]`) tracked for
+        // the shadowed outer variable.
+        scope.remove(&pname);
+        scope.invalidate_dependent_keys(&pname);
+        if param_results.is_empty() {
+            scope.set_empty(&pname);
+        } else {
             scope.seed(&pname, param_results);
         }
     }
@@ -1632,8 +1810,9 @@ fn walk_top_level_statements<'a, 'b: 'a>(
             // must be analyzed the same way as top-level functions.
             Statement::If(if_stmt) => {
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
                 walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
             }
@@ -1643,8 +1822,9 @@ fn walk_top_level_statements<'a, 'b: 'a>(
             // unresolved.
             _ => {
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
             }
         }
@@ -1655,11 +1835,11 @@ fn walk_top_level_statements<'a, 'b: 'a>(
 /// and analyze each one.  Handles the common PHP pattern:
 /// `if (!function_exists('name')) { function name(...) { ... } }`
 fn walk_functions_in_if_body<'b>(
-    body: &'b mago_syntax::ast::control_flow::r#if::IfBody<'b>,
+    body: &'b mago_syntax::cst::control_flow::r#if::IfBody<'b>,
     default_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::control_flow::r#if::IfBody;
+    use mago_syntax::cst::control_flow::r#if::IfBody;
 
     let statements: &[Statement<'b>] = match body {
         IfBody::Statement(stmt_body) => {
@@ -1701,12 +1881,12 @@ fn walk_functions_in_if_body<'b>(
 
 /// Walk a class member to find method bodies and run the forward walker.
 fn walk_class_member_body<'b>(
-    member: &'b mago_syntax::ast::class_like::member::ClassLikeMember<'b>,
+    member: &'b mago_syntax::cst::class_like::member::ClassLikeMember<'b>,
     enclosing_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::class_like::member::ClassLikeMember;
-    use mago_syntax::ast::class_like::method::MethodBody;
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
 
     if let ClassLikeMember::Method(method) = member
         && let MethodBody::Concrete(block) = &method.body
@@ -1763,6 +1943,32 @@ fn analyze_function_body<'b>(
         top_level_scope: None,
     };
 
+    seed_and_walk_function_body(
+        parameters,
+        body_statements,
+        fn_span_start,
+        method_name,
+        is_static,
+        &ctx,
+    );
+}
+
+/// Seed a fresh scope for a function/method body and walk it for
+/// diagnostic scope snapshots.
+///
+/// Shared by [`analyze_function_body`] (top-level functions and class
+/// methods) and [`walk_anonymous_class_member_bodies`] (methods declared
+/// inside an anonymous class expression).  Both need the same seeding:
+/// `$this` for non-static methods, parameter types, and superglobals.
+/// The only difference is the `current_class` carried by `ctx`.
+fn seed_and_walk_function_body<'b>(
+    parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
+    body_statements: impl Iterator<Item = &'b Statement<'b>>,
+    fn_span_start: u32,
+    method_name: Option<&str>,
+    is_static: bool,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     let mut scope = ScopeState::new();
 
     // Seed `$this` for non-static class methods so that expressions
@@ -1770,14 +1976,14 @@ fn analyze_function_body<'b>(
     // resolve from the scope instead of falling through to the backward
     // scanner.
     if !is_static {
-        seed_this(&mut scope, current_class);
+        seed_this(&mut scope, ctx.current_class);
     }
 
     // Seed scope with parameter types.
     // Detect whether this method has a #[Scope] attribute by scanning
     // the source text around the method span for `#[Scope]`.
     let has_scope_attr = method_name
-        .map(|_| detect_scope_attribute_from_source(diag_ctx.content, fn_span_start as usize))
+        .map(|_| detect_scope_attribute_from_source(ctx.content, fn_span_start as usize))
         .unwrap_or(false);
     seed_params(
         &mut scope,
@@ -1785,7 +1991,7 @@ fn analyze_function_body<'b>(
         fn_span_start,
         method_name,
         has_scope_attr,
-        &ctx,
+        ctx,
     );
 
     // Seed superglobals so that accesses like `$_SERVER['key']` don't
@@ -1797,7 +2003,59 @@ fn analyze_function_body<'b>(
     record_scope_snapshot(fn_span_start, &scope);
 
     // Walk the entire body, recording snapshots at each statement.
-    walk_body_for_diagnostics(body_statements, &mut scope, &ctx);
+    walk_body_for_diagnostics(body_statements, &mut scope, ctx);
+}
+
+/// Walk the method bodies of an anonymous class expression, seeding
+/// `$this` to the anonymous class itself.
+///
+/// Without this, the forward walker records `$this` snapshots for the
+/// lexically enclosing method (whose `$this` is the outer class) and
+/// those snapshots leak into the anonymous class's method bodies, since
+/// they sit at higher offsets with no intervening re-seed.  Member
+/// accesses like `$this->prop` inside the anonymous class would then
+/// resolve against the outer class and be flagged as unknown.
+fn walk_anonymous_class_member_bodies<'b>(anon: &'b AnonymousClass<'b>, ctx: &ForwardWalkCtx<'_>) {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
+
+    // The parser extracts anonymous classes as `ClassInfo` with the
+    // synthetic name `__anonymous@<left_brace_offset>`.  Look it up so
+    // the walk sees the anonymous class's real members instead of the
+    // enclosing class.
+    let anon_name = format!("__anonymous@{}", anon.left_brace.start.offset);
+    let Some(anon_class) = ctx.all_classes.iter().find(|c| *c.name == anon_name) else {
+        return;
+    };
+
+    let anon_ctx = ForwardWalkCtx {
+        current_class: anon_class.as_ref(),
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: ctx.cursor_offset,
+        class_loader: ctx.class_loader,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: None,
+        top_level_scope: None,
+    };
+
+    for member in anon.members.iter() {
+        if let ClassLikeMember::Method(method) = member
+            && let MethodBody::Concrete(block) = &method.body
+        {
+            let method_name = bytes_to_str(method.name.value).to_string();
+            let is_static = method.modifiers.contains_static();
+            seed_and_walk_function_body(
+                method.parameter_list.parameters.iter(),
+                block.statements.iter(),
+                method.span().start.offset,
+                Some(&method_name),
+                is_static,
+                &anon_ctx,
+            );
+        }
+    }
 }
 
 /// Find the innermost class whose body span contains `offset`.
@@ -1883,6 +2141,17 @@ impl ScopeState {
         self.locals.remove(&atom(var_name));
     }
 
+    /// Remove synthetic property/array-access keys rooted at `var_name`
+    /// (e.g. `$s->cache`, `$s["k"]`).  Called when the base variable is
+    /// reassigned: the previous object identity no longer holds, so any
+    /// type tracked for one of its properties is stale.
+    pub fn invalidate_dependent_keys(&mut self, var_name: &str) {
+        let prop_prefix = format!("{var_name}->");
+        let arr_prefix = format!("{var_name}[");
+        self.locals
+            .retain(|key, _| !key.starts_with(&prop_prefix) && !key.starts_with(&arr_prefix));
+    }
+
     /// Merge another scope into `self`.
     ///
     /// For each variable:
@@ -1921,6 +2190,34 @@ impl ScopeState {
                             {
                                 existing.type_string = rt.type_string.clone();
                             }
+                            // A virtual member that only one branch's
+                            // class_info carries (e.g. a member injected by
+                            // `property_exists` / `method_exists` narrowing
+                            // inside a guarded branch) must not survive the
+                            // merge: the member is only proven where the
+                            // guard held.  Drop any virtual member missing
+                            // from the incoming branch.
+                            drop_branch_local_virtual_members(existing, rt);
+                            merged_into_existing = true;
+                            break;
+                        }
+                    }
+                } else if rt.type_string.is_array_shape() {
+                    // Fold an incoming array-shape variant into an
+                    // existing array-shape entry instead of accumulating
+                    // one variant per branch (`array{a: int}` merged with
+                    // `array{a: int, b: string}` becomes
+                    // `array{a: int, b?: string}`).  A variable written
+                    // key-by-key across hundreds of conditionals would
+                    // otherwise collect hundreds of near-identical shape
+                    // variants, and the pairwise subsumption pass below
+                    // makes every subsequent merge quadratic in that
+                    // variant count.
+                    for existing in entry.iter_mut() {
+                        if existing.class_info.is_none()
+                            && let Some(joined) = existing.type_string.join_shapes(&rt.type_string)
+                        {
+                            existing.type_string = joined;
                             merged_into_existing = true;
                             break;
                         }
@@ -1960,6 +2257,73 @@ impl ScopeState {
             }
         }
     }
+}
+
+/// Drop virtual members from `existing`'s class_info that the `incoming`
+/// branch's same-class class_info does not carry.
+///
+/// Branch-local narrowing (notably `property_exists` / `method_exists`)
+/// injects a virtual member into a *clone* of the variable's class_info
+/// for the guarded branch only.  When that branch merges with a sibling
+/// that never proved the member, the union no longer guarantees it, so
+/// the injected member must not leak into the merged scope.
+///
+/// Only virtual members are reconciled — real declared members are
+/// identical across branches (same class source) and never removed.  A
+/// virtual member present in *both* branches (e.g. an `@property` tag or
+/// a Laravel model column baked into the base class_info) is kept,
+/// because both branches derive from the same pre-branch class_info, so
+/// any base virtual member appears on both sides and only narrowing-added
+/// members appear on one.
+fn drop_branch_local_virtual_members(existing: &mut ResolvedType, incoming: &ResolvedType) {
+    let (Some(ex_cls), Some(in_cls)) = (&existing.class_info, &incoming.class_info) else {
+        return;
+    };
+    // Same Arc → identical member sets, nothing to reconcile.  This is
+    // the common case (no branch narrowed the type), so the merge stays
+    // cheap.
+    if Arc::ptr_eq(ex_cls, in_cls) {
+        return;
+    }
+
+    let incoming_virtual_props: HashSet<&str> = in_cls
+        .properties
+        .iter()
+        .filter(|p| p.is_virtual)
+        .map(|p| p.name.as_str())
+        .collect();
+    let incoming_virtual_methods: HashSet<String> = in_cls
+        .methods
+        .iter()
+        .filter(|m| m.is_virtual)
+        .map(|m| m.name.to_ascii_lowercase())
+        .collect();
+
+    let drop_prop = ex_cls
+        .properties
+        .iter()
+        .any(|p| p.is_virtual && !incoming_virtual_props.contains(p.name.as_str()));
+    let drop_method = ex_cls
+        .methods
+        .iter()
+        .any(|m| m.is_virtual && !incoming_virtual_methods.contains(&m.name.to_ascii_lowercase()));
+    if !drop_prop && !drop_method {
+        return;
+    }
+
+    let mut narrowed = (**ex_cls).clone();
+    if drop_prop {
+        narrowed
+            .properties
+            .make_mut()
+            .retain(|p| !p.is_virtual || incoming_virtual_props.contains(p.name.as_str()));
+    }
+    if drop_method {
+        narrowed.methods.make_mut().retain(|m| {
+            !m.is_virtual || incoming_virtual_methods.contains(&m.name.to_ascii_lowercase())
+        });
+    }
+    existing.class_info = Some(Arc::new(narrowed));
 }
 
 /// Simplify unions in a scope by collapsing child/parent class pairs.
@@ -2216,6 +2580,17 @@ pub(crate) fn walk_body_forward<'b>(
         let cursor_inside_stmt = ctx.cursor_offset >= stmt_span.start.offset
             && ctx.cursor_offset <= stmt_span.end.offset;
 
+        // Snapshot the pre-statement scope for the closure walk below.
+        // References inside this statement's own expression (including
+        // closure/arrow bodies) evaluate before the statement's
+        // assignment takes effect, so they must see the pre-assignment
+        // types rather than the reassigned result.
+        let pre_stmt_scope = if record_snapshots {
+            Some(scope.clone())
+        } else {
+            None
+        };
+
         if record_snapshots {
             record_scope_snapshot(stmt_span.start.offset, scope);
         }
@@ -2264,7 +2639,8 @@ pub(crate) fn walk_body_forward<'b>(
         // the scope reflects narrowing and bindings from the enclosing
         // block.
         if record_snapshots {
-            walk_closures_in_statement(stmt, scope, ctx);
+            let closure_scope = pre_stmt_scope.as_ref().unwrap_or(scope);
+            walk_closures_in_statement(stmt, closure_scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
     }
@@ -2312,6 +2688,10 @@ pub(crate) fn resolve_in_method_body<'b>(
         // Activate a temporary diagnostic scope so that walk_body_forward
         // records snapshots at every statement boundary.
         let _diag_guard = with_diagnostic_scope_cache();
+        // This is a dedicated scope-building walk (it harvests the temp
+        // cache below), so its snapshots must be recorded even when we
+        // were reached from a nested resolution that suspended recording.
+        let _resume_guard = resume_snapshot_recording();
 
         // Build a full-walk context (cursor at u32::MAX = walk entire body).
         let full_ctx = ForwardWalkCtx {
@@ -2379,8 +2759,13 @@ pub(crate) fn resolve_in_method_body<'b>(
         ctx,
     );
 
-    // Walk the body forward.
-    walk_body_forward(stmts_vec.iter().copied(), &mut scope, ctx);
+    // Walk the body forward.  Suspend snapshot recording: this is a
+    // transient lookup of `var_name`'s type, not the authoritative scope
+    // build, so it must not write into an active diagnostic scope cache.
+    {
+        let _suspend = suspend_snapshot_recording();
+        walk_body_forward(stmts_vec.iter().copied(), &mut scope, ctx);
+    }
 
     // Read the target variable from the scope.
     // Return `Some(types)` when the variable exists in scope (even if
@@ -2460,8 +2845,13 @@ pub(crate) fn resolve_in_function_body<'b>(
         ctx,
     );
 
-    // Walk the body forward.
-    walk_body_forward(func.body.statements.iter(), &mut scope, ctx);
+    // Walk the body forward.  Suspend snapshot recording (see
+    // `resolve_in_method_body`): this transient lookup must not pollute
+    // an active diagnostic scope cache.
+    {
+        let _suspend = suspend_snapshot_recording();
+        walk_body_forward(func.body.statements.iter(), &mut scope, ctx);
+    }
 
     // Read the target variable.
     // Return `Some` when the variable exists in scope (even with
@@ -2498,8 +2888,15 @@ pub(crate) fn resolve_in_top_level<'b>(
     // Seed superglobals so that `$_GET`, `$_POST`, etc. resolve.
     seed_superglobals(&mut scope);
 
-    // Walk the top-level statements forward.
-    walk_body_forward(statements, &mut scope, ctx);
+    // Walk the top-level statements forward.  Suspend snapshot recording
+    // (see `resolve_in_method_body`): this transient lookup must not
+    // pollute an active diagnostic scope cache.  Its statements can even
+    // belong to another file (return-type inference of a called function),
+    // whose offsets would otherwise collide with the outer file's.
+    {
+        let _suspend = suspend_snapshot_recording();
+        walk_body_forward(statements, &mut scope, ctx);
+    }
 
     // Return `Some` when the variable exists in scope (even with
     // empty types), `None` when it was never seen.
@@ -2520,6 +2917,10 @@ pub(crate) fn walk_top_level_for_globals<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     seed_superglobals(scope);
+    // Suspend snapshot recording (see `resolve_in_method_body`): this
+    // transient `global`-resolution walk must not pollute an active
+    // diagnostic scope cache.
+    let _suspend = suspend_snapshot_recording();
     walk_body_forward(statements, scope, ctx);
 }
 
@@ -2780,6 +3181,7 @@ pub(super) fn resolve_param_type(
     // type `class-string` doesn't resolve to a class.  Unwrap the
     // inner type and resolve it so that `$class::KEY` finds
     // static members on `Foo`.
+    let mut resolved_from_class_string_inner = false;
     if resolved_from_effective.is_empty()
         && let Some(ref eff) = effective_type
         && let Some(inner) = eff.unwrap_class_string_inner()
@@ -2792,6 +3194,7 @@ pub(super) fn resolve_param_type(
         );
         if !inner_resolved.is_empty() {
             resolved_from_effective = inner_resolved;
+            resolved_from_class_string_inner = true;
         }
     }
 
@@ -2845,6 +3248,22 @@ pub(super) fn resolve_param_type(
             )
         })
     };
+
+    // Preserve the `class-string<...>` wrapper on the resolved value
+    // type.  When `class-string<A|B>` unwraps to multiple classes,
+    // `from_classes_with_hint` rebuilds the union from bare class names,
+    // which drops the wrapper and makes the value look like an instance
+    // of the class rather than a class-string naming it.  Re-wrap each
+    // class member so the value keeps its class-string type (matching the
+    // single-class case, which already carries `class-string<Foo>`).
+    if resolved_from_class_string_inner && param_results.len() > 1 {
+        for rt in &mut param_results {
+            if let Some(ci) = rt.class_info.as_ref() {
+                let inner = PhpType::Named(ci.fqn().to_string());
+                rt.type_string = PhpType::ClassString(Some(Box::new(inner)));
+            }
+        }
+    }
 
     // Variadic parameter wrapping.
     if is_variadic && !param_results.is_empty() {
@@ -3000,10 +3419,13 @@ fn process_statement<'b>(
         }
         Statement::Return(ret) => {
             if let Some(val) = ret.value {
+                process_assignment_expr(val, scope, ctx);
+
                 // Record `&&` chain snapshots so that member accesses
                 // after an instanceof/null guard see the narrowed type.
                 // E.g. `return $x instanceof Foo && $x->bar()`
                 record_and_chain_snapshots(val, scope, ctx);
+                record_or_chain_snapshots(val, scope, ctx);
 
                 // Record narrowed snapshots inside match(true) arms
                 // and ternary instanceof branches.
@@ -3055,6 +3477,7 @@ fn process_expression_statement<'b>(
     // type.  E.g. `$x instanceof Foo && $x->bar()` as an expression
     // statement.
     record_and_chain_snapshots(expr, scope, ctx);
+    record_or_chain_snapshots(expr, scope, ctx);
 
     // Record narrowed snapshots inside match(true) arms and ternary
     // instanceof branches within this expression.
@@ -3065,6 +3488,8 @@ fn process_expression_statement<'b>(
     // Process assignments.
     process_assignment_expr(expr, scope, ctx);
 
+    process_by_ref_closure_captures(expr, scope, ctx);
+
     // Process pass-by-reference parameter type inference.
     process_pass_by_ref(expr, scope, ctx);
 
@@ -3073,6 +3498,367 @@ fn process_expression_statement<'b>(
 
     // Process increment/decrement: $a++, ++$a, $a--, --$a.
     process_increment_decrement(expr, scope, ctx);
+}
+
+fn process_by_ref_closure_captures<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match expr {
+        Expression::Call(Call::Function(fc)) => {
+            let Some(func_name) = (match fc.function {
+                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+                _ => None,
+            }) else {
+                return;
+            };
+
+            for (arg_idx, arg) in fc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && function_invokes_callable_arg_immediately(&func_name, arg_idx, ctx)
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Call(Call::Method(mc)) => {
+            let Some(method_name) = (match &mc.method {
+                ClassLikeMemberSelector::Identifier(ident) => {
+                    Some(bytes_to_str(ident.value).to_string())
+                }
+                _ => None,
+            }) else {
+                return;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            if receiver_names.is_empty() {
+                return;
+            }
+
+            for (arg_idx, arg) in mc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && method_invokes_callable_arg_immediately(
+                        &receiver_names,
+                        &method_name,
+                        arg_idx,
+                        ctx,
+                    )
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Call(Call::NullSafeMethod(mc)) => {
+            let Some(method_name) = (match &mc.method {
+                ClassLikeMemberSelector::Identifier(ident) => {
+                    Some(bytes_to_str(ident.value).to_string())
+                }
+                _ => None,
+            }) else {
+                return;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            if receiver_names.is_empty() {
+                return;
+            }
+
+            for (arg_idx, arg) in mc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && method_invokes_callable_arg_immediately(
+                        &receiver_names,
+                        &method_name,
+                        arg_idx,
+                        ctx,
+                    )
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let Some(method_name) = (match &sc.method {
+                ClassLikeMemberSelector::Identifier(ident) => {
+                    Some(bytes_to_str(ident.value).to_string())
+                }
+                _ => None,
+            }) else {
+                return;
+            };
+            let receiver_names = static_receiver_class_names(sc.class, ctx);
+            if receiver_names.is_empty() {
+                return;
+            }
+
+            for (arg_idx, arg) in sc.argument_list.arguments.iter().enumerate() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Closure(closure) = arg_expr
+                    && method_invokes_callable_arg_immediately(
+                        &receiver_names,
+                        &method_name,
+                        arg_idx,
+                        ctx,
+                    )
+                {
+                    process_by_ref_closure_capture(closure, scope, ctx);
+                }
+            }
+        }
+        Expression::Parenthesized(inner) => {
+            process_by_ref_closure_captures(inner.expression, scope, ctx);
+        }
+        Expression::Assignment(assignment) => {
+            process_by_ref_closure_captures(assignment.rhs, scope, ctx);
+        }
+        _ => {}
+    }
+}
+
+fn function_invokes_callable_arg_immediately(
+    func_name: &str,
+    arg_idx: usize,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    with_parsed_program(
+        ctx.content,
+        "function_invokes_callable_arg",
+        |program, _| {
+            program.statements.iter().any(|stmt| {
+                if let Statement::Function(func) = stmt
+                    && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
+                {
+                    let Some(param) = func.parameter_list.parameters.iter().nth(arg_idx) else {
+                        return false;
+                    };
+                    return !function_param_has_invocation_tag(
+                        func.name.span.start.offset as usize,
+                        ctx.content,
+                        bytes_to_str(param.variable.name),
+                        "param-later-invoked-callable",
+                    );
+                }
+                false
+            })
+        },
+    )
+}
+
+fn receiver_class_names(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<String> {
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => {
+            let var_name = bytes_to_str(dv.name);
+            if var_name == "$this" && !ctx.current_class.name.is_empty() {
+                return vec![
+                    ctx.current_class.name.to_string(),
+                    ctx.current_class.fqn().to_string(),
+                ];
+            }
+            scope
+                .get(var_name)
+                .iter()
+                .filter_map(|rt| rt.class_info.as_ref())
+                .flat_map(|cls| [cls.name.to_string(), cls.fqn().to_string()])
+                .collect()
+        }
+        Expression::Parenthesized(inner) => receiver_class_names(inner.expression, scope, ctx),
+        _ => Vec::new(),
+    }
+}
+
+fn static_receiver_class_names(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Vec<String> {
+    match expr {
+        Expression::Self_(_) | Expression::Static(_) if !ctx.current_class.name.is_empty() => {
+            vec![
+                ctx.current_class.name.to_string(),
+                ctx.current_class.fqn().to_string(),
+            ]
+        }
+        Expression::Parent(_) => ctx
+            .current_class
+            .parent_class
+            .map(|name| vec![name.to_string()])
+            .unwrap_or_default(),
+        Expression::Identifier(ident) => vec![bytes_to_str(ident.value()).to_string()],
+        Expression::Parenthesized(inner) => static_receiver_class_names(inner.expression, ctx),
+        _ => Vec::new(),
+    }
+}
+
+fn method_invokes_callable_arg_immediately(
+    receiver_names: &[String],
+    method_name: &str,
+    arg_idx: usize,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    with_parsed_program(ctx.content, "method_invokes_callable_arg", |program, _| {
+        program.statements.iter().any(|stmt| {
+            let members = match stmt {
+                Statement::Class(class)
+                    if class_name_matches_receiver(class.name.value, receiver_names) =>
+                {
+                    Some(class.members.iter())
+                }
+                _ => None,
+            };
+
+            let Some(members) = members else {
+                return false;
+            };
+
+            members.into_iter().any(|member| {
+                if let ClassLikeMember::Method(method) = member
+                    && bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name)
+                {
+                    let Some(param) = method.parameter_list.parameters.iter().nth(arg_idx) else {
+                        return false;
+                    };
+                    return node_param_has_invocation_tag(
+                        method.name.span.start.offset as usize,
+                        ctx.content,
+                        bytes_to_str(param.variable.name),
+                        "param-immediately-invoked-callable",
+                    );
+                }
+                false
+            })
+        })
+    })
+}
+
+fn class_name_matches_receiver(name: &[u8], receiver_names: &[String]) -> bool {
+    let class_name = bytes_to_str(name);
+    receiver_names.iter().any(|receiver| {
+        receiver.eq_ignore_ascii_case(class_name)
+            || crate::util::short_name(receiver).eq_ignore_ascii_case(class_name)
+    })
+}
+
+fn function_param_has_invocation_tag(
+    node_start: usize,
+    content: &str,
+    param_name: &str,
+    tag_name: &str,
+) -> bool {
+    node_param_has_invocation_tag(node_start, content, param_name, tag_name)
+}
+
+fn node_param_has_invocation_tag(
+    node_start: usize,
+    content: &str,
+    param_name: &str,
+    tag_name: &str,
+) -> bool {
+    let Some(docblock) = preceding_docblock_text(content, node_start) else {
+        return false;
+    };
+    docblock.lines().any(|line| {
+        let line = line
+            .trim()
+            .trim_start_matches("/**")
+            .trim_start_matches('*')
+            .trim_end_matches("*/")
+            .trim();
+        line.starts_with(&format!("@{tag_name}"))
+            && line
+                .split_whitespace()
+                .any(|part| part.trim_matches(',') == param_name)
+    })
+}
+
+fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
+    let before = content.get(..node_start)?;
+    let doc_end = before.rfind("*/")? + 2;
+    let between = &before[doc_end..];
+    if between.contains(';') || between.contains('{') || between.contains('}') {
+        return None;
+    }
+    let doc_start = before[..doc_end].rfind("/**")?;
+    Some(&before[doc_start..doc_end])
+}
+
+fn process_by_ref_closure_capture<'b>(
+    closure: &'b Closure<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let captured: Vec<String> = closure
+        .use_clause
+        .as_ref()
+        .map(|use_clause| {
+            use_clause
+                .variables
+                .iter()
+                .filter(|use_var| use_var.ampersand.is_some())
+                .map(|use_var| bytes_to_str(use_var.variable.name).to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    if captured.is_empty() {
+        return;
+    }
+
+    let full_ctx = ctx.with_cursor_offset(u32::MAX);
+    let mut closure_scope = ScopeState::new();
+
+    let this_types = scope.get("$this");
+    if !this_types.is_empty() {
+        closure_scope.set("$this", this_types.to_vec());
+    }
+
+    if let Some(ref use_clause) = closure.use_clause {
+        for use_var in use_clause.variables.iter() {
+            let var_name = bytes_to_str(use_var.variable.name).to_string();
+            let from_outer = scope.get(&var_name);
+            if !from_outer.is_empty() {
+                closure_scope.set(&var_name, from_outer.to_vec());
+            } else if scope.contains(&var_name) {
+                closure_scope.set_empty(&var_name);
+            }
+        }
+    }
+
+    seed_closure_params(
+        &mut closure_scope,
+        &closure.parameter_list,
+        closure.span().start.offset,
+        &[],
+        &full_ctx,
+    );
+
+    walk_body_forward(
+        closure.body.statements.iter(),
+        &mut closure_scope,
+        &full_ctx,
+    );
+
+    for var_name in captured {
+        scope.invalidate_dependent_keys(&var_name);
+        let types = closure_scope.get(&var_name).to_vec();
+        if !types.is_empty() {
+            scope.set(&var_name, types);
+        } else if closure_scope.contains(&var_name) {
+            scope.set_empty(&var_name);
+        }
+    }
 }
 
 /// Process increment/decrement expressions (`$a++`, `++$a`, `$a--`, `--$a`).
@@ -3085,7 +3871,7 @@ fn process_increment_decrement<'b>(
     scope: &mut ScopeState,
     _ctx: &ForwardWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
+    use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
 
     let var_expr = match expr {
         Expression::UnaryPostfix(postfix) => match &postfix.operator {
@@ -3253,19 +4039,21 @@ fn record_match_ternary_snapshots<'b>(
             }
         }
         Expression::Conditional(conditional) => {
-            // Only apply narrowing when the condition contains an
-            // instanceof check (simple or compound OR).  General
-            // truthiness/null narrowing is too broad and can produce
-            // incorrect scope snapshots for arbitrary ternaries.
-            let has_instanceof = {
+            // Only apply narrowing when the condition adds information the
+            // guarded branch relies on: an instanceof check (simple or
+            // compound OR) or a member-existence proof
+            // (`property_exists`/`method_exists`/`isset($x->prop)`).
+            // General truthiness/null narrowing is too broad and can
+            // produce incorrect scope snapshots for arbitrary ternaries.
+            let has_narrowing = {
                 let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
                 var_names.iter().any(|vn| {
                     narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
                         || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
                             .is_some()
                 })
-            };
-            if has_instanceof {
+            } || condition_proves_member(conditional.condition, scope);
+            if has_narrowing {
                 let mut then_scope = scope.clone();
                 apply_condition_narrowing(conditional.condition, &mut then_scope, ctx);
                 if let Some(then_expr) = conditional.then {
@@ -3398,9 +4186,11 @@ fn apply_cursor_ternary_narrowing<'b>(
             }
         }
         Expression::Conditional(conditional) => {
-            // Check if the condition contains an instanceof check for
+            // Check if the condition contains an instanceof check or a
+            // member-existence proof
+            // (`property_exists`/`method_exists`/`isset($x->prop)`) for
             // any variable currently in scope.
-            let has_instanceof = {
+            let has_narrowing = {
                 let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
                 var_names.iter().any(|vn| {
                     narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
@@ -3412,8 +4202,8 @@ fn apply_cursor_ternary_narrowing<'b>(
                         || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
                             .is_some()
                 })
-            };
-            if has_instanceof {
+            } || condition_proves_member(conditional.condition, scope);
+            if has_narrowing {
                 if let Some(then_expr) = conditional.then {
                     let then_span = then_expr.span();
                     if cursor >= then_span.start.offset && cursor <= then_span.end.offset {
@@ -3502,6 +4292,42 @@ fn apply_cursor_ternary_narrowing<'b>(
                 apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
             }
         }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+            ) =>
+        {
+            // `||` chain: the right operand executes only when the
+            // preceding operands are false, so apply the *inverse*
+            // narrowing from those operands when the cursor is in a
+            // later operand.  E.g. `!$x instanceof Foo || $x->bar()`
+            // narrows `$x` to `Foo` for the `$x->bar()` operand.
+            let operands = collect_or_chain_operands(expr);
+            if operands.len() >= 2 {
+                let mut narrowed = false;
+                for (i, operand) in operands.iter().enumerate() {
+                    let op_span = operand.span();
+                    if cursor >= op_span.start.offset && cursor <= op_span.end.offset {
+                        narrowed = true;
+                        apply_cursor_ternary_narrowing(operand, scope, ctx);
+                        break;
+                    }
+                    // Apply this operand's inverse narrowing for the
+                    // subsequent operands.
+                    if i < operands.len() - 1 {
+                        apply_condition_narrowing_inverse(operand, scope, ctx);
+                    }
+                }
+                if !narrowed {
+                    apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
+                    apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
+                }
+            } else {
+                apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
+                apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
+            }
+        }
         Expression::Binary(bin) => {
             apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
             apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
@@ -3578,8 +4404,77 @@ fn record_and_chain_snapshots<'b>(
         // inside a function call argument.
         record_scope_snapshot_recursive(operand, &narrowed_scope);
 
+        // Refine nested `&&` / `||` chains inside this operand on top of
+        // the accumulated narrowing.  E.g. `$a && ($b instanceof Foo ||
+        // $c) && $a->m()` — the inner `||` operands narrow independently.
+        // These overwrite the coarser snapshots recorded above at the
+        // offsets that carry intra-chain narrowing.
+        record_and_chain_snapshots(operand, &narrowed_scope, ctx);
+        record_or_chain_snapshots(operand, &narrowed_scope, ctx);
+
         // Apply this operand's narrowing for the next operand.
         apply_condition_narrowing(operand, &mut narrowed_scope, ctx);
+    }
+}
+
+/// Record intermediate scope snapshots within `||` chains.
+///
+/// The right operand of `||` executes only when every preceding
+/// operand evaluated to false, so each operand after the first sees
+/// the *inverse* narrowing of all operands before it. This is the
+/// mirror of [`record_and_chain_snapshots`]:
+///
+/// - `!$x instanceof Foo || $x->bar()` — `$x` narrowed to `Foo` for
+///   the `$x->bar()` span (the negation of `!$x instanceof Foo`).
+/// - `$x === null || $x->method()` — `$x` narrowed to non-null for
+///   the `$x->method()` span.
+///
+/// As with the `&&` variant, the narrowing is applied only to
+/// snapshots — it does NOT mutate the caller's scope, so subsequent
+/// statements see the original types.
+fn record_or_chain_snapshots<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if !is_diagnostic_scope_active() {
+        return;
+    }
+
+    let operands = collect_or_chain_operands(expr);
+    if operands.len() < 2 {
+        // Not a `||` chain — the `&&` and match/ternary snapshot
+        // recorders handle the other shapes.
+        return;
+    }
+
+    // Apply the inverse narrowing cumulatively: each operand sees the
+    // negation of all previous operands.
+    let mut narrowed_scope = scope.clone();
+    for (i, operand) in operands.iter().enumerate() {
+        if i == 0 {
+            // First operand: apply its inverse for subsequent operands.
+            apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx);
+            continue;
+        }
+
+        // Record a snapshot at this operand's start offset, and recurse
+        // into sub-expressions so member accesses nested inside calls,
+        // negations, etc. see the narrowed types.
+        record_scope_snapshot(operand.span().start.offset, &narrowed_scope);
+        record_scope_snapshot_recursive(operand, &narrowed_scope);
+
+        // Refine nested `&&` / `||` chains inside this operand on top of
+        // the accumulated inverse narrowing.  E.g. the common idiom
+        // `$parent->child() !== $node || ($x instanceof Foo && !$x->m())`
+        // — the inner `&&` narrows `$x` to `Foo` for `$x->m()`.  These
+        // overwrite the coarser snapshots recorded above at the offsets
+        // that carry intra-chain narrowing.
+        record_and_chain_snapshots(operand, &narrowed_scope, ctx);
+        record_or_chain_snapshots(operand, &narrowed_scope, ctx);
+
+        // Apply this operand's inverse for the next operand.
+        apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx);
     }
 }
 
@@ -3902,25 +4797,48 @@ fn resolve_type_to_resolved_types(
     }
 }
 
+/// Strip the `/**`…`*/` wrapper from a docblock and collapse its
+/// line-continuation markers into a single space-joined string.
+///
+/// This flattens type strings that span multiple lines (e.g. a
+/// `array{...}` shape written across several ` * ` lines) so they can be
+/// parsed as one token sequence instead of retaining the leading `*`
+/// markers, which [`PhpType::parse`] cannot interpret.
+fn flatten_docblock_inner(doc_text: &str) -> Option<String> {
+    let inner = doc_text.strip_prefix("/**")?.strip_suffix("*/")?;
+    Some(
+        inner
+            .lines()
+            .map(|l| l.trim().trim_start_matches('*').trim())
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
 /// Parse ALL `@var Type $varName` pairs from a docblock.  Returns an
-/// empty vec when none are found.  Handles multi-line docblocks like:
+/// empty vec when none are found.  Handles multi-line docblocks with one
+/// annotation per line as well as a single annotation whose type spans
+/// several lines:
 /// ```text
 /// /**
 ///  * @var App                      $app
 ///  * @var array{indexName: string} $params
 ///  */
 /// ```
-fn parse_all_inline_var_docblocks(
-    doc_text: &str,
-    _ctx: &ForwardWalkCtx<'_>,
-) -> Vec<(String, PhpType)> {
-    let inner = match doc_text
-        .strip_prefix("/**")
-        .and_then(|s| s.strip_suffix("*/"))
-    {
+/// ```text
+/// /**
+///  * @var array{
+///  *     Label,
+///  *     Stmt,
+///  * } $pair
+///  */
+/// ```
+fn parse_var_docblock_pairs(doc_text: &str) -> Vec<(String, PhpType)> {
+    let inner = match flatten_docblock_inner(doc_text) {
         Some(s) => s,
         None => return vec![],
     };
+    let inner = inner.as_str();
 
     let mut results = Vec::new();
 
@@ -3953,69 +4871,49 @@ fn parse_all_inline_var_docblocks(
     results
 }
 
+/// Parse ALL `@var Type $varName` pairs from a docblock preceding an
+/// assignment or expression.
+fn parse_all_inline_var_docblocks(
+    doc_text: &str,
+    _ctx: &ForwardWalkCtx<'_>,
+) -> Vec<(String, PhpType)> {
+    parse_var_docblock_pairs(doc_text)
+}
+
 /// Parse ALL `@var Type $varName` annotations from a docblock.
-/// Supports both single-line (`/** @var Type $var */`) and multi-line
-/// docblocks with multiple `@var` tags.
+/// Supports single-line (`/** @var Type $var */`), one-annotation-per-line
+/// multi-line docblocks, and annotations whose type spans several lines
+/// (e.g. a multi-line `array{...}` shape).
 fn parse_all_var_docblock_annotations(doc_text: &str) -> Vec<(String, PhpType)> {
-    let mut results = Vec::new();
-    // Strip `/**` and `*/`
-    let inner = match doc_text
-        .strip_prefix("/**")
-        .and_then(|s| s.strip_suffix("*/"))
-    {
-        Some(s) => s,
-        None => return results,
-    };
-    // Scan each line for `@var`
-    for line in inner.lines() {
-        let trimmed = line.trim().trim_start_matches('*').trim();
-        if let Some(rest) = trimmed.strip_prefix("@var") {
-            let rest = rest.trim_start();
-            // Find the `$` that starts the variable name.
-            if let Some(dollar_pos) = rest.find('$') {
-                if dollar_pos == 0 {
-                    // `@var $var Type` format — skip.
-                    continue;
-                }
-                let type_str = rest[..dollar_pos].trim();
-                let var_part = &rest[dollar_pos..];
-                let var_name = var_part.split_whitespace().next().unwrap_or("");
-                if !type_str.is_empty() && !var_name.is_empty() {
-                    let php_type = PhpType::parse(type_str);
-                    results.push((var_name.to_string(), php_type));
-                }
-            }
-        }
-    }
-    results
+    parse_var_docblock_pairs(doc_text)
 }
 
 /// Parse `/** @var Type */` (without variable name) and return the PhpType.
 fn parse_inline_var_docblock_no_var(doc_text: &str, _ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
-    let inner = doc_text.strip_prefix("/**")?.strip_suffix("*/")?.trim();
+    // Flatten line-continuation markers so a `array{...}` shape spread
+    // across several lines is parsed as one type string.
+    let inner = flatten_docblock_inner(doc_text)?;
+    let inner = inner.trim().strip_prefix("@var")?.trim();
 
-    let inner = inner
-        .strip_prefix("@var")
-        .or_else(|| inner.strip_prefix("* @var"))?;
-    let inner = inner.trim();
-
-    // For multi-line docblocks, only take the type from the first line.
-    // Additional lines may contain other tags like @psalm-suppress that
-    // would corrupt the type string.
-    let inner = inner.lines().next().unwrap_or(inner).trim();
-    // Strip trailing `*` that may remain from `* @var Type  *` formatting.
-    let inner = inner.trim_end_matches('*').trim();
+    // Stop at the next docblock tag so trailing tags (e.g. `@psalm-suppress`)
+    // do not corrupt the type string.
+    let type_str = match inner.find(" @") {
+        Some(pos) => inner[..pos].trim(),
+        None => inner,
+    };
+    // Strip a trailing `*` that may remain from `* @var Type *` formatting.
+    let type_str = type_str.trim_end_matches('*').trim();
 
     // If there's a `$` it has a variable name — not the no-var form.
-    if inner.contains('$') {
+    if type_str.contains('$') {
         return None;
     }
 
-    if inner.is_empty() {
+    if type_str.is_empty() {
         return None;
     }
 
-    Some(PhpType::parse(inner))
+    Some(PhpType::parse(type_str))
 }
 
 /// Process assignment expressions, updating the scope.
@@ -4072,6 +4970,42 @@ fn process_assignment_expr<'b>(
             return;
         }
 
+        // Property assignment: `$var->prop = expr;` (and null-safe
+        // `$var?->prop = expr;`).  Record the assigned type under the
+        // property-path key (e.g. `$settings->cache`) so that a later
+        // read of that path resolves through the assignment rather than
+        // the declaring class's declared property hints.  This is what
+        // lets nested object property chains resolve, most notably on
+        // `stdClass` which has no declared properties:
+        //
+        //     $s = new stdClass();
+        //     $s->cache = new stdClass();
+        //     $s->cache->ttl = 1;   // `$s->cache` now resolves to stdClass
+        //
+        // The key contains `->`, so it is treated as a synthetic
+        // narrowing entry and stripped at loop boundaries — matching the
+        // conservative behaviour of condition-based property narrowing.
+        if matches!(
+            assignment.lhs,
+            Expression::Access(Access::Property(_) | Access::NullSafeProperty(_))
+        ) {
+            // Skip when the cursor is inside the RHS so that lookups
+            // within the RHS see the pre-assignment state.
+            let rhs_span = assignment.rhs.span();
+            if ctx.cursor_offset >= rhs_span.start.offset
+                && ctx.cursor_offset <= rhs_span.end.offset
+            {
+                return;
+            }
+            if let Some(key) = narrowing::expr_to_subject_key(assignment.lhs) {
+                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                if !rhs_types.is_empty() {
+                    scope.set(&key, rhs_types);
+                }
+            }
+            return;
+        }
+
         // Simple variable assignment: `$var = expr;`
         let lhs_name = match assignment.lhs {
             Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
@@ -4109,6 +5043,12 @@ fn process_assignment_expr<'b>(
                 }
             }
         }
+        // Reassigning the variable replaces its object identity, so any
+        // property/array-access key rooted at it (seeded by an earlier
+        // assignment or condition narrowing) is now stale.  Drop them
+        // after resolving the RHS, so `$x = $x->foo` still reads the old
+        // key while resolving.
+        scope.invalidate_dependent_keys(&lhs_name);
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
         } else if !scope.contains(&lhs_name) {
@@ -4130,7 +5070,7 @@ fn process_compound_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    use mago_syntax::ast::assignment::AssignmentOperator;
+    use mago_syntax::cst::assignment::AssignmentOperator;
 
     let var_name = match assignment.lhs {
         Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
@@ -4184,8 +5124,22 @@ fn process_compound_assignment<'b>(
         | AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
         | AssignmentOperator::BitwiseXor(_) => PhpType::int(),
-        AssignmentOperator::Addition(_)
-        | AssignmentOperator::Subtraction(_)
+        AssignmentOperator::Addition(_) => {
+            // PHP overloads `+` / `+=` for array union vs numeric addition.
+            // If either operand is array-like, the result is array.
+            let lhs_types = scope.get(&var_name).to_vec();
+            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+            let either_is_array = lhs_types
+                .iter()
+                .chain(rhs_types.iter())
+                .any(|rt| rt.type_string.is_array_like());
+            if either_is_array {
+                PhpType::Named("array".to_string())
+            } else {
+                infer_arithmetic_result_type(&lhs_types, &rhs_types, false)
+            }
+        }
+        AssignmentOperator::Subtraction(_)
         | AssignmentOperator::Multiplication(_)
         | AssignmentOperator::Division(_)
         | AssignmentOperator::Exponentiation(_) => {
@@ -4346,7 +5300,7 @@ fn resolve_rhs_with_scope<'b>(
     if let Expression::Assignment(assignment) = rhs
         && !assignment.operator.is_assign()
     {
-        use mago_syntax::ast::assignment::AssignmentOperator;
+        use mago_syntax::cst::assignment::AssignmentOperator;
         let result_type = match &assignment.operator {
             AssignmentOperator::Concat(_) => Some(PhpType::string()),
             AssignmentOperator::Modulo(_) => Some(PhpType::int()),
@@ -4355,8 +5309,25 @@ fn resolve_rhs_with_scope<'b>(
             | AssignmentOperator::BitwiseAnd(_)
             | AssignmentOperator::BitwiseOr(_)
             | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
-            AssignmentOperator::Addition(_)
-            | AssignmentOperator::Subtraction(_)
+            AssignmentOperator::Addition(_) => {
+                // PHP overloads `+` / `+=` for array union vs numeric addition.
+                let lhs_types = if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
+                    scope.get(bytes_to_str(dv.name)).to_vec()
+                } else {
+                    vec![]
+                };
+                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                let either_is_array = lhs_types
+                    .iter()
+                    .chain(rhs_types.iter())
+                    .any(|rt| rt.type_string.is_array_like());
+                if either_is_array {
+                    Some(PhpType::Named("array".to_string()))
+                } else {
+                    Some(infer_arithmetic_result_type(&lhs_types, &rhs_types, false))
+                }
+            }
+            AssignmentOperator::Subtraction(_)
             | AssignmentOperator::Multiplication(_)
             | AssignmentOperator::Division(_)
             | AssignmentOperator::Exponentiation(_) => {
@@ -4451,7 +5422,7 @@ fn resolve_rhs_with_scope<'b>(
 
     // Type casts: (int)$x → int, (string)$x → string, etc.
     if let Expression::UnaryPrefix(prefix) = rhs {
-        use mago_syntax::ast::unary::UnaryPrefixOperator;
+        use mago_syntax::cst::unary::UnaryPrefixOperator;
         let cast_type = match &prefix.operator {
             UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
                 Some(PhpType::int())
@@ -4514,7 +5485,7 @@ fn resolve_rhs_with_scope<'b>(
 
     // Bitwise NOT (~): returns string when operand is string, int otherwise.
     if let Expression::UnaryPrefix(prefix) = rhs {
-        use mago_syntax::ast::unary::UnaryPrefixOperator;
+        use mago_syntax::cst::unary::UnaryPrefixOperator;
         if matches!(prefix.operator, UnaryPrefixOperator::BitwiseNot(_)) {
             let operand_types = resolve_rhs_with_scope(prefix.operand, scope, ctx);
             let is_string = !operand_types.is_empty()
@@ -4594,7 +5565,7 @@ fn resolve_rhs_with_scope<'b>(
 
     // Binary operators — the result type depends on the operator kind.
     if let Expression::Binary(binary) = rhs {
-        use mago_syntax::ast::binary::BinaryOperator;
+        use mago_syntax::cst::binary::BinaryOperator;
 
         // Spaceship (<=>): always int (-1, 0, or 1).
         if matches!(binary.operator, BinaryOperator::Spaceship(_)) {
@@ -4824,6 +5795,44 @@ fn process_destructuring_assignment<'b>(
     if let Some(ref rhs_type) = raw_type {
         bind_destructured_pattern(assignment.lhs, rhs_type, scope, ctx);
     }
+
+    // Ensure every destructured variable is present in scope even when the
+    // RHS type (or an individual element's type) could not be resolved.  A
+    // plain assignment from an unresolvable RHS records the variable with an
+    // empty type list via `set_empty`, which lets later assert narrowing seed
+    // a type for it.  Without this, list-destructuring from an unresolvable
+    // RHS leaves the variables absent from scope entirely, so the assert
+    // narrowing loop never visits them and the asserted type is dropped.
+    seed_destructured_vars_empty(assignment.lhs, scope);
+}
+
+/// Walk a destructuring LHS pattern and record every direct variable in
+/// scope with an empty type list, unless it is already present.  Used so
+/// that variables destructured from an unresolvable RHS still participate
+/// in later narrowing (`set_empty` leaves any already-bound type intact).
+fn seed_destructured_vars_empty<'b>(lhs: &'b Expression<'b>, scope: &mut ScopeState) {
+    let elements: Vec<&ArrayElement<'b>> = match lhs {
+        Expression::Array(arr) => arr.elements.iter().collect(),
+        Expression::List(list) => list.elements.iter().collect(),
+        _ => return,
+    };
+
+    for elem in elements {
+        let value_expr = match elem {
+            ArrayElement::KeyValue(kv) => kv.value,
+            ArrayElement::Value(val) => val.value,
+            _ => continue,
+        };
+        match value_expr {
+            Expression::Variable(Variable::Direct(dv)) => {
+                scope.set_empty(bytes_to_str(dv.name));
+            }
+            Expression::Array(_) | Expression::List(_) => {
+                seed_destructured_vars_empty(value_expr, scope);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Recursively bind types from a destructuring LHS pattern against a
@@ -4931,6 +5940,13 @@ fn process_array_key_assignment<'b>(
             return;
         }
 
+        // If the base variable is a string, bracket-indexed assignment
+        // (`$str[0] = 'z'`) modifies the string in-place — the variable
+        // remains a string, it does NOT become an array.
+        if base_type.is_string_subtype() {
+            return;
+        }
+
         // Extract all keys in the chain.
         let all_string_keys: Option<Vec<String>> = key_chain
             .iter()
@@ -4941,7 +5957,11 @@ fn process_array_key_assignment<'b>(
             let merged =
                 super::resolution::merge_nested_shape_keys(&base_type, &keys, &value_php_type);
             scope.set(&base_name, vec![ResolvedType::from_type_string(merged)]);
-        } else if key_chain.len() == 1 && !base_type.is_array_shape() {
+        } else {
+            // The chain contains at least one dynamic (non-literal) key,
+            // e.g. `$sums[$id] = …` or `$return['data'][$count]['earnings']
+            // = …`.  Literal segments are tracked as shape entries and
+            // dynamic segments as generic `array<K, V>` levels.
             let rhs_offset = assignment.span().start.offset;
             let scope_locals = &scope.locals;
             let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
@@ -4951,9 +5971,22 @@ fn process_array_key_assignment<'b>(
                     .unwrap_or_default()
             };
             let rhs_ctx = ctx.var_ctx_for_with_scope("$__idx", rhs_offset, &scope_resolver);
-            let key_php_type = super::resolution::infer_array_key_type(key_chain[0], &rhs_ctx);
-            let merged =
-                super::resolution::merge_keyed_type(&base_type, &key_php_type, &value_php_type);
+            let write_keys: Vec<super::resolution::ArrayWriteKey> = key_chain
+                .iter()
+                .map(
+                    |idx| match super::resolution::extract_array_key_for_shape(idx) {
+                        Some(key) => super::resolution::ArrayWriteKey::Shape(key),
+                        None => super::resolution::ArrayWriteKey::Keyed(
+                            super::resolution::infer_array_key_type(idx, &rhs_ctx),
+                        ),
+                    },
+                )
+                .collect();
+            let merged = super::resolution::merge_nested_array_write(
+                &base_type,
+                &write_keys,
+                &value_php_type,
+            );
             scope.set(&base_name, vec![ResolvedType::from_type_string(merged)]);
         }
     }
@@ -5368,6 +6401,36 @@ fn process_assert_narrowing<'b>(
         }
     }
 
+    // Seed property/array-access subject keys that appear as arguments
+    // to the assert call (e.g. `assertInstanceOf(X::class, $view->component)`
+    // or a `@phpstan-assert` helper called on `$arg->value`) so the
+    // narrowing loop below can find and narrow them.
+    seed_assert_arg_subject_keys(expr, scope, ctx);
+
+    // Re-export narrowing: PHPUnit's `assertTrue()` / `assertFalse()` carry
+    // `@psalm-assert true/false $condition`.  When the argument is a boolean
+    // condition expression (e.g. `property_exists($x, 'p')`), proving it
+    // true/false is equivalent to a guard on that condition, so run the
+    // standard condition-narrowing pipeline on the argument.
+    let reexport_conditions = {
+        let reexport_snapshot = scope.locals.clone();
+        let reexport_resolver = |vn: &str| -> Vec<ResolvedType> {
+            reexport_snapshot
+                .get(&atom(vn))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let reexport_ctx = build_var_ctx("", ctx, &reexport_resolver);
+        narrowing::collect_assert_reexport_conditions(expr, &reexport_ctx)
+    };
+    for (condition, asserts_true) in reexport_conditions {
+        if asserts_true {
+            apply_condition_narrowing(condition, scope, ctx);
+        } else {
+            apply_condition_narrowing_inverse(condition, scope, ctx);
+        }
+    }
+
     // Apply assert narrowing to each variable in scope.
     let scope_snapshot = scope.locals.clone();
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
@@ -5398,13 +6461,45 @@ fn process_assert_narrowing<'b>(
 
         // assert($x instanceof Foo)
         ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_assert_instanceof_narrowing(expr, &var_ctx, classes);
+            narrowing::try_apply_assert_instanceof_narrowing(expr, &var_ctx, classes)
         });
 
         // @phpstan-assert / @psalm-assert
+        let mut type_guard: Option<(narrowing::TypeGuardKind, bool)> = None;
         ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_custom_assert_narrowing(expr, &var_ctx, classes);
+            narrowing::try_apply_custom_assert_narrowing(expr, &var_ctx, classes, &mut type_guard)
         });
+
+        // A scalar / pseudo-type assertion (`assertIsString`, `assertIsObject`,
+        // `assertIsArray`, their `assertIsNot*` negations, or the `object`
+        // fallback for an unresolvable `assertInstanceOf` class argument) is a
+        // type guard, not a class narrowing.  Apply it on the full resolved
+        // types so union members are kept or dropped by category — e.g.
+        // `assertIsObject` drops null/scalar members while keeping the class,
+        // and `assertIsNotObject` drops the class.
+        if let Some((kind, exclude)) = type_guard {
+            if exclude {
+                narrowing::apply_type_guard_exclusion(kind, &mut results);
+            } else {
+                narrowing::apply_type_guard_inclusion(kind, &mut results);
+            }
+        }
+
+        // A not-null assertion (`@phpstan-assert !null $x`, e.g. PHPUnit's
+        // `assertNotNull`) removes the `null` pseudo-type, which the
+        // class-based exclusion above cannot express.  Strip null from the
+        // subject's resolved types directly so a value that was tracked as
+        // exactly `null` (e.g. after `$obj->prop = null;`) no longer reads
+        // as null after the assertion.
+        if narrowing::call_asserts_not_null(expr, &var_ctx) {
+            results.retain_mut(|rt| match rt.type_string.non_null_type() {
+                Some(non_null) => {
+                    rt.type_string = non_null;
+                    true
+                }
+                None => rt.type_string != PhpType::null(),
+            });
+        }
 
         if resolved_types_differ(&results, &before) {
             if results.is_empty() {
@@ -5460,7 +6555,10 @@ fn process_if<'b>(
     // member accesses after an instanceof/null guard within the condition
     // see the narrowed type.  E.g. `if ($x !== null && $x->method())`
     // — the `$x->method()` span needs `$x` narrowed to non-null.
+    // The `||` variant handles the short-circuit guard idiom
+    // `!$x instanceof Foo || $x->method()`.
     record_and_chain_snapshots(if_stmt.condition, scope, ctx);
+    record_or_chain_snapshots(if_stmt.condition, scope, ctx);
 
     // Check if the cursor is inside the condition expression.
     // If so, apply inline && narrowing.
@@ -5587,6 +6685,12 @@ fn process_if_statement_body<'b>(
             apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
             let _ = prev_idx;
         }
+        // Record a scope snapshot at the elseif condition boundary so
+        // that diagnostic variable lookups inside the condition don't
+        // pick up assignments from preceding if/elseif bodies.
+        if is_diagnostic_scope_active() {
+            record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
+        }
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
@@ -5600,6 +6704,12 @@ fn process_if_statement_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
         for ei in body.else_if_clauses.iter() {
             apply_condition_narrowing_inverse(ei.condition, &mut else_scope, ctx);
+        }
+        // Record a scope snapshot at the else boundary so that
+        // diagnostic variable lookups inside the else body don't
+        // pick up assignments from the if/elseif bodies.
+        if is_diagnostic_scope_active() {
+            record_scope_snapshot(else_clause.statement.span().start.offset, &else_scope);
         }
         walk_body_forward(std::iter::once(else_clause.statement), &mut else_scope, ctx);
         let exits = statement_unconditionally_exits(else_clause.statement);
@@ -5787,6 +6897,22 @@ fn process_if_colon_body<'b>(
     let mut all_scopes = vec![then_scope];
     for ei in body.else_if_clauses.iter() {
         let mut ei_scope = pre_if_scope.clone();
+        // The elseif branch only runs when the if condition and every
+        // preceding elseif condition were false, so apply their inverse
+        // narrowing before walking this branch.
+        apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
+        for prev_ei in body.else_if_clauses.iter() {
+            if std::ptr::eq(prev_ei, ei) {
+                break;
+            }
+            apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
+        }
+        // Record a scope snapshot at the elseif condition boundary so
+        // that diagnostic variable lookups inside the condition don't
+        // pick up assignments from preceding if/elseif bodies.
+        if is_diagnostic_scope_active() {
+            record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
+        }
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
@@ -5795,11 +6921,32 @@ fn process_if_colon_body<'b>(
     }
     if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
+        // The else branch only runs when the if condition and every
+        // elseif condition were false, so apply the inverse of all of
+        // them.
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
+        for ei in body.else_if_clauses.iter() {
+            apply_condition_narrowing_inverse(ei.condition, &mut else_scope, ctx);
+        }
+        // Record a scope snapshot at the else boundary.
+        if is_diagnostic_scope_active()
+            && let Some(first_stmt) = else_clause.statements.first()
+        {
+            record_scope_snapshot(first_stmt.span().start.offset, &else_scope);
+        }
         walk_body_forward(else_clause.statements.iter(), &mut else_scope, ctx);
         all_scopes.push(else_scope);
     } else {
-        all_scopes.push(pre_if_scope);
+        // No else clause — the pre-if scope is the implicit "all
+        // conditions were false" path.  Apply the inverse of the if
+        // condition (and every elseif condition) so information from a
+        // failed condition is reflected in the merged scope.
+        let mut implicit_else_scope = pre_if_scope.clone();
+        apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+        for ei in body.else_if_clauses.iter() {
+            apply_condition_narrowing_inverse(ei.condition, &mut implicit_else_scope, ctx);
+        }
+        all_scopes.push(implicit_else_scope);
     }
 
     // Merge all surviving scopes.
@@ -5990,7 +7137,7 @@ fn collect_expr_assignment_deps(
     expr: &Expression<'_>,
     deps: &mut HashMap<String, HashSet<String>>,
 ) {
-    use mago_syntax::ast::variable::Variable;
+    use mago_syntax::cst::variable::Variable;
 
     if let Expression::Assignment(assign) = expr
         && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
@@ -6004,7 +7151,7 @@ fn collect_expr_assignment_deps(
 
 /// Collect all variable references from an expression (cheap, no type resolution).
 fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<String>) {
-    use mago_syntax::ast::variable::Variable;
+    use mago_syntax::cst::variable::Variable;
 
     match expr {
         Expression::Variable(Variable::Direct(dv)) => {
@@ -6045,16 +7192,16 @@ fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<String>) {
             }
         }
         Expression::Access(access) => match access {
-            mago_syntax::ast::access::Access::Property(pa) => {
+            mago_syntax::cst::access::Access::Property(pa) => {
                 collect_rhs_variables(pa.object, vars);
             }
-            mago_syntax::ast::access::Access::NullSafeProperty(pa) => {
+            mago_syntax::cst::access::Access::NullSafeProperty(pa) => {
                 collect_rhs_variables(pa.object, vars);
             }
-            mago_syntax::ast::access::Access::StaticProperty(sp) => {
+            mago_syntax::cst::access::Access::StaticProperty(sp) => {
                 collect_rhs_variables(sp.class, vars);
             }
-            mago_syntax::ast::access::Access::ClassConstant(cc) => {
+            mago_syntax::cst::access::Access::ClassConstant(cc) => {
                 collect_rhs_variables(cc.class, vars);
             }
         },
@@ -6085,7 +7232,7 @@ fn collect_rhs_variables(expr: &Expression<'_>, vars: &mut HashSet<String>) {
 
 /// Collect variable references from an argument list.
 fn collect_arglist_variables(
-    args: &mago_syntax::ast::argument::ArgumentList<'_>,
+    args: &mago_syntax::cst::argument::ArgumentList<'_>,
     vars: &mut HashSet<String>,
 ) {
     for arg in args.arguments.iter() {
@@ -6151,16 +7298,28 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
     // check for @var annotations for each one.
     let foreach_offset = foreach.foreach.span().start.offset as usize;
     if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
-        let var_name = format!("${}", bytes_to_str(dv.name));
-        if scope.get(bytes_to_str(dv.name)).is_empty()
-            && let Some(var_type) =
-                crate::docblock::find_var_raw_type_in_source(ctx.content, foreach_offset, &var_name)
+        // `bytes_to_str(dv.name)` already includes the leading `$`, which
+        // is how scope keys and `find_var_raw_type_in_source` expect it.
+        let var_name = bytes_to_str(dv.name);
+        if let Some(var_type) =
+            crate::docblock::find_var_raw_type_in_source(ctx.content, foreach_offset, var_name)
         {
-            let resolved = resolve_type_to_resolved_types(
-                &crate::util::resolve_php_type_names(&var_type, ctx.class_loader),
-                ctx,
-            );
-            scope.set(bytes_to_str(dv.name), resolved);
+            let php_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
+            // An explicit inline `@var` seeds an empty scope entry, and it
+            // also refines a non-informative pre-existing type such as a
+            // `mixed` closure/function parameter or a bare `array`.  Without
+            // the second case, a `mixed` parameter would occupy the scope
+            // slot and shadow the developer's `@var iterable<T> $x`
+            // annotation, leaving the loop variable untyped.
+            let current = scope.get(var_name);
+            let should_apply = current.is_empty()
+                || current.iter().all(|rt| {
+                    crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
+                });
+            if should_apply {
+                let resolved = resolve_type_to_resolved_types(&php_type, ctx);
+                scope.set(var_name, resolved);
+            }
         }
     } else {
         // For complex expressions like `$users->active()->byName()`,
@@ -6171,19 +7330,30 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
             // Extract the base variable (e.g. "$users" from "$users->active()->byName()")
             if let Some(base_end) = expr_text.find("->").or_else(|| expr_text.find("::")) {
                 let base_var = expr_text[..base_end].trim();
-                if let Some(scope_key) = base_var.strip_prefix('$')
-                    && scope.get(scope_key).is_empty()
+                // Scope keys retain the leading `$` (e.g. "$users"), so the
+                // lookup and the insert must both use the `$`-prefixed name,
+                // matching the direct-variable branch above.
+                if base_var.starts_with('$')
                     && let Some(var_type) = crate::docblock::find_var_raw_type_in_source(
                         ctx.content,
                         foreach_offset,
                         base_var,
                     )
                 {
-                    let resolved = resolve_type_to_resolved_types(
-                        &crate::util::resolve_php_type_names(&var_type, ctx.class_loader),
-                        ctx,
-                    );
-                    scope.set(scope_key, resolved);
+                    let php_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
+                    // As in the direct-variable branch: seed an unknown base
+                    // variable, or refine a non-informative pre-existing type
+                    // (e.g. a `mixed` parameter), but never clobber a more
+                    // precise type inferred from an assignment.
+                    let current = scope.get(base_var);
+                    let should_apply = current.is_empty()
+                        || current.iter().all(|rt| {
+                            crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
+                        });
+                    if should_apply {
+                        let resolved = resolve_type_to_resolved_types(&php_type, ctx);
+                        scope.set(base_var, resolved);
+                    }
                 }
             }
         }
@@ -6567,11 +7737,12 @@ fn bind_foreach_value<'b>(
     if let Expression::Variable(Variable::Direct(dv)) = value_expr {
         let var_name = bytes_to_str(dv.name).to_string();
         if let Some(it) = iter_type {
-            // Strategy 1: extract from the type's own generic parameters.
-            let value_php_type = it.extract_value_type(false);
+            // Strategy 1: extract from the type's own generic parameters
+            // (or, for tuple-style shapes, the union of positional values).
+            let value_php_type = it.iterable_element_type();
             if let Some(vt) = value_php_type {
                 let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
-                    vt,
+                    &vt,
                     &ctx.current_class.name,
                     ctx.all_classes,
                     ctx.class_loader,
@@ -6677,9 +7848,10 @@ fn bind_foreach_value<'b>(
         // destructured variable's type from that element type using shape
         // keys or positional indices.
         let element_type: Option<PhpType> = iter_type.as_ref().and_then(|it| {
-            // Try direct value type extraction first.
-            if let Some(vt) = it.extract_value_type(false) {
-                return Some(vt.clone());
+            // Try direct value type extraction first (handles tuple-style
+            // shapes by unioning their positional value types).
+            if let Some(vt) = it.iterable_element_type() {
+                return Some(vt);
             }
             // Try class-based iterable element extraction.
             if let Some(et) = resolve_iterable_element_via_class(it, ctx)
@@ -6835,13 +8007,14 @@ fn resolve_iterable_element_via_class(
     iter_type: &PhpType,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<PhpType> {
-    // Only attempt for Named types (bare class names without generics).
-    // Generic types like `Collection<int, User>` are handled by
-    // extract_value_type above.
-    let class_name = match iter_type {
-        PhpType::Named(name) => name.as_str(),
-        _ => return None,
-    };
+    // Accept bare class names, whether or not wrapped in `Nullable` (e.g.
+    // `?SimpleXMLElement`, the return type of `SimpleXMLElement::children()`).
+    // `base_name` unwraps `Nullable`/`Generic` to the underlying class name.
+    // Bare generic types like `Collection<int, User>` are handled by
+    // extract_value_type above, so this only needs the name for the
+    // `class_loader` fallback below; `type_hint_to_classes_typed` handles
+    // the full (possibly nullable) type itself.
+    let class_name = iter_type.base_name()?;
 
     // Resolve the class name to ClassInfo.
     let classes = crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -6905,6 +8078,7 @@ fn bind_foreach_key<'b>(
     if let Expression::Variable(Variable::Direct(dv)) = key_expr {
         let var_name = bytes_to_str(dv.name).to_string();
         if let Some(it) = iter_type {
+            // Strategy 1: extract from the type's own generic parameters.
             let key_php_type = it.extract_key_type(false);
             if let Some(kt) = key_php_type {
                 let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -6923,6 +8097,30 @@ fn bind_foreach_key<'b>(
                 }
                 return;
             }
+
+            // Strategy 2: class-based fallback for bare collection names.
+            // When the iterable is `PhpType::Named("Finder")` (no generics),
+            // look at the class's implements_generics / extends_generics to
+            // find the key type (e.g. IteratorAggregate<non-empty-string, SplFileInfo>).
+            if let Some(key_type) = resolve_iterable_key_via_class(it, ctx)
+                && !is_unsubstituted_template_param(&key_type)
+            {
+                let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
+                    &key_type,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+                if !resolved.is_empty() {
+                    scope.set(
+                        &var_name,
+                        ResolvedType::from_classes_with_hint(resolved, key_type),
+                    );
+                } else {
+                    scope.set(&var_name, vec![ResolvedType::from_type_string(key_type)]);
+                }
+                return;
+            }
         }
         // Default: key is int|string.
         scope.set(
@@ -6933,6 +8131,63 @@ fn bind_foreach_key<'b>(
             ]))],
         );
     }
+}
+
+/// Resolve the iterable **key** type from a class's `implements_generics`
+/// / `extends_generics`.  Mirrors `resolve_iterable_element_via_class`.
+fn resolve_iterable_key_via_class(
+    iter_type: &PhpType,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    // See `resolve_iterable_element_via_class`: unwrap `Nullable`/`Generic`
+    // via `base_name` so `?SimpleXMLElement`-style iterable types resolve.
+    let class_name = iter_type.base_name()?;
+
+    let classes = crate::completion::type_resolution::type_hint_to_classes_typed(
+        iter_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+
+    if classes.is_empty() {
+        let cls = (ctx.class_loader)(class_name)?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        return super::foreach_resolution::extract_iterable_key_type_from_class(
+            &merged,
+            ctx.class_loader,
+        );
+    }
+
+    for cls in &classes {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let key_type = super::foreach_resolution::extract_iterable_key_type_from_class(
+            &merged,
+            ctx.class_loader,
+        );
+        if let Some(ref kt) = key_type {
+            if let Some(name) = kt.base_name()
+                && merged
+                    .template_params
+                    .iter()
+                    .any(|p| p.as_ref() as &str == name)
+                && let Some(bound) = merged.template_param_bounds.get(&crate::atom::atom(name))
+            {
+                return Some(bound.clone());
+            }
+            return key_type;
+        }
+    }
+
+    None
 }
 
 /// Process a `while` loop.
@@ -6951,8 +8206,9 @@ fn process_while<'b>(while_stmt: &'b While<'b>, scope: &mut ScopeState, ctx: &Fo
         return;
     }
 
-    // Record `&&` chain snapshots for the while condition.
+    // Record `&&` and `||` chain snapshots for the while condition.
     record_and_chain_snapshots(while_stmt.condition, scope, ctx);
+    record_or_chain_snapshots(while_stmt.condition, scope, ctx);
 
     let pre_loop_scope = scope.clone();
 
@@ -7097,6 +8353,18 @@ fn process_for<'b>(for_stmt: &'b For<'b>, scope: &mut ScopeState, ctx: &ForwardW
         seed_pass_by_ref_in_condition(cond_expr, scope, ctx);
     }
 
+    // Record a snapshot at each condition expression so that member
+    // accesses in the condition clause (which live on the `for` line,
+    // before any body statement) see the variables bound by the init
+    // clause.  Without this, a diagnostic on the condition would only
+    // find the pre-`for` snapshot and treat init-clause variables as
+    // unresolved.
+    if is_diagnostic_scope_active() {
+        for cond_expr in for_stmt.conditions.iter() {
+            record_scope_snapshot(cond_expr.span().start.offset, scope);
+        }
+    }
+
     let pre_loop_scope = scope.clone();
 
     // When the cursor is inside the loop body (completion path), discovery
@@ -7160,6 +8428,18 @@ fn process_for<'b>(for_stmt: &'b For<'b>, scope: &mut ScopeState, ctx: &ForwardW
             ForBody::ColonDelimited(body) => {
                 walk_body_forward(body.statements.iter(), scope, walk_ctx);
             }
+        }
+    }
+
+    // Record a snapshot at each increment expression so that member
+    // accesses in the update clause (e.g. `$p = $p->next()`, also on the
+    // `for` line) see the variables bound by the init clause and the loop
+    // body.  The increments run after the body, so `scope` here reflects
+    // both; recording before the post-loop merge keeps the in-loop types
+    // rather than the widened post-loop union.
+    if is_diagnostic_scope_active() {
+        for increment in for_stmt.increments.iter() {
+            record_scope_snapshot(increment.span().start.offset, scope);
         }
     }
 
@@ -7467,7 +8747,7 @@ fn apply_condition_narrowing<'b>(
                             &extraction.class_type,
                             &var_ctx,
                             classes,
-                        );
+                        )
                     });
                     // Negated instanceof exclusion does NOT eliminate
                     // null — `!$x instanceof Foo` is true when $x is
@@ -7487,7 +8767,7 @@ fn apply_condition_narrowing<'b>(
                             extraction.exact,
                             &var_ctx,
                             classes,
-                        );
+                        )
                     });
                     if !single.is_empty() {
                         let entry = instanceof_results.entry(var_name.clone()).or_default();
@@ -7600,12 +8880,7 @@ fn apply_condition_narrowing<'b>(
                     };
                     let var_ctx = build_var_ctx(&var_name, ctx, &scope_resolver);
                     ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_inclusion(
-                            &union_type,
-                            false,
-                            &var_ctx,
-                            classes,
-                        );
+                        narrowing::apply_instanceof_inclusion(&union_type, false, &var_ctx, classes)
                     });
                     // Instanceof guarantees non-null — strip bare
                     // `null` entries that were preserved by
@@ -7628,6 +8903,10 @@ fn apply_condition_narrowing<'b>(
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
     apply_type_guard_narrowing_truthy(condition, scope);
 
+    // `is_a($x, Class::class, true)` / `class_exists($x)` narrowing:
+    // narrow a string-typed `$x` to `class-string<Class>` / `class-string`.
+    apply_class_string_guard_narrowing(condition, scope, ctx, true);
+
     // Null narrowing: `if ($x !== null)` — remove null from scope.
     apply_null_narrowing_truthy(condition, scope, ctx);
 
@@ -7636,6 +8915,9 @@ fn apply_condition_narrowing<'b>(
 
     // in_array($var, $haystack, true) narrowing.
     apply_in_array_narrowing(condition, scope, ctx, false);
+
+    // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
+    apply_member_exists_narrowing(condition, scope, false);
 }
 
 /// Apply inverse narrowing for a single condition expression (not
@@ -7680,7 +8962,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
             let mut results = scope.get(var_name).to_vec();
             for cls_type in &classes {
                 ResolvedType::apply_narrowing(&mut results, |class_list| {
-                    narrowing::apply_instanceof_exclusion(cls_type, &var_ctx, class_list);
+                    narrowing::apply_instanceof_exclusion(cls_type, &var_ctx, class_list)
                 });
             }
             if !results.is_empty() {
@@ -7703,7 +8985,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
                         extraction.exact,
                         &var_ctx,
                         classes,
-                    );
+                    )
                 });
                 results.retain(|rt| !rt.type_string.is_null());
             } else {
@@ -7711,11 +8993,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
                 ResolvedType::apply_narrowing(&mut results, |classes| {
-                    narrowing::apply_instanceof_exclusion(
-                        &extraction.class_type,
-                        &var_ctx,
-                        classes,
-                    );
+                    narrowing::apply_instanceof_exclusion(&extraction.class_type, &var_ctx, classes)
                 });
             }
             if !results.is_empty() {
@@ -7723,6 +9001,11 @@ fn apply_condition_narrowing_inverse_single<'b>(
             }
         }
     }
+
+    // Inverse member-existence narrowing: after a guard clause like
+    // `if (!property_exists($x, 'name')) { return; }`, the member is
+    // known to exist.
+    apply_member_exists_narrowing(condition, scope, true);
 }
 
 /// Apply inverse condition-based narrowing (for else branches and
@@ -7743,6 +9026,7 @@ fn apply_condition_narrowing_inverse<'b>(
         // Type guard, null, phpstan-assert, and in_array narrowing
         // operate on the full condition expression.
         apply_type_guard_narrowing_inverse(condition, scope);
+        apply_class_string_guard_narrowing(condition, scope, ctx, false);
         apply_null_narrowing_inverse(condition, scope, ctx);
         apply_phpstan_assert_condition_narrowing(condition, scope, ctx, true);
         apply_in_array_narrowing(condition, scope, ctx, true);
@@ -7778,6 +9062,7 @@ fn apply_condition_narrowing_inverse<'b>(
         // Type guard, null, phpstan-assert, and in_array narrowing
         // operate on the full condition expression.
         apply_type_guard_narrowing_inverse(condition, scope);
+        apply_class_string_guard_narrowing(condition, scope, ctx, false);
         apply_null_narrowing_inverse(condition, scope, ctx);
         apply_phpstan_assert_condition_narrowing(condition, scope, ctx, true);
         apply_in_array_narrowing(condition, scope, ctx, true);
@@ -7789,6 +9074,10 @@ fn apply_condition_narrowing_inverse<'b>(
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
     apply_type_guard_narrowing_inverse(condition, scope);
 
+    // Inverse class-string guard narrowing: `if (!is_a($x, Class::class, true))`
+    // guard clause → after it, `$x` is a class-string of `Class`.
+    apply_class_string_guard_narrowing(condition, scope, ctx, false);
+
     // Inverse null narrowing: `if ($x === null)` after guard → remove null.
     apply_null_narrowing_inverse(condition, scope, ctx);
 
@@ -7797,6 +9086,101 @@ fn apply_condition_narrowing_inverse<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+}
+
+/// Report whether `condition` contains a member-existence proof for any
+/// variable currently in `scope`: `property_exists($x, 'name')`,
+/// `method_exists($x, 'name')`, or `isset($x->name)` (all recognised by
+/// [`narrowing::try_extract_member_exists_guard`]).
+///
+/// Ternary branch narrowing runs only for conditions that add information
+/// the guarded branch relies on.  Like `instanceof`, these guards qualify:
+/// the then-branch of `property_exists($x, 'p') ? $x->p : …` depends on the
+/// proof that `$x->p` exists.
+fn condition_proves_member(condition: &Expression<'_>, scope: &ScopeState) -> bool {
+    let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+    collect_and_chain_operands(condition).iter().any(|operand| {
+        var_names
+            .iter()
+            .any(|vn| narrowing::try_extract_member_exists_guard(operand, vn.as_str()).is_some())
+    })
+}
+
+/// Apply `property_exists($var, 'name')` / `method_exists($var, 'name')`
+/// narrowing to the scope.
+///
+/// In the branch where the guard holds, each class in the variable's
+/// resolved union gains a virtual member of the guarded name (unknown
+/// type), mirroring PHPStan's `object&hasProperty('name')` intersection.
+/// Member access, completion, and hover inside the branch then treat the
+/// member as present instead of reporting it unknown.
+///
+/// `inverted` is `false` for the truthy branch (a bare guard proves the
+/// member exists) and `true` for the inverse path (else branch / after an
+/// exiting guard clause), where the *negated* form proves it.
+fn apply_member_exists_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    inverted: bool,
+) {
+    for operand in collect_and_chain_operands(condition) {
+        let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+        for var_name in &var_names {
+            let Some((member, is_method, negated)) =
+                narrowing::try_extract_member_exists_guard(operand, var_name)
+            else {
+                continue;
+            };
+            // Only the direction where the guard is known TRUE adds
+            // information — "the member does not exist" removes nothing
+            // we model.
+            if negated != inverted {
+                continue;
+            }
+
+            let mut results = scope.get(var_name).to_vec();
+            let mut changed = false;
+            for rt in &mut results {
+                let Some(class_info) = &rt.class_info else {
+                    continue;
+                };
+                // Skip when the member is already declared on the class
+                // itself — nothing to add, and injecting an untyped
+                // virtual member would shadow the declared type.  Only
+                // own members are checked (resolving ancestors here
+                // would be expensive); guarding a *statically declared
+                // inherited* member with `property_exists` is rare, and
+                // the cost is an unknown member type inside the branch,
+                // never a false diagnostic.
+                let already_present = if is_method {
+                    class_info.get_method_ci(&member).is_some()
+                } else {
+                    class_info
+                        .properties
+                        .iter()
+                        .any(|p| p.name.as_str() == member)
+                };
+                if already_present {
+                    continue;
+                }
+                let mut narrowed = (**class_info).clone();
+                if is_method {
+                    narrowed
+                        .methods
+                        .push(Arc::new(MethodInfo::virtual_method(&member, None)));
+                } else {
+                    narrowed
+                        .properties
+                        .push(PropertyInfo::virtual_property(&member, None));
+                }
+                rt.class_info = Some(Arc::new(narrowed));
+                changed = true;
+            }
+            if changed {
+                scope.set(var_name, results);
+            }
+        }
+    }
 }
 
 /// Apply `in_array($var, $haystack, true)` narrowing.
@@ -7847,18 +9231,18 @@ fn apply_in_array_narrowing<'b>(
                 let would_remove_all = {
                     let mut test = results.clone();
                     ResolvedType::apply_narrowing(&mut test, |classes| {
-                        narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes);
+                        narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes)
                     });
                     test.is_empty()
                 };
                 if !would_remove_all {
                     ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes);
+                        narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes)
                     });
                 }
             } else {
                 ResolvedType::apply_narrowing(&mut results, |classes| {
-                    narrowing::apply_instanceof_inclusion(&element_type, false, &var_ctx, classes);
+                    narrowing::apply_instanceof_inclusion(&element_type, false, &var_ctx, classes)
                 });
             }
 
@@ -7988,7 +9372,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                                 &assertion.asserted_type,
                                 &var_ctx,
                                 classes,
-                            );
+                            )
                         });
                     } else {
                         ResolvedType::apply_narrowing(&mut results, |classes| {
@@ -7997,7 +9381,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                                 false,
                                 &var_ctx,
                                 classes,
-                            );
+                            )
                         });
                     }
                     if !results.is_empty() {
@@ -8007,30 +9391,45 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
             }
         }
         Call::StaticMethod(static_call) => {
-            let class_name = match static_call.class {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-                Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-                _ => return,
-            };
             let method_name = match &static_call.method {
                 ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
                 _ => return,
             };
-            let class_info = match (ctx.class_loader)(&class_name) {
+            // Resolve the receiver to a class, handling `self`, `static`,
+            // `parent`, and subclass names.
+            let receiver = match static_call.class {
+                Expression::Identifier(ident) => {
+                    let name = bytes_to_str(ident.value());
+                    let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
+                    (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
+                }
+                Expression::Self_(_) | Expression::Static(_) => {
+                    (ctx.class_loader)(&ctx.current_class.name)
+                }
+                Expression::Parent(_) => match ctx.current_class.parent_class.as_ref() {
+                    Some(parent) => (ctx.class_loader)(parent),
+                    None => return,
+                },
+                _ => return,
+            };
+            let class_info = match receiver {
                 Some(ci) => ci,
                 None => return,
             };
-            let method = match class_info
-                .methods
-                .iter()
-                .find(|m| m.name == method_name && m.is_static)
-            {
-                Some(m) => m.clone(),
+            // Search the trait/parent chain so assertions declared on an
+            // ancestor (e.g. PHPUnit's `Assert`) are found.  Uses raw class
+            // loads only, avoiding a full merge that would poison the shared
+            // resolved-class cache mid-walk.
+            let method = match narrowing::find_assertion_method_in_chain(
+                &class_info,
+                &method_name,
+                ctx.class_loader,
+                &mut Vec::new(),
+                0,
+            ) {
+                Some(m) => m,
                 None => return,
             };
-            if method.type_assertions.is_empty() {
-                return;
-            }
             for assertion in &method.type_assertions {
                 let applies_positively = match assertion.kind {
                     AssertionKind::IfTrue => function_returned_true,
@@ -8058,7 +9457,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                                 &resolved_assert_type,
                                 &var_ctx,
                                 classes,
-                            );
+                            )
                         });
                     } else {
                         ResolvedType::apply_narrowing(&mut results, |classes| {
@@ -8067,7 +9466,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                                 false,
                                 &var_ctx,
                                 classes,
-                            );
+                            )
                         });
                     }
                     if !results.is_empty() {
@@ -8094,17 +9493,22 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
             // Collect assertions from all candidate classes.
             let mut to_apply: Vec<(crate::php_type::PhpType, bool, String)> = Vec::new();
             for rt in receiver_types {
-                let class_info = match (ctx.class_loader)(&rt.type_string.to_string()) {
+                let receiver = match (ctx.class_loader)(&rt.type_string.to_string()) {
                     Some(ci) => ci,
                     None => {
                         continue;
                     }
                 };
-                let method = match class_info
-                    .methods
-                    .iter()
-                    .find(|m| m.name == method_name && !m.is_static)
-                {
+                // Search the trait/parent chain for the method's assertions
+                // using raw class loads only (a full merge would poison the
+                // shared resolved-class cache mid-walk).
+                let method = match narrowing::find_assertion_method_in_chain(
+                    &receiver,
+                    &method_name,
+                    ctx.class_loader,
+                    &mut Vec::new(),
+                    0,
+                ) {
                     Some(m) => m,
                     None => continue,
                 };
@@ -8122,7 +9526,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                     // `Decimal::isZero()` would narrow $denominator to
                     // `Monetary` instead of `Decimal`.
                     let resolved_type = if assertion.asserted_type.contains_self_ref() {
-                        assertion.asserted_type.replace_self(&class_info.fqn())
+                        assertion.asserted_type.replace_self(&receiver.fqn())
                     } else {
                         assertion.asserted_type.clone()
                     };
@@ -8143,7 +9547,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                 let mut results = scope.get(&target_var).to_vec();
                 if should_exclude {
                     ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_exclusion(&asserted_type, &var_ctx, classes);
+                        narrowing::apply_instanceof_exclusion(&asserted_type, &var_ctx, classes)
                     });
                 } else {
                     ResolvedType::apply_narrowing(&mut results, |classes| {
@@ -8152,7 +9556,7 @@ fn apply_phpstan_assert_condition_narrowing<'b>(
                             false,
                             &var_ctx,
                             classes,
-                        );
+                        )
                     });
                 }
                 if !results.is_empty() {
@@ -8254,6 +9658,89 @@ fn apply_type_guard_on_operands(condition: &Expression<'_>, scope: &mut ScopeSta
     }
 }
 
+/// Apply `is_a($x, Class::class, true)` / `class_exists($x)` (and the
+/// other `*_exists()` forms) class-string narrowing.
+///
+/// When the guard's effective truth value is `true`, narrows string-like
+/// (and `mixed`) entries in `$x`'s type to `class-string<Class>` (or
+/// bare `class-string` for the generic `*_exists()` forms, which don't
+/// name a specific class).  Negation is resolved by
+/// `try_extract_class_string_guard`, so passing `truthy = false` here
+/// from a guard-clause inverse correctly re-derives the truthy narrowing
+/// for a negated condition (`if (!is_a(...)) { throw; }`).
+///
+/// Object-typed entries (with `class_info` set) are left untouched —
+/// `is_a()`'s object side is already narrowed by the existing
+/// instanceof-style handling, which operates independently on the
+/// class-bearing entries.
+fn apply_class_string_guard_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let operands = collect_and_chain_operands(condition);
+    let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    for key in collect_condition_property_keys(condition) {
+        if !var_names.contains(&key) {
+            var_names.push(key);
+        }
+    }
+    for operand in &operands {
+        for var_name in &var_names {
+            if let Some((target, negated)) =
+                narrowing::try_extract_class_string_guard(operand, var_name)
+            {
+                let effective_truthy = if negated { !truthy } else { truthy };
+                if !effective_truthy {
+                    continue;
+                }
+                // Seed compound subject keys (`$arr['class']`, `$obj->prop`)
+                // so a class-string guard on an array-index or property
+                // subject narrows just like one on a plain variable.  An
+                // untyped array index seeds as `mixed`, which the loop below
+                // narrows to `class-string<Class>`.
+                seed_synthetic_key_if_needed(var_name, scope, ctx);
+                let mut results = scope.get(var_name).to_vec();
+                if results.is_empty() {
+                    continue;
+                }
+                let resolved_fqn = target
+                    .as_deref()
+                    .map(|name| crate::util::resolve_name_via_loader(name, ctx.class_loader));
+                let class_string_type = match &resolved_fqn {
+                    Some(fqn) => PhpType::parse(&format!("class-string<{}>", fqn)),
+                    None => PhpType::parse("class-string"),
+                };
+                let mut changed = false;
+                for rt in results.iter_mut() {
+                    if rt.class_info.is_some() {
+                        continue;
+                    }
+                    // Never widen a type that is already at least as
+                    // specific as the guard's result. The generic
+                    // `*_exists()` forms narrow to bare `class-string`; a
+                    // variable already typed `class-string<Foo>` must keep
+                    // its type argument rather than be downgraded (a bare
+                    // `class-string` is a supertype, so `new $var` could no
+                    // longer recover the concrete class).
+                    if rt.type_string.is_subtype_of(&class_string_type) {
+                        continue;
+                    }
+                    if rt.type_string.is_subtype_of(&PhpType::string()) || rt.type_string.is_mixed()
+                    {
+                        rt.type_string = class_string_type.clone();
+                        changed = true;
+                    }
+                }
+                if changed {
+                    scope.set(var_name, results);
+                }
+            }
+        }
+    }
+}
+
 fn apply_null_narrowing_truthy<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -8304,6 +9791,14 @@ fn apply_null_narrowing_truthy<'b>(
     if let Some(var_name) = extract_not_empty_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_null_from_scope(&var_name, scope);
+    }
+    // Bare truthy check: `if ($x) { ... }` — $x is truthy in the
+    // then-body, so strip null and false from its type.
+    if let Some(var_name) =
+        expr_to_var_name(condition).or_else(|| narrowing::expr_to_subject_key(condition))
+    {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        strip_falsy_from_scope(&var_name, scope);
     }
 }
 
@@ -8738,29 +10233,38 @@ fn process_condition_assignment<'b>(
         process_condition_assignment(inner.expression, scope, ctx);
         return;
     }
-    // Assignment inside a binary comparison:
-    //   `if (($x = expr()) !== null)` or `if (null !== ($x = expr()))`
+    // Negated (or otherwise unary-prefixed) conditions:
+    //   `if (!$x = expr()) { return; }` — PHP parses this as
+    //   `!($x = expr())`.  Recurse into the operand.
+    if let Expression::UnaryPrefix(prefix) = condition {
+        process_condition_assignment(prefix.operand, scope, ctx);
+        return;
+    }
+    // Assignment inside a binary comparison or logical chain:
+    //   `if (($x = expr()) !== null)`, `if (null !== ($x = expr()))`,
+    //   `while (($x = next()) && $x->valid())`.  Recurse into both
+    //   operands so the assignment on either side is seen.
     if let Expression::Binary(bin) = condition {
-        // Check LHS directly: `($x = expr()) !== null`
-        if let Expression::Assignment(_) = bin.lhs {
-            process_condition_assignment(bin.lhs, scope, ctx);
-            return;
-        }
-        if let Expression::Parenthesized(p) = bin.lhs
-            && let Expression::Assignment(_) = p.expression
-        {
-            process_condition_assignment(p.expression, scope, ctx);
-            return;
-        }
-        // Check RHS: `null !== ($x = expr())`
-        if let Expression::Assignment(_) = bin.rhs {
-            process_condition_assignment(bin.rhs, scope, ctx);
-            return;
-        }
-        if let Expression::Parenthesized(p) = bin.rhs
-            && let Expression::Assignment(_) = p.expression
-        {
-            process_condition_assignment(p.expression, scope, ctx);
+        process_condition_assignment(bin.lhs, scope, ctx);
+        process_condition_assignment(bin.rhs, scope, ctx);
+        return;
+    }
+    // Assignment wrapped in a call argument:
+    //   `while (is_object($token = $tokenizer->next()))`.  Recurse
+    //   into each argument value so the assignment is registered.
+    if let Expression::Call(call) = condition {
+        let arg_list = match call {
+            Call::Function(fc) => &fc.argument_list,
+            Call::Method(mc) => &mc.argument_list,
+            Call::NullSafeMethod(mc) => &mc.argument_list,
+            Call::StaticMethod(sc) => &sc.argument_list,
+        };
+        for arg in arg_list.arguments.iter() {
+            let arg_expr = match arg {
+                Argument::Positional(a) => a.value,
+                Argument::Named(a) => a.value,
+            };
+            process_condition_assignment(arg_expr, scope, ctx);
         }
     }
 }
@@ -8856,33 +10360,84 @@ fn seed_synthetic_key_if_needed(key: &str, scope: &mut ScopeState, ctx: &Forward
             if base_types.is_empty() {
                 return;
             }
-            // Look up the array key's type from the array shape.
+            // Look up the array key's type.  Prefer a precise shape entry
+            // (`array{class: Foo}`); fall back to the generic element type
+            // (`array<string, Foo>` → `Foo`); and finally to `mixed` for an
+            // untyped array (plain `array`).  Seeding the untyped case is
+            // what lets assertion / class-string narrowing apply to an
+            // array-index subject whose element type is otherwise unknown
+            // (e.g. `assertInstanceOf(X::class, $arr['k'])`).
             let mut key_results: Vec<ResolvedType> = Vec::new();
             for rt in base_types {
-                if let Some(element_type) = rt.type_string.extract_shape_key_type(key_name) {
-                    let resolved_classes =
-                        crate::completion::type_resolution::type_hint_to_classes_typed(
-                            &element_type,
-                            &ctx.current_class.name,
-                            ctx.all_classes,
-                            ctx.class_loader,
-                        );
-                    if resolved_classes.is_empty() {
-                        ResolvedType::extend_unique(
-                            &mut key_results,
-                            vec![ResolvedType::from_type_string(element_type)],
-                        );
-                    } else {
-                        ResolvedType::extend_unique(
-                            &mut key_results,
-                            ResolvedType::from_classes_with_hint(resolved_classes, element_type),
-                        );
-                    }
+                let element_type = rt
+                    .type_string
+                    .extract_shape_key_type(key_name)
+                    .or_else(|| rt.type_string.extract_value_type(false).cloned())
+                    .or_else(|| rt.type_string.is_array_like().then(PhpType::mixed));
+                let Some(element_type) = element_type else {
+                    continue;
+                };
+                let resolved_classes =
+                    crate::completion::type_resolution::type_hint_to_classes_typed(
+                        &element_type,
+                        &ctx.current_class.name,
+                        ctx.all_classes,
+                        ctx.class_loader,
+                    );
+                if resolved_classes.is_empty() {
+                    ResolvedType::extend_unique(
+                        &mut key_results,
+                        vec![ResolvedType::from_type_string(element_type)],
+                    );
+                } else {
+                    ResolvedType::extend_unique(
+                        &mut key_results,
+                        ResolvedType::from_classes_with_hint(resolved_classes, element_type),
+                    );
                 }
             }
             if !key_results.is_empty() {
                 scope.set(key, key_results);
             }
+        }
+    }
+}
+
+/// Seed property/array-access subject keys that appear as arguments to a
+/// call expression into the scope.
+///
+/// Used for assertion narrowing on non-variable subjects, e.g.
+/// `assertInstanceOf(X::class, $view->component)` or a `@phpstan-assert`
+/// helper invoked on `$arg->value`.  Each argument that resolves to a
+/// compound subject key (property path or array access) is seeded with
+/// its current type so the assertion narrowing loop can narrow it.
+fn seed_assert_arg_subject_keys(
+    expr: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Call(call) = expr else {
+        return;
+    };
+    let argument_list = match call {
+        Call::Function(fc) => &fc.argument_list,
+        Call::Method(mc) => &mc.argument_list,
+        Call::NullSafeMethod(mc) => &mc.argument_list,
+        Call::StaticMethod(sc) => &sc.argument_list,
+    };
+    for arg in argument_list.arguments.iter() {
+        let arg_expr = match arg {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        };
+        if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
+            && (key.contains("->") || key.contains("[\""))
+        {
+            seed_synthetic_key_if_needed(&key, scope, ctx);
         }
     }
 }
@@ -8947,6 +10502,11 @@ fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys: &mut Vec<S
                         | "is_callable"
                         | "is_null"
                         | "is_scalar"
+                        | "is_a"
+                        | "class_exists"
+                        | "interface_exists"
+                        | "enum_exists"
+                        | "trait_exists"
                 );
                 if is_type_guard && let Some(first_arg) = func_call.argument_list.arguments.first()
                 {
@@ -9070,8 +10630,15 @@ fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &mut Vec<Stri
                 Expression::Identifier(ident) => bytes_to_str(ident.value()),
                 _ => return,
             };
-            if (func_name == "is_a" || func_name == "get_class")
-                && let Some(first_arg) = func_call.argument_list.arguments.first()
+            if matches!(
+                func_name,
+                "is_a"
+                    | "get_class"
+                    | "class_exists"
+                    | "interface_exists"
+                    | "enum_exists"
+                    | "trait_exists"
+            ) && let Some(first_arg) = func_call.argument_list.arguments.first()
             {
                 let arg_expr = match first_arg {
                     Argument::Positional(pos) => pos.value,
@@ -9257,6 +10824,12 @@ fn try_enter_closure_expr<'b>(
                     &filtered_inferred,
                     ctx,
                 );
+                // The arrow body is a single return-value expression, so
+                // apply the same cursor narrowing that `walk_body_forward`
+                // applies to a statement body.  This narrows a parameter
+                // referenced after an earlier `&&` conjunct (e.g.
+                // `fn($x) => $x instanceof Foo && $x->bar()`).
+                apply_cursor_ternary_narrowing(arrow.expression, scope, ctx);
                 // The body is a single expression.  Recurse into it
                 // to find nested closures/arrow functions that may
                 // contain the cursor (e.g. a closure passed as an
@@ -9435,15 +11008,9 @@ fn infer_callable_params_for_call(
 /// Non-literal types are returned unchanged.
 fn widen_literal(ty: &PhpType) -> PhpType {
     match ty {
-        PhpType::Literal(s) if s.parse::<i64>().is_ok() => PhpType::int(),
-        PhpType::Literal(s)
-            if (s.starts_with('\'') && s.ends_with('\''))
-                || (s.starts_with('"') && s.ends_with('"')) =>
-        {
-            PhpType::string()
-        }
-        PhpType::Literal(s) if s.parse::<f64>().is_ok() => PhpType::float(),
-        PhpType::Literal(s) if s == "true" || s == "false" => PhpType::bool(),
+        PhpType::Literal(crate::php_type::LiteralValue::Int(_)) => PhpType::int(),
+        PhpType::Literal(crate::php_type::LiteralValue::String(_)) => PhpType::string(),
+        PhpType::Literal(crate::php_type::LiteralValue::Float(_)) => PhpType::float(),
         _ => ty.clone(),
     }
 }

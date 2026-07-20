@@ -124,8 +124,27 @@ pub enum SubjectExpr {
 pub enum BracketSegment {
     /// A string-key access, e.g. `['items']`.
     StringKey(String),
-    /// A numeric or variable index access, e.g. `[0]` or `[$i]` or `[]`.
+    /// An integer-literal index access, e.g. `[0]` or `[2]`. Carries the
+    /// decimal string form so it can address positional shape entries
+    /// (`array{Foo, Bar}`) as well as explicit numeric keys.
+    IntKey(String),
+    /// A variable or otherwise non-literal index access, e.g. `[$i]` or `[]`.
     ElementAccess,
+}
+
+/// Classify the text inside a `[…]` bracket into a [`BracketSegment`].
+///
+/// Quoted strings become [`BracketSegment::StringKey`]; bare integer
+/// literals become [`BracketSegment::IntKey`]; everything else (variables,
+/// expressions, empty `[]`) becomes [`BracketSegment::ElementAccess`].
+fn classify_bracket_inner(inner: &str) -> BracketSegment {
+    if let Some(key) = crate::util::unquote_php_string(inner) {
+        BracketSegment::StringKey(key.to_string())
+    } else if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) {
+        BracketSegment::IntKey(inner.to_string())
+    } else {
+        BracketSegment::ElementAccess
+    }
 }
 
 impl SubjectExpr {
@@ -314,6 +333,9 @@ impl SubjectExpr {
                         BracketSegment::StringKey(k) => {
                             s.push_str(&format!("['{}']", k));
                         }
+                        BracketSegment::IntKey(n) => {
+                            s.push_str(&format!("[{}]", n));
+                        }
                         BracketSegment::ElementAccess => {
                             s.push_str("[]");
                         }
@@ -330,6 +352,9 @@ impl SubjectExpr {
                     match seg {
                         BracketSegment::StringKey(k) => {
                             s.push_str(&format!("['{}']", k));
+                        }
+                        BracketSegment::IntKey(n) => {
+                            s.push_str(&format!("[{}]", n));
                         }
                         BracketSegment::ElementAccess => {
                             s.push_str("[]");
@@ -350,6 +375,54 @@ impl SubjectExpr {
         )
     }
 
+    /// Collects the names of genuine local variables (`$var`, but not
+    /// `$this`) referenced anywhere in this expression — both as receivers
+    /// (`$stmt->foo()`) and as call arguments (`$this->parse($stmt)`).
+    /// Names are appended to `out` (with their leading `$`), possibly with
+    /// duplicates.
+    ///
+    /// A local variable's type comes from assignments visible at the cursor,
+    /// so the same expression text can resolve to different types at
+    /// different call sites depending on what those variables hold.  Any
+    /// cache keyed by the subject text alone must therefore mix in a
+    /// discriminator built from these variables' resolved types.  `$this`,
+    /// `self`, `static`, and `parent` are class-relative rather than local,
+    /// so they are not collected.
+    pub fn collect_local_variables(&self, out: &mut Vec<String>) {
+        match self {
+            SubjectExpr::Variable(name) => out.push(name.clone()),
+            SubjectExpr::PropertyChain { base, .. }
+            | SubjectExpr::MethodCall { base, .. }
+            | SubjectExpr::ArrayAccess { base, .. } => base.collect_local_variables(out),
+            SubjectExpr::CallExpr { callee, args_text } => {
+                callee.collect_local_variables(out);
+                collect_text_local_variables(args_text, out);
+            }
+            SubjectExpr::InlineArray { elements, .. } => {
+                for elem in elements {
+                    collect_text_local_variables(elem, out);
+                }
+            }
+            SubjectExpr::This
+            | SubjectExpr::SelfKw
+            | SubjectExpr::StaticKw
+            | SubjectExpr::Parent
+            | SubjectExpr::StaticMethodCall { .. }
+            | SubjectExpr::StaticAccess { .. }
+            | SubjectExpr::NewExpr { .. }
+            | SubjectExpr::ClassName(_)
+            | SubjectExpr::FunctionCall(_) => {}
+        }
+    }
+
+    /// Returns `true` if this expression references any genuine local
+    /// variable (see [`collect_local_variables`](Self::collect_local_variables)).
+    pub fn references_local_variable(&self) -> bool {
+        let mut vars = Vec::new();
+        self.collect_local_variables(&mut vars);
+        !vars.is_empty()
+    }
+
     /// Parse the callee portion of a call expression (everything before
     /// the opening `(`).
     ///
@@ -362,6 +435,30 @@ impl SubjectExpr {
 }
 
 // ─── SubjectExpr parsing helpers ────────────────────────────────────────────
+
+/// Appends the names of genuine local variables (`$name`, but not `$this`)
+/// found in a raw argument/element text to `out`, each with its leading
+/// `$`.  Used to gather the variables an expression's resolution depends
+/// on so a cache key can be made scope-aware.
+fn collect_text_local_variables(text: &str, out: &mut Vec<String>) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+            if end > start && !text[start..end].eq_ignore_ascii_case("this") {
+                out.push(text[i..end].to_string());
+            }
+            i = end.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+}
 
 /// Parse the callee portion of a call expression (everything before the
 /// opening `(`).
@@ -633,11 +730,7 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
         let close = rest.find(']')?;
         let inner = rest[1..close].trim();
 
-        if let Some(key) = crate::util::unquote_php_string(inner) {
-            segments.push(BracketSegment::StringKey(key.to_string()));
-        } else {
-            segments.push(BracketSegment::ElementAccess);
-        }
+        segments.push(classify_bracket_inner(inner));
 
         rest = &rest[close + 1..];
     }
@@ -699,11 +792,7 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
                     None => break,
                 };
                 let inner = rest[1..close].trim();
-                if let Some(key) = crate::util::unquote_php_string(inner) {
-                    new_segments.push(BracketSegment::StringKey(key.to_string()));
-                } else {
-                    new_segments.push(BracketSegment::ElementAccess);
-                }
+                new_segments.push(classify_bracket_inner(inner));
                 rest = &rest[close + 1..];
             }
             if !new_segments.is_empty() {
@@ -762,11 +851,7 @@ fn parse_call_array_access(subject: &str) -> Option<SubjectExpr> {
     while rest.starts_with('[') {
         let close = rest.find(']')?;
         let inner = rest[1..close].trim();
-        if let Some(key) = crate::util::unquote_php_string(inner) {
-            segments.push(BracketSegment::StringKey(key.to_string()));
-        } else {
-            segments.push(BracketSegment::ElementAccess);
-        }
+        segments.push(classify_bracket_inner(inner));
         rest = &rest[close + 1..];
     }
 
@@ -805,19 +890,7 @@ fn parse_inline_array(subject: &str) -> Option<SubjectExpr> {
     while rest.starts_with('[') {
         let close = rest.find(']')?;
         let idx_inner = rest[1..close].trim();
-        if let Some(key) = idx_inner
-            .strip_prefix('\'')
-            .and_then(|s| s.strip_suffix('\''))
-            .or_else(|| {
-                idx_inner
-                    .strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
-            })
-        {
-            index_segments.push(BracketSegment::StringKey(key.to_string()));
-        } else {
-            index_segments.push(BracketSegment::ElementAccess);
-        }
+        index_segments.push(classify_bracket_inner(idx_inner));
         rest = &rest[close + 1..];
     }
 

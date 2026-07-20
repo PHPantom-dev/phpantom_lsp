@@ -29,8 +29,11 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
     // or >= 2 under a braced namespace).
     let mut brace_depth: usize = 0;
     let mut namespace_brace_depth: Option<usize> = None;
+    let mut pending_use_start: Option<usize> = None;
 
     for line in content.split('\n') {
+        let line_brace_depth = brace_depth;
+
         // Update brace depth for braces on this line (crude but
         // sufficient — we only need an approximate depth to tell
         // top-level from class-body).  We skip braces inside strings
@@ -69,8 +72,17 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
         // brace depth: depth 0 normally, or depth 1 when inside a
         // braced `namespace Foo { … }` block.
         let top_level_depth = namespace_brace_depth.map_or(0, |d| d + 1);
-        if trimmed.starts_with("use ") && trimmed.contains(';') && brace_depth == top_level_depth {
-            ranges.push((offset, offset + line.len()));
+        if let Some(start) = pending_use_start {
+            if trimmed.contains(';') {
+                ranges.push((start, offset + line.len()));
+                pending_use_start = None;
+            }
+        } else if line_brace_depth == top_level_depth && trimmed.starts_with("use ") {
+            if trimmed.contains(';') {
+                ranges.push((offset, offset + line.len()));
+            } else {
+                pending_use_start = Some(offset);
+            }
         }
         offset += line.len() + 1; // +1 for '\n'
     }
@@ -84,6 +96,48 @@ pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
     ranges
         .iter()
         .any(|&(start, end)| offset >= start && offset < end)
+}
+
+/// Compute the byte ranges of `isset(...)` and `empty(...)` argument lists.
+///
+/// A member or array-index access inside these constructs never triggers
+/// a runtime error or warning even when the accessed member doesn't
+/// exist — that is the entire purpose of `isset()`/`empty()`.  Callers
+/// use this to suppress unknown-member, unresolved-member, and
+/// scalar-member-access diagnostics for spans that fall inside one of
+/// these ranges.
+pub(crate) fn compute_isset_empty_argument_ranges(content: &str) -> Vec<ByteRange> {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < len {
+        let after_name = if matches_ident(bytes, i, b"isset") {
+            Some(i + b"isset".len())
+        } else if matches_ident(bytes, i, b"empty") {
+            Some(i + b"empty".len())
+        } else {
+            None
+        };
+        if let Some(after_name) = after_name {
+            // Must not be preceded by an identifier character (avoid
+            // matching a variable/function named `myisset`).
+            let preceded_by_ident = i > 0 && is_ident_char(bytes[i - 1]);
+            if !preceded_by_ident {
+                let paren_start = skip_ws(bytes, after_name);
+                if paren_start < len
+                    && bytes[paren_start] == b'('
+                    && let Some(paren_end) = find_matching_paren(bytes, paren_start)
+                {
+                    ranges.push((paren_start + 1, paren_end));
+                    i = paren_end + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    ranges
 }
 
 // Re-export the canonical `resolve_to_fqn` from `crate::util` so that

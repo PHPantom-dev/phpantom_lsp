@@ -1,0 +1,30 @@
+// test: assertInstanceOf with a variable class drops null from the subject (object intersection)
+// feature: hover
+// expect_hover: $reference => ASTNode
+---
+<?php
+
+class ASTNode {
+    public function getImage(): string { return ''; }
+}
+
+class BaseAssert
+{
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, object $actual): void
+    {
+    }
+}
+
+class MyTestCase extends BaseAssert
+{
+    public function testIt(string $expectedTypeClass, ?ASTNode $reference): void
+    {
+        static::assertInstanceOf($expectedTypeClass, $reference);
+        $<>reference;
+    }
+}

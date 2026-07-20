@@ -205,6 +205,23 @@ pub(super) fn build_property_type(
     }
 }
 
+/// Whether `name` (case-insensitively) resolves to a relationship method
+/// on `class`.
+///
+/// Eloquent relation property access (`$model->orderProducts`) flows
+/// through `Model::__get()` → `getRelationValue()` → `isRelation()` →
+/// `method_exists()`, all of which are case-insensitive.  So accessing a
+/// relation as `$model->orderproducts` resolves the same relationship at
+/// runtime.  Property matching is otherwise case-sensitive, so callers
+/// use this to grant relation-backed virtual properties the same
+/// case-insensitivity PHP method calls already have.
+pub(crate) fn class_has_relation_method_ci(class: &ClassInfo, name: &str) -> bool {
+    class
+        .get_method(name)
+        .and_then(|m| m.return_type.as_ref())
+        .is_some_and(|rt| classify_relationship_typed(rt).is_some())
+}
+
 /// Map a `*_count` virtual property name back to the relationship method
 /// name that produced it.
 ///

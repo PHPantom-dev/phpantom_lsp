@@ -19,12 +19,12 @@
 use std::collections::HashMap;
 
 #[cfg(test)]
-use bumpalo::Bump;
+use mago_allocator::LocalArena;
 use mago_span::HasSpan;
-use mago_syntax::ast::class_like::member::ClassLikeMember;
-use mago_syntax::ast::class_like::property::Property;
-use mago_syntax::ast::modifier::Modifier;
-use mago_syntax::ast::*;
+use mago_syntax::cst::class_like::member::ClassLikeMember;
+use mago_syntax::cst::class_like::property::Property;
+use mago_syntax::cst::modifier::Modifier;
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
@@ -944,7 +944,7 @@ mod tests {
     }
 
     fn parse_and_collect(php: &str) -> Vec<AccessorProperty> {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
 
@@ -1070,7 +1070,7 @@ mod tests {
     #[test]
     fn skips_hooked_property() {
         let php = "<?php\nclass Foo {\n    public string $name { get => $this->name; }\n}";
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
 
@@ -1094,7 +1094,7 @@ mod tests {
 
     #[test]
     fn finds_existing_methods() {
-        let arena = Box::leak(Box::new(Bump::new()));
+        let arena = Box::leak(Box::new(LocalArena::new()));
         let file_id = mago_database::file::FileId::new(b"input.php");
         let php = "<?php\nclass Foo {\n    public string $name;\n    public function getName(): string { return $this->name; }\n    public function setName(string $name): self { $this->name = $name; return $this; }\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
