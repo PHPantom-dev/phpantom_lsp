@@ -2036,16 +2036,24 @@ impl Backend {
     }
 }
 
-/// Remove diagnostics that are redundant given more precise or
-/// higher-priority diagnostics on the same line or range.
+/// Drop `unresolved_member_access` hints that are already explained by
+/// a more precise diagnostic, then order the survivors for display.
 ///
-/// Two suppression rules:
+/// **Suppression.**  When a priority diagnostic (`unknown_class`,
+/// `unknown_member`, `scalar_member_access`, `unknown_function`)
+/// overlaps an `unresolved_member_access` hint, the hint is dropped
+/// because the root cause is already surfaced by the priority
+/// diagnostic.  This is the only case we remove: it is a strict
+/// refinement of the same finding, not two independent issues.  We do
+/// **not** discard overlapping external (line-only) diagnostics — a
+/// full-line PHPStan/PHPCS/Mago finding can be an independent issue
+/// (and may be more severe) than a precise native one on the same
+/// line, so hiding it risks losing a critical error behind a minor
+/// note.
 ///
-/// 1. **`unresolved_member_access` vs priority diagnostics.**  When a
-///    priority diagnostic (`unknown_class`, `unknown_member`,
-///    `scalar_member_access`, `unknown_function`) overlaps an
-///    `unresolved_member_access` hint, the hint is dropped because the
-///    root cause is already surfaced by the priority diagnostic.
+/// **Ordering.**  Instead of hiding line-only diagnostics, the sort at
+/// the end keeps a precise marker from being buried under a full-line
+/// underline (see the sort's inline comment).
 ///
 /// This is **not** deduplication in the traditional sense (removing
 /// identical entries).  Each diagnostic source fully replaces its own
@@ -2098,16 +2106,48 @@ fn suppress_imprecise_overlaps(diagnostics: &mut Vec<Diagnostic>) {
         true
     });
 
-    // Sort by range for stable output order.
+    // Order diagnostics so that, at a shared location, the most useful
+    // one is listed first.  We no longer hide overlapping external
+    // (line-only) diagnostics, so ordering is what keeps a precise
+    // marker from being buried under a full-line underline in the
+    // editor.  Within a line: most-severe first (a critical error leads
+    // regardless of which tool found it), then precise before full-line
+    // (a pinpointed range beats a whole-line span), then left-to-right
+    // by start, then by end for a stable order.
     diagnostics.sort_by(|a, b| {
         a.range
             .start
             .line
             .cmp(&b.range.start.line)
+            .then_with(|| severity_rank(a).cmp(&severity_rank(b)))
+            .then_with(|| is_full_line_range(&a.range).cmp(&is_full_line_range(&b.range)))
             .then_with(|| a.range.start.character.cmp(&b.range.start.character))
             .then_with(|| a.range.end.line.cmp(&b.range.end.line))
             .then_with(|| a.range.end.character.cmp(&b.range.end.character))
     });
+}
+
+/// Ranks a diagnostic's severity for ordering, most severe first
+/// (`ERROR` → 0, `WARNING` → 1, `INFORMATION` → 2, `HINT` → 3).  A
+/// missing severity sorts last so explicitly-classified diagnostics
+/// take precedence.
+fn severity_rank(d: &Diagnostic) -> u8 {
+    match d.severity {
+        Some(DiagnosticSeverity::ERROR) => 0,
+        Some(DiagnosticSeverity::WARNING) => 1,
+        Some(DiagnosticSeverity::INFORMATION) => 2,
+        Some(DiagnosticSeverity::HINT) => 3,
+        _ => 4,
+    }
+}
+
+/// Returns `true` if the range spans a full line (character 0 to a
+/// very large end character).  PHPStan and other line-only tools
+/// produce these ranges because they don't report column information.
+/// Used only for ordering (full-line diagnostics sort after precise
+/// ones on the same line), never to suppress them.
+fn is_full_line_range(range: &Range) -> bool {
+    range.start.line == range.end.line && range.start.character == 0 && range.end.character >= 1000
 }
 
 /// Remove diagnostics suppressed by `@phpantom-ignore` comments.
@@ -2527,9 +2567,37 @@ mod tests {
             message: "Class 'Foo' not found".to_string(),
             ..Default::default()
         };
-        let mut diags = vec![phpstan, precise.clone()];
+        let mut diags = vec![phpstan.clone(), precise.clone()];
         suppress_imprecise_overlaps(&mut diags);
-        assert_eq!(diags.len(), 2);
+        // Both survive, and the precise marker is listed first so it is
+        // not buried under the full-line underline in the editor.
+        assert_eq!(diags, vec![precise, phpstan]);
+    }
+
+    #[test]
+    fn most_severe_diagnostic_leads_on_a_shared_line() {
+        // A full-line error must sort ahead of a precise warning on the
+        // same line: the critical finding is surfaced first regardless
+        // of which tool reported it or how precise its range is.
+        let full_line_error = Diagnostic {
+            range: make_range(5, 0, 5, u32::MAX),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("argument.type".to_string())),
+            source: Some("phpstan".to_string()),
+            message: "Parameter #1 $x expects int, string given.".to_string(),
+            ..Default::default()
+        };
+        let precise_warning = Diagnostic {
+            range: make_range(5, 10, 5, 20),
+            severity: Some(DiagnosticSeverity::WARNING),
+            code: Some(NumberOrString::String("unknown_member".to_string())),
+            source: Some("phpantom".to_string()),
+            message: "Method 'foo' not found".to_string(),
+            ..Default::default()
+        };
+        let mut diags = vec![precise_warning.clone(), full_line_error.clone()];
+        suppress_imprecise_overlaps(&mut diags);
+        assert_eq!(diags, vec![full_line_error, precise_warning]);
     }
 
     #[test]
