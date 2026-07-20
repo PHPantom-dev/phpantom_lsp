@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784562061211,
+  "lastUpdate": 1784576510787,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17305,6 +17305,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2128552b573018555d67a5b2270c00eea20ef5ff",
+          "message": "Post-rebase cleanup for full workspace reference index (#186)\n\nAdds the changelog entries this PR was missing, removes the now-shipped\nX4/X8 backlog items and rewords their cross-references in other todo\ndocs, simplifies a redundant branch in find_implementors, and fixes a\nclippy warning left over from the rebase merge.\n\nContributed by @sidux in #186.",
+          "timestamp": "2026-07-20T21:28:07+02:00",
+          "tree_id": "e00b548501f8281f3e12dbbf5455738243e9a3ba",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2128552b573018555d67a5b2270c00eea20ef5ff"
+        },
+        "date": 1784576508111,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 51.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.9,
             "unit": "MiB"
           }
         ]
