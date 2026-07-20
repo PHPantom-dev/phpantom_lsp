@@ -230,10 +230,10 @@ pub use helpers::extends_eloquent_model;
 pub(crate) use helpers::walk_all_php_expressions;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
 
-pub(crate) use accessors::is_accessor_method;
+pub(crate) use accessors::is_accessor_or_mutator_method;
 use accessors::{
-    extract_modern_accessor_type, is_legacy_accessor, is_modern_accessor,
-    legacy_accessor_property_name,
+    extract_modern_accessor_type, is_legacy_accessor, is_legacy_mutator, is_modern_accessor,
+    legacy_accessor_property_name, legacy_mutator_property_name,
 };
 pub(crate) use where_property::where_property_method_to_column;
 
@@ -841,6 +841,19 @@ fn relationship_kind_name(kind: RelationshipKind) -> &'static str {
     }
 }
 
+fn mutator_methods_by_property(class: &ClassInfo) -> HashMap<String, String> {
+    let mut mutators = HashMap::new();
+    for method in &class.methods {
+        if is_legacy_mutator(method) {
+            mutators.insert(
+                legacy_mutator_property_name(&method.name),
+                method.name.to_string(),
+            );
+        }
+    }
+    mutators
+}
+
 fn push_or_replace_property(properties: &mut Vec<PropertyInfo>, property: PropertyInfo) {
     if let Some(existing) = properties.iter_mut().find(|p| p.name == property.name) {
         *existing = property;
@@ -873,6 +886,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
         let mut methods = Vec::new();
         let mut seen_props: std::collections::HashSet<String> = std::collections::HashSet::new();
         let schema_table = model_schema_table(class, cache);
+        let mutator_methods = mutator_methods_by_property(class);
 
         // ── Cast properties ─────────────────────────────────────────
         if let Some(laravel) = class.laravel() {
@@ -884,6 +898,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         cast: cast_type.clone(),
                         column: schema_column_source(schema_table.as_ref(), column),
                         attribute_default: attribute_default_source(class, column),
+                        mutator: mutator_methods.get(column).cloned(),
                     }),
                     ..PropertyInfo::virtual_property_typed(column, Some(&php_type))
                 });
@@ -901,6 +916,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         cast: "date".to_string(),
                         column: schema_column_source(schema_table.as_ref(), column),
                         attribute_default: attribute_default_source(class, column),
+                        mutator: mutator_methods.get(column).cloned(),
                     }),
                     ..PropertyInfo::virtual_property_typed(column, Some(&carbon_type()))
                 });
@@ -918,6 +934,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         PropertySource::AttributeDefault {
                             default,
                             column: schema_column_source(schema_table.as_ref(), column),
+                            mutator: mutator_methods.get(column).cloned(),
                         }
                     }),
                     ..PropertyInfo::virtual_property_typed(column, Some(php_type))
@@ -949,6 +966,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                                 generated_mode: column.generated_mode.clone(),
                             },
                             attribute_default: attribute_default_source(class, &column.name),
+                            mutator: mutator_methods.get(&column.name).cloned(),
                         }),
                         ..PropertyInfo::virtual_property_typed(&column.name, Some(&php_type))
                     });
@@ -1002,11 +1020,13 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 let source = if column.is_some() {
                     PropertySource::Accessor {
                         method: method.name.to_string(),
+                        mutator: mutator_methods.get(&prop_name).cloned(),
                         column,
                     }
                 } else {
                     PropertySource::ComputedProperty {
                         method: method.name.to_string(),
+                        mutator: mutator_methods.get(&prop_name).cloned(),
                     }
                 };
                 push_or_replace_property(
@@ -1031,11 +1051,13 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 let source = if column.is_some() {
                     PropertySource::Accessor {
                         method: method.name.to_string(),
+                        mutator: mutator_methods.get(&prop_name).cloned(),
                         column,
                     }
                 } else {
                     PropertySource::ComputedProperty {
                         method: method.name.to_string(),
+                        mutator: mutator_methods.get(&prop_name).cloned(),
                     }
                 };
                 push_or_replace_property(

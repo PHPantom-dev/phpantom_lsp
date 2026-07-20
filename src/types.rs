@@ -857,22 +857,27 @@ pub enum PropertySource {
     DatabaseColumn {
         column: DatabaseColumnSource,
         attribute_default: Option<AttributeDefaultSource>,
+        mutator: Option<String>,
     },
     Cast {
         cast: String,
         column: Option<DatabaseColumnSource>,
         attribute_default: Option<AttributeDefaultSource>,
+        mutator: Option<String>,
     },
     Accessor {
         method: String,
+        mutator: Option<String>,
         column: Option<DatabaseColumnSource>,
     },
     AttributeDefault {
         default: AttributeDefaultSource,
         column: Option<DatabaseColumnSource>,
+        mutator: Option<String>,
     },
     ComputedProperty {
         method: String,
+        mutator: Option<String>,
     },
     Relationship {
         method: String,
