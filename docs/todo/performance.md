@@ -871,6 +871,30 @@ are needed.
 
 ---
 
+## P32. Vendor package scan reads every file twice for origin classification
+
+**Impact: Medium · Effort: Low-Medium**
+
+`scan_vendor_packages_with_skip` (`src/classmap_scanner.rs`) scans the
+collected vendor files twice on every startup:
+
+1. `scan_files_parallel_full(&all_files, …)` reads and byte-scans every
+   file in parallel to build the classmap/function/constant indices.
+2. A sequential origin-classification pass then **re-reads and
+   re-scans the same files** — `read_for_scan` + `scan_content` per
+   PSR-4 file, and a full `scan_file_full` per plain file — solely to
+   map each discovered symbol to its package's completion-origin tier.
+
+That doubles the I/O and scan cost of the vendor scan, and the second
+pass is single-threaded. The origin is known per *file* before either
+pass runs (it comes from the package entry the file was collected
+under), so the classification can be produced during the parallel scan:
+thread the per-file origin through `scan_files_parallel_full` (e.g.
+scan `(PathBuf, origin)` pairs and emit origins alongside symbols)
+and delete the second pass entirely.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class

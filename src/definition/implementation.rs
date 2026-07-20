@@ -661,7 +661,7 @@ impl Backend {
         if self.config().indexing.strategy() == IndexingStrategy::Full
             && !self.workspace_indexed.load(Ordering::Acquire)
         {
-            self.ensure_workspace_indexed();
+            self.ensure_workspace_indexed_for_request();
         }
         let workspace_index_ready = self.workspace_indexed.load(Ordering::Acquire);
 
@@ -718,6 +718,14 @@ impl Backend {
             return result;
         }
 
+        // The remaining phases scan known-size candidate sets; report
+        // per-file progress into the request's scan window (the totals
+        // accumulate as each phase adds its candidate list).
+        let progress = self.request_progress.as_deref();
+        if let Some(p) = progress {
+            p.set_scope(80, 100, "Scanning for implementations");
+        }
+
         // ── Phase 2: scan fqn_uri_index for classes not yet in uri_classes_index ────
         let index_entries: Vec<(String, String)> = {
             let idx = self.fqn_uri_index.read();
@@ -726,7 +734,13 @@ impl Backend {
                 .collect()
         };
 
+        if let Some(p) = progress {
+            p.add_total(index_entries.len() as u64);
+        }
         for (fqn, uri) in &index_entries {
+            if let Some(p) = progress {
+                p.add_done(1);
+            }
             if seen_fqns.contains(fqn) {
                 continue;
             }
@@ -765,7 +779,13 @@ impl Backend {
 
         let loaded_uris: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
 
+        if let Some(p) = progress {
+            p.add_total(index_paths.len() as u64);
+        }
         for path in &index_paths {
+            if let Some(p) = progress {
+                p.add_done(1);
+            }
             let uri = crate::util::path_to_uri(path);
             if loaded_uris.contains(&uri) {
                 continue;
@@ -811,7 +831,13 @@ impl Backend {
         // skipped entirely when only project implementors are wanted.
         if !project_only {
             let stub_idx = self.stub_index.read();
+            if let Some(p) = progress {
+                p.add_total(stub_idx.len() as u64);
+            }
             for (stub_name, &stub_source) in stub_idx.iter() {
+                if let Some(p) = progress {
+                    p.add_done(1);
+                }
                 if seen_fqns.contains(stub_name) {
                     continue;
                 }
@@ -864,7 +890,14 @@ impl Backend {
             let loaded_uris_p5: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
 
             for dir in &psr4_dirs {
-                for php_file in collect_php_files(dir, &vendor_dir_paths) {
+                let php_files = collect_php_files(dir, &vendor_dir_paths);
+                if let Some(p) = progress {
+                    p.add_total(php_files.len() as u64);
+                }
+                for php_file in php_files {
+                    if let Some(p) = progress {
+                        p.add_done(1);
+                    }
                     // Skip files already covered by the class index (Phase 3).
                     if index_paths.contains(&php_file) {
                         continue;

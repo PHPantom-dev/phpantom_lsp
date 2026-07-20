@@ -375,7 +375,7 @@ fn scan_workspace_fallback_full_discovers_all_symbol_types() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
 
     // Classes
     assert!(
@@ -421,7 +421,7 @@ fn scan_workspace_fallback_full_excludes_class_methods_and_constants() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
 
     assert!(
         result.classmap.contains_key("Service"),

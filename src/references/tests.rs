@@ -2477,6 +2477,63 @@ fn workspace_index_progress_covers_known_files_and_refresh_walks() {
 }
 
 #[test]
+fn request_progress_maps_indexing_into_lower_window() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(
+        src.join("Target.php"),
+        "<?php\nnamespace App;\nclass Target {}\n",
+    )
+    .expect("target file");
+
+    let mut backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    let state = crate::progress::ScanProgress::new();
+    backend.request_progress = Some(std::sync::Arc::clone(&state));
+
+    backend.ensure_workspace_indexed_for_request();
+
+    // The indexing pass reports 100% into the request sink, which maps
+    // it to the top of the 0..80 indexing window.
+    let (percentage, message) = state.take_report().expect("indexing progress forwarded");
+    assert_eq!(percentage, 80);
+    assert_eq!(message, "Workspace index ready");
+}
+
+#[test]
+fn request_progress_reports_per_file_reference_scan() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(
+        src.join("Target.php"),
+        "<?php\nnamespace App;\nclass Target {}\n",
+    )
+    .expect("target file");
+    std::fs::write(
+        src.join("Usage.php"),
+        "<?php\nnamespace App;\n$t = new Target();\n",
+    )
+    .expect("usage file");
+
+    let mut backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    let state = crate::progress::ScanProgress::new();
+    backend.request_progress = Some(std::sync::Arc::clone(&state));
+
+    let locations = backend.find_class_references("App\\Target", true);
+    assert!(!locations.is_empty(), "reference scan found the usage");
+
+    // After the scan, the sink holds the completed 80..100 scan window
+    // with per-file counts.
+    let (percentage, message) = state.take_report().expect("scan progress reported");
+    assert_eq!(percentage, 100);
+    assert!(
+        message.starts_with("Scanning for class references ("),
+        "unexpected message: {message}"
+    );
+}
+
+#[test]
 fn parse_files_parallel_with_progress_merges_large_batches() {
     let backend = Backend::new_test();
     let files = (0..3)

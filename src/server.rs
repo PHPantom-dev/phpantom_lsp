@@ -323,31 +323,33 @@ impl LanguageServer for Backend {
             let has_composer_json = composer_package.is_some();
 
             // ── Create a progress token for indexing feedback ────────
+            // The heavy scans below run synchronously, so per-file
+            // progress is written to a shared `ScanProgress` state and
+            // flushed to the client by a background poller task.
             let progress_token = self.progress_create("phpantom/indexing").await;
             if let Some(ref tok) = progress_token {
                 self.progress_begin(tok, "PHPantom: Indexing", Some("Starting".to_string()))
                     .await;
             }
+            let progress = crate::progress::ScanProgress::new();
+            let poller = progress_token
+                .as_ref()
+                .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
             if has_composer_json {
                 // ── Single-project path (root composer.json exists) ──────
-                self.init_single_project(
-                    &root,
-                    php_version,
-                    composer_package,
-                    progress_token.as_ref(),
-                )
-                .await;
+                self.init_single_project(&root, php_version, composer_package, Some(&progress))
+                    .await;
             } else {
                 // ── Monorepo / non-Composer path ────────────────────────
                 let subprojects = composer::discover_subproject_roots(&root);
 
                 if !subprojects.is_empty() {
-                    self.init_monorepo(&root, &subprojects, php_version, progress_token.as_ref())
+                    self.init_monorepo(&root, &subprojects, php_version, Some(&progress))
                         .await;
                 } else {
                     // No subprojects found — pure non-Composer workspace.
-                    self.init_no_composer(&root, php_version, progress_token.as_ref())
+                    self.init_no_composer(&root, php_version, Some(&progress))
                         .await;
                 }
             }
@@ -355,16 +357,16 @@ impl LanguageServer for Backend {
             // Warm the Eloquent Builder resolution cache only for Laravel
             // projects; a non-Laravel workspace has nothing to warm.
             if self.resolved_class_cache.read().is_laravel() {
-                if let Some(ref tok) = progress_token {
-                    self.progress_report(tok, 90, Some("Warming Laravel completions".to_string()))
-                        .await;
-                }
+                progress.set_percentage(90, "Warming Laravel completions");
                 let warmed = self.warm_laravel_completion_cache();
                 if warmed > 0 {
                     tracing::info!("PHPantom: warmed {} Laravel completion classes", warmed);
                 }
             }
 
+            if let Some(poller) = poller {
+                poller.finish().await;
+            }
             if let Some(ref tok) = progress_token {
                 let classmap_count = self.fqn_uri_index.read().len();
                 self.progress_end(tok, Some(format!("Indexed {} classes", classmap_count)))
@@ -854,7 +856,12 @@ impl LanguageServer for Backend {
         // flush progress notifications to the client.
         //
         // Wrapped in tokio::spawn for cancellation safety (see references handler).
-        let backend = self.clone_for_blocking();
+        let mut backend = self.clone_for_blocking();
+        let poller = token.as_ref().map(|tok| {
+            let state = crate::progress::ScanProgress::new();
+            backend.request_progress = Some(Arc::clone(&state));
+            self.spawn_progress_poller(tok.clone(), state)
+        });
         let uri_clone = uri.clone();
         let result = tokio::spawn(async move {
             tokio::task::spawn_blocking(move || {
@@ -880,6 +887,9 @@ impl LanguageServer for Backend {
         .await
         .unwrap_or(Ok(None));
 
+        if let Some(poller) = poller {
+            poller.finish().await;
+        }
         if let Some(ref tok) = token {
             self.progress_end(tok, Some("Done".to_string())).await;
         }
@@ -1030,7 +1040,12 @@ impl LanguageServer for Backend {
         // this wrapper, dropping the handler future detaches the
         // spawn_blocking JoinHandle, and tower-lsp 0.20 may corrupt
         // its internal state when the orphaned task completes.
-        let backend = self.clone_for_blocking();
+        let mut backend = self.clone_for_blocking();
+        let poller = token.as_ref().map(|tok| {
+            let state = crate::progress::ScanProgress::new();
+            backend.request_progress = Some(Arc::clone(&state));
+            self.spawn_progress_poller(tok.clone(), state)
+        });
         let uri_clone = uri.clone();
         let result = tokio::spawn(async move {
             tokio::task::spawn_blocking(move || {
@@ -1050,6 +1065,9 @@ impl LanguageServer for Backend {
         .await
         .unwrap_or(Ok(None));
 
+        if let Some(poller) = poller {
+            poller.finish().await;
+        }
         if let Some(ref tok) = token {
             self.progress_end(tok, Some("Done".to_string())).await;
         }
@@ -1391,7 +1409,7 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchySubtypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        let backend = self.clone_for_blocking();
+        let mut backend = self.clone_for_blocking();
         let item = params.item;
         let token = match params.work_done_progress_params.work_done_token {
             Some(t) => Some(t),
@@ -1402,6 +1420,11 @@ impl LanguageServer for Backend {
             self.progress_begin(tok, "Type Hierarchy", Some("Scanning…".to_string()))
                 .await;
         }
+        let poller = token.as_ref().map(|tok| {
+            let state = crate::progress::ScanProgress::new();
+            backend.request_progress = Some(Arc::clone(&state));
+            self.spawn_progress_poller(tok.clone(), state)
+        });
 
         // Wrapped in tokio::spawn for cancellation safety (see references handler).
         let result = tokio::spawn(async move {
@@ -1412,6 +1435,9 @@ impl LanguageServer for Backend {
         .await
         .unwrap_or(None);
 
+        if let Some(poller) = poller {
+            poller.finish().await;
+        }
         if let Some(ref tok) = token {
             self.progress_end(tok, Some("Done".to_string())).await;
         }
@@ -1779,43 +1805,26 @@ impl Backend {
             .await;
         }
 
+        let progress_state = crate::progress::ScanProgress::new();
+        let poller = progress_token
+            .as_ref()
+            .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress_state)));
+
         let parse_backend = self.clone_for_blocking();
         let progress_backend = self.clone_for_blocking();
         tokio::spawn(async move {
-            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+            let worker_state = Arc::clone(&progress_state);
             let indexed_files = tokio::task::spawn_blocking(move || {
-                let progress_tx = std::sync::Arc::new(std::sync::Mutex::new(progress_tx));
-                let report_progress = |percentage, message| {
-                    if let Ok(tx) = progress_tx.lock() {
-                        let _ = tx.send((percentage, message));
-                    }
-                };
+                let report_progress =
+                    |percentage, message: String| worker_state.set_percentage(percentage, message);
                 parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
                 parse_backend.symbol_maps.read().len()
-            });
-            tokio::pin!(indexed_files);
+            })
+            .await
+            .unwrap_or(0);
 
-            let indexed_files = loop {
-                tokio::select! {
-                    Some((percentage, message)) = progress_rx.recv() => {
-                        if let Some(ref tok) = progress_token {
-                            progress_backend
-                                .progress_report(tok, percentage, Some(message))
-                                .await;
-                        }
-                    }
-                    result = &mut indexed_files => {
-                        break result.unwrap_or(0);
-                    }
-                }
-            };
-
-            while let Ok((percentage, message)) = progress_rx.try_recv() {
-                if let Some(ref tok) = progress_token {
-                    progress_backend
-                        .progress_report(tok, percentage, Some(message))
-                        .await;
-                }
+            if let Some(poller) = poller {
+                poller.finish().await;
             }
 
             progress_backend
@@ -2449,11 +2458,10 @@ impl Backend {
         root: &std::path::Path,
         php_version: crate::types::PhpVersion,
         composer_json: Option<composer::ComposerPackage>,
-        progress_token: Option<&NumberOrString>,
+        progress: Option<&crate::progress::ScanProgress>,
     ) {
-        if let Some(tok) = progress_token {
-            self.progress_report(tok, 10, Some("Reading composer.json".to_string()))
-                .await;
+        if let Some(p) = progress {
+            p.set_percentage(10, "Reading composer.json");
         }
 
         // Classify the project so Laravel-specific resolution (Eloquent
@@ -2493,9 +2501,11 @@ impl Backend {
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();
 
-        if let Some(tok) = progress_token {
-            self.progress_report(tok, 20, Some("Building class index".to_string()))
-                .await;
+        // The classmap build owns the 15..70 range of the bar; the
+        // scan helpers divide it into contiguous per-phase windows
+        // with per-file counts.
+        if let Some(p) = progress {
+            p.set_scope(15, 70, "Building class index");
         }
 
         let explicit_deps = composer_json
@@ -2521,15 +2531,23 @@ impl Backend {
                 // so that third-party classes are still indexed.
                 let mut skip_dirs = HashSet::new();
                 skip_dirs.insert(vendor_path.clone());
-                let mut scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs);
+                if let Some(p) = progress {
+                    p.begin_phase(0.0, 0.3, "Scanning workspace files");
+                }
+                let mut scan =
+                    classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
 
                 // Merge vendor packages (excluded from the workspace
                 // walk above, scanned separately here).
+                if let Some(p) = progress {
+                    p.begin_phase(0.3, 1.0, "Scanning vendor packages");
+                }
                 let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
                     root,
                     &vendor_dir,
                     &HashSet::new(),
                     &explicit_deps,
+                    progress,
                 );
                 for (fqcn, path) in vendor_scan.classmap {
                     scan.classmap.entry(fqcn).or_insert(path);
@@ -2553,6 +2571,7 @@ impl Backend {
                     &vendor_dir,
                     composer_json.as_ref(),
                     &skip_paths,
+                    progress,
                 );
                 self.populate_autoload_indices(&scan);
                 let mut merged = composer_cm;
@@ -2591,7 +2610,11 @@ impl Backend {
         if let Some(ref pkg) = composer_json
             && let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg)
         {
-            let drupal_result = classmap_scanner::scan_drupal_directories(&drupal_web_root);
+            if let Some(p) = progress {
+                p.set_scope(70, 74, "Scanning Drupal directories");
+            }
+            let drupal_result =
+                classmap_scanner::scan_drupal_directories(&drupal_web_root, progress);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -2636,12 +2659,11 @@ impl Backend {
         }
 
         // ── Autoload files ──────────────────────────────────────────
-        if let Some(tok) = progress_token {
-            self.progress_report(tok, 70, Some("Scanning autoload files".to_string()))
-                .await;
+        if let Some(p) = progress {
+            p.set_scope(74, 85, "Scanning autoload files");
         }
 
-        self.scan_autoload_files(root, &vendor_dir);
+        self.scan_autoload_files(root, &vendor_dir, progress);
 
         let symbol_count = symbol_count
             + self.autoload_function_index.read().len()
@@ -2673,7 +2695,7 @@ impl Backend {
         root: &std::path::Path,
         subprojects: &[(PathBuf, String)],
         php_version: crate::types::PhpVersion,
-        progress_token: Option<&NumberOrString>,
+        progress: Option<&crate::progress::ScanProgress>,
     ) {
         // Log the discovered subprojects.
         let sub_list: Vec<String> = subprojects
@@ -2704,26 +2726,28 @@ impl Backend {
         let mut any_laravel = false;
 
         for (sub_idx, (sub_root, vendor_dir)) in subprojects.iter().enumerate() {
-            // Report per-subproject progress.  Reserve 10..80 for the
-            // subproject loop, leaving 80..95 for the loose-file scan.
-            if let Some(tok) = progress_token {
-                let pct = 10 + (sub_idx as u32 * 70) / sub_count.max(1) as u32;
+            // Each subproject owns an equal slice of the 10..80 range;
+            // the loose-file scan gets 80..85.  Every report inside the
+            // slice carries the subproject prefix, and the scan helpers
+            // divide the slice into per-phase windows with file counts.
+            let sub_lo = 10 + (sub_idx as u32 * 70) / sub_count.max(1) as u32;
+            let sub_hi = 10 + ((sub_idx as u32 + 1) * 70) / sub_count.max(1) as u32;
+            // The autoload byte-scan is a small fraction of a
+            // subproject's work; the classmap build dominates.
+            let sub_mid = sub_lo + (sub_hi - sub_lo) / 5;
+            if let Some(p) = progress {
                 let label = sub_root
                     .strip_prefix(root)
                     .unwrap_or(sub_root)
                     .display()
                     .to_string();
-                self.progress_report(
-                    tok,
-                    pct,
-                    Some(format!(
-                        "Indexing subproject {} / {}: {}",
-                        sub_idx + 1,
-                        sub_count,
-                        label
-                    )),
-                )
-                .await;
+                p.set_label_prefix(format!(
+                    "Subproject {} / {}: {}",
+                    sub_idx + 1,
+                    sub_count,
+                    label
+                ));
+                p.set_scope(sub_lo, sub_mid, "Scanning autoload files");
             }
             skip_dirs.insert(sub_root.clone());
 
@@ -2759,7 +2783,7 @@ impl Backend {
             self.add_vendor_dir(&vendor_path);
 
             // ── Autoload files ──────────────────────────────────────
-            self.scan_autoload_files(sub_root, vendor_dir);
+            self.scan_autoload_files(sub_root, vendor_dir, progress);
 
             // ── Merged classmap + self-scan ──────────────────────────
             // Load the subproject's Composer classmap as a skip set,
@@ -2772,7 +2796,11 @@ impl Backend {
                 sub_cm.entry(fqn).or_insert(path);
             }
             let sub_skip: HashSet<PathBuf> = sub_cm.values().cloned().collect();
-            let scan = self.build_self_scan_composer(sub_root, vendor_dir, None, &sub_skip);
+            if let Some(p) = progress {
+                p.set_scope(sub_mid, sub_hi, "Building class index");
+            }
+            let scan =
+                self.build_self_scan_composer(sub_root, vendor_dir, None, &sub_skip, progress);
             self.populate_autoload_indices(&scan);
             {
                 let mut idx = self.fqn_uri_index.write();
@@ -2797,12 +2825,12 @@ impl Backend {
         // ── Full-scan loose files ───────────────────────────────────
         // Walk the workspace for PHP files outside any subproject
         // directory, using gitignore-aware walking.
-        if let Some(tok) = progress_token {
-            self.progress_report(tok, 80, Some("Scanning loose PHP files".to_string()))
-                .await;
+        if let Some(p) = progress {
+            p.set_label_prefix("");
+            p.set_scope(80, 85, "Scanning loose PHP files");
         }
 
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs);
+        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
         self.populate_autoload_indices(&scan);
         {
             let mut idx = self.fqn_uri_index.write();
@@ -2835,7 +2863,7 @@ impl Backend {
         &self,
         root: &std::path::Path,
         php_version: crate::types::PhpVersion,
-        progress_token: Option<&NumberOrString>,
+        progress: Option<&crate::progress::ScanProgress>,
     ) {
         self.log(
             MessageType::INFO,
@@ -2843,13 +2871,8 @@ impl Backend {
         )
         .await;
 
-        if let Some(tok) = progress_token {
-            self.progress_report(
-                tok,
-                20,
-                Some("Scanning workspace for PHP files".to_string()),
-            )
-            .await;
+        if let Some(p) = progress {
+            p.set_scope(10, 85, "Scanning workspace for PHP files");
         }
 
         // No composer.json means no Laravel/Illuminate dependency, so
@@ -2857,7 +2880,7 @@ impl Backend {
         self.resolved_class_cache.write().set_laravel(false);
 
         let skip_dirs = HashSet::new();
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs);
+        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
         self.populate_autoload_indices(&scan);
 
         let symbol_count = scan.classmap.len();
@@ -3031,6 +3054,7 @@ impl Backend {
                 &vendor_dir,
                 &HashSet::new(),
                 &explicit_deps,
+                None,
             );
             let vendor_package_roots =
                 classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
@@ -3088,7 +3112,7 @@ impl Backend {
             *self.vendor_package_origin_roots.write() = vendor_package_roots;
 
             // Rescan autoload files (they may have changed).
-            self.scan_autoload_files(root, &vendor_dir);
+            self.scan_autoload_files(root, &vendor_dir, None);
         }
 
         // Clear all cached class info since vendor classes may have
@@ -3108,6 +3132,7 @@ impl Backend {
         &self,
         project_root: &std::path::Path,
         vendor_dir: &str,
+        progress: Option<&crate::progress::ScanProgress>,
     ) -> usize {
         let autoload_files = composer::parse_autoload_files(project_root, vendor_dir);
         let autoload_count = autoload_files.len();
@@ -3125,7 +3150,18 @@ impl Backend {
         file_queue.extend(sibling_globals);
         let mut visited: HashSet<PathBuf> = HashSet::new();
 
+        // Every queued file is popped exactly once, so counting queue
+        // pushes as total and pops as done keeps the counters balanced
+        // even as `require_once` chains grow the queue.
+        if let Some(p) = progress {
+            p.begin_phase(0.0, 0.4, "Scanning autoload files");
+            p.add_total(file_queue.len() as u64);
+        }
+
         while let Some(file_path) = file_queue.pop() {
+            if let Some(p) = progress {
+                p.add_done(1);
+            }
             // Canonicalise to avoid revisiting the same file via
             // different relative paths.
             let canonical = file_path.canonicalize().unwrap_or(file_path);
@@ -3183,6 +3219,9 @@ impl Backend {
                     for rel_path in require_paths {
                         let resolved = file_dir.join(&rel_path);
                         if resolved.is_file() {
+                            if let Some(p) = progress {
+                                p.add_total(1);
+                            }
                             file_queue.push(resolved);
                         }
                     }
@@ -3209,7 +3248,10 @@ impl Backend {
             let mut paths = self.autoload_file_paths.write();
             paths.extend(visited.iter().cloned());
         }
-        self.preload_autoload_files(&visited);
+        if let Some(p) = progress {
+            p.begin_phase(0.4, 1.0, "Parsing autoload helpers");
+        }
+        self.preload_autoload_files_with_progress(&visited, progress);
 
         autoload_count
     }
@@ -3226,6 +3268,16 @@ impl Backend {
     ///
     /// Files already present in `parsed_uris` are skipped.
     pub fn preload_autoload_files(&self, paths: &[PathBuf]) {
+        self.preload_autoload_files_with_progress(paths, None);
+    }
+
+    /// Like [`preload_autoload_files`](Self::preload_autoload_files),
+    /// reporting per-file progress when a sink is attached.
+    pub(crate) fn preload_autoload_files_with_progress(
+        &self,
+        paths: &[PathBuf],
+        progress: Option<&crate::progress::ScanProgress>,
+    ) {
         // Skip files that have already been parsed (e.g. opened in the
         // editor before indexing reached them).
         let pending: Vec<&PathBuf> = paths
@@ -3239,6 +3291,9 @@ impl Backend {
         let file_count = pending.len();
         if file_count == 0 {
             return;
+        }
+        if let Some(p) = progress {
+            p.add_total(file_count as u64);
         }
 
         let n_threads = std::thread::available_parallelism()
@@ -3259,6 +3314,9 @@ impl Backend {
                             let i = next_idx.fetch_add(1, Ordering::Relaxed);
                             if i >= file_count {
                                 break;
+                            }
+                            if let Some(p) = progress {
+                                p.add_done(1);
                             }
                             let path = pending[i];
                             if let Ok(content) = std::fs::read_to_string(path) {
@@ -3383,6 +3441,7 @@ impl Backend {
         vendor_dir: &str,
         preloaded_package: Option<&composer::ComposerPackage>,
         skip_paths: &HashSet<PathBuf>,
+        progress: Option<&crate::progress::ScanProgress>,
     ) -> WorkspaceScanResult {
         // Use the pre-parsed package when available; only read from disk
         // as a fallback (e.g. monorepo subproject calls).
@@ -3395,9 +3454,13 @@ impl Backend {
                     Some(p) => p,
                     None => {
                         let skip_dirs = HashSet::new();
+                        if let Some(p) = progress {
+                            p.begin_phase(0.0, 1.0, "Scanning workspace files");
+                        }
                         return classmap_scanner::scan_workspace_fallback_full(
                             project_root,
                             &skip_dirs,
+                            progress,
                         );
                     }
                 }
@@ -3419,21 +3482,31 @@ impl Backend {
             .collect();
 
         // Scan user source directories (classes only for PSR-4).
+        // Project sources are a small slice of the file count; vendor
+        // packages dominate, so they get most of the current scope.
+        if let Some(p) = progress {
+            p.begin_phase(0.0, 0.2, "Scanning project files");
+        }
         let vendor_dir_paths = vec![project_root.join(vendor_dir)];
         let classmap = classmap_scanner::scan_psr4_directories_with_skip(
             &psr4_dirs,
             &classmap_dirs,
             &vendor_dir_paths,
             skip_paths,
+            progress,
         );
 
         // Scan vendor packages from installed.json.
+        if let Some(p) = progress {
+            p.begin_phase(0.2, 1.0, "Scanning vendor packages");
+        }
         let explicit_deps = crate::composer::explicit_dependency_names(package);
         let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
             project_root,
             vendor_dir,
             skip_paths,
             &explicit_deps,
+            progress,
         );
 
         let mut result = WorkspaceScanResult {

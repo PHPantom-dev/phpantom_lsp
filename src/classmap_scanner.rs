@@ -68,6 +68,22 @@ use std::path::{Path, PathBuf};
 use memchr::{memchr, memmem};
 use memmap2::Mmap;
 
+use crate::progress::ScanProgress;
+
+/// Add discovered work units to the progress total, if reporting.
+fn progress_add_total(progress: Option<&ScanProgress>, n: usize) {
+    if let Some(p) = progress {
+        p.add_total(n as u64);
+    }
+}
+
+/// Record one completed work unit, if reporting.
+fn progress_add_done(progress: Option<&ScanProgress>) {
+    if let Some(p) = progress {
+        p.add_done(1);
+    }
+}
+
 // ─── File reading ────────────────────────────────────────────────────────────
 
 /// Bytes of a file made available to the byte-level scanners.
@@ -233,7 +249,7 @@ pub fn scan_directories(
         );
     }
     let paths: Vec<PathBuf> = php_files.into_iter().map(|(p, _)| p).collect();
-    scan_files_parallel_classes(&paths)
+    scan_files_parallel_classes(&paths, None)
 }
 
 /// Build a classmap by scanning all `.php` files under the given
@@ -258,7 +274,7 @@ pub fn scan_psr4_directories(
     classmap_dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
 ) -> HashMap<String, PathBuf> {
-    scan_psr4_directories_with_skip(psr4, classmap_dirs, vendor_dir_paths, &HashSet::new())
+    scan_psr4_directories_with_skip(psr4, classmap_dirs, vendor_dir_paths, &HashSet::new(), None)
 }
 
 /// Like [`scan_psr4_directories`] but accepts a set of absolute file
@@ -271,6 +287,7 @@ pub fn scan_psr4_directories_with_skip(
     classmap_dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
     skip_paths: &HashSet<PathBuf>,
+    progress: Option<&ScanProgress>,
 ) -> HashMap<String, PathBuf> {
     // ── PSR-4 directories: collect (path, expected_fqn) pairs ───────
     let mut psr4_files: Vec<(PathBuf, String, crate::ClassCompletionOrigin)> = Vec::new();
@@ -306,9 +323,10 @@ pub fn scan_psr4_directories_with_skip(
     // ── Scan all files in parallel ──────────────────────────────────
     let psr4_pairs: Vec<(PathBuf, String)> =
         psr4_files.into_iter().map(|(p, s, _)| (p, s)).collect();
-    let mut classmap = scan_files_parallel_psr4(&psr4_pairs);
     let plain_paths: Vec<PathBuf> = plain_files.into_iter().map(|(p, _)| p).collect();
-    let plain_classmap = scan_files_parallel_classes(&plain_paths);
+    progress_add_total(progress, psr4_pairs.len() + plain_paths.len());
+    let mut classmap = scan_files_parallel_psr4(&psr4_pairs, progress);
+    let plain_classmap = scan_files_parallel_classes(&plain_paths, progress);
     for (fqcn, path) in plain_classmap {
         classmap.entry(fqcn).or_insert(path);
     }
@@ -322,7 +340,13 @@ pub fn scan_psr4_directories_with_skip(
 /// package's autoload directories.  Supports PSR-4 and classmap
 /// entries.
 pub fn scan_vendor_packages(workspace_root: &Path, vendor_dir: &str) -> WorkspaceScanResult {
-    scan_vendor_packages_with_skip(workspace_root, vendor_dir, &HashSet::new(), &HashSet::new())
+    scan_vendor_packages_with_skip(
+        workspace_root,
+        vendor_dir,
+        &HashSet::new(),
+        &HashSet::new(),
+        None,
+    )
 }
 
 /// Classify a Composer package name into its completion origin.
@@ -397,6 +421,7 @@ pub fn scan_vendor_packages_with_skip(
     vendor_dir: &str,
     skip_paths: &HashSet<PathBuf>,
     explicit_deps: &HashSet<String>,
+    progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
     let installed_path = vendor_path.join("composer").join("installed.json");
@@ -559,11 +584,19 @@ pub fn scan_vendor_packages_with_skip(
     let mut all_files: Vec<PathBuf> = psr4_files.iter().map(|(path, _, _)| path.clone()).collect();
     all_files.extend(plain_files.iter().map(|(path, _)| path.clone()));
 
-    let mut result = scan_files_parallel_full(&all_files);
+    // The origin classification pass below re-reads every file, so it
+    // counts as its own work units.
+    progress_add_total(
+        progress,
+        all_files.len() + psr4_files.len() + plain_files.len(),
+    );
+
+    let mut result = scan_files_parallel_full(&all_files, progress);
     let mut class_origins = HashMap::new();
     let mut function_origins = HashMap::new();
     let mut constant_origins = HashMap::new();
     for (path, expected_fqn, origin) in psr4_files {
+        progress_add_done(progress);
         if let Ok(content) = read_for_scan(&path) {
             for fqn in scan_content(&content) {
                 if fqn == expected_fqn {
@@ -573,6 +606,7 @@ pub fn scan_vendor_packages_with_skip(
         }
     }
     for (path, origin) in plain_files {
+        progress_add_done(progress);
         let symbols = scan_file_full(&path);
         for fqn in symbols.classes {
             class_origins.entry(fqn).or_insert(origin);
@@ -613,7 +647,10 @@ pub fn scan_workspace_fallback(
 /// Uses [`std::thread::scope`] with one thread per CPU core.  Small
 /// batches (≤ 4 files) are processed sequentially to avoid thread
 /// overhead.
-fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
+fn scan_files_parallel_classes(
+    files: &[PathBuf],
+    progress: Option<&ScanProgress>,
+) -> HashMap<String, PathBuf> {
     if files.is_empty() {
         return HashMap::new();
     }
@@ -622,6 +659,7 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
     if files.len() <= 4 {
         let mut classmap = HashMap::new();
         for path in files {
+            progress_add_done(progress);
             if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     classmap.entry(fqcn).or_insert_with(|| path.clone());
@@ -641,6 +679,7 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
                     for path in chunk {
+                        progress_add_done(progress);
                         if let Ok(content) = read_for_scan(path) {
                             for fqcn in scan_content(&content) {
                                 local.push((fqcn, path.clone()));
@@ -677,7 +716,10 @@ fn scan_files_parallel_classes(files: &[PathBuf]) -> HashMap<String, PathBuf> {
 ///
 /// Each entry is `(file_path, expected_fqn)`.  Only classes whose FQN
 /// matches the expected FQN are included.
-fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, PathBuf> {
+fn scan_files_parallel_psr4(
+    files: &[(PathBuf, String)],
+    progress: Option<&ScanProgress>,
+) -> HashMap<String, PathBuf> {
     if files.is_empty() {
         return HashMap::new();
     }
@@ -686,6 +728,7 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
     if files.len() <= 4 {
         let mut classmap = HashMap::new();
         for (path, expected_fqn) in files {
+            progress_add_done(progress);
             if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     if &fqcn == expected_fqn {
@@ -707,6 +750,7 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
                     for (path, expected_fqn) in chunk {
+                        progress_add_done(progress);
                         if let Ok(content) = read_for_scan(path) {
                             for fqcn in scan_content(&content) {
                                 if &fqcn == expected_fqn {
@@ -742,7 +786,10 @@ fn scan_files_parallel_psr4(files: &[(PathBuf, String)]) -> HashMap<String, Path
 
 /// Scan a batch of files for all symbols (classes, functions, constants)
 /// in parallel and return a [`WorkspaceScanResult`].
-fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
+fn scan_files_parallel_full(
+    files: &[PathBuf],
+    progress: Option<&ScanProgress>,
+) -> WorkspaceScanResult {
     if files.is_empty() {
         return WorkspaceScanResult::default();
     }
@@ -751,6 +798,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
     if files.len() <= 4 {
         let mut result = WorkspaceScanResult::default();
         for path in files {
+            progress_add_done(progress);
             if let Ok(content) = read_for_scan(path) {
                 let scan = find_symbols(&content);
                 for fqcn in scan.classes {
@@ -795,6 +843,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
                 s.spawn(move || {
                     let mut local: Vec<(ScanResult, PathBuf)> = Vec::new();
                     for path in chunk {
+                        progress_add_done(progress);
                         if let Ok(content) = read_for_scan(path) {
                             let scan = find_symbols(&content);
                             if !scan.classes.is_empty()
@@ -880,6 +929,7 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
 pub fn scan_workspace_fallback_full(
     workspace_root: &Path,
     skip_dirs: &HashSet<PathBuf>,
+    progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     use ignore::WalkBuilder;
 
@@ -914,7 +964,8 @@ pub fn scan_workspace_fallback_full(
     }
 
     // Phase 2: scan files in parallel
-    scan_files_parallel_full(&php_files)
+    progress_add_total(progress, php_files.len());
+    scan_files_parallel_full(&php_files, progress)
 }
 
 /// Scan Drupal-specific directories for PHP symbols, bypassing `.gitignore`.
@@ -932,7 +983,10 @@ pub fn scan_workspace_fallback_full(
 ///
 /// Test directories (`tests/` and `Tests/`) are excluded by name to avoid
 /// indexing duplicate class definitions from unit-test fixtures.
-pub fn scan_drupal_directories(web_root: &Path) -> WorkspaceScanResult {
+pub fn scan_drupal_directories(
+    web_root: &Path,
+    progress: Option<&ScanProgress>,
+) -> WorkspaceScanResult {
     use ignore::WalkBuilder;
 
     let drupal_dirs = [
@@ -983,7 +1037,8 @@ pub fn scan_drupal_directories(web_root: &Path) -> WorkspaceScanResult {
         }
     }
 
-    scan_files_parallel_full(&php_files)
+    progress_add_total(progress, php_files.len());
+    scan_files_parallel_full(&php_files, progress)
 }
 
 /// Return `true` for file extensions that Drupal treats as PHP source.
@@ -2893,7 +2948,7 @@ function realFunc(): void {}
         std::fs::write(dir.path().join("Model.php"), "<?php\nclass User {}").unwrap();
 
         let skip = std::collections::HashSet::new();
-        let result = scan_workspace_fallback_full(dir.path(), &skip);
+        let result = scan_workspace_fallback_full(dir.path(), &skip, None);
         assert!(result.classmap.contains_key("User"));
         assert!(
             result.function_index.contains_key("myHelper"),
@@ -2930,7 +2985,7 @@ function realFunc(): void {}
 
         let mut skip = std::collections::HashSet::new();
         skip.insert(vendor.clone());
-        let result = scan_workspace_fallback_full(dir.path(), &skip);
+        let result = scan_workspace_fallback_full(dir.path(), &skip, None);
         assert!(result.function_index.contains_key("appFunc"));
         assert!(
             !result.function_index.contains_key("vendorFunc"),
@@ -2955,7 +3010,7 @@ function realFunc(): void {}
         .unwrap();
 
         let skip = std::collections::HashSet::new();
-        let result = scan_workspace_fallback_full(dir.path(), &skip);
+        let result = scan_workspace_fallback_full(dir.path(), &skip, None);
         assert!(result.function_index.contains_key("publicFunc"));
         assert!(
             !result.function_index.contains_key("secretFunc"),
@@ -3049,7 +3104,7 @@ function realFunc(): void {}
         )
         .unwrap();
 
-        let result = scan_drupal_directories(web_root);
+        let result = scan_drupal_directories(web_root, None);
         assert!(
             result
                 .classmap
@@ -3091,7 +3146,7 @@ function realFunc(): void {}
         )
         .unwrap();
 
-        let result = scan_drupal_directories(web_root);
+        let result = scan_drupal_directories(web_root, None);
         assert!(
             !result
                 .classmap
@@ -3108,7 +3163,7 @@ function realFunc(): void {}
     fn scan_drupal_directories_skips_nonexistent_dirs() {
         let dir = tempfile::tempdir().unwrap();
         // Empty web root — none of the expected subdirectories exist
-        let result = scan_drupal_directories(dir.path());
+        let result = scan_drupal_directories(dir.path(), None);
         assert!(result.classmap.is_empty());
         assert!(result.function_index.is_empty());
         assert!(result.constant_index.is_empty());
@@ -3129,7 +3184,7 @@ function realFunc(): void {}
         )
         .unwrap();
 
-        let result = scan_drupal_directories(web_root);
+        let result = scan_drupal_directories(web_root, None);
         // Only the .php file should be indexed
         assert!(
             result.function_index.contains_key("install_begin"),

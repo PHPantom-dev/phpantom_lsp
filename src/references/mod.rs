@@ -428,8 +428,10 @@ impl Backend {
                 is_static: true,
             },
         ]);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for macro references");
         let mut locations = Vec::new();
         for (file_uri, symbol_map) in &snapshot {
+            self.request_scan_file_done();
             if symbol_map.member_access_indices(name).is_empty() {
                 continue;
             }
@@ -939,7 +941,7 @@ impl Backend {
     /// vendor directory or the internal stub scheme.  All four cross-file
     /// reference scanners use this to restrict results to user code.
     pub(crate) fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed();
+        self.ensure_workspace_indexed_for_request();
         self.user_file_symbol_maps_matching(None)
     }
 
@@ -947,7 +949,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed();
+        self.ensure_workspace_indexed_for_request();
         let candidate_uris = self.reference_candidate_uris_for_keys(keys);
         self.user_file_symbol_maps_matching(candidate_uris.as_ref())
     }
@@ -1001,8 +1003,10 @@ impl Backend {
 
         let candidate_keys = class_candidate_keys(target, target_short);
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for class references");
 
         for (file_uri, symbol_map) in &snapshot {
+            self.request_scan_file_done();
             // Prefer mago-names resolved_names for FQN resolution (byte-offset
             // based, applies PHP's full name resolution rules).  Falls back to
             // the legacy use_map lazily for identifiers not tracked by
@@ -1176,8 +1180,10 @@ impl Backend {
             },
         ]);
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for constructor references");
 
         for (file_uri, symbol_map) in &snapshot {
+            self.request_scan_file_done();
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
@@ -1371,8 +1377,10 @@ impl Backend {
 
         let candidate_keys = member_candidate_keys(target_member, target_is_static, hierarchy);
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
 
         for (file_uri, symbol_map) in &snapshot {
+            self.request_scan_file_done();
             // First pass: name-only check to avoid unnecessary work.
             // When a hierarchy is present (e.g. Laravel), we allow static mismatch.
             let has_member_access_match = symbol_map
@@ -1616,8 +1624,10 @@ impl Backend {
 
         let candidate_keys = function_candidate_keys(target, target_short);
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for function references");
 
         for (file_uri, symbol_map) in &snapshot {
+            self.request_scan_file_done();
             // Prefer mago-names resolved_names; lazy-load use_map only
             // when an offset is not tracked (e.g. docblock references).
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
@@ -2480,6 +2490,43 @@ impl Backend {
     /// skipped during the filesystem walk.
     pub(crate) fn ensure_workspace_indexed(&self) {
         self.ensure_workspace_indexed_with_progress(None);
+    }
+
+    /// Ensure the workspace index is built, forwarding indexing
+    /// progress into the current request's progress sink when one is
+    /// attached (go-to-implementation, find-references, type
+    /// hierarchy).
+    ///
+    /// The indexing pass maps into 0..80 of the request's progress
+    /// bar; the per-file reference/implementor scans that follow
+    /// report into the remaining 80..100.
+    pub(crate) fn ensure_workspace_indexed_for_request(&self) {
+        match self.request_progress.as_deref() {
+            Some(state) => {
+                let forward = |percentage: u32, message: String| {
+                    state.set_percentage(percentage.min(100) * 4 / 5, message);
+                };
+                self.ensure_workspace_indexed_with_progress(Some(&forward));
+            }
+            None => self.ensure_workspace_indexed(),
+        }
+    }
+
+    /// Enter the per-file scan window (80..100) of the current
+    /// request's progress bar and register `total` files to scan.
+    /// No-op when no progress sink is attached.
+    pub(crate) fn begin_request_scan_window(&self, total: usize, label: &str) {
+        if let Some(state) = self.request_progress.as_deref() {
+            state.set_scope(80, 100, label);
+            state.add_total(total as u64);
+        }
+    }
+
+    /// Record one scanned file in the current request's progress bar.
+    pub(crate) fn request_scan_file_done(&self) {
+        if let Some(state) = self.request_progress.as_deref() {
+            state.add_done(1);
+        }
     }
 
     pub(crate) fn ensure_workspace_indexed_with_progress(

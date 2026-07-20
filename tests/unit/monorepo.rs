@@ -383,7 +383,7 @@ fn loose_files_discovered_outside_subprojects() {
     let mut skip_dirs = HashSet::new();
     skip_dirs.insert(sub.clone());
 
-    let result = scan_workspace_fallback_full(dir.path(), &skip_dirs);
+    let result = scan_workspace_fallback_full(dir.path(), &skip_dirs, None);
 
     // Should find loose files
     assert!(
@@ -432,7 +432,7 @@ fn no_double_scanning_of_subproject_files() {
     let mut skip_dirs = HashSet::new();
     skip_dirs.insert(sub.clone());
 
-    let result = scan_workspace_fallback_full(dir.path(), &skip_dirs);
+    let result = scan_workspace_fallback_full(dir.path(), &skip_dirs, None);
 
     // The subproject files should NOT be in the scan result
     // (they would be handled by the Composer pipeline instead)
@@ -487,7 +487,7 @@ fn full_scan_with_empty_skip_set_finds_everything() {
     std::fs::write(sub.join("util.php"), "<?php\nfunction lib_func(): void {}").unwrap();
 
     let skip = HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
 
     assert!(result.classmap.contains_key("AppClass"));
     assert!(result.function_index.contains_key("app_func"));
@@ -624,7 +624,7 @@ fn full_scan_skips_hidden_directories() {
     .unwrap();
 
     let skip = HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
 
     assert!(result.function_index.contains_key("app_func"));
     assert!(

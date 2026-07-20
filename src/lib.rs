@@ -174,6 +174,7 @@ pub(crate) mod phar;
 pub mod php_type;
 mod phpcs;
 mod phpstan;
+pub mod progress;
 mod reference_index;
 mod references;
 mod rename;
@@ -827,6 +828,15 @@ pub struct Backend {
     /// Prevents duplicate background full-index tasks when initialization and
     /// a request both race to parse the whole workspace.
     pub(crate) full_index_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    /// Progress sink for the currently executing long-running request
+    /// (go-to-implementation, find-references, type hierarchy).
+    ///
+    /// Handlers set this on their per-request clone before moving the
+    /// work to the blocking pool, so the scan code deep inside the
+    /// request can report per-file progress without threading a
+    /// callback through every signature.  The shared `Backend`
+    /// instance (and every fresh clone) keeps `None`.
+    pub(crate) request_progress: Option<Arc<progress::ScanProgress>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1017,6 +1027,7 @@ impl Backend {
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            request_progress: None,
             sync_ast_updates: false,
         }
     }
@@ -1120,6 +1131,7 @@ impl Backend {
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            request_progress: None,
             sync_ast_updates: true,
         }
     }
@@ -1749,6 +1761,9 @@ impl Backend {
             workspace_indexed: Arc::clone(&self.workspace_indexed),
             workspace_index_lock: Arc::clone(&self.workspace_index_lock),
             full_index_in_progress: Arc::clone(&self.full_index_in_progress),
+            // Deliberately not propagated: a request's progress sink is
+            // attached explicitly to that request's own clone only.
+            request_progress: None,
             sync_ast_updates: self.sync_ast_updates,
         }
     }
