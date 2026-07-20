@@ -3638,7 +3638,9 @@ fn function_invokes_callable_arg_immediately(
         ctx.content,
         "function_invokes_callable_arg",
         |program, _| {
-            program.statements.iter().any(|stmt| {
+            let mut stmts = Vec::new();
+            flatten_namespaced_statements(program.statements.iter(), &mut stmts);
+            stmts.into_iter().any(|stmt| {
                 if let Statement::Function(func) = stmt
                     && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
                 {
@@ -3656,6 +3658,25 @@ fn function_invokes_callable_arg_immediately(
             })
         },
     )
+}
+
+/// Flatten a statement iterator, descending into `namespace Foo;` and
+/// `namespace Foo { ... }` blocks so that function and class
+/// declarations inside a namespace are visited alongside top-level
+/// declarations. Nearly all real-world PHP declares its symbols inside
+/// a namespace, so a search that only inspects `program.statements`
+/// would never find the callee.
+fn flatten_namespaced_statements<'b>(
+    statements: impl Iterator<Item = &'b Statement<'b>>,
+    out: &mut Vec<&'b Statement<'b>>,
+) {
+    for stmt in statements {
+        if let Statement::Namespace(ns) = stmt {
+            flatten_namespaced_statements(ns.statements().iter(), out);
+        } else {
+            out.push(stmt);
+        }
+    }
 }
 
 fn receiver_class_names(
@@ -3710,7 +3731,9 @@ fn method_invokes_callable_arg_immediately(
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
     with_parsed_program(ctx.content, "method_invokes_callable_arg", |program, _| {
-        program.statements.iter().any(|stmt| {
+        let mut stmts = Vec::new();
+        flatten_namespaced_statements(program.statements.iter(), &mut stmts);
+        stmts.into_iter().any(|stmt| {
             let members = match stmt {
                 Statement::Class(class)
                     if class_name_matches_receiver(class.name.value, receiver_names) =>
