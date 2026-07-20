@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784589180815,
+  "lastUpdate": 1784591048802,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17543,6 +17543,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 111.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3c93b915af98ce47ebe0f71ceff77c19af2c3e6a",
+          "message": "Remove bespoke Zed extension",
+          "timestamp": "2026-07-21T01:29:53+02:00",
+          "tree_id": "e798fce3fe976b097dc29b18e36a9a18d7286c80",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3c93b915af98ce47ebe0f71ceff77c19af2c3e6a"
+        },
+        "date": 1784591046569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 51.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 110.4,
             "unit": "MiB"
           }
         ]
