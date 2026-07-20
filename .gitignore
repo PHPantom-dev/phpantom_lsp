@@ -3,7 +3,6 @@
 *.phprj
 *.workspace
 /stubs/
-/zed-extension/extension.wasm
 sandbox.php
 .cargo
 /.phpantom.toml

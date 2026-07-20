@@ -42,17 +42,7 @@ PHPantom communicates over stdin/stdout using the standard [Language Server Prot
 <details>
 <summary><b>Zed</b></summary>
 
-A Zed extension is included in the `zed-extension/` directory:
-
-1. Ensure you have `rustc` available in your `$PATH`. This is part of the Rust [toolchain](https://rust-lang.org/tools/install/)
-2. Open Zed
-3. Open the Extensions panel
-4. Click **Install Dev Extension**
-5. Select the `zed-extension/` directory
-
-The extension automatically downloads the correct pre-built binary from GitHub releases for your platform. If you'd prefer to use a locally built binary, ensure `phpantom_lsp` is on your `PATH` and the extension will use it instead.
-
-To make PHPantom the default PHP language server, add to your Zed `settings.json`:
+PHPantom is supported directly by Zed's official PHP extension, no separate PHPantom extension needed. Install (or update) the PHP extension from Zed's Extensions panel, then add PHPantom to your Zed `settings.json`:
 
 ```json
 {
@@ -63,6 +53,8 @@ To make PHPantom the default PHP language server, add to your Zed `settings.json
   }
 }
 ```
+
+If you'd prefer to use a locally built binary, put `phpantom_lsp` on your `PATH` and the extension will use it instead of downloading one.
 
 </details>
 

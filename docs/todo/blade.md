@@ -608,12 +608,12 @@ The server activates Blade preprocessing when:
 
 ### Zed extension
 
-The Zed extension (`zed-extension/extension.toml`) currently
-registers `languages = ["PHP"]` and is planned to merge into the
-official Zed PHP extension, so it will not grow Blade support. The
-Blade language registration (tree-sitter grammar, `.blade.php`
-association, `languageId: "blade"` wiring) belongs to the separate
-`zed-laravel` extension — see `zed-laravel/todo.md` items Z2/Z3.
+PHPantom's plain-PHP wiring has merged into Zed's official PHP
+extension, so this repo no longer bundles its own `zed-extension/`.
+That extension will not grow Blade support. The Blade language
+registration (tree-sitter grammar, `.blade.php` association,
+`languageId: "blade"` wiring) belongs to the separate `zed-laravel`
+extension — see planned `zed-laravel` extension.
 
 ### Other editors
 

@@ -15,4 +15,3 @@ ignore:
   - "src/server.rs"
   - "src/main.rs"
   - "benches/"
-  - "zed-extension/"

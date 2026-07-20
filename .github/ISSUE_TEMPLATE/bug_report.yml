@@ -22,7 +22,7 @@ body:
       label: Installation method
       options:
         - Pre-built binary from GitHub Releases
-        - Zed extension (auto-downloaded)
+        - Zed's official PHP extension (auto-downloaded)
         - Built from source
         - Other (describe in Additional Context)
     validations:

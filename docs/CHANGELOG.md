@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Continuous progress reporting.** The indexing progress bar now advances file by file with live counts (e.g. "Scanning vendor packages (3201/8544 files)") instead of jumping between a few fixed milestones. This covers single-project, monorepo, and non-Composer workspaces. Go to Implementation, Find References, and Type Hierarchy show the same live progress while they scan, including when one of them triggers the first full workspace index.
 - **Updated the bundled mago toolchain to 1.43.0.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @enwi in https://github.com/PHPantom-dev/phpantom_lsp/pull/234.
 
+### Removed
+
+- **Bundled Zed extension.** PHPantom's plain-PHP wiring has merged into Zed's official PHP extension, so a separate PHPantom extension is no longer needed. See [SETUP.md](SETUP.md) for the updated Zed configuration.
+
 ### Fixed
 
 - **Laravel macro callbacks registered through facades now infer `$this` as the concrete facade target.** `$this` inside callbacks such as `Request::macro('shouldReturnJson', function () { ... })` and `Context::macro(...)` now resolves to the class behind the facade instead of the surrounding service provider. Contributed by @calebdw.
