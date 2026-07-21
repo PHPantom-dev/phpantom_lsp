@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784644416791,
+  "lastUpdate": 1784647746902,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17946,6 +17946,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 54.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 110.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "10ccb3942bf66540b36502589cf832f43a680712",
+          "message": "Add support for more Blade directives",
+          "timestamp": "2026-07-21T17:13:25+02:00",
+          "tree_id": "0df520416c21fe2310698b5170ea882591d9e6b9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/10ccb3942bf66540b36502589cf832f43a680712"
+        },
+        "date": 1784647744243,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 55.6,
             "unit": "MiB"
           },
           {
