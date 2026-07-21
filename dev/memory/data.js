@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784591048802,
+  "lastUpdate": 1784592663400,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17577,6 +17577,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 110.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4874c7e545b807dbfa75106980e26080870130a2",
+          "message": "fix: retain overlapping external diagnostics (#245)\n\nCo-authored-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-07-21T01:57:03+02:00",
+          "tree_id": "fce5fdff589c6d200bc87f9b1b110d45e90af5e1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4874c7e545b807dbfa75106980e26080870130a2"
+        },
+        "date": 1784592661257,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 54.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 109,
             "unit": "MiB"
           }
         ]
