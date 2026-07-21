@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784593246629,
+  "lastUpdate": 1784593426228,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17645,6 +17645,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 109.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "ed2cb483deb22c9a8751339a9a0974be7df1df55",
+          "message": "feat(schema): add diagnostics.ignore rules to config JSON schema\n\nAdd the [[diagnostics.ignore]] array to config-schema.json to match\nthe new ignore rules added in e8fe8a8. Each rule supports optional\nmessage (regex), path (glob), and identifier (diagnostic code)\nconstraints for suppressing matching diagnostics project-wide.",
+          "timestamp": "2026-07-20T19:09:06-05:00",
+          "tree_id": "1917eb01c3048f4de5f6c6b7ebfb041331c27e48",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ed2cb483deb22c9a8751339a9a0974be7df1df55"
+        },
+        "date": 1784593423203,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 52.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 108.5,
             "unit": "MiB"
           }
         ]
