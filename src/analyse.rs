@@ -263,6 +263,11 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // false-positive return-type diagnostics.
     if backend.resolved_class_cache.read().is_laravel() {
         backend.build_laravel_date_class();
+        // Discover config files, view/translation directories, and route
+        // files registered by service providers so that config(), view(),
+        // trans(), and route() string keys resolve the same way they do in
+        // the LSP (which builds these in its `initialized` handler).
+        backend.build_provider_resources();
     }
 
     // ── Phase 1.5: Eager class population ───────────────────────────

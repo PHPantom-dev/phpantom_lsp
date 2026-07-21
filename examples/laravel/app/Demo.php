@@ -234,6 +234,10 @@ class Demo
         route('home');
         route('admin.users.index');
 
+        // Route registered from a provider via Route::…->group(base_path(…)),
+        // with the route file under app/Modules instead of the routes/ dir.
+        route('reviews.update');
+
         // Translation Keys
         __('messages.welcome');
         trans('auth.failed');

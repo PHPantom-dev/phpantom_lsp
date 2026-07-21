@@ -2408,9 +2408,10 @@ impl Backend {
             .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
     }
 
-    fn build_provider_resources(&self) {
+    pub(crate) fn build_provider_resources(&self) {
         let mut resources = crate::virtual_members::laravel::ProviderResources::default();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let workspace_root = self.workspace_root.read().clone().unwrap_or_default();
 
         for fqn in self.laravel_provider_fqns() {
             let Some(uri) = self.resolve_class_uri(&fqn) else {
@@ -2431,7 +2432,9 @@ impl Backend {
             };
 
             resources.merge(crate::virtual_members::laravel::extract_provider_resources(
-                &content, &file_dir,
+                &content,
+                &file_dir,
+                &workspace_root,
             ));
         }
 

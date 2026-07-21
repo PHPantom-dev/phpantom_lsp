@@ -120,6 +120,8 @@ fn extract_resource_info<'a>(
 ///   `Route::name('admin.email.template.')->group(fn() { Route::get(...)->name('create'); })`
 pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Location> {
     let mut results = Vec::new();
+    let mut scanned: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
 
     for (file_uri, _) in snapshot {
@@ -132,6 +134,9 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
         let Some(content) = backend.get_file_content(&file_uri) else {
             continue;
         };
+        if let Ok(path) = uri.to_file_path() {
+            scanned.insert(path.canonicalize().unwrap_or(path));
+        }
         let file_dir = uri
             .to_file_path()
             .ok()
@@ -140,6 +145,12 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
     }
 
     for route_path in &backend.laravel_provider_resources.read().route_files {
+        let canonical = route_path
+            .canonicalize()
+            .unwrap_or_else(|_| route_path.clone());
+        if !scanned.insert(canonical) {
+            continue;
+        }
         if let Ok(content) = std::fs::read_to_string(route_path)
             && let Ok(uri) = Url::from_file_path(route_path)
         {
@@ -400,6 +411,8 @@ fn scan_group_body<'a>(
 /// that routes in sub-files inherit the parent group's name prefix.
 pub(crate) fn enumerate_all_route_names(backend: &Backend) -> Vec<String> {
     let mut names = Vec::new();
+    let mut scanned: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
 
     for (file_uri, _) in snapshot {
@@ -419,14 +432,25 @@ pub(crate) fn enumerate_all_route_names(backend: &Backend) -> Vec<String> {
         let Some(content) = backend.get_file_content(&file_uri) else {
             continue;
         };
-        let file_dir = Url::parse(&file_uri)
+        let path = Url::parse(&file_uri)
             .ok()
-            .and_then(|u| u.to_file_path().ok())
+            .and_then(|u| u.to_file_path().ok());
+        if let Some(ref p) = path {
+            scanned.insert(p.canonicalize().unwrap_or_else(|_| p.clone()));
+        }
+        let file_dir = path
+            .as_ref()
             .and_then(|p| p.parent().map(|d| d.to_path_buf()));
         collect_all_names_from_file(&content, file_dir.as_deref(), &mut names);
     }
 
     for route_path in &backend.laravel_provider_resources.read().route_files {
+        let canonical = route_path
+            .canonicalize()
+            .unwrap_or_else(|_| route_path.clone());
+        if !scanned.insert(canonical) {
+            continue;
+        }
         if let Ok(content) = std::fs::read_to_string(route_path) {
             let file_dir = route_path.parent();
             collect_all_names_from_file(&content, file_dir, &mut names);
