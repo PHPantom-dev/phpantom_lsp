@@ -2134,15 +2134,33 @@ impl Backend {
             }
         }
 
+        // Every mixin-class file the scan pulled macros from, so an edit to one
+        // triggers a rebuild even though it holds no `macro(`/`mixin(` token.
+        let mut mixin_uris: std::collections::HashSet<String> = std::collections::HashSet::new();
+
         // Scan a single file's content into the index, keyed by its URI.
         let scan_content = |index: &mut crate::virtual_members::laravel::LaravelMacroIndex,
+                            mixin_uris: &mut std::collections::HashSet<String>,
                             uri: String,
                             content: &str| {
-            if memchr::memmem::find(content.as_bytes(), b"macro(").is_none() {
+            let has_macro = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
+            let has_mixin = memchr::memmem::find(content.as_bytes(), b"mixin(").is_some();
+            if !has_macro && !has_mixin {
                 return;
             }
-            let mut regs =
-                crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
+            let mut regs = if has_macro {
+                crate::virtual_members::laravel::extract_macro_registrations(content, php_version)
+            } else {
+                Vec::new()
+            };
+            if has_mixin {
+                for reg in self.synthesize_mixin_registrations(content, php_version) {
+                    if let Some(mixin_uri) = &reg.definition_uri {
+                        mixin_uris.insert(mixin_uri.clone());
+                    }
+                    regs.push(reg);
+                }
+            }
             if regs.is_empty() {
                 return;
             }
@@ -2168,7 +2186,7 @@ impl Backend {
                 seeds.insert(uri.clone(), Vec::new());
                 continue;
             };
-            scan_content(&mut index, uri.clone(), &content);
+            scan_content(&mut index, &mut mixin_uris, uri.clone(), &content);
 
             let referenced =
                 crate::virtual_members::laravel::parse_provider_referenced_classes(&content);
@@ -2190,7 +2208,7 @@ impl Backend {
             let Some(content) = self.get_file_content(uri) else {
                 continue;
             };
-            scan_content(&mut index, uri.clone(), &content);
+            scan_content(&mut index, &mut mixin_uris, uri.clone(), &content);
         }
 
         index.rebuild();
@@ -2202,6 +2220,7 @@ impl Backend {
         self.laravel_has_macros
             .store(has_macros, std::sync::atomic::Ordering::Relaxed);
         *self.laravel_macro_seeds.write() = seeds;
+        *self.laravel_macro_mixin_uris.write() = mixin_uris;
 
         // Evict every class that had macros before or has them now, so a
         // rebuild triggered by a provider edit replaces stale cached merges
@@ -2324,6 +2343,47 @@ impl Backend {
         self.fqn_uri_index.read().get(fqn).cloned()
     }
 
+    /// Expand every `Target::mixin(new X)` / `Target::mixin(X::class)`
+    /// registration found in `content` into the concrete macros the mixin class
+    /// `X` contributes.
+    ///
+    /// The mixin class's methods live in a different file than the `::mixin(…)`
+    /// call, so this resolves `X` to its source (via the class index, preferring
+    /// an open editor buffer over disk) and parses each qualifying method's
+    /// returned closure.  Each resulting registration records the mixin file's
+    /// URI as its go-to-definition target.  Returns an empty vector when the
+    /// file registers no mixins or the mixin classes cannot be located.
+    fn synthesize_mixin_registrations(
+        &self,
+        content: &str,
+        php_version: Option<crate::types::PhpVersion>,
+    ) -> Vec<crate::virtual_members::laravel::MacroRegistration> {
+        let mixins = crate::virtual_members::laravel::extract_mixin_registrations(content);
+        let mut out = Vec::new();
+        for mixin in mixins {
+            let Some(uri) = self.resolve_class_uri(&mixin.mixin_fqn) else {
+                continue;
+            };
+            let Some(mixin_source) = self.get_file_content(&uri).or_else(|| {
+                let path = tower_lsp::lsp_types::Url::parse(&uri)
+                    .ok()?
+                    .to_file_path()
+                    .ok()?;
+                std::fs::read_to_string(path).ok()
+            }) else {
+                continue;
+            };
+            out.extend(crate::virtual_members::laravel::synthesize_mixin_macros(
+                &mixin_source,
+                &mixin.mixin_fqn,
+                &uri,
+                &mixin.target,
+                php_version,
+            ));
+        }
+        out
+    }
+
     /// Re-scan a single file's macro registrations after an edit, keeping the
     /// index and the resolved-class cache coherent.
     ///
@@ -2342,6 +2402,20 @@ impl Backend {
         // leave a stale one behind.
         if self.laravel_date_seed_uris.read().contains(uri) {
             self.build_laravel_date_class();
+        }
+        // A `Macroable::mixin()` registration pulls its macros from another
+        // file and records that file as a dependency.  Because those macros are
+        // keyed under the registration site (not the mixin class) and the mixin
+        // class carries no `macro(`/`mixin(` token of its own, the single-file
+        // path below cannot keep them coherent.  So any edit that touches a
+        // `mixin(` call site, or a file a mixin was read from, rebuilds the
+        // whole index (which also refreshes the dependency set).  Mixin
+        // registrations are rare, so the occasional full rebuild is cheap.
+        if memchr::memmem::find(content.as_bytes(), b"mixin(").is_some()
+            || self.laravel_macro_mixin_uris.read().contains(uri)
+        {
+            self.build_laravel_macro_index();
+            return;
         }
         // An edit to a seed file (a service provider or the app's provider
         // registration files) that changes its class references alters which
