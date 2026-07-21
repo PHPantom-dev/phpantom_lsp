@@ -44,6 +44,28 @@
           "type": "boolean",
           "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
           "default": true
+        },
+        "ignore": {
+          "type": "array",
+          "description": "Rules that suppress matching diagnostics, similar to PHPStan's ignoreErrors. Each rule may constrain by message (regex), path (glob relative to workspace root), and/or identifier (diagnostic code). A diagnostic is suppressed when it matches every constraint present on a rule; omitted constraints match anything.",
+          "items": {
+            "type": "object",
+            "description": "A single ignore rule. At least one constraint (message, path, or identifier) must be present.",
+            "properties": {
+              "message": {
+                "type": "string",
+                "description": "Regex matched against the diagnostic message."
+              },
+              "path": {
+                "type": "string",
+                "description": "Glob matched against the file path relative to the workspace root. Follows gitignore-style glob syntax: * does not cross /, use ** to match across directories."
+              },
+              "identifier": {
+                "type": "string",
+                "description": "Diagnostic identifier (the diagnostic code, e.g. \"unused_import\", \"deprecated_usage\")."
+              }
+            }
+          }
         }
       }
     },
