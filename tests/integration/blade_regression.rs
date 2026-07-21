@@ -122,4 +122,27 @@ mod tests {
             diags
         );
     }
+
+    /// Inline attribute directives (`@class`, `@style`, `@checked`,
+    /// `@selected`, `@disabled`, `@readonly`, `@required`) used as HTML
+    /// attributes must consume their own argument list and return to HTML
+    /// mode, not swallow the rest of the template as PHP.
+    #[tokio::test]
+    async fn test_blade_attribute_directives_do_not_corrupt_rest_of_template() {
+        let blade_text = r#"<div @class(['collapse', 'in' => $errors->has('cover_image')])
+    id="collapse-cover-image">
+    <input type="checkbox" @checked($page->show_in_app) />
+    <input @disabled(!$canChange) @readonly($locked) @required($mandatory) />
+    <select><option @selected($lang === $current)>{{ $lang }}</option></select>
+    <span @style(['color: red' => $hasError])>Text</span>
+</div>
+"#;
+
+        let diags = blade_syntax_errors("file:///attributes.blade.php", blade_text);
+        assert!(
+            diags.is_empty(),
+            "attribute directives should not produce syntax errors: {:?}",
+            diags
+        );
+    }
 }

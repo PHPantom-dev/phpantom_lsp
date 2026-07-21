@@ -29,8 +29,11 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     // Wrap the template body in a function so that diagnostic
     // collectors (which only analyse function/method bodies) treat
     // the Blade content as analysable code.  The closing brace is
-    // appended after the main loop.
-    virtual_php.push_str("function __blade_template() {\n");
+    // appended after the main loop.  `$errors`/`$__env` are assigned
+    // in the outer scope above, so pull them in with `global` —
+    // otherwise every use of them inside the wrapped function is a
+    // false-positive "undefined variable".
+    virtual_php.push_str("function __blade_template() { global $errors, $__env;\n");
 
     let mut in_php_directive_block = false;
     let mut mode = Mode::Html;
@@ -120,6 +123,11 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                     match_len = 3;
                     replacement = " echo ".to_string();
                     next_mode = Mode::RawPhp(true);
+                } else if remaining.starts_with(&['<', '?', 'x', 'm', 'l']) {
+                    // `<?xml ... ?>` is never a PHP open tag, regardless of
+                    // `short_open_tag` — PHP special-cases it so XML
+                    // declarations in templates aren't misparsed. Leave it
+                    // as plain HTML.
                 } else if remaining.starts_with(&['<', '?']) {
                     match_len = 2;
                     next_mode = Mode::RawPhp(false);
@@ -149,8 +157,12 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             let after_dir: String = rest_str[directive.len()..].chars().collect();
                             let after_trimmed = after_dir.trim_start();
                             if after_trimmed.starts_with('(') {
+                                // `translate_directive("empty")` opens an
+                                // extra unmatched `(` (`if(empty`), so the
+                                // directive's own closing paren needs a
+                                // second `)` before the `:`.
                                 replacement = format!(" {} ", translate_directive(directive));
-                                next_mode = Mode::DirectiveArgs(":");
+                                next_mode = Mode::DirectiveArgs("):");
                                 paren_depth = 0;
                             } else {
                                 // forelse @empty (no args) → endforeach; if (false):
@@ -189,16 +201,18 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             paren_depth = 0;
                         } else if matches!(
                             directive,
-                            "if" | "elseif"
-                                | "for"
-                                | "while"
-                                | "switch"
-                                | "unless"
-                                | "isset"
-                                | "case"
+                            "if" | "elseif" | "for" | "while" | "switch" | "case"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(":"); // Directive Args
+                            paren_depth = 0;
+                        } else if matches!(directive, "unless" | "isset") {
+                            // `translate_directive` opens an extra unmatched
+                            // `(` for both (`if(!` / `if(isset`), so the
+                            // directive's own closing paren needs a second
+                            // `)` before the `:`.
+                            replacement = format!(" {} ", translate_directive(directive));
+                            next_mode = Mode::DirectiveArgs("):");
                             paren_depth = 0;
                         } else if matches!(
                             directive,
@@ -226,6 +240,14 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "prependOnce"
                                 | "hasstack"
                                 | "method"
+                                | "class"
+                                | "style"
+                                | "checked"
+                                | "selected"
+                                | "disabled"
+                                | "readonly"
+                                | "required"
+                                | "stack"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(";"); // Directive Args for layout tags
@@ -471,6 +493,25 @@ fn utf16_count(s: &str) -> usize {
 mod tests {
     use super::*;
 
+    /// `<?xml ... ?>` is never a PHP open tag regardless of
+    /// `short_open_tag`; PHP special-cases it so XML declarations and
+    /// feeds embedded in templates aren't misparsed as PHP.
+    #[test]
+    fn test_preprocess_xml_declaration_is_not_a_php_tag() {
+        let content = "<?xml version=\"1.0\" ?>\n<users>\n    <user>{{ $user }}</user>\n</users>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("version"),
+            "<?xml ...?> should be masked as HTML, not parsed as PHP: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $user )"),
+            "{{ $user }} after the XML declaration should still translate normally: {}",
+            php
+        );
+    }
+
     #[test]
     fn test_preprocess_directive_with_string_parens() {
         let content = "@if(str_contains($val, \")\"))\n    {{ $val }}\n@endif";
@@ -503,6 +544,63 @@ mod tests {
         assert!(
             loop_use > loop_decl,
             "$loop usage after declaration: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_errors_bag_visible_inside_template_function() {
+        let content = "{{ $errors->has('name') }}";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("function __blade_template() { global $errors, $__env;"),
+            "$errors/$__env must be pulled into the wrapper function's scope: {}",
+            php
+        );
+    }
+
+    /// Inline attribute directives (`@class`, `@style`, `@checked`,
+    /// `@selected`, `@disabled`, `@readonly`, `@required`) must consume
+    /// their own argument list and return to HTML mode, not fall into the
+    /// generic directive branch (which leaves everything after them
+    /// parsed as PHP for the rest of the template).
+    #[test]
+    fn test_preprocess_attribute_directives_return_to_html() {
+        let content = r#"<div @class(['a', 'b' => $cond]) id="x"></div>"#;
+        let (php, _) = preprocess(content);
+        // HTML content is masked with spaces (it is not meant to be parsed
+        // as PHP), so the literal `id="x"` markup must NOT survive as raw
+        // PHP source after the directive — that was the bug: the
+        // generic-directive fallback left the parser in PHP mode for the
+        // rest of the template, so `id="x"></div>` leaked through
+        // unmasked and caused cascading syntax errors.
+        assert!(
+            !php.contains(r#"id="x""#),
+            "content after @class(...) should be masked as HTML, not left as raw PHP: {}",
+            php
+        );
+        assert!(
+            php.contains("blade_directive (['a', 'b' => $cond]);"),
+            "unexpected @class(...) translation: {}",
+            php
+        );
+    }
+
+    /// `@stack('name')` (render a named stack) must consume its own
+    /// argument list and return to HTML mode, like `@yield`/`@section`,
+    /// instead of falling into the generic directive branch.
+    #[test]
+    fn test_preprocess_stack_directive_returns_to_html() {
+        let content = r#"<div>@stack('scripts')</div><p>after</p>"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("after"),
+            "content after @stack(...) should be masked as HTML, not left as raw PHP: {}",
+            php
+        );
+        assert!(
+            php.contains("blade_directive ('scripts');"),
+            "unexpected @stack(...) translation: {}",
             php
         );
     }
@@ -861,6 +959,36 @@ mod tests {
             msg_echo > msg_decl,
             "$message usage should come after declaration: {}",
             php
+        );
+    }
+
+    /// `@unless`/`@isset`/`@empty(...)` translate to `if(!`/`if(isset`/
+    /// `if(empty` respectively — an extra, unmatched opening paren on top
+    /// of the directive's own argument parens — so the directive needs a
+    /// second closing paren before the trailing `:`, or the next PHP
+    /// parser sees `unexpected token ':', expected ')'` and the rest of
+    /// the template is corrupted.
+    #[test]
+    fn test_preprocess_unless_isset_empty_close_extra_paren() {
+        let (unless_php, _) = preprocess("@unless($cond)\nx\n@endunless\n<p>after</p>");
+        assert!(
+            unless_php.contains("if(! ($cond)):"),
+            "@unless should close both the synthetic and the argument paren: {}",
+            unless_php
+        );
+
+        let (isset_php, _) = preprocess("@isset($var)\nx\n@endisset\n<p>after</p>");
+        assert!(
+            isset_php.contains("if(isset ($var)):"),
+            "@isset should close both the synthetic and the argument paren: {}",
+            isset_php
+        );
+
+        let (empty_php, _) = preprocess("@empty($var)\nx\n@endempty\n<p>after</p>");
+        assert!(
+            empty_php.contains("if(empty ($var)):"),
+            "@empty(...) should close both the synthetic and the argument paren: {}",
+            empty_php
         );
     }
 }

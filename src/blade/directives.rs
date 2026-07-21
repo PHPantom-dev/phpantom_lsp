@@ -141,7 +141,8 @@ pub fn translate_directive(directive: &str) -> String {
         "inject" => "$".to_string(),
         "extends" | "include" | "includeIf" | "includeWhen" | "includeUnless" | "includeFirst"
         | "component" | "each" => "blade_view_directive".to_string(),
-        "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" => {
+        "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"
+        | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack" => {
             "blade_directive".to_string()
         }
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endslot" | "stop" | "show"

@@ -71,3 +71,67 @@ reports a false positive at
 key (respecting a model's `$primaryKey` / `$incrementing` overrides)
 for every Eloquent model regardless of whether schema data is
 available, so the default `id` is always known.
+
+## Blade attribute directives corrupt everything after them in the virtual PHP
+
+The Blade preprocessor recognizes `class`, `style`, `checked`,
+`selected`, `disabled`, `readonly`, and `required` as directives (they
+appear in `match_directive`), but none of them has a case in
+`preprocess()`'s big if/else chain in `src/blade/preprocessor.rs`, so
+they fall into the generic default branch:
+
+```rust
+} else {
+    replacement = format!(" {}; ", translate_directive(directive));
+    next_mode = Mode::Php;
+}
+```
+
+Unlike the other directives handled here, this branch does not consume
+the directive's parenthesized argument list (no `DirectiveArgs` mode)
+and does not return to `Mode::Html`. When one of these directives is
+used the way Laravel actually supports them, as a conditional
+attribute inline inside an HTML tag, e.g.
+`<div @class(['collapse', 'in' => $errors->has('x')]) id="foo">`, the
+preprocessor emits the boilerplate statement and then keeps parsing
+the rest of the line, and every subsequent line, as raw PHP: the
+argument list, the closing `>`, and all following HTML/Blade markup.
+This produces dozens of cascading `syntax_error` diagnostics per file
+(one real-world file produced 252) until something coincidentally
+closes the runaway PHP mode. Confirmed against two production Laravel
+codebases (dozens of affected files combined) once the newly-added
+`config/view.php` path support (see "Read view folder from config")
+started scanning their non-default view directories for the first
+time. Fix: give these seven directives their own case that treats them
+as an expression directive, consumes the argument list like
+`DirectiveArgs`, and returns to `Mode::Html` afterward (they never take
+a body/`@end...` counterpart).
+
+## `@use` and `@inject` corrupt everything after them in the virtual PHP
+
+`use` and `inject` are recognized directive names (`match_directive`
+in `src/blade/directives.rs`) and `translate_directive` has entries
+for both (`"use" => "use "`, `"inject" => "$"`), but neither has a
+case in `preprocess()`'s if/else chain in `src/blade/preprocessor.rs`,
+so both fall into the same generic default branch described above:
+the parenthesized argument list is left unconsumed and the parser
+stays in `Mode::Php` for the rest of the template, corrupting
+everything after it. Unlike the seven attribute directives fixed
+above, neither can be fixed by simply routing them through the
+existing `DirectiveArgs` consume-and-return-to-`Html` path, because
+their real-world semantics require actually parsing the argument
+string, not just discarding it:
+
+- `@use('App\Models\Post')` / `@use('App\Models\Post as Article')`
+  must become a real `use App\Models\Post;` /
+  `use App\Models\Post as Article;` statement so the imported name
+  resolves; emitting `use ('App\Models\Post');` (treating the string
+  as a plain expression) is not valid PHP import syntax.
+- `@inject('var', 'Class')` must become `$var = app('Class');` (or
+  similar) so the injected variable gets the class's type; the
+  `translate_directive` mapping of `"inject" => "$"` alone does not
+  produce a complete assignment.
+
+Fix: give `@use` and `@inject` their own preprocessor cases that
+parse the string-literal argument(s) out of the parens and emit the
+correct real PHP construct, then return to `Mode::Html`.
