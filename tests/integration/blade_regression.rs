@@ -145,4 +145,44 @@ mod tests {
             diags
         );
     }
+
+    /// `@use` and `@inject` previously left the parser in PHP mode for the
+    /// rest of the template, corrupting everything after them. They must now
+    /// consume their argument lists and translate to real PHP without
+    /// producing cascading syntax errors.
+    #[tokio::test]
+    async fn test_blade_use_and_inject_do_not_corrupt_rest_of_template() {
+        let blade_text = r#"@use('App\Models\Post')
+@use('App\Models\Comment as Reply')
+@inject('metrics', 'App\Services\Metrics')
+<div class="post">
+    <h1>{{ $post->title }}</h1>
+    <p>{{ $metrics->views() }}</p>
+</div>
+"#;
+
+        let diags = blade_syntax_errors("file:///use-inject.blade.php", blade_text);
+        assert!(
+            diags.is_empty(),
+            "@use/@inject should not produce syntax errors: {:?}",
+            diags
+        );
+
+        let (virtual_php, _) = phpantom_lsp::blade::preprocessor::preprocess(blade_text);
+        assert!(
+            virtual_php.contains("use App\\Models\\Post;"),
+            "@use should emit a real import: {}",
+            virtual_php
+        );
+        assert!(
+            virtual_php.contains("use App\\Models\\Comment as Reply;"),
+            "aliased @use should emit an aliased import: {}",
+            virtual_php
+        );
+        assert!(
+            virtual_php.contains("$metrics = app('App\\Services\\Metrics');"),
+            "@inject should emit an app() assignment: {}",
+            virtual_php
+        );
+    }
 }

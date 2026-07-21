@@ -137,10 +137,8 @@ pub fn translate_directive(directive: &str) -> String {
         }
         "isset" => "if(isset".to_string(),
         "empty" => "if(empty".to_string(),
-        "use" => "use ".to_string(),
         "break" => "break;".to_string(),
         "default" => "default:".to_string(),
-        "inject" => "$".to_string(),
         "extends" | "include" | "includeIf" | "includeWhen" | "includeUnless" | "includeFirst"
         | "component" | "each" => "blade_view_directive".to_string(),
         "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"

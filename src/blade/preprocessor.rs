@@ -22,6 +22,21 @@ enum Mode {
     /// a `:name="..."` value; `None` is the shorthand `:$var`, which ends
     /// at the first character that cannot be part of the variable name.
     BoundAttr(Option<char>),
+    /// The parenthesised argument list of an `@use(...)` or `@inject(...)`
+    /// directive. Unlike `DirectiveArgs`, the argument text is captured and
+    /// transformed (rather than emitted verbatim) so the correct real PHP
+    /// construct can be produced when the list closes.
+    CaptureArgs(CapturedDirective),
+}
+
+/// Which directive is having its argument list captured by
+/// [`Mode::CaptureArgs`]. The two have different real-PHP translations:
+/// `@use` becomes a top-level `use` import (hoisted out of the wrapper
+/// function), `@inject` becomes an inline `$var = app(service);` assignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapturedDirective {
+    Use,
+    Inject,
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
@@ -42,6 +57,13 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     // otherwise every use of them inside the wrapped function is a
     // false-positive "undefined variable".
     virtual_php.push_str("function __blade_template() { global $errors, $__env;\n");
+
+    // `@use` imports cannot be emitted inline: the template body is wrapped
+    // in `function __blade_template()`, and PHP `use` imports are only valid
+    // at the top level. They are collected here and appended as real
+    // top-level `use` statements after the wrapper function closes, so the
+    // imported names populate the file's use-map and resolve.
+    let mut hoisted_uses: Vec<String> = Vec::new();
 
     let mut in_php_directive_block = false;
     let mut mode = Mode::Html;
@@ -347,6 +369,26 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::Html; // These don't take args and return to HTML mode immediately
+                        } else if matches!(directive, "use" | "inject") {
+                            // `@use(...)` / `@inject(...)` need their string
+                            // argument(s) parsed into a real PHP construct, so
+                            // the argument list is captured (not emitted
+                            // verbatim) and transformed when it closes. Emit
+                            // nothing inline until then.
+                            let after_dir: String = rest_str[directive.len()..].chars().collect();
+                            if after_dir.trim_start().starts_with('(') {
+                                replacement = "".to_string();
+                                next_mode = Mode::CaptureArgs(if directive == "use" {
+                                    CapturedDirective::Use
+                                } else {
+                                    CapturedDirective::Inject
+                                });
+                                paren_depth = 0;
+                            } else {
+                                // Malformed (no argument list): mask and move on.
+                                replacement = "".to_string();
+                                next_mode = Mode::Html;
+                            }
                         } else {
                             replacement = format!(" {}; ", translate_directive(directive));
                             next_mode = Mode::Php;
@@ -466,6 +508,42 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 char_idx += 1;
                 current_utf16_col += ch.len_utf16() as u32;
                 continue;
+            } else if let Mode::CaptureArgs(kind) = mode {
+                // Capture the argument text (in `buffer`, via the fall-through
+                // push below) until the parens balance, then transform it.
+                if ch == '(' {
+                    paren_depth += 1;
+                } else if ch == ')' {
+                    paren_depth -= 1;
+                    if paren_depth <= 0 {
+                        char_idx += 1;
+                        current_utf16_col += 1;
+                        // `buffer` holds the argument text from the opening
+                        // `(` up to (but not including) this closing `)`.
+                        let raw = std::mem::take(&mut buffer);
+                        let emitted = match kind {
+                            CapturedDirective::Use => {
+                                if let Some(stmt) = build_use_statement(&raw) {
+                                    hoisted_uses.push(stmt);
+                                }
+                                // The import is hoisted; nothing inline.
+                                String::new()
+                            }
+                            CapturedDirective::Inject => build_inject_statement(&raw),
+                        };
+
+                        let start_suffix = utf16_count(&processed) as u32;
+                        processed.push_str(&emitted);
+                        let end_suffix = utf16_count(&processed) as u32;
+
+                        adjustments.push((current_utf16_col, start_suffix));
+                        adjustments.push((current_utf16_col, end_suffix));
+
+                        mode = Mode::Html;
+                        in_string = None;
+                        continue;
+                    }
+                }
             }
 
             if match_len > 0 || mode != next_mode {
@@ -575,6 +653,14 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     // Close the wrapper function.
     virtual_php.push_str("}\n");
 
+    // Emit collected `@use` imports as real top-level `use` statements.
+    // They live after the wrapper function (and past every Blade line) so
+    // they are valid PHP and do not shift the line-based source map.
+    for stmt in &hoisted_uses {
+        virtual_php.push_str(stmt);
+        virtual_php.push('\n');
+    }
+
     (virtual_php, source_map)
 }
 
@@ -614,6 +700,85 @@ fn flush_buffer(
 
 fn utf16_count(s: &str) -> usize {
     s.encode_utf16().count()
+}
+
+/// Trim surrounding whitespace and quote characters, matching Blade's
+/// compiler (`trim($x, " '\"")`).
+fn trim_quotes_and_space(s: &str) -> &str {
+    s.trim_matches(|c: char| c == ' ' || c == '\'' || c == '"')
+}
+
+/// Whether `s` is a valid PHP identifier (variable name without the `$`).
+fn is_php_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Translate the captured argument text of an `@use(...)` directive into a
+/// real top-level `use` statement, mirroring Blade's `compileUse`. `raw` is
+/// everything from the opening `(` up to (not including) the closing `)`.
+///
+/// Handles the plain form (`'App\Models\Post'`), the inline alias
+/// (`'App\Models\Post as Article'`), the two-argument alias
+/// (`'App\Models\Post', 'Article'`), grouped imports
+/// (`'App\Models\{Post, Comment}'`), and the `function`/`const` modifiers.
+/// Returns `None` when no importable path can be parsed.
+fn build_use_statement(raw: &str) -> Option<String> {
+    // Blade strips all parens, then trims whitespace/quotes.
+    let expression: String = raw.chars().filter(|c| *c != '(' && *c != ')').collect();
+    let expression = trim_quotes_and_space(&expression);
+
+    let (path_with_modifier, alias) = if expression.contains('{') {
+        // Grouped import: the braces are the argument, no alias.
+        (expression.to_string(), String::new())
+    } else {
+        let mut segments = expression.splitn(2, ',');
+        let path = trim_quotes_and_space(segments.next().unwrap_or("")).to_string();
+        let alias = match segments.next() {
+            Some(a) => format!(" as {}", trim_quotes_and_space(a)),
+            None => String::new(),
+        };
+        (path, alias)
+    };
+
+    // Split off a `function ` / `const ` modifier if present.
+    let (modifier, path) = if let Some(rest) = path_with_modifier.strip_prefix("function ") {
+        ("function ", rest)
+    } else if let Some(rest) = path_with_modifier.strip_prefix("const ") {
+        ("const ", rest)
+    } else {
+        ("", path_with_modifier.as_str())
+    };
+    let path = path.trim().trim_start_matches('\\');
+
+    if path.is_empty() {
+        return None;
+    }
+
+    Some(format!("use {modifier}{path}{alias};"))
+}
+
+/// Translate the captured argument text of an `@inject(...)` directive into
+/// an inline `$var = app(service);` assignment, mirroring Blade's
+/// `compileInject`. `raw` is everything from the opening `(` up to (not
+/// including) the closing `)`. Returns an empty string when the argument
+/// list has no valid variable name or service.
+fn build_inject_statement(raw: &str) -> String {
+    let stripped: String = raw.chars().filter(|c| *c != '(' && *c != ')').collect();
+    let mut segments = stripped.splitn(2, ',');
+    let variable = trim_quotes_and_space(segments.next().unwrap_or(""));
+    // The service keeps its own quotes; only surrounding whitespace is trimmed.
+    let service = segments.next().unwrap_or("").trim();
+
+    if variable.is_empty() || !is_php_identifier(variable) || service.is_empty() {
+        return String::new();
+    }
+
+    format!(" ${variable} = app({service}); ")
 }
 
 /// If `rem` (starting at a `:`) opens a `:name="` or `:name='` bound
@@ -1316,6 +1481,114 @@ mod tests {
             empty_php.contains("if(empty ($var)):"),
             "@empty(...) should close both the synthetic and the argument paren: {}",
             empty_php
+        );
+    }
+
+    /// `@use('App\Models\Post')` must become a real top-level `use` import
+    /// (hoisted out of the wrapper function), and must not leave the parser
+    /// in PHP mode corrupting the rest of the template.
+    #[test]
+    fn test_preprocess_use_directive_emits_import() {
+        let content = "@use('App\\Models\\Post')\n<p>after</p>";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("use App\\Models\\Post;"),
+            "@use should emit a real use import: {}",
+            php
+        );
+        // The import is hoisted after the wrapper function's closing brace,
+        // so it must appear after `}` (top-level, not inside the function).
+        let brace = php.rfind('}').unwrap();
+        let import = php.find("use App\\Models\\Post;").unwrap();
+        assert!(
+            import > brace,
+            "the use import must be hoisted to the top level: {}",
+            php
+        );
+        // Content after @use must stay masked as HTML, not leak as raw PHP.
+        assert!(
+            !php.contains("after"),
+            "content after @use(...) should be masked as HTML: {}",
+            php
+        );
+    }
+
+    /// The inline-alias form `@use('App\Models\Post as Article')` keeps the
+    /// alias.
+    #[test]
+    fn test_preprocess_use_directive_inline_alias() {
+        let content = "@use('App\\Models\\Post as Article')\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("use App\\Models\\Post as Article;"),
+            "@use with an inline `as` should preserve the alias: {}",
+            php
+        );
+    }
+
+    /// The two-argument alias form `@use('App\Models\Post', 'Article')`
+    /// produces the same aliased import.
+    #[test]
+    fn test_preprocess_use_directive_second_arg_alias() {
+        let content = "@use('App\\Models\\Post', 'Article')\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("use App\\Models\\Post as Article;"),
+            "@use with a second alias argument should preserve the alias: {}",
+            php
+        );
+    }
+
+    /// The `function`/`const` modifiers are carried through to the import.
+    #[test]
+    fn test_preprocess_use_directive_function_modifier() {
+        let content = "@use('function App\\Support\\helper')\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("use function App\\Support\\helper;"),
+            "@use with a function modifier should emit `use function`: {}",
+            php
+        );
+    }
+
+    /// `@inject('metrics', 'App\Services\Metrics')` becomes an inline
+    /// `$metrics = app(...)` assignment so the injected variable is defined
+    /// and typed, and does not corrupt the rest of the template.
+    #[test]
+    fn test_preprocess_inject_directive_emits_assignment() {
+        let content = "@inject('metrics', 'App\\Services\\Metrics')\n<p>after</p>";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$metrics = app('App\\Services\\Metrics');"),
+            "@inject should emit an inline app() assignment: {}",
+            php
+        );
+        // The assignment is inline (inside the wrapper function), so it must
+        // come before the wrapper function's closing brace.
+        let brace = php.rfind('}').unwrap();
+        let assign = php.find("$metrics = app(").unwrap();
+        assert!(
+            assign < brace,
+            "the inject assignment must stay inside the wrapper function: {}",
+            php
+        );
+        assert!(
+            !php.contains("after"),
+            "content after @inject(...) should be masked as HTML: {}",
+            php
+        );
+    }
+
+    /// `@inject` with a `::class` service expression is preserved verbatim
+    /// (Blade keeps the second argument unquoted-trimmed).
+    #[test]
+    fn test_preprocess_inject_directive_class_constant_service() {
+        let content = "@inject('repo', App\\Repo::class)\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$repo = app(App\\Repo::class);"),
+            "@inject should preserve a ::class service expression: {}",
+            php
         );
     }
 }
