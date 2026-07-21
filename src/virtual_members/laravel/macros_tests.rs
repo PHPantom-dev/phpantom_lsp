@@ -496,3 +496,178 @@ Collection::macro('temp', function () {});
     index.rebuild();
     assert!(index.is_empty());
 }
+
+// ─── Macroable::mixin() ─────────────────────────────────────────────────────
+
+#[test]
+fn extracts_mixin_registration_from_new_instance() {
+    let content = r#"<?php
+namespace App\Providers;
+use Illuminate\Support\Str;
+use App\Mixins\StrMixin;
+class AppServiceProvider {
+    public function boot(): void {
+        Str::mixin(new StrMixin());
+    }
+}
+"#;
+    let regs = extract_mixin_registrations(content);
+    assert_eq!(regs.len(), 1);
+    assert_eq!(regs[0].target, "Illuminate\\Support\\Str");
+    assert_eq!(regs[0].mixin_fqn, "App\\Mixins\\StrMixin");
+}
+
+#[test]
+fn extracts_mixin_registration_from_class_constant() {
+    let content = r#"<?php
+use Illuminate\Support\Collection;
+use App\Mixins\CollectionMixin;
+Collection::mixin(CollectionMixin::class);
+"#;
+    let regs = extract_mixin_registrations(content);
+    assert_eq!(regs.len(), 1);
+    assert_eq!(regs[0].target, "Illuminate\\Support\\Collection");
+    assert_eq!(regs[0].mixin_fqn, "App\\Mixins\\CollectionMixin");
+}
+
+#[test]
+fn skips_mixin_with_non_literal_argument() {
+    let content = r#"<?php
+use Illuminate\Support\Str;
+Str::mixin($someMixin);
+"#;
+    assert!(extract_mixin_registrations(content).is_empty());
+}
+
+#[test]
+fn skips_relative_self_mixin_target() {
+    let content = r#"<?php
+use App\Mixins\StrMixin;
+class Widget {
+    public static function register(): void {
+        self::mixin(new StrMixin());
+    }
+}
+"#;
+    assert!(extract_mixin_registrations(content).is_empty());
+}
+
+#[test]
+fn no_mixin_substring_is_cheap_empty() {
+    let content = "<?php class Foo { public function bar() {} }";
+    assert!(extract_mixin_registrations(content).is_empty());
+}
+
+#[test]
+fn synthesizes_macros_from_mixin_methods() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+use Closure;
+class StrMixin {
+    public function shout(): Closure {
+        return function (string $value): string {
+            return strtoupper($value);
+        };
+    }
+
+    public function repeat(): Closure {
+        return fn (string $value, int $times): string => str_repeat($value, $times);
+    }
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\StrMixin",
+        "file:///app/Mixins/StrMixin.php",
+        "Illuminate\\Support\\Str",
+        None,
+    );
+    assert_eq!(regs.len(), 2);
+
+    let shout = regs
+        .iter()
+        .find(|r| r.method.name.as_str() == "shout")
+        .unwrap();
+    assert_eq!(shout.target, "Illuminate\\Support\\Str");
+    assert_eq!(shout.method.parameters.len(), 1);
+    assert_eq!(shout.method.parameters[0].name.as_str(), "$value");
+    assert_eq!(
+        shout.method.return_type.as_ref().map(|t| t.to_string()),
+        Some("string".to_string())
+    );
+    assert!(shout.method.is_macro);
+    // Go-to-definition points at the mixin method's own file.
+    assert_eq!(
+        shout.definition_uri.as_deref(),
+        Some("file:///app/Mixins/StrMixin.php")
+    );
+
+    let repeat = regs
+        .iter()
+        .find(|r| r.method.name.as_str() == "repeat")
+        .unwrap();
+    assert_eq!(repeat.method.parameters.len(), 2);
+}
+
+#[test]
+fn skips_mixin_methods_without_a_returned_closure() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+use Closure;
+class StrMixin {
+    public function ok(): Closure {
+        return fn () => 1;
+    }
+    // No returned closure — not a macro factory.
+    public function notAFactory(): int {
+        return 42;
+    }
+    // Private, static and magic methods are never mixed in.
+    private function secret(): Closure {
+        return fn () => 1;
+    }
+    public static function boot(): Closure {
+        return fn () => 1;
+    }
+    public function __construct() {}
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\StrMixin",
+        "file:///m.php",
+        "Illuminate\\Support\\Str",
+        None,
+    );
+    let names: Vec<_> = regs
+        .iter()
+        .map(|r| r.method.name.as_str().to_string())
+        .collect();
+    assert_eq!(names, vec!["ok".to_string()]);
+}
+
+#[test]
+fn synthesize_mixin_ignores_other_classes_in_file() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+use Closure;
+class Other {
+    public function nope(): Closure { return fn () => 1; }
+}
+class StrMixin {
+    public function yes(): Closure { return fn () => 1; }
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\StrMixin",
+        "file:///m.php",
+        "Illuminate\\Support\\Str",
+        None,
+    );
+    let names: Vec<_> = regs
+        .iter()
+        .map(|r| r.method.name.as_str().to_string())
+        .collect();
+    assert_eq!(names, vec!["yes".to_string()]);
+}
