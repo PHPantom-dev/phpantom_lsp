@@ -1024,3 +1024,371 @@ class Consumer {
         panic!("expected HoverContents::Markup");
     }
 }
+
+// ─── Macroable::mixin() ─────────────────────────────────────────────────────
+
+const MIXIN_COMPOSER_JSON: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "Illuminate\\Support\\": "vendor/illuminate/Support/"
+        }
+    }
+}"#;
+
+const MIXIN_PROVIDER_PHP: &str = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Support\\Collection;
+use App\\Mixins\\CollectionMixin;
+class AppServiceProvider {
+    public function boot(): void {
+        Collection::mixin(new CollectionMixin());
+    }
+}
+";
+
+const COLLECTION_MIXIN_PHP: &str = "\
+<?php
+namespace App\\Mixins;
+use Closure;
+class CollectionMixin {
+    public function sumField(): Closure {
+        return function (string $field): float {
+            return 0.0;
+        };
+    }
+}
+";
+
+#[tokio::test]
+async fn mixin_macro_is_surfaced_on_target() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): void {
+        $c->
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        MIXIN_COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", COLLECTION_PHP),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/AppServiceProvider.php", MIXIN_PROVIDER_PHP),
+            ("src/Mixins/CollectionMixin.php", COLLECTION_MIXIN_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result.expect("completion should return results") {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"sumField"),
+        "mixin method should be surfaced as a macro, got: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn mixin_macro_call_is_not_flagged_and_resolves() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): float {
+        return $c->sumField('price');
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        MIXIN_COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", COLLECTION_PHP),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/AppServiceProvider.php", MIXIN_PROVIDER_PHP),
+            ("src/Mixins/CollectionMixin.php", COLLECTION_MIXIN_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = "file:///src/Consumer.php";
+    open(&backend, uri, consumer).await;
+    backend.update_ast(uri, consumer);
+    let mut diagnostics = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, consumer, &mut diagnostics);
+
+    let members: Vec<&str> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+        })
+        .map(|d| d.message.as_str())
+        .collect();
+
+    assert!(
+        members.is_empty(),
+        "mixin macro method call should not be flagged as unknown, got: {members:?}"
+    );
+}
+
+#[tokio::test]
+async fn goto_definition_on_mixin_macro_jumps_to_mixin_method() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): float {
+        return $c->sumField('price');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        MIXIN_COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", COLLECTION_PHP),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/AppServiceProvider.php", MIXIN_PROVIDER_PHP),
+            ("src/Mixins/CollectionMixin.php", COLLECTION_MIXIN_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let mixin_uri = Url::from_file_path(dir.path().join("src/Mixins/CollectionMixin.php")).unwrap();
+    match result.expect("go-to-definition should resolve a mixin macro call") {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, mixin_uri);
+            // The `public function sumField(): Closure` line in the mixin file.
+            assert_eq!(location.range.start.line, 4);
+        }
+        other => panic!("expected a scalar location, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn hover_on_mixin_macro_shows_signature() {
+    // Regression guard: a mixin registered in a provider that is listed in
+    // bootstrap/providers.php must be discovered, so hovering a mixed-in macro
+    // shows its recovered signature (return type + macro origin).
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): float {
+        return $c->sumField('price');
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        MIXIN_COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", COLLECTION_PHP),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/AppServiceProvider.php", MIXIN_PROVIDER_PHP),
+            ("src/Mixins/CollectionMixin.php", COLLECTION_MIXIN_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 20,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let hover = result.expect("hover should resolve a mixin macro call");
+    if let HoverContents::Markup(markup) = hover.contents {
+        let value = &markup.value;
+        assert!(
+            value.contains("macro"),
+            "hover should show the macro origin indicator, got:\n{value}"
+        );
+        assert!(
+            value.contains("float"),
+            "hover should show the recovered return type, got:\n{value}"
+        );
+    } else {
+        panic!("expected HoverContents::Markup");
+    }
+}
+
+#[tokio::test]
+async fn this_using_mixin_macro_resolves_in_completion_and_hover() {
+    // A `$this`-using mixin (the closure body calls Collection methods on the
+    // rebound `$this`) whose macro returns `array`: it must be surfaced in
+    // completion and hover on the target, exactly like a signature-only mixin.
+    let collection = "\
+<?php
+namespace Illuminate\\Support;
+class Collection {
+    public function count(): int { return 0; }
+    public function mapWithKeys(callable $cb): static { return $this; }
+    public function all(): array { return []; }
+}
+";
+    let provider = "\
+<?php
+namespace App\\Providers;
+use App\\Support\\CollectionMixin;
+use Illuminate\\Support\\Collection;
+class DemoServiceProvider {
+    public function boot(): void {
+        Collection::mixin(new CollectionMixin());
+    }
+}
+";
+    let mixin = "\
+<?php
+namespace App\\Support;
+use Closure;
+class CollectionMixin {
+    public function toAssoc(): Closure {
+        return function (string $keyField, string $valueField): array {
+            return $this->mapWithKeys(fn (array $item) => [$item[$keyField] => $item[$valueField]])->all();
+        };
+    }
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): array {
+        return $c->toAssoc('id', 'name');
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        MIXIN_COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", collection),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\DemoServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/DemoServiceProvider.php", provider),
+            ("src/Support/CollectionMixin.php", mixin),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    // Hover on `toAssoc` in `$c->toAssoc('id', 'name')` (name starts at col 19).
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 21,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover should resolve the mixin macro call");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover");
+    };
+    assert!(
+        markup.value.contains("macro"),
+        "hover should mark the macro origin, got:\n{}",
+        markup.value
+    );
+    assert!(
+        markup
+            .value
+            .contains("toAssoc(string $keyField, string $valueField): array"),
+        "hover should show the recovered signature, got:\n{}",
+        markup.value
+    );
+}
