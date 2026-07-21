@@ -400,39 +400,6 @@ misses the others.
 
 ---
 
-## Split `php_type.rs` into a module directory
-
-**What to do.** After its test block moves out (see above), the
-remaining ~4,500 production lines of `src/php_type.rs` split along
-existing free-function clusters into `php_type/`:
-
-- `mod.rs` — `PhpType`/`ShapeEntry`/`CallableParam` definitions,
-  convenience constructors, and the small `is_*` predicate/accessor
-  methods.
-- `parse.rs` — `parse()`, the AST-conversion free functions
-  (`convert`, `flatten_union`, `flatten_intersection`, `evaluate_*`),
-  and raw-string preprocessing (`replace_star_wildcards`,
-  `strip_variance_annotations_from_type`, `normalize_keyword_casing`).
-- `subtype.rs` — `is_subtype_of` (~270 lines), `equivalent`,
-  `is_named_subtype`, `literal_is_subtype_of`, `normalize_alias`.
-- `normalize.rs` — `simplified`, `distribute_intersection`,
-  `dedup_types`, `simplify_bool_union`, `absorb_scalar_refinements`.
-- `transform.rs` — `resolve_names`, `shorten`, `replace_self*`,
-  `substitute`, class-name collection.
-- `display.rs` — the three `Display` impls and `format_shape_key`.
-- `keywords.rs` — the pure `*_name` classifier free functions.
-
-Also extract from `src/types.rs`: `SharedVec<T>` (a generic container
-with its own impl suite) into `types/shared_vec.rs`, and the
-`ResolvedType` impl (~340 lines of resolution/narrowing/join logic,
-not data modelling) into `types/resolved_type.rs`.
-
-**Why it matters.** `php_type.rs` is the core type representation every
-feature depends on; `impl PhpType` blocks can be spread across files in
-the same module, making this a mechanical split.
-
----
-
 ## Shared AST walker for the hand-rolled traversals
 
 **What to do.** At least six modules hand-roll the same giant
