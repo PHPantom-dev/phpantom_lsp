@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784593164627,
+  "lastUpdate": 1784596629406,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -99839,6 +99839,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.751,
             "range": "± 0.023",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "87ee14075c11fffdfbdb3b6fd92a7b9c0bf4fa18",
+          "message": "feat: infer Laravel model properties from migrations\n\nParse Laravel migration files using Mago CST to infer\nEloquent model database columns. Migrations are discovered\nfrom non-vendor database/migrations directories (including\nnested modules), applied in global basename order, and\nlayered on top of schema dumps.\n\nFeatures:\n- Named and anonymous migration class support\n- $connection property and Schema::connection() routing\n- Blueprint column types, nullable, virtualAs/storedAs\n- Blueprint::after() nested closure scanning\n- Blueprint macro expansion via existing macro scanner\n- Incremental rebuild: editing one migration re-reads only\n  that file and replays the cached plan over base schema\n- Non-recursive directory scanning (skips archive subdirs)\n- Config: [laravel.migrations] enabled/paths in .phpantom.toml\n- JSON schema for editor TOML completion",
+          "timestamp": "2026-07-20T20:07:33-05:00",
+          "tree_id": "d3b86bad2b8cec86f714378bb130cb1492e040d9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/87ee14075c11fffdfbdb3b6fd92a7b9c0bf4fa18"
+        },
+        "date": 1784596627640,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.835,
+            "range": "± 0.278",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.037,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.086,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.123,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.198,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.185,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.775,
+            "range": "± 0.034",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.501,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.081,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.045,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.041,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.05,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 2.756,
+            "range": "± 0.158",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.153,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.199,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.056,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.045,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.099,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.072,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.062,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.146,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.907,
+            "range": "± 0.062",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.074,
+            "range": "± 0.155",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.908,
+            "range": "± 0.03",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.025,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.023,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 48.6,
+            "range": "± 2.461",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.065,
+            "range": "± 0.061",
             "unit": "ms"
           }
         ]
