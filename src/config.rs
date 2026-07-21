@@ -596,7 +596,7 @@ mod tests {
         let path = dir.path().join(CONFIG_FILE_NAME);
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("$schema"));
+        assert!(content.contains("#:schema"));
     }
 
     #[test]
