@@ -1735,48 +1735,34 @@ impl Backend {
                     }
                 }
 
-                // 2. Scan for closure/arrow-function literal assignment.
-                if let Some(ret) =
-                    super::source::helpers::extract_closure_return_type_from_assignment(
-                        var_name,
-                        content,
-                        cursor_offset,
-                    )
-                {
-                    let classes: Vec<Arc<ClassInfo>> =
-                        super::type_resolution::type_hint_to_classes_typed(
-                            &ret,
-                            "",
-                            ctx.all_classes,
-                            ctx.class_loader,
-                        );
-                    if !classes.is_empty() {
-                        return classes;
+                // 2. Resolve the variable's own type.  Closures, arrow
+                //    functions, and first-class callables are all
+                //    inferred as a `PhpType::Callable` (see
+                //    `infer_closure_literal_type`), so `$fn`'s embedded
+                //    return type covers `$fn = function(): T {}`,
+                //    `$fn = fn(): T => …`, and `$fn = strlen(...)` /
+                //    `$fn = $obj->method(...)` alike.
+                let resolved_var_types =
+                    super::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx);
+                for rt in &resolved_var_types {
+                    if let Some(ret_type) = rt.type_string.callable_return_type() {
+                        let classes: Vec<Arc<ClassInfo>> =
+                            super::type_resolution::type_hint_to_classes_typed(
+                                ret_type,
+                                "",
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                        if !classes.is_empty() {
+                            return classes;
+                        }
                     }
                 }
 
-                // 3. Scan for first-class callable assignment.
-                if let Some(ret) =
-                    super::source::helpers::extract_first_class_callable_return_type(var_name, ctx)
-                {
-                    let classes: Vec<Arc<ClassInfo>> =
-                        super::type_resolution::type_hint_to_classes_typed(
-                            &ret,
-                            "",
-                            ctx.all_classes,
-                            ctx.class_loader,
-                        );
-                    if !classes.is_empty() {
-                        return classes;
-                    }
-                }
-
-                // 4. Resolve the variable's type and check for __invoke().
-                //    When $f holds an object with an __invoke() method,
-                //    $f() should return __invoke()'s return type.
-                let var_classes = ResolvedType::into_arced_classes(
-                    super::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx),
-                );
+                // 3. Check for __invoke().  When $f holds an object with
+                //    an __invoke() method, $f() should return
+                //    __invoke()'s return type.
+                let var_classes = ResolvedType::into_arced_classes(resolved_var_types);
                 for owner in &var_classes {
                     if let Some(invoke) = owner.get_method("__invoke")
                         && let Some(ref ret) = invoke.return_type

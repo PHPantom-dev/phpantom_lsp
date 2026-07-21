@@ -2621,6 +2621,20 @@ pub(crate) fn infer_closure_literal_type(
                 Some(ResolvedType::types_joined(&resolved))
             }
         }
+        // First-class callable syntax: `strlen(...)`, `$this->method(...)`,
+        // `ClassName::method(...)`.  Resolve the underlying function/method's
+        // return type from the callable's own source text.
+        Expression::PartialApplication(_) => {
+            let span = expr.span();
+            let start = (span.start.offset as usize).min(ctx.content.len());
+            let end = (span.end.offset as usize).min(ctx.content.len());
+            ctx.content.get(start..end).and_then(|text| {
+                let rctx = ctx.as_resolution_ctx();
+                crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                    text, &rctx,
+                )
+            })
+        }
         _ => None,
     });
 
@@ -3064,57 +3078,31 @@ fn resolve_rhs_function_call<'b>(
             }
         }
 
-        // 2. Scan for closure literal assignment and
-        //    extract native return type hint.
-        if let Some(ret) =
-            crate::completion::source::helpers::extract_closure_return_type_from_assignment(
-                &var_name,
-                content,
-                ctx.cursor_offset,
-            )
-        {
-            let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
-                &ret,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
-            if !resolved.is_empty() {
-                return ResolvedType::from_classes_with_hint(resolved, ret);
+        // 2. Resolve the variable's own type.  Closures, arrow functions,
+        //    and first-class callables are all inferred by
+        //    `resolve_rhs_expression` as a `PhpType::Callable` (see
+        //    `infer_closure_literal_type`), so `$fn`'s embedded return
+        //    type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
+        //    and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
+        let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        for rt in &var_types {
+            if let Some(ret_type) = rt.type_string.callable_return_type() {
+                let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
+                    ret_type,
+                    current_class_name,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+                }
             }
         }
 
-        // 3. Scan backward for first-class callable assignment:
-        //    `$fn = strlen(...)`, `$fn = $obj->method(...)`, or
-        //    `$fn = ClassName::staticMethod(...)`.
-        //    Resolve the underlying function/method's return type.
-        let rctx = ctx.as_resolution_ctx();
-        if let Some(ret) =
-            crate::completion::source::helpers::extract_first_class_callable_return_type(
-                &var_name, &rctx,
-            )
-        {
-            let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
-                &ret,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
-            if !resolved.is_empty() {
-                return ResolvedType::from_classes_with_hint(resolved, ret);
-            }
-        }
-
-        // 4. Resolve the variable's type and check for __invoke().
-        //    When $f holds an object with an __invoke() method,
-        //    $f() should return __invoke()'s return type.
-        let rctx = ctx.as_resolution_ctx();
-        let var_classes =
-            ResolvedType::into_arced_classes(crate::completion::resolver::resolve_target_classes(
-                &var_name,
-                crate::types::AccessKind::Arrow,
-                &rctx,
-            ));
+        // 3. Check for __invoke().  When $f holds an object with an
+        //    __invoke() method, $f() should return __invoke()'s return
+        //    type.
+        let var_classes = ResolvedType::into_arced_classes(var_types);
         for owner in &var_classes {
             if let Some(invoke) = owner.get_method("__invoke")
                 && let Some(ref ret) = invoke.return_type

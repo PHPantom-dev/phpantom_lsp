@@ -214,33 +214,18 @@ Each item must include:
 
 # Outstanding items
 
-## Redundant backwards text walkers
+## Redundant backwards text walker: `extract_function_return_from_source`
 
-These functions in `src/completion/source/helpers.rs` scan backward with `rfind`
-to find the most recent assignment to a variable. The forward walker's scope map
-already tracks this information during its top-to-bottom pass.
-
-### `extract_closure_return_type_from_assignment`
-
-Uses `rfind("$fn = ")` backward from cursor, then parses closure return type
-from raw text. The forward walker does NOT currently store callable return type
-info — it stores the variable as plain `Closure` via `resolve_rhs_expression`.
-Eliminating this backward walker requires teaching `resolve_rhs_expression` (or
-`resolve_rhs_with_scope`) to produce a `Callable(params, return_type)` PhpType
-for closure/arrow-function expressions.
-
-### `extract_first_class_callable_return_type`
-
-Uses `rfind("$fn = ")` backward, then resolves `Foo::bar(...)` callable return
-type from text. Same situation: the forward walker stores plain `Closure` for
-first-class callable assignments. Needs the same `Callable` type support.
-
-### `extract_function_return_from_source`
-
-Uses `rfind("/**")` backward to get `@return` type for functions not yet in
-`global_functions`. This is a fallback for unindexed functions and is harder to
-replace, but could be eliminated once all reachable functions are guaranteed to
-be indexed before resolution runs.
+`src/completion/source/helpers.rs` still has one `rfind`-based backward
+scanner: `extract_function_return_from_source` uses `rfind("/**")` backward
+to get a function's `@return` type when it is not yet in `global_functions`.
+This is a fallback for unindexed functions and is harder to replace than the
+closure/first-class-callable walkers that used to sit alongside it (those
+were eliminated by teaching `infer_closure_literal_type` in
+`rhs_resolution.rs` to produce a `PhpType::Callable` with an embedded return
+type for closures, arrow functions, and first-class callables alike). This
+one could be eliminated once all reachable functions are guaranteed to be
+indexed before resolution runs.
 
 ---
 

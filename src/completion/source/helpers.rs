@@ -9,12 +9,12 @@
 ///   a text fragment.
 /// - **`extract_function_return_from_source`** — find a function's
 ///   `@return` type by scanning backward for its docblock.
-/// - **`extract_closure_return_type_from_assignment`** — find a
-///   closure/arrow-function's native return type hint from its
-///   assignment.
-/// - **`extract_first_class_callable_return_type`** — resolve the
-///   return type of a first-class callable assignment like
-///   `$fn = strlen(...)` or `$fn = $obj->method(...)`.
+/// - **`extract_closure_return_type_from_text`** — find a
+///   closure/arrow-function's native return type hint from its own
+///   source text.
+/// - **`resolve_first_class_callable_return_type`** — resolve the
+///   return type of a first-class callable expression like
+///   `strlen(...)` or `$obj->method(...)`.
 /// - **`try_chained_array_access_with_candidates`** /
 ///   **`walk_array_segments_and_resolve`** — walk bracket segments on
 ///   candidate `PhpType` values to resolve array access chains.
@@ -27,7 +27,6 @@ use std::sync::Arc;
 use crate::docblock;
 use crate::php_type::PhpType;
 use crate::types::{BracketSegment, ClassInfo};
-use crate::util::find_semicolon_balanced;
 
 use crate::completion::resolver::ResolutionCtx;
 
@@ -57,107 +56,9 @@ pub(in crate::completion) fn extract_function_return_from_source(
     docblock::extract_return_type(docblock)
 }
 
-/// Scan backward through `content` for a closure or arrow-function
-/// literal assigned to `var_name` and extract the native return type
-/// hint from the source text.
-///
-/// Handles:
-/// - `$fn = function(…): ReturnType { … }`
-/// - `$fn = function(…) use (…): ReturnType { … }`
-/// - `$fn = fn(…): ReturnType => …`
-///
-/// Returns `None` if no closure/arrow-function assignment is found
-/// or if there is no return type hint.
-pub(in crate::completion) fn extract_closure_return_type_from_assignment(
-    var_name: &str,
-    content: &str,
-    cursor_offset: u32,
-) -> Option<PhpType> {
-    let search_area = content.get(..cursor_offset as usize)?;
-
-    // Look for `$fn = function` or `$fn = fn` assignment.
-    let assign_prefix = format!("{} = ", var_name);
-    let assign_pos = search_area.rfind(&assign_prefix)?;
-    let rhs_start = assign_pos + assign_prefix.len();
-    let rhs = search_area.get(rhs_start..)?.trim_start();
-
-    // Match `function(…): ReturnType` or `fn(…): ReturnType => …`
-    let is_closure = rhs.starts_with("function") && rhs[8..].trim_start().starts_with('(');
-    let is_arrow = rhs.starts_with("fn") && rhs[2..].trim_start().starts_with('(');
-
-    if !is_closure && !is_arrow {
-        return None;
-    }
-
-    // Find the opening `(` of the parameter list.
-    let paren_open = rhs.find('(')?;
-    // Find the matching `)` by tracking depth.
-    let mut depth = 0i32;
-    let mut paren_close = None;
-    for (i, c) in rhs[paren_open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    paren_close = Some(paren_open + i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let paren_close = paren_close?;
-
-    // After `)`, look for `: ReturnType`.
-    let after_paren = rhs.get(paren_close + 1..)?.trim_start();
-    // For closures there may be a `use (…)` clause before the return type.
-    let after_use = if after_paren.starts_with("use") {
-        let use_paren = after_paren.find('(')?;
-        let mut udepth = 0i32;
-        let mut use_close = None;
-        for (i, c) in after_paren[use_paren..].char_indices() {
-            match c {
-                '(' => udepth += 1,
-                ')' => {
-                    udepth -= 1;
-                    if udepth == 0 {
-                        use_close = Some(use_paren + i);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        after_paren.get(use_close? + 1..)?.trim_start()
-    } else {
-        after_paren
-    };
-
-    // Expect `: ReturnType`
-    let after_colon = after_use.strip_prefix(':')?.trim_start();
-    if after_colon.is_empty() {
-        return None;
-    }
-
-    // Extract the return type token — stop at `{`, `=>`, or whitespace.
-    let end = after_colon
-        .find(|c: char| c == '{' || c == '=' || c.is_whitespace())
-        .unwrap_or(after_colon.len());
-    let ret_type = after_colon[..end].trim();
-    if ret_type.is_empty() {
-        return None;
-    }
-
-    Some(PhpType::parse(ret_type))
-}
-
 /// Extract the return type annotation from a closure or arrow-function
-/// literal passed as a call-site argument.
-///
-/// Unlike [`extract_closure_return_type_from_assignment`], this operates
-/// on the raw argument text (e.g. the text between the call's parentheses
-/// for one argument), not on a `$var = …` assignment context.
+/// literal, given its own source text (e.g. the closure's span text, or
+/// the text between a call's parentheses for one argument).
 ///
 /// Handles:
 /// - `fn(…): ReturnType => …`
@@ -808,47 +709,27 @@ fn split_params_at_depth_zero(text: &str) -> Vec<&str> {
     result
 }
 
-/// Resolve the return type of a first-class callable assigned to
-/// `var_name`.
+/// Resolve the return type of a first-class callable expression, given
+/// its own source text (e.g. `"strlen(...)"`, `"$this->method(...)"`,
+/// `"ClassName::method(...)"`).
 ///
-/// Scans backward for `$var_name = callable_expr(...)` and resolves
-/// the underlying function or method's return type.  Handles:
+/// Handles:
 ///
-/// - `$fn = strlen(...)` (standalone function)
-/// - `$fn = $this->method(...)` (instance method)
-/// - `$fn = $obj->method(...)` (instance method on resolved variable)
-/// - `$fn = ClassName::method(...)` (static method)
-/// - `$fn = self::method(...)` / `static::method(...)`
+/// - `strlen(...)` (standalone function)
+/// - `$this->method(...)` (instance method)
+/// - `$obj->method(...)` (instance method on resolved variable)
+/// - `ClassName::method(...)` (static method)
+/// - `self::method(...)` / `static::method(...)`
 ///
-/// Returns `None` if no first-class callable assignment is found or
-/// the return type cannot be determined.
-pub(in crate::completion) fn extract_first_class_callable_return_type(
-    var_name: &str,
+/// Returns `None` if the text is not a recognised callable form or the
+/// return type cannot be determined.
+pub(in crate::completion) fn resolve_first_class_callable_return_type(
+    callable_text: &str,
     rctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    let content = rctx.content;
-    let cursor_offset = rctx.cursor_offset;
-    let search_area = content.get(..cursor_offset as usize)?;
-
-    // Look for `$fn = ` assignment.
-    let assign_prefix = format!("{} = ", var_name);
-    let assign_pos = search_area.rfind(&assign_prefix)?;
-    let rhs_start = assign_pos + assign_prefix.len();
-
-    // Extract the RHS up to the next `;`
-    let remaining = &content[rhs_start..];
-    let semi_pos = find_semicolon_balanced(remaining)?;
-    let rhs_text = remaining[..semi_pos].trim();
-
-    // Must end with `(...)` — the first-class callable marker.
-    let callable_text = rhs_text.strip_suffix("(...)")?.trim_end();
-    if callable_text.is_empty() {
-        return None;
-    }
-
-    // Parse the callable text into a structured expression using the
-    // main SubjectExpr pipeline, then resolve through the shared call
-    // return type resolver.
+    // `SubjectExpr::parse_callee` strips the trailing `(...)` marker
+    // itself, so the full callable text (including it) can be passed
+    // straight through.
     let callee_expr = crate::subject_expr::SubjectExpr::parse_callee(callable_text);
 
     // For method calls (instance and static), use the main pipeline
