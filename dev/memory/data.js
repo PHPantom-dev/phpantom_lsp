@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784674726042,
+  "lastUpdate": 1784675854444,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18019,6 +18019,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 109.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1daceb2fed7f520104efaaf07effc8a348b8be87",
+          "message": "Fix @use and @inject handeling in Blade fiels",
+          "timestamp": "2026-07-22T01:01:25+02:00",
+          "tree_id": "154842728eaad2484ce4a3da3f43a73112f00bf7",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1daceb2fed7f520104efaaf07effc8a348b8be87"
+        },
+        "date": 1784675852165,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 55.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 113.1,
             "unit": "MiB"
           }
         ]
