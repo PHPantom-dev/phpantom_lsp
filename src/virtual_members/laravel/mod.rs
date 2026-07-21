@@ -94,7 +94,7 @@ mod route_names;
 mod scopes;
 mod trans_keys;
 mod view_names;
-mod where_property;
+pub(crate) mod where_property;
 
 pub(crate) use aliases::LaravelAliases;
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};

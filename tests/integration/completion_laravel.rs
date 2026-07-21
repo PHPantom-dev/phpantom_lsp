@@ -13224,3 +13224,116 @@ class CartFacade {
         props
     );
 }
+
+// ─── model-property<Model> string completion ────────────────────────────────
+
+#[tokio::test]
+async fn test_model_property_completion_suggests_properties() {
+    let process_php = "\
+<?php
+namespace App\\Models;
+class Process {
+    public string $name;
+    public int $status;
+    public string $email;
+}
+";
+    let service_php = "\
+<?php
+namespace App\\Models;
+class Service {
+    /** @param model-property<Process> $column */
+    public static function sortBy(string $column): void {}
+}
+";
+    let test_php = "\
+<?php
+namespace App\\Models;
+class MPTest {
+    public function test() {
+        Service::sortBy('
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Process.php", process_php),
+        ("src/Models/Service.php", service_php),
+        ("src/Models/MPTest.php", test_php),
+    ]);
+
+    let items = complete_at(&backend, &dir, "src/Models/MPTest.php", test_php, 4, 25).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        labels.contains(&"name"),
+        "Should offer 'name' property for model-property<Process>, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"status"),
+        "Should offer 'status' property for model-property<Process>, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"email"),
+        "Should offer 'email' property for model-property<Process>, got: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn test_model_property_completion_filters_by_partial() {
+    let process_php = "\
+<?php
+namespace App\\Models;
+class Process {
+    public string $name;
+    public int $status;
+    public string $email;
+}
+";
+    let service_php = "\
+<?php
+namespace App\\Models;
+class FilterService {
+    /** @param model-property<Process> $column */
+    public static function sortBy(string $column): void {}
+}
+";
+    let test_php = "\
+<?php
+namespace App\\Models;
+class MPFilterTest {
+    public function test() {
+        FilterService::sortBy('na
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Process.php", process_php),
+        ("src/Models/FilterService.php", service_php),
+        ("src/Models/MPFilterTest.php", test_php),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/MPFilterTest.php",
+        test_php,
+        4,
+        33,
+    )
+    .await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        labels.contains(&"name"),
+        "Should offer 'name' matching partial 'na', got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"status"),
+        "Should NOT offer 'status' when partial is 'na', got: {:?}",
+        labels
+    );
+}

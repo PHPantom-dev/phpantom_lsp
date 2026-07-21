@@ -48,6 +48,11 @@ struct ResolvedArg {
     start: usize,
     /// Byte offset of the argument expression end (exclusive).
     end: usize,
+    /// String literal values extracted from array argument elements,
+    /// with their byte offset spans.  Used for `model-property<Model>`
+    /// validation when the param type is an array with `model-property`
+    /// in a generic position.
+    array_string_literals: Vec<(String, usize, usize)>,
 }
 
 /// All resolved argument types for a single call site.
@@ -417,6 +422,39 @@ pub(super) fn is_type_compatible(
         )
     {
         return true;
+    }
+
+    // ── model-property<Model>: string literal validation ────────
+    // Larastan's `model-property<Model>` is a string subtype
+    // representing the property names of an Eloquent model.  When
+    // the param is `model-property<Model>`, non-literal string
+    // types are accepted (MAYBE — the string might be a valid
+    // property name at runtime).  For string literals, we check
+    // against the model's known properties when the class can be
+    // loaded.
+    if let PhpType::Generic(name, args) = param_type
+        && name.eq_ignore_ascii_case("model-property")
+        && args.len() == 1
+    {
+        if let PhpType::Literal(lit) = arg_type
+            && let Some(prop_name) = lit.string_content()
+        {
+            if let Some(model_name) = args[0].base_name()
+                && let Some(cls) = class_loader(model_name)
+            {
+                let resolved =
+                    crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
+                let found = resolved.properties.iter().any(|p| &*p.name == prop_name)
+                    || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
+                        .iter()
+                        .any(|col| col == prop_name);
+                return found;
+            }
+            return true;
+        }
+        if arg_type.is_string_type() || arg_type.is_string_subtype() {
+            return true;
+        }
     }
 
     // ── Array-like / traversable-like → generic iterable/Traversable ─
@@ -824,6 +862,69 @@ pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
         }
     }
     false
+}
+
+/// Extract string literal values from array expression elements.
+///
+/// Collects both keys and values so that `model-property<Model>`
+/// validation works regardless of whether the model-property type
+/// is in the key or value position of the param's array generic.
+fn extract_array_string_literals(expr: &Expression<'_>) -> Vec<(String, usize, usize)> {
+    use mago_syntax::cst::array::ArrayElement;
+
+    let elements = match expr {
+        Expression::Array(arr) => &arr.elements,
+        Expression::LegacyArray(arr) => &arr.elements,
+        _ => return Vec::new(),
+    };
+
+    let mut literals = Vec::new();
+    let mut push_string = |s: &mago_syntax::cst::literal::LiteralString| {
+        if let Some(content) = crate::util::unquote_php_string(bytes_to_str(s.raw)) {
+            let start = s.span.start.offset as usize;
+            let end = s.span.end.offset as usize;
+            literals.push((content.to_string(), start, end));
+        }
+    };
+    for elem in elements.iter() {
+        match elem {
+            ArrayElement::KeyValue(kv) => {
+                if let Expression::Literal(Literal::String(s)) = kv.key {
+                    push_string(s);
+                }
+                if let Expression::Literal(Literal::String(s)) = kv.value {
+                    push_string(s);
+                }
+            }
+            ArrayElement::Value(v) => {
+                if let Expression::Literal(Literal::String(s)) = v.value {
+                    push_string(s);
+                }
+            }
+            _ => {}
+        }
+    }
+    literals
+}
+
+/// Extract the model name from a `model-property<Model>` type that
+/// appears as a generic argument of an array/list type.
+fn extract_model_property_from_array_type(ty: &PhpType) -> Option<String> {
+    let PhpType::Generic(name, args) = ty else {
+        return None;
+    };
+    if !is_array_like_name(name) && !name.eq_ignore_ascii_case("list") {
+        return None;
+    }
+    for arg in args {
+        if let PhpType::Generic(n, inner) = arg
+            && n.eq_ignore_ascii_case("model-property")
+            && inner.len() == 1
+        {
+            return inner[0].base_name().map(|s| s.to_string());
+        }
+    }
+    None
 }
 
 /// Returns `true` when the type is any form of array (bare, generic,
@@ -1687,7 +1788,13 @@ impl Backend {
                             &class_loader,
                         )
                         .unwrap_or(ty);
-                        resolved_args.push(ResolvedArg { ty, start, end });
+                        let array_string_literals = extract_array_string_literals(arg_expr);
+                        resolved_args.push(ResolvedArg {
+                            ty,
+                            start,
+                            end,
+                            array_string_literals,
+                        });
                     }
                     result.insert(
                         *args_start,
@@ -1857,6 +1964,43 @@ impl Backend {
 
                 // Check compatibility.
                 if is_type_compatible(arg_type, param_type, &class_loader, strict_types) {
+                    // Even when the array types are compatible, validate
+                    // string literals against model-property<Model> when
+                    // the param type is an array with model-property in
+                    // a generic position.
+                    if !resolved_arg.array_string_literals.is_empty()
+                        && let Some(model_fqn) = extract_model_property_from_array_type(param_type)
+                        && let Some(cls) = class_loader(&model_fqn)
+                    {
+                        let resolved = crate::virtual_members::resolve_class_fully_cached(
+                            &cls,
+                            &class_loader,
+                            &self.resolved_class_cache,
+                        );
+                        let columns: Vec<String> = resolved
+                            .properties
+                            .iter()
+                            .map(|p| p.name.to_string())
+                            .collect();
+                        for (lit, lit_start, lit_end) in &resolved_arg.array_string_literals {
+                            let found = columns.iter().any(|col| col == lit);
+                            if !found
+                                && let Some(range) = self
+                                    .offset_range_to_lsp_range(uri, content, *lit_start, *lit_end)
+                            {
+                                out.push(make_diagnostic(
+                                    range,
+                                    DiagnosticSeverity::ERROR,
+                                    TYPE_MISMATCH_ARGUMENT_CODE,
+                                    format!(
+                                        "'{}' is not a known property of {}",
+                                        lit,
+                                        model_fqn.rsplit('\\').next().unwrap_or(&model_fqn),
+                                    ),
+                                ));
+                            }
+                        }
+                    }
                     continue;
                 }
 

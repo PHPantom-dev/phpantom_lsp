@@ -22,6 +22,10 @@ impl PhpType {
         let cleaned = strip_variance_annotations_from_type(input);
         // Replace PHPStan `*` wildcards in generic positions with `mixed`.
         let cleaned = replace_star_wildcards(&cleaned);
+        // Replace known hyphenated pseudo-types (e.g. `model-property`)
+        // with underscore placeholders so Mago can parse the surrounding
+        // type structure.  The placeholders are restored in the result.
+        let cleaned = replace_hyphenated_keywords(&cleaned);
         let effective: &str = &cleaned;
 
         let span = Span::new(
@@ -37,8 +41,9 @@ impl PhpType {
         #[allow(deprecated)]
         let parsed = mago_type_syntax::parse_str(&arena, span, effective);
         match parsed {
-            Ok(ty) => convert(&ty),
-            Err(_) => PhpType::Raw(input.to_owned()),
+            Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
+            Err(_) => try_parse_hyphenated_generic(input)
+                .unwrap_or_else(|| PhpType::Raw(input.to_owned())),
         }
     }
 }
@@ -126,6 +131,63 @@ pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
 ///   by `_` or identifier chars)
 ///
 /// Returns the input unchanged (no allocation) when no wildcards are found.
+/// Hyphenated PHPDoc pseudo-type names that `mago_type_syntax` cannot
+/// parse because hyphens are not valid PHP identifier characters.
+/// Each pair is `(hyphenated, placeholder)`.
+const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[("model-property", "__model_property__")];
+
+/// Replace known hyphenated pseudo-type names with underscore
+/// placeholders so that `mago_type_syntax` can parse the surrounding
+/// type structure (e.g. `array<model-property<T>, mixed>`).
+fn replace_hyphenated_keywords(s: &str) -> std::borrow::Cow<'_, str> {
+    let mut result = std::borrow::Cow::Borrowed(s);
+    for &(hyphenated, placeholder) in HYPHENATED_KEYWORDS {
+        if result.contains(hyphenated) {
+            result = std::borrow::Cow::Owned(result.replace(hyphenated, placeholder));
+        }
+    }
+    result
+}
+
+/// Restore hyphenated pseudo-type names from underscore placeholders
+/// in a parsed `PhpType` tree.
+fn restore_hyphenated_keywords(ty: PhpType) -> PhpType {
+    ty.resolve_names(&|name| {
+        let mut result = name.to_string();
+        for &(hyphenated, placeholder) in HYPHENATED_KEYWORDS {
+            if result.contains(placeholder) {
+                result = result.replace(placeholder, hyphenated);
+            }
+        }
+        result
+    })
+}
+
+/// Try to parse a hyphenated PHPDoc pseudo-type with generic arguments
+/// that `mago_type_syntax` does not recognise (e.g. `model-property<T>`).
+///
+/// Hyphens are not valid PHP identifier characters, so the Mago parser
+/// rejects them.  Known pseudo-types like `class-string` and
+/// `non-empty-string` have dedicated CST nodes, but Larastan additions
+/// like `model-property` do not.  This function acts as a fallback when
+/// the Mago parse fails: it splits the input at the first `<` that
+/// follows a hyphenated base name, parses the inner type(s) recursively,
+/// and returns `PhpType::Generic` if the base name is a recognised
+/// keyword type.
+fn try_parse_hyphenated_generic(input: &str) -> Option<PhpType> {
+    let angle = input.find('<')?;
+    let base = &input[..angle];
+    if !base.contains('-') || !super::keywords::is_keyword_type(base) {
+        return None;
+    }
+    let inner = input.get(angle + 1..input.len().checked_sub(1)?)?;
+    if !input.ends_with('>') {
+        return None;
+    }
+    let args: Vec<PhpType> = inner.split(',').map(|s| PhpType::parse(s.trim())).collect();
+    Some(PhpType::Generic(base.to_string(), args))
+}
+
 pub(crate) fn replace_star_wildcards(s: &str) -> std::borrow::Cow<'_, str> {
     if !s.contains('*') {
         return std::borrow::Cow::Borrowed(s);

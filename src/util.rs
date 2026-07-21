@@ -1326,6 +1326,29 @@ pub(crate) fn is_subtype_of_typed(
         return is_subtype_of_typed(sub, sup, class_loader);
     }
 
+    // ── String literal <: model-property<Model> ────────────────
+    // Larastan's `model-property<Model>` is a string subtype
+    // representing the property names of an Eloquent model.  A
+    // string literal is a subtype only if it names a known
+    // property.  When the model class cannot be loaded, stay
+    // permissive (return true) to avoid false positives.
+    if let PhpType::Literal(lit) = subtype
+        && lit.string_content().is_some()
+        && let PhpType::Generic(name, args) = supertype
+        && name.eq_ignore_ascii_case("model-property")
+        && args.len() == 1
+    {
+        let prop_name = lit.string_content().unwrap();
+        if let Some(model_name) = args[0].base_name()
+            && let Some(cls) = class_loader(model_name)
+        {
+            return crate::virtual_members::laravel::where_property::collect_column_names(&cls)
+                .iter()
+                .any(|col| col == prop_name);
+        }
+        return true;
+    }
+
     // ── String literal <: class-string<Bound> ────────────────────
     // A string literal that names an existing class satisfying the
     // bound is a valid `class-string<Bound>`, e.g. passing

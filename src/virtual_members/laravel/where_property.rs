@@ -37,7 +37,7 @@ use super::helpers::snake_to_pascal;
 /// class's own declared/virtual properties, avoiding a full
 /// `resolve_class_fully` call (which would recurse through
 /// `LaravelModelProvider`).
-fn collect_column_names(class: &ClassInfo) -> Vec<String> {
+pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut columns = Vec::new();
 

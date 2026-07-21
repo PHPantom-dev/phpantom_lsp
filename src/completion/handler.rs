@@ -403,6 +403,19 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── model-property<Model> string completion ────────────
+            // When the cursor is inside a string argument whose
+            // parameter is typed as `model-property<Model>`, suggest
+            // the model's known property names.
+            if matches!(
+                string_ctx,
+                StringContext::InStringLiteral | StringContext::NotInString
+            ) && let Some(response) =
+                self.try_model_property_completion(&content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
             // ── Laravel route controller method completion ─────────
             // Inside `Route::controller(X::class)->group(fn(){…})`,
             // the 2nd argument string of Route::get/post/patch/… is a
