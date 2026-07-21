@@ -246,44 +246,30 @@ be indexed before resolution runs.
 
 ## Move test blocks out of src/ files
 
-**What to do.** ~18,000 lines of tests currently live inside `src/`
-files, inflating them far past the 600-line threshold and drowning the
-production code they sit next to. Two distinct moves:
+**What to do.** Several thousand lines of Backend-driven tests still
+live inside `src/` files, inflating them far past the 600-line threshold
+and drowning the production code they sit next to.
 
-1. **Backend-driven suites → `tests/integration/`.** These build a full
-   `Backend` (`new_test_with_stubs`, `update_ast`) and are integration
-   tests by the project's own definition. `deprecated.rs` and
-   `type_errors.rs` already follow the correct convention (zero inline
-   tests, suites in `tests/integration/diagnostics_*.rs`) — extend it to:
-   - `src/diagnostics/unknown_members/tests.rs` (5,294 lines, 217
-     Backend uses). A parallel suite already exists at
-     `tests/integration/diagnostics_unknown_members.rs` (5,033 lines) —
-     consolidate, checking for overlapping coverage while porting.
-   - `src/diagnostics/undefined_variables.rs` (~1,563 test lines;
-     `tests/integration/diagnostics_undefined_variables.rs` also
-     already exists — same consolidation).
-   - Inline blocks in `unknown_classes.rs` (~1,009), `argument_count.rs`
-     (~962), `unused_variables.rs` (~792), `invalid_class_kind.rs`
-     (~563), `implementation_errors.rs` (~493), `unknown_functions.rs`
-     (~446), `syntax_errors.rs` (~143).
-2. **Pure unit tests → sibling `_tests.rs` files via `#[path]`** (the
-   convention already used by `inheritance_tests.rs`,
-   `subject_expr_tests.rs`, `signature_help_tests.rs`,
-   `resolution_tests.rs`, `class_completion_tests.rs`):
-   - `src/php_type.rs` — 3,215 test lines (lines ~4522-7736), the single
-     largest violation. Moving them halves the file.
-   - `src/types.rs` (~1,017), `src/selection_range.rs` (~2,248, 72% of
-     the file), `src/completion/phpdoc/generation.rs` (~1,200),
-     `src/classmap_scanner.rs` (~1,000), `src/code_actions/`:
-     `extract_function.rs` (~2,432), `extract_constant.rs` (~1,413),
-     `import_class.rs` (~1,193), `extract_variable.rs` (~1,164),
-     `update_docblock.rs` (~1,155), `phpstan/fix_return_type.rs` (~828).
+**Backend-driven suites → `tests/integration/`.** These build a full
+`Backend` (`new_test_with_stubs`, `update_ast`) and are integration
+tests by the project's own definition. `deprecated.rs` and
+`type_errors.rs` already follow the correct convention (zero inline
+tests, suites in `tests/integration/diagnostics_*.rs`) — extend it to:
+
+- `src/diagnostics/unknown_members/tests.rs` (5,294 lines, 217
+  Backend uses). A parallel suite already exists at
+  `tests/integration/diagnostics_unknown_members.rs` (5,033 lines) —
+  consolidate, checking for overlapping coverage while porting.
+- `src/diagnostics/undefined_variables.rs` (~1,563 test lines;
+  `tests/integration/diagnostics_undefined_variables.rs` also
+  already exists — same consolidation).
+- Inline blocks in `unknown_classes.rs` (~1,009), `argument_count.rs`
+  (~962), `unused_variables.rs` (~792), `invalid_class_kind.rs`
+  (~563), `implementation_errors.rs` (~493), `unknown_functions.rs`
+  (~446), `syntax_errors.rs` (~143).
 
 **Why it matters.** The file-size and test-placement checklist sections
-fail on these files every gate pass. The moves are mechanical and
-zero-risk, and for `extract_constant.rs`, `extract_variable.rs`, and
-`import_class.rs` they alone bring production code back under ~900
-lines.
+fail on these files every gate pass.
 
 ---
 
