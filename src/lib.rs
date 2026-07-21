@@ -251,7 +251,14 @@ impl LaravelStringKeyCache {
         if uri.contains("/config/") {
             self.config_keys = None;
         }
-        if uri.contains("/resources/views/") {
+        // View roots are configurable via `config/view.php`, so a Blade
+        // file may live outside `resources/views/`. Invalidate on any
+        // Blade file, any path containing a `views/` directory, and on
+        // `config/view.php` itself (which changes the set of roots).
+        if uri.ends_with(".blade.php")
+            || uri.contains("/views/")
+            || uri.contains("/config/view.php")
+        {
             self.view_names = None;
         }
         if uri.contains("/lang/") || uri.contains("/resources/lang/") {

@@ -68,10 +68,11 @@ fn parse_view_config_paths(config_path: &Path, workspace_root: &Path) -> Vec<Pat
 
     let mut result = Vec::new();
 
-    // Match `base_path('...')` or `realpath(base_path('...'))`.
+    // Match `base_path('...')`, `resource_path('...')`, `realpath(...)`
+    // wrappers, and bare string literals.
     for segment in array_content.split(',') {
         let trimmed = segment.trim();
-        if let Some(path) = extract_base_path_arg(trimmed) {
+        if let Some(path) = extract_view_path_arg(trimmed) {
             let resolved = workspace_root.join(path);
             if resolved.is_dir() {
                 result.push(resolved);
@@ -92,18 +93,34 @@ fn parse_view_config_paths(config_path: &Path, workspace_root: &Path) -> Vec<Pat
     result
 }
 
-/// Extract the string argument from `base_path('...')` or
-/// `realpath(base_path('...'))`.
-fn extract_base_path_arg(s: &str) -> Option<&str> {
-    // Strip optional `realpath(` wrapper.
+/// Extract the workspace-relative directory from a `config/view.php`
+/// path expression: `base_path('resources/views')`,
+/// `resource_path('views')`, or either wrapped in `realpath(...)`.
+///
+/// `resource_path('X')` resolves to `resources/X` (and bare
+/// `resource_path()` to `resources`), matching Laravel's helper.
+fn extract_view_path_arg(s: &str) -> Option<String> {
+    // Strip an optional `realpath(` wrapper.
     let inner = if let Some(rest) = s.strip_prefix("realpath(") {
         rest.strip_suffix(')')?.trim()
     } else {
         s
     };
 
-    let rest = inner.strip_prefix("base_path(")?.strip_suffix(')')?.trim();
-    extract_string_literal(rest)
+    if let Some(rest) = inner.strip_prefix("base_path(") {
+        let arg = rest.strip_suffix(')')?.trim();
+        return extract_string_literal(arg).map(|p| p.to_string());
+    }
+
+    if let Some(rest) = inner.strip_prefix("resource_path(") {
+        let arg = rest.strip_suffix(')')?.trim();
+        if arg.is_empty() {
+            return Some("resources".to_string());
+        }
+        return extract_string_literal(arg).map(|p| format!("resources/{p}"));
+    }
+
+    None
 }
 
 /// Extract content from a single- or double-quoted PHP string literal.
@@ -222,5 +239,59 @@ mod tests {
         // Register via language_id
         backend.blade_uris.write().insert(uri.to_string());
         assert!(backend.is_blade_file(uri));
+    }
+
+    #[test]
+    fn view_path_arg_variants() {
+        assert_eq!(
+            extract_view_path_arg("base_path('resources/views')").as_deref(),
+            Some("resources/views")
+        );
+        assert_eq!(
+            extract_view_path_arg("realpath(base_path('resources/backoffice/views'))").as_deref(),
+            Some("resources/backoffice/views")
+        );
+        // resource_path('X') resolves relative to the resources dir.
+        assert_eq!(
+            extract_view_path_arg("resource_path('views')").as_deref(),
+            Some("resources/views")
+        );
+        assert_eq!(
+            extract_view_path_arg("resource_path('theme/views')").as_deref(),
+            Some("resources/theme/views")
+        );
+        assert_eq!(
+            extract_view_path_arg("resource_path()").as_deref(),
+            Some("resources")
+        );
+        assert_eq!(extract_view_path_arg("some_other_call('x')"), None);
+    }
+
+    #[test]
+    fn discover_view_paths_reads_custom_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::create_dir_all(root.join("resources/backoffice/views")).unwrap();
+        std::fs::create_dir_all(root.join("resources/views")).unwrap();
+        std::fs::write(
+            root.join("config/view.php"),
+            "<?php\nreturn [\n 'paths' => [\n  realpath(base_path('resources/backoffice/views')),\n  resource_path('views'),\n ],\n];\n",
+        )
+        .unwrap();
+
+        let paths = discover_view_paths(root);
+        assert!(paths.contains(&root.join("resources/backoffice/views")));
+        assert!(paths.contains(&root.join("resources/views")));
+    }
+
+    #[test]
+    fn discover_view_paths_falls_back_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("resources/views")).unwrap();
+        // No config/view.php present.
+        let paths = discover_view_paths(root);
+        assert_eq!(paths, vec![root.join("resources/views")]);
     }
 }

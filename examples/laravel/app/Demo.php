@@ -216,6 +216,8 @@ class Demo
      *  2. Ctrl+Click "admin.users.index" to jump to the view.
      *  3. Ctrl+Click "home" to jump to the ->name('home') declaration in routes/web.php.
      *  4. Ctrl+Click "auth.failed" to jump to lang/en/auth.php.
+     *  5. Ctrl+Click "theme.dashboard" to jump to a view under the custom
+     *     path registered in config/view.php (resources/theme/views).
      */
     public function laravelNavigation(): void
     {
@@ -224,6 +226,9 @@ class Demo
         view('welcome', compact('posts'));
         View::make('admin.users.index', ['users' => BlogAuthor::all()]);
         View::exists('emails.blog_published');
+
+        // View under a custom path from config/view.php (resources/theme/views).
+        view('theme.dashboard');
 
         // Named Routes
         route('home');

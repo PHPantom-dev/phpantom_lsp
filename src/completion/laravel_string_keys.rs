@@ -240,16 +240,31 @@ fn detect_laravel_string_key_context(
 // ─── Enumeration ────────────────────────────────────────────────────────────
 
 impl Backend {
-    /// Enumerate all view names by scanning `resources/views/` file URIs.
+    /// The configured Blade view root directories.
+    ///
+    /// Reads the `paths` array from `config/view.php` (falling back to
+    /// the conventional `resources/views`) so that projects with custom
+    /// view directories resolve `view()` names correctly. Only existing
+    /// directories are returned. Read from disk, so unsaved edits to
+    /// `config/view.php` are not reflected until saved.
+    pub(crate) fn laravel_view_roots(&self) -> Vec<std::path::PathBuf> {
+        match self.workspace_root.read().clone() {
+            Some(root) => crate::blade::discover_view_paths(&root),
+            None => Vec::new(),
+        }
+    }
+
+    /// Enumerate all view names by scanning the configured view roots on
+    /// disk, plus namespaced views registered by service providers.
+    ///
+    /// Scanning the filesystem (rather than the parsed-file index) means
+    /// Blade templates in custom directories are found even before they
+    /// are opened or indexed.
     fn enumerate_all_view_names(&self) -> Vec<String> {
-        let snapshot = self.user_file_symbol_maps();
         let mut names = Vec::new();
 
-        for (file_uri, _) in snapshot {
-            let Some(rel) = extract_view_relative_path(&file_uri) else {
-                continue;
-            };
-            names.push(rel);
+        for root in self.laravel_view_roots() {
+            collect_namespaced_view_names(&root, "", &mut names);
         }
 
         for res in &self.laravel_provider_resources.read().view_dirs {
@@ -388,22 +403,6 @@ impl Backend {
     }
 }
 
-/// Extract the dot-notated view name from a file URI.
-///
-/// `file:///path/resources/views/users/profile.blade.php` → `"users.profile"`
-pub(crate) fn extract_view_relative_path(uri: &str) -> Option<String> {
-    let marker = "/resources/views/";
-    let idx = uri.find(marker)?;
-    let rel = &uri[idx + marker.len()..];
-    let name = rel
-        .strip_suffix(".blade.php")
-        .or_else(|| rel.strip_suffix(".php"))?;
-    if name.is_empty() {
-        return None;
-    }
-    Some(name.replace('/', "."))
-}
-
 /// Extract the file stem from a lang file URI for use as the translation
 /// key prefix.
 ///
@@ -474,7 +473,14 @@ fn collect_view_names_recursive(
                 .or_else(|| rel.strip_suffix(".php"));
             if let Some(name) = name {
                 let dotted = name.replace([std::path::MAIN_SEPARATOR, '/'], ".");
-                out.push(format!("{namespace}::{dotted}"));
+                // An empty namespace means the app's own view roots, where
+                // names are used bare (`admin.permissions.index`). Package
+                // views use the `namespace::name` form.
+                if namespace.is_empty() {
+                    out.push(dotted);
+                } else {
+                    out.push(format!("{namespace}::{dotted}"));
+                }
             }
         }
     }
@@ -737,19 +743,31 @@ mod tests {
     }
 
     #[test]
-    fn view_relative_path_extraction() {
-        assert_eq!(
-            extract_view_relative_path("file:///app/resources/views/users/profile.blade.php"),
-            Some("users.profile".to_string())
+    fn view_names_scanned_from_custom_and_default_roots() {
+        // Enumeration scans view root directories on disk (as configured
+        // in `config/view.php`), so templates in custom directories are
+        // discovered with bare (non-namespaced) names.
+        let dir = tempfile::tempdir().unwrap();
+        let backoffice = dir
+            .path()
+            .join("resources/backoffice/views/admin/permissions");
+        std::fs::create_dir_all(&backoffice).unwrap();
+        std::fs::write(backoffice.join("index.blade.php"), "").unwrap();
+        let default = dir.path().join("resources/views");
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::write(default.join("welcome.blade.php"), "").unwrap();
+
+        let mut names = Vec::new();
+        collect_namespaced_view_names(
+            &dir.path().join("resources/backoffice/views"),
+            "",
+            &mut names,
         );
-        assert_eq!(
-            extract_view_relative_path("file:///app/resources/views/home.blade.php"),
-            Some("home".to_string())
-        );
-        assert_eq!(
-            extract_view_relative_path("file:///app/src/Controller.php"),
-            None
-        );
+        collect_namespaced_view_names(&default, "", &mut names);
+        names.sort();
+
+        assert!(names.contains(&"admin.permissions.index".to_string()));
+        assert!(names.contains(&"welcome".to_string()));
     }
 
     #[test]

@@ -1033,10 +1033,15 @@ impl Backend {
                     crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/resources/views/")
-                        .next()
-                        .map(|p| format!("resources/views/{}", p))
+                    // Show the path relative to the workspace root so
+                    // custom view directories (from `config/view.php`)
+                    // display cleanly rather than as absolute paths.
+                    let short_path = self
+                        .workspace_root
+                        .read()
+                        .as_deref()
+                        .and_then(|root| path.strip_prefix(&format!("{}/", root.to_string_lossy())))
+                        .map(|rel| rel.to_string())
                         .unwrap_or_else(|| path.to_string());
                     format!("`{}`", short_path)
                 } else {

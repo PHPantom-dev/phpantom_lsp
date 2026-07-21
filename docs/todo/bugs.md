@@ -55,3 +55,19 @@ parameter's `@param-immediately-invoked-callable` /
 variable's type is either propagated when it should not be or left
 stale when it should update. Match named arguments to parameters by
 name before deciding whether the callable is immediately invoked.
+
+## Eloquent models without a migration or schema dump lack the implicit `id` primary key
+
+Every Eloquent model has an implicit `id` primary key (Laravel's
+default `$primaryKey`), but PHPantom only synthesizes model
+properties from migrations and schema dumps. A model whose table has
+neither (no `create_<table>` migration, no `database/schema` dump)
+therefore exposes none of its columns, and even the always-present
+primary key is missing, so `$model->id` is flagged
+`Property 'id' not found`. Reproduces in `examples/laravel` on
+`App\Models\Bakery` (there is no bakeries migration): `$bakery->id`
+reports a false positive at
+`app/Http/Controllers/BakeryController.php`. Synthesize the primary
+key (respecting a model's `$primaryKey` / `$incrementing` overrides)
+for every Eloquent model regardless of whether schema data is
+available, so the default `id` is always known.

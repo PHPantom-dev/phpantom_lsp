@@ -3389,6 +3389,132 @@ class Service {
 }
 
 #[tokio::test]
+async fn test_goto_definition_laravel_view_custom_path() {
+    // `config/view.php` registers a non-default view directory. A
+    // `view()` name should resolve to a template living under that
+    // custom root, not just `resources/views`.
+    let view_config = "\
+<?php
+return [
+    'paths' => [
+        realpath(base_path('resources/backoffice/views')),
+        realpath(base_path('resources/views')),
+    ],
+];
+";
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $v = view('admin.permissions.index');
+    }
+}
+";
+    let blade = "<!-- Permissions index -->";
+
+    let (backend, dir) = make_workspace(&[
+        ("config/view.php", view_config),
+        ("src/Services/Service.php", service_php),
+        (
+            "resources/backoffice/views/admin/permissions/index.blade.php",
+            blade,
+        ),
+    ]);
+
+    // Cursor on "admin.permissions.index" — line 4, char 20.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        20,
+    )
+    .await;
+
+    let result =
+        result.expect("view('admin.permissions.index') should resolve under the custom root");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri
+            .as_str()
+            .ends_with("/resources/backoffice/views/admin/permissions/index.blade.php"),
+        "Should jump to the template under the custom view root, got: {}",
+        target_uri
+    );
+}
+
+#[tokio::test]
+async fn test_view_diagnostic_respects_custom_path() {
+    // A view under a custom root (from `config/view.php`) must not be
+    // flagged as unknown, while a genuinely missing view still is.
+    let view_config = "\
+<?php
+return [
+    'paths' => [
+        realpath(base_path('resources/backoffice/views')),
+        realpath(base_path('resources/views')),
+    ],
+];
+";
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        view('admin.permissions.index');
+        view('does.not.exist');
+    }
+}
+";
+    let blade = "<!-- Permissions index -->";
+
+    let (backend, dir) = make_workspace(&[
+        ("config/view.php", view_config),
+        ("src/Services/Service.php", service_php),
+        (
+            "resources/backoffice/views/admin/permissions/index.blade.php",
+            blade,
+        ),
+    ]);
+
+    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: service_php.to_string(),
+            },
+        })
+        .await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), service_php, &mut diags);
+
+    let view_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(
+            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_view"),
+        )
+        .collect();
+
+    assert_eq!(
+        view_diags.len(),
+        1,
+        "Only the missing view should be flagged, got: {:?}",
+        view_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    assert!(
+        view_diags[0].message.contains("does.not.exist"),
+        "The flagged view should be the missing one, got: {}",
+        view_diags[0].message
+    );
+}
+
+#[tokio::test]
 async fn test_goto_definition_laravel_view_facade() {
     let service_php = "\
 <?php
