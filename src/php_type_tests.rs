@@ -946,6 +946,36 @@ fn literal_string() {
     assert_eq!(ty, PhpType::literal_string_raw("'foo'"));
 }
 
+#[test]
+fn parse_model_property_generic() {
+    let ty = PhpType::parse("model-property<Process>");
+    assert_eq!(
+        ty,
+        PhpType::Generic(
+            "model-property".to_string(),
+            vec![PhpType::Named("Process".to_string())]
+        )
+    );
+}
+
+#[test]
+fn parse_model_property_nested_in_array() {
+    let ty = PhpType::parse("array<model-property<Process>, mixed>");
+    assert_eq!(
+        ty,
+        PhpType::Generic(
+            "array".to_string(),
+            vec![
+                PhpType::Generic(
+                    "model-property".to_string(),
+                    vec![PhpType::Named("Process".to_string())]
+                ),
+                PhpType::mixed(),
+            ]
+        )
+    );
+}
+
 // ─── extract_value_type tests ───────────────────────────────────────────
 
 #[test]

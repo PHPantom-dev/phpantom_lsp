@@ -6035,3 +6035,184 @@ class Test {
          not a class-string, got: {out:?}"
     );
 }
+
+// ─── model-property<Model> type validation ──────────────────────────────────
+
+#[test]
+fn no_false_positive_model_property_valid_column() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+    public int $status;
+}
+
+class Service {
+    /** @param model-property<Process> $column */
+    public function sortBy(string $column): void {}
+}
+
+function test(): void {
+    $svc = new Service();
+    $svc->sortBy('name');
+    $svc->sortBy('status');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A string literal naming a valid property must satisfy model-property<Model>: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn model_property_flags_invalid_column() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+    public int $status;
+}
+
+class Service {
+    /** @param model-property<Process> $column */
+    public function sortBy(string $column): void {}
+}
+
+function test(): void {
+    $svc = new Service();
+    $svc->sortBy('nonexistent');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A string literal that is NOT a property of the model should be flagged"
+    );
+}
+
+#[test]
+fn no_false_positive_model_property_non_literal_string() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+    public int $status;
+}
+
+class Service {
+    /** @param model-property<Process> $column */
+    public function sortBy(string $column): void {}
+}
+
+function test(string $col): void {
+    $svc = new Service();
+    $svc->sortBy($col);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A non-literal string must be accepted for model-property (MAYBE): {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn no_false_positive_model_property_to_model_property() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+}
+
+class Outer {
+    /** @param model-property<Process> $column */
+    public function sortBy(string $column): void {}
+
+    /** @param model-property<Process> $col */
+    public function proxy(string $col): void {
+        $this->sortBy($col);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Passing model-property to model-property of the same model must not error: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn model_property_array_flags_invalid_element() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+    public int $status;
+}
+
+class Service {
+    /** @param array<model-property<Process>, mixed> $params */
+    public function test(array $params): void {}
+}
+
+function test(): void {
+    $svc = new Service();
+    $svc->test(['nonexistent' => 1]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A string literal in an array that is NOT a property of the model should be flagged"
+    );
+}
+
+#[test]
+fn no_false_positive_model_property_array_valid_elements() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+    public int $status;
+}
+
+class Service {
+    /** @param array<model-property<Process>, mixed> $params */
+    public function test(array $params): void {}
+}
+
+function test(): void {
+    $svc = new Service();
+    $svc->test(['name' => 1, 'status' => 2]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Valid property names in an array should not be flagged: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn model_property_list_flags_invalid_value() {
+    let php = r#"<?php
+class Process {
+    public string $name;
+    public int $status;
+}
+
+class Service {
+    /** @param list<model-property<Process>> $columns */
+    public function test(array $columns): void {}
+}
+
+function test(): void {
+    $svc = new Service();
+    $svc->test(['nonexistent']);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A string literal value in a list that is NOT a property should be flagged"
+    );
+}

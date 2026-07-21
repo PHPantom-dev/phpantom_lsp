@@ -1736,25 +1736,46 @@ mod tests {
     fn database_type_to_php_type_maps_arrays_before_scalar_elements() {
         // Postgres array types must resolve to `array`, not the scalar
         // element type embedded in the name.
-        assert_eq!(database_type_to_php_type("integer[]", false), PhpType::array());
-        assert_eq!(database_type_to_php_type("bigint[]", false), PhpType::array());
-        assert_eq!(database_type_to_php_type("numeric[]", false), PhpType::array());
-        assert_eq!(database_type_to_php_type("boolean[]", false), PhpType::array());
+        assert_eq!(
+            database_type_to_php_type("integer[]", false),
+            PhpType::array()
+        );
+        assert_eq!(
+            database_type_to_php_type("bigint[]", false),
+            PhpType::array()
+        );
+        assert_eq!(
+            database_type_to_php_type("numeric[]", false),
+            PhpType::array()
+        );
+        assert_eq!(
+            database_type_to_php_type("boolean[]", false),
+            PhpType::array()
+        );
         assert_eq!(database_type_to_php_type("text[]", false), PhpType::array());
     }
 
     #[test]
     fn database_type_to_php_type_does_not_treat_interval_as_int() {
         // `interval` embeds "int" but is a string type.
-        assert_eq!(database_type_to_php_type("interval", false), PhpType::string());
+        assert_eq!(
+            database_type_to_php_type("interval", false),
+            PhpType::string()
+        );
     }
 
     #[test]
     fn database_type_to_php_type_treats_tinyint_one_as_bool() {
         // `$table->boolean()` renders as `tinyint(1)` in a MySQL dump.
-        assert_eq!(database_type_to_php_type("tinyint(1)", false), PhpType::bool());
+        assert_eq!(
+            database_type_to_php_type("tinyint(1)", false),
+            PhpType::bool()
+        );
         // Wider tinyints stay integers.
-        assert_eq!(database_type_to_php_type("tinyint(3)", false), PhpType::int());
+        assert_eq!(
+            database_type_to_php_type("tinyint(3)", false),
+            PhpType::int()
+        );
         assert_eq!(database_type_to_php_type("tinyint", false), PhpType::int());
         // Plain integer types are unaffected.
         assert_eq!(database_type_to_php_type("bigint", false), PhpType::int());

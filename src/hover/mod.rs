@@ -621,6 +621,14 @@ impl Backend {
             return Some(hover);
         }
 
+        // ── model-property<Model> string hover ─────────────────
+        // When the cursor is inside a string argument whose parameter
+        // is typed as model-property<Model>, show the property's type
+        // and source info (same as hovering over $model->property).
+        if let Some(hover) = self.try_model_property_hover(uri, content, position) {
+            return Some(hover);
+        }
+
         None
     }
 
@@ -1766,6 +1774,89 @@ impl Backend {
 
         make_hover(lines.join("\n\n"))
     }
+
+    /// Try hover for a string literal inside a `model-property<Model>`
+    /// parameter context.  Shows the same property info as hovering
+    /// over `$model->property`.
+    fn try_model_property_hover(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<Hover> {
+        use crate::completion::eloquent_string::detect_string_call_context;
+
+        let sc = detect_string_call_context(content, position)?;
+
+        // For hover we need the FULL string content, not just the
+        // partial typed before the cursor.  Scan forward from the
+        // content start to find the closing quote.
+        let full_string = {
+            let bytes = content.as_bytes();
+            let start = sc.string_content_start;
+            let quote = sc.quote_char as u8;
+            let mut end = start;
+            while end < bytes.len() && bytes[end] != quote {
+                end += 1;
+            }
+            &content[start..end]
+        };
+        if full_string.is_empty() {
+            return None;
+        }
+
+        let ctx = self.file_context(uri);
+        let call_expr = match &sc.subject {
+            Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),
+            Some(subj) => format!("{}->{}", subj, sc.method_name),
+            None => sc.method_name.clone(),
+        };
+
+        let resolved = self.resolve_callable_target(&call_expr, content, position, &ctx)?;
+        let param = resolved.parameters.get(sc.arg_index)?;
+        let param_type = param.type_hint.as_ref()?;
+
+        let model_name = extract_model_name_from_model_property_type(param_type)?;
+
+        let class_loader = self.class_loader(&ctx);
+        let model_class = class_loader(&model_name)?;
+        let resolved_model = crate::virtual_members::resolve_class_fully_cached(
+            &model_class,
+            &class_loader,
+            &self.resolved_class_cache,
+        );
+
+        let property = resolved_model
+            .properties
+            .iter()
+            .find(|p| &*p.name == full_string)?;
+
+        Some(self.hover_for_property(property, &resolved_model, &class_loader))
+    }
+}
+
+/// Extract a model name from a `model-property<Model>` type, including
+/// when nested inside array/list generic arguments.
+pub(crate) fn extract_model_name_from_model_property_type(ty: &PhpType) -> Option<String> {
+    if let PhpType::Generic(name, args) = ty
+        && name.eq_ignore_ascii_case("model-property")
+        && args.len() == 1
+    {
+        return args[0].base_name().map(|s| s.to_string());
+    }
+    if let PhpType::Generic(name, args) = ty
+        && (crate::php_type::is_array_like_name(name) || name.eq_ignore_ascii_case("list"))
+    {
+        for arg in args {
+            if let PhpType::Generic(n, inner) = arg
+                && n.eq_ignore_ascii_case("model-property")
+                && inner.len() == 1
+            {
+                return inner[0].base_name().map(|s| s.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Resolve the namespace for a type string by loading the base type

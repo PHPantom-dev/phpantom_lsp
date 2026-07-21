@@ -106,6 +106,98 @@ enum EloquentStringKind {
 }
 
 /// Context extracted when the cursor is inside an Eloquent string argument.
+/// Generic context for a cursor inside a string argument of a
+/// function or method call.  Shared by Eloquent string completion
+/// and `model-property<Model>` completion.
+#[derive(Debug)]
+pub(crate) struct StringCallContext {
+    pub partial: String,
+    pub quote_char: char,
+    pub method_name: String,
+    pub subject: Option<String>,
+    pub is_static: bool,
+    pub arg_index: usize,
+    pub string_content_start: usize,
+}
+
+/// Detect a string-inside-call context at the cursor position.
+///
+/// Returns `Some(StringCallContext)` when the cursor is inside a
+/// string literal that is an argument to a function or method call.
+/// Works for both `$obj->method('|')` and standalone `func('|')`.
+pub(crate) fn detect_string_call_context(
+    content: &str,
+    position: Position,
+) -> Option<StringCallContext> {
+    let cursor_offset = position_to_offset(content, position) as usize;
+    let bytes = content.as_bytes();
+
+    if cursor_offset == 0 || cursor_offset > bytes.len() {
+        return None;
+    }
+
+    let mut quote_pos = None;
+    let mut quote_char = '\'';
+    let mut i = cursor_offset;
+    while i > 0 {
+        i -= 1;
+        let ch = bytes[i];
+        if ch == b'\'' || ch == b'"' {
+            let mut backslashes = 0;
+            let mut j = i;
+            while j > 0 && bytes[j - 1] == b'\\' {
+                backslashes += 1;
+                j -= 1;
+            }
+            if backslashes % 2 == 0 {
+                quote_pos = Some(i);
+                quote_char = ch as char;
+                break;
+            }
+        }
+        if ch == b'\n' {
+            return None;
+        }
+    }
+
+    let quote_pos = quote_pos?;
+    let string_content_start = quote_pos + 1;
+    let partial = content[string_content_start..cursor_offset].to_string();
+
+    let before_quote = &content[..quote_pos];
+    let trimmed = before_quote.trim_end();
+    let last_char = trimmed.as_bytes().last().copied()?;
+    if last_char != b'(' && last_char != b',' && last_char != b'[' {
+        return None;
+    }
+
+    let paren_pos = find_matching_open_paren(trimmed)?;
+    let arg_index = count_top_level_commas(&content[paren_pos + 1..quote_pos]);
+    let before_paren = content[..paren_pos].trim_end();
+    let (method_name, before_method) = extract_identifier_backwards(before_paren)?;
+
+    let before_method_trimmed = before_method.trim_end();
+    let (is_static, subject) = if let Some(stripped) = before_method_trimmed.strip_suffix("::") {
+        (true, extract_subject_backwards(stripped.trim_end()))
+    } else if let Some(stripped) = before_method_trimmed.strip_suffix("?->") {
+        (false, extract_subject_backwards(stripped.trim_end()))
+    } else if let Some(stripped) = before_method_trimmed.strip_suffix("->") {
+        (false, extract_subject_backwards(stripped.trim_end()))
+    } else {
+        (false, None)
+    };
+
+    Some(StringCallContext {
+        partial,
+        quote_char,
+        method_name,
+        subject,
+        is_static,
+        arg_index,
+        string_content_start,
+    })
+}
+
 #[derive(Debug)]
 pub(crate) struct EloquentStringContext {
     /// The kind of string completion needed.
@@ -132,95 +224,25 @@ pub(crate) fn detect_eloquent_string_context(
     content: &str,
     position: Position,
 ) -> Option<EloquentStringContext> {
-    let cursor_offset = position_to_offset(content, position) as usize;
-    let bytes = content.as_bytes();
+    let ctx = detect_string_call_context(content, position)?;
 
-    if cursor_offset == 0 || cursor_offset > bytes.len() {
-        return None;
-    }
+    let subject = ctx.subject?;
 
-    // Find the opening quote before the cursor.
-    let mut quote_pos = None;
-    let mut quote_char = '\'';
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            // Make sure this isn't an escaped quote.
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                quote_char = ch as char;
-                break;
-            }
-        }
-        // Stop at newlines — strings don't span lines in PHP (except heredoc).
-        if ch == b'\n' {
-            return None;
-        }
-    }
-
-    let quote_pos = quote_pos?;
-    let string_content_start = quote_pos + 1;
-
-    // The partial text typed so far.
-    let partial = content[string_content_start..cursor_offset].to_string();
-
-    // Scan backwards from the quote to find the method call pattern.
-    // We expect: `subject->method(` or `subject::method(` possibly with
-    // additional arguments before us (e.g. inside an array `['posts', '`).
-    let before_quote = &content[..quote_pos];
-    let trimmed = before_quote.trim_end();
-
-    // The character before the string could be `(`, `,`, or `[` (for array args).
-    let last_char = trimmed.as_bytes().last().copied()?;
-    if last_char != b'(' && last_char != b',' && last_char != b'[' {
-        return None;
-    }
-
-    // Find the opening paren of the method call.
-    let paren_pos = find_matching_open_paren(trimmed)?;
-    let before_paren = content[..paren_pos].trim_end();
-
-    // Extract the method name.
-    let (method_name, before_method) = extract_identifier_backwards(before_paren)?;
-
-    // Determine the kind based on method name.
-    let kind = if RELATION_METHODS.contains(&method_name.as_str()) {
+    let kind = if RELATION_METHODS.contains(&ctx.method_name.as_str()) {
         EloquentStringKind::Relation
-    } else if COLUMN_METHODS.contains(&method_name.as_str()) {
+    } else if COLUMN_METHODS.contains(&ctx.method_name.as_str()) {
         EloquentStringKind::Column
     } else {
         return None;
     };
 
-    // Extract the access operator and subject.
-    let before_method_trimmed = before_method.trim_end();
-    let (is_static, before_op) = if let Some(stripped) = before_method_trimmed.strip_suffix("::") {
-        (true, stripped)
-    } else if let Some(stripped) = before_method_trimmed.strip_suffix("?->") {
-        (false, stripped)
-    } else {
-        let stripped = before_method_trimmed.strip_suffix("->")?;
-        (false, stripped)
-    };
-
-    // Extract subject (class name or variable).
-    let subject = extract_subject_backwards(before_op.trim_end())?;
-
     Some(EloquentStringContext {
         kind,
-        partial,
-        quote_char,
+        partial: ctx.partial,
+        quote_char: ctx.quote_char,
         subject,
-        is_static,
-        string_content_start,
+        is_static: ctx.is_static,
+        string_content_start: ctx.string_content_start,
     })
 }
 
@@ -538,6 +560,134 @@ impl Backend {
 
         items
     }
+
+    /// Try completion for `model-property<Model>` typed parameters.
+    ///
+    /// When the cursor is inside a string argument whose corresponding
+    /// parameter is typed as `model-property<Model>`, suggests the
+    /// model's known property names.  Uses the shared
+    /// [`detect_string_call_context`] to locate the enclosing call,
+    /// then resolves the callable target to inspect the parameter type.
+    pub(crate) fn try_model_property_completion(
+        &self,
+        content: &str,
+        position: Position,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        let sc = detect_string_call_context(content, position)?;
+
+        let call_expr = match &sc.subject {
+            Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),
+            Some(subj) => format!("{}->{}", subj, sc.method_name),
+            None => sc.method_name.clone(),
+        };
+
+        let resolved = self.resolve_callable_target(&call_expr, content, position, ctx)?;
+        let param = resolved.parameters.get(sc.arg_index)?;
+        let param_type = param.type_hint.as_ref()?;
+
+        let model_name_owned: String;
+        let model_name: &str = if let PhpType::Generic(name, args) = param_type
+            && name.eq_ignore_ascii_case("model-property")
+            && args.len() == 1
+        {
+            args[0].base_name()?
+        } else {
+            let name = extract_model_property_from_generic_args(param_type)?;
+            model_name_owned = name;
+            &model_name_owned
+        };
+
+        let class_loader = self.class_loader(ctx);
+        let model_class = class_loader(model_name)?;
+        let resolved = crate::virtual_members::resolve_class_fully_cached(
+            &model_class,
+            &class_loader,
+            &self.resolved_class_cache,
+        );
+        let columns: Vec<String> = resolved
+            .properties
+            .iter()
+            .map(|p| p.name.to_string())
+            .collect();
+
+        let mut items = Vec::new();
+        for col in &columns {
+            if !sc.partial.is_empty() && !col.to_lowercase().starts_with(&sc.partial.to_lowercase())
+            {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: col.clone(),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some("model property".to_string()),
+                insert_text: Some(col.clone()),
+                ..Default::default()
+            });
+        }
+
+        if items.is_empty() {
+            None
+        } else {
+            Some(CompletionResponse::Array(items))
+        }
+    }
+}
+
+/// Extract the model name from a `model-property<Model>` type nested
+/// inside an array or list generic argument.
+fn extract_model_property_from_generic_args(ty: &PhpType) -> Option<String> {
+    let PhpType::Generic(name, args) = ty else {
+        return None;
+    };
+    if !crate::php_type::is_array_like_name(name) && !name.eq_ignore_ascii_case("list") {
+        return None;
+    }
+    for arg in args {
+        if let PhpType::Generic(n, inner) = arg
+            && n.eq_ignore_ascii_case("model-property")
+            && inner.len() == 1
+        {
+            return inner[0].base_name().map(|s| s.to_string());
+        }
+    }
+    None
+}
+
+/// Count commas at the top level (not inside nested parens, brackets,
+/// or string literals) to determine the argument index.
+fn count_top_level_commas(text: &str) -> usize {
+    let mut count = 0;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut in_string = false;
+    let mut string_char = b'\0';
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let ch = bytes[i];
+        if in_string {
+            if ch == string_char && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        match ch {
+            b'\'' | b'"' => {
+                in_string = true;
+                string_char = ch;
+            }
+            b'(' => paren_depth += 1,
+            b')' => paren_depth -= 1,
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth -= 1,
+            b',' if paren_depth == 0 && bracket_depth == 0 => count += 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    count
 }
 
 /// Extract the model FQN from a `Builder<Model>` type.
