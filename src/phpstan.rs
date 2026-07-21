@@ -154,31 +154,45 @@ pub(crate) fn run_phpstan(
     let timeout = Duration::from_millis(timeout_ms);
     let memory_limit = config.memory_limit.as_deref().unwrap_or("1G");
 
-    // Write the buffer to a temp file. We use the system temp dir
-    // (not a sibling file) because PHPStan's --tmp-file is designed
-    // to work with arbitrary temp paths, and we avoid polluting the
-    // project directory.
-    let tmp = write_temp_file(file_path, content)?;
-    let tmp_path = tmp.path().to_path_buf();
-
     // Build the PHPStan command.
     //
     // The file path is passed as a positional argument so that PHPStan
     // only analyses this single file, not the entire project.  Without
     // it, PHPStan would analyse all paths from phpstan.neon, which can
-    // take minutes on large codebases.  The `--tmp-file` / `--instead-of`
-    // flags tell PHPStan to substitute the file's content but do NOT
-    // limit the analysis scope.
+    // take minutes on large codebases.
     let mut cmd = Command::new(&resolved.path);
     cmd.arg("analyse")
         .arg("--error-format=json")
         .arg("--no-progress")
         .arg("--no-ansi")
-        .arg(format!("--memory-limit={}", memory_limit))
-        .arg(format!("--tmp-file={}", tmp_path.display()))
-        .arg(format!("--instead-of={}", file_path.display()))
-        .arg(file_path)
-        .current_dir(workspace_root);
+        .arg(format!("--memory-limit={}", memory_limit));
+
+    // Only enter editor mode (`--tmp-file` / `--instead-of`) when the
+    // buffer differs from what is on disk. When they are byte-identical
+    // we analyse the real file directly, so PHPStan sees it at its real
+    // path. This matters for rules that inspect `$scope->getFile()`
+    // (e.g. Larastan's env-outside-config rule): in editor mode PHPStan
+    // analyses the temp file under the temp file's OWN path and only
+    // swaps the path back to the real file when formatting errors, so a
+    // temp file outside the real file's directory makes such rules
+    // misfire. Keeping the temp file alive (its destructor removes it on
+    // drop) until after PHPStan finishes; `None` in the direct path.
+    let on_disk = std::fs::read(file_path).ok();
+    let buffer_matches_disk = on_disk
+        .as_deref()
+        .map(|bytes| bytes == content.as_bytes())
+        .unwrap_or(false);
+
+    let tmp = if buffer_matches_disk {
+        None
+    } else {
+        let tmp = write_temp_file(file_path, content)?;
+        cmd.arg(format!("--tmp-file={}", tmp.path().display()))
+            .arg(format!("--instead-of={}", file_path.display()));
+        Some(tmp)
+    };
+
+    cmd.arg(file_path).current_dir(workspace_root);
 
     let result =
         crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPStan", None);
@@ -511,16 +525,30 @@ fn strip_ansi_tags(s: &str) -> String {
 
 /// Write content to a temporary file for PHPStan's `--tmp-file` flag.
 ///
-/// Uses the system temp directory via `tempfile::Builder`.  The `.php`
-/// extension is preserved because PHPStan requires it.  Returns a
-/// `NamedTempFile` whose destructor automatically removes the file on
-/// drop — the caller must keep it alive until after PHPStan finishes.
-fn write_temp_file(_original: &Path, content: &str) -> Result<NamedTempFile, String> {
-    let mut temp = tempfile::Builder::new()
-        .prefix("phpantom-")
-        .suffix(".php")
-        .tempfile()
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+/// The temp file is created as a hidden sibling of `original` (same
+/// directory, leading-dot name) so that PHPStan analyses it under a
+/// path inside the real file's directory. Path-dependent rules read
+/// the analysed file's path during editor mode, so a temp file in the
+/// system temp dir would make them misfire. The leading dot keeps
+/// PHPStan's file finder from picking the temp file up as a separately
+/// analysed file. When the project directory is not writable, we fall
+/// back to the system temp dir. The `.php` suffix is preserved because
+/// PHPStan requires it. Returns a `NamedTempFile` whose destructor
+/// removes the file on drop — the caller must keep it alive until after
+/// PHPStan finishes.
+fn write_temp_file(original: &Path, content: &str) -> Result<NamedTempFile, String> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".phpantom-").suffix(".php");
+
+    let mut temp = match original.parent() {
+        Some(dir) => builder
+            .tempfile_in(dir)
+            .or_else(|_| builder.tempfile())
+            .map_err(|e| format!("Failed to create temp file: {}", e))?,
+        None => builder
+            .tempfile()
+            .map_err(|e| format!("Failed to create temp file: {}", e))?,
+    };
 
     temp.write_all(content.as_bytes())
         .map_err(|e| format!("Failed to write temp file: {}", e))?;
@@ -997,25 +1025,44 @@ mod tests {
     // ── write_temp_file ─────────────────────────────────────────────
 
     #[test]
-    fn write_temp_file_round_trips_content() {
+    fn write_temp_file_places_sibling_of_original() {
         let content = "<?php\necho 'hello';\n";
-        let original = Path::new("/project/src/Foo.php");
-        let tmp = write_temp_file(original, content).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("src");
+        std::fs::create_dir_all(&original).unwrap();
+        let original = original.join("Foo.php");
+
+        let tmp = write_temp_file(&original, content).unwrap();
 
         assert!(tmp.path().exists());
+        // The temp file is a hidden sibling in the original's directory.
+        assert_eq!(tmp.path().parent(), original.parent());
         assert!(tmp.path().extension().and_then(|e| e.to_str()) == Some("php"));
-        assert!(
-            tmp.path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .contains("phpantom-")
-        );
+        let name = tmp
+            .path()
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        assert!(name.starts_with(".phpantom-"));
 
         let read_back = std::fs::read_to_string(tmp.path()).unwrap();
         assert_eq!(read_back, content);
 
         // NamedTempFile auto-deletes on drop — no manual remove needed.
+    }
+
+    #[test]
+    fn write_temp_file_falls_back_when_dir_missing() {
+        let content = "<?php\necho 'hi';\n";
+        // Parent directory does not exist: creation there fails and we
+        // fall back to the system temp dir rather than erroring.
+        let original = Path::new("/nonexistent-phpantom-dir/src/Foo.php");
+        let tmp = write_temp_file(original, content).unwrap();
+
+        assert!(tmp.path().exists());
+        assert!(tmp.path().extension().and_then(|e| e.to_str()) == Some("php"));
+        let read_back = std::fs::read_to_string(tmp.path()).unwrap();
+        assert_eq!(read_back, content);
     }
 
     // ── PhpStanConfig helpers ───────────────────────────────────────
