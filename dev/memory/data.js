@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784593426228,
+  "lastUpdate": 1784596914024,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17679,6 +17679,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 108.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "87ee14075c11fffdfbdb3b6fd92a7b9c0bf4fa18",
+          "message": "feat: infer Laravel model properties from migrations\n\nParse Laravel migration files using Mago CST to infer\nEloquent model database columns. Migrations are discovered\nfrom non-vendor database/migrations directories (including\nnested modules), applied in global basename order, and\nlayered on top of schema dumps.\n\nFeatures:\n- Named and anonymous migration class support\n- $connection property and Schema::connection() routing\n- Blueprint column types, nullable, virtualAs/storedAs\n- Blueprint::after() nested closure scanning\n- Blueprint macro expansion via existing macro scanner\n- Incremental rebuild: editing one migration re-reads only\n  that file and replays the cached plan over base schema\n- Non-recursive directory scanning (skips archive subdirs)\n- Config: [laravel.migrations] enabled/paths in .phpantom.toml\n- JSON schema for editor TOML completion",
+          "timestamp": "2026-07-20T20:07:33-05:00",
+          "tree_id": "d3b86bad2b8cec86f714378bb130cb1492e040d9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/87ee14075c11fffdfbdb3b6fd92a7b9c0bf4fa18"
+        },
+        "date": 1784596911641,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 55.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 112,
             "unit": "MiB"
           }
         ]
