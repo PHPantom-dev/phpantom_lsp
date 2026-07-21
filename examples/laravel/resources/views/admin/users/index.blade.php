@@ -21,7 +21,11 @@
         </thead>
         <tbody>
             @foreach($users->active()->byName() as $user)
-                <tr>
+                @php $rowLabel = 'Author: ' . $user->name; @endphp
+                {{-- Bound component attributes: the expressions below are real
+                     PHP, so $rowLabel (used only here) is not "unused" and
+                     $user->email resolves for hover/go-to-definition. --}}
+                <tr :data-label="$rowLabel" :data-email="$user->email">
                     <td>{{ $user->name }}</td>
                     <td>{{ $user->email }}</td>
                 </tr>

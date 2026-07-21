@@ -14,6 +14,14 @@ enum Mode {
     DirectiveArgs(&'static str),
     SkipArgs(&'static str),
     Verbatim,
+    /// The expression of a Blade component bound attribute
+    /// (`:name="$expr"` or the `:$var` shorthand). The expression is
+    /// emitted verbatim as a real PHP argument to `blade_directive(...)`
+    /// so the forward walker sees the variables it uses; the surrounding
+    /// tag markup stays masked. `Some(quote)` is the delimiting quote of
+    /// a `:name="..."` value; `None` is the shorthand `:$var`, which ends
+    /// at the first character that cannot be part of the variable name.
+    BoundAttr(Option<char>),
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
@@ -40,6 +48,13 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     let mut paren_depth = 0;
     let mut in_string: Option<char> = None;
     let mut is_escaped = false;
+    // Whether the HTML scanner is currently between the `<` and `>` of a
+    // tag, and (when inside a tag) whether it is inside a quoted attribute
+    // value. Both persist across lines so multi-line tags are tracked
+    // correctly. They gate recognition of `:name="$expr"` bound
+    // attributes, which are only valid at attribute position inside a tag.
+    let mut in_html_tag = false;
+    let mut html_attr_string: Option<char> = None;
 
     for line in content.lines() {
         let mut processed = String::new();
@@ -56,6 +71,44 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
         let mut char_idx = 0;
         while char_idx < line_chars.len() {
             let ch = line_chars[char_idx];
+
+            // Close a bound-attribute expression when its terminator is
+            // reached. This must run before the generic string tracking
+            // below, otherwise the closing `"` of a `:name="..."` value
+            // would be mistaken for the start of a PHP string literal.
+            if let Mode::BoundAttr(term) = mode {
+                let at_end = match term {
+                    Some(delim) => in_string.is_none() && ch == delim,
+                    None => {
+                        in_string.is_none()
+                            && !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
+                    }
+                };
+                if at_end {
+                    flush_buffer(
+                        &mut processed,
+                        &mut buffer,
+                        mode,
+                        current_utf16_col,
+                        &mut adjustments,
+                    );
+                    let start_suffix = utf16_count(&processed) as u32;
+                    processed.push_str(");");
+                    let end_suffix = utf16_count(&processed) as u32;
+                    adjustments.push((current_utf16_col, start_suffix));
+                    adjustments.push((current_utf16_col, end_suffix));
+                    if term.is_some() {
+                        // Consume the closing quote (masked tag markup).
+                        char_idx += 1;
+                        current_utf16_col += ch.len_utf16() as u32;
+                        adjustments.push((current_utf16_col, end_suffix));
+                    }
+                    // The shorthand terminator (whitespace, `>`, `/`, …) is
+                    // left for the HTML scanner to reprocess.
+                    mode = Mode::Html;
+                    continue;
+                }
+            }
 
             if mode != Mode::Html {
                 if let Some(quote) = in_string {
@@ -299,6 +352,32 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             next_mode = Mode::Php;
                         }
                     }
+                } else if remaining.starts_with(&[':'])
+                    && in_html_tag
+                    && html_attr_string.is_none()
+                    && (char_idx == 0 || line_chars[char_idx - 1].is_ascii_whitespace())
+                    && remaining.get(1) != Some(&':')
+                {
+                    // A Blade component bound attribute at attribute
+                    // position: `:name="$expr"`, `:name='$expr'`, or the
+                    // `:$var` shorthand. The expression becomes a real PHP
+                    // argument so its variables are seen; the rest of the
+                    // tag stays masked. A leading `::` is an escaped literal
+                    // colon and is left alone.
+                    if remaining.get(1) == Some(&'$')
+                        && remaining
+                            .get(2)
+                            .is_some_and(|c| c.is_ascii_alphabetic() || *c == '_')
+                    {
+                        match_len = 1;
+                        replacement = " blade_directive(".to_string();
+                        next_mode = Mode::BoundAttr(None);
+                    } else if let Some(open_len) = bound_attr_open_len(remaining) {
+                        let quote = remaining[open_len - 1];
+                        match_len = open_len;
+                        replacement = " blade_directive(".to_string();
+                        next_mode = Mode::BoundAttr(Some(quote));
+                    }
                 }
             } else if mode == Mode::Php {
                 if remaining.starts_with(&['}', '}']) || remaining.starts_with(&['!', '!', '}']) {
@@ -428,9 +507,55 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 continue;
             }
 
+            // Track HTML tag / attribute-value state so bound attributes
+            // are only recognized at attribute position (inside a tag, not
+            // inside a quoted value). Colons in attribute values (e.g.
+            // `href="mailto:x"`, `style="color:red"`) or in text between
+            // tags (`10:30`) never satisfy `in_html_tag && !html_attr_string`.
+            if mode == Mode::Html {
+                match html_attr_string {
+                    Some(q) if ch == q => html_attr_string = None,
+                    Some(_) => {}
+                    None => {
+                        if ch == '<' {
+                            // Enter a tag only when `<` begins an element
+                            // (next char names a tag or is `/`), not on a
+                            // stray `<` in text or a `< ` comparison.
+                            let next = line_chars.get(char_idx + 1);
+                            if next.is_none()
+                                || next.is_some_and(|c| c.is_ascii_alphabetic() || *c == '/')
+                            {
+                                in_html_tag = true;
+                            }
+                        } else if ch == '>' {
+                            in_html_tag = false;
+                        } else if in_html_tag && (ch == '"' || ch == '\'') {
+                            html_attr_string = Some(ch);
+                        }
+                    }
+                }
+            }
+
             buffer.push(ch);
             char_idx += 1;
             current_utf16_col += ch.len_utf16() as u32;
+        }
+
+        // A bound-attribute expression must not span lines. If its closing
+        // quote never appeared on this line, close the `blade_directive(`
+        // call here so the rest of the template is not corrupted.
+        if let Mode::BoundAttr(_) = mode {
+            flush_buffer(
+                &mut processed,
+                &mut buffer,
+                mode,
+                current_utf16_col,
+                &mut adjustments,
+            );
+            processed.push_str(");");
+            adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
+            mode = Mode::Html;
+            in_string = None;
         }
 
         flush_buffer(
@@ -489,6 +614,30 @@ fn flush_buffer(
 
 fn utf16_count(s: &str) -> usize {
     s.encode_utf16().count()
+}
+
+/// If `rem` (starting at a `:`) opens a `:name="` or `:name='` bound
+/// attribute, return the length (in chars) of that opening span, up to and
+/// including the opening quote. Returns `None` when the syntax does not
+/// match, so the `:` is left as ordinary masked tag markup.
+fn bound_attr_open_len(rem: &[char]) -> Option<usize> {
+    // rem[0] is the ':'.
+    let mut i = 1;
+    let name_start = i;
+    while i < rem.len() && (rem[i].is_ascii_alphanumeric() || matches!(rem[i], '_' | '-' | '.')) {
+        i += 1;
+    }
+    if i == name_start {
+        return None; // no attribute name after the colon
+    }
+    if rem.get(i) != Some(&'=') {
+        return None;
+    }
+    i += 1;
+    match rem.get(i) {
+        Some('"') | Some('\'') => Some(i + 1),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -642,6 +791,143 @@ mod tests {
         assert!(
             php.contains("blade_directive ($value);"),
             "unexpected @dump(...) translation: {}",
+            php
+        );
+    }
+
+    /// A bound attribute on a component tag (`:src="$image"`) must emit
+    /// its expression as real PHP so the variable is seen by the forward
+    /// walker (otherwise a variable used only there is a false-positive
+    /// "unused variable"). The surrounding tag markup stays masked.
+    #[test]
+    fn test_preprocess_bound_attribute_emits_expression() {
+        let content = r#"<x-img.size :src="$image" alt="x" />"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($image);"),
+            "bound attribute expression should be emitted as PHP: {}",
+            php
+        );
+        // The tag name and other attribute markup must not leak as raw PHP.
+        assert!(
+            !php.contains("x-img.size"),
+            "tag markup should stay masked: {}",
+            php
+        );
+        assert!(
+            !php.contains(r#"alt="x""#),
+            "unbound attribute markup should stay masked: {}",
+            php
+        );
+    }
+
+    /// Package tag namespaces (`<livewire:...>`) and method-call
+    /// expressions inside the binding must work the same way.
+    #[test]
+    fn test_preprocess_bound_attribute_livewire_and_method_call() {
+        let content = r#"<livewire:edit-channel :key="$item->id" />"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($item->id);"),
+            "method-call expression in a bound attribute should be emitted: {}",
+            php
+        );
+        // The `:` inside the `livewire:edit-channel` tag name is part of
+        // the name, not an attribute, so it must not open a directive call.
+        assert!(
+            !php.contains("blade_directive(edit-channel"),
+            "namespace colon in the tag name must not be treated as a binding: {}",
+            php
+        );
+    }
+
+    /// The `:$var` shorthand expands to a bound `var` attribute whose
+    /// expression is `$var`.
+    #[test]
+    fn test_preprocess_bound_attribute_shorthand() {
+        let content = r#"<x-alert :$message />"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($message);"),
+            "`:$var` shorthand should emit the variable as PHP: {}",
+            php
+        );
+    }
+
+    /// A bound attribute whose value contains a PHP string literal (with
+    /// the opposite quote) must be captured whole, not truncated at the
+    /// inner quote.
+    #[test]
+    fn test_preprocess_bound_attribute_with_inner_string() {
+        let content = r#"<x-btn :class="$active ? 'on' : 'off'" />"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($active ? 'on' : 'off');"),
+            "inner string literals should be preserved in the expression: {}",
+            php
+        );
+    }
+
+    /// Colons that are not at attribute position must never be treated as
+    /// bindings: inside an attribute value (`mailto:`), in text between
+    /// tags (`10:30`), or as an escaped literal colon (`::class`).
+    #[test]
+    fn test_preprocess_bound_attribute_does_not_misfire_on_value_colons() {
+        let content =
+            "<a href=\"mailto:x@example.com\">10:30</a>\n<x-c ::class=\"literal\" :real=\"$v\" />";
+        let (php, _) = preprocess(content);
+        // The only binding here is `:real="$v"`.
+        assert!(
+            php.contains("blade_directive($v);"),
+            "the real binding should still be emitted: {}",
+            php
+        );
+        // The prologue declares `function blade_directive(...)` once, so a
+        // single binding yields two occurrences of `blade_directive(`.
+        assert_eq!(
+            php.matches("blade_directive(").count(),
+            2,
+            "no spurious bindings from value/text/escaped colons: {}",
+            php
+        );
+        // `mailto:` and the escaped `::class` literal must stay masked.
+        assert!(
+            !php.contains("mailto"),
+            "attr value must stay masked: {}",
+            php
+        );
+        assert!(
+            !php.contains("literal"),
+            "escaped `::` attribute must stay masked: {}",
+            php
+        );
+    }
+
+    /// A `:name="..."` written outside any tag (in text) must not be
+    /// treated as a binding.
+    #[test]
+    fn test_preprocess_bound_attribute_ignored_outside_tag() {
+        let content = r#"<p>ratio :w="16" here</p>"#;
+        let (php, _) = preprocess(content);
+        // Only the prologue's `function blade_directive(...)` declaration
+        // should remain; no binding call is emitted for a colon in text.
+        assert_eq!(
+            php.matches("blade_directive(").count(),
+            1,
+            "a colon in text (outside a tag span) is not a binding: {}",
+            php
+        );
+    }
+
+    /// A bound attribute split across lines from its tag opener must still
+    /// be recognized (tags span multiple lines in real templates).
+    #[test]
+    fn test_preprocess_bound_attribute_multiline_tag() {
+        let content = "<x-img.size\n    :src=\"$image\"\n/>";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($image);"),
+            "binding on a continuation line should be recognized: {}",
             php
         );
     }

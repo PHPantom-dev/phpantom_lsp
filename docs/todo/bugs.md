@@ -135,35 +135,3 @@ string, not just discarding it:
 Fix: give `@use` and `@inject` their own preprocessor cases that
 parse the string-literal argument(s) out of the parens and emit the
 correct real PHP construct, then return to `Mode::Html`.
-
-## Blade component bound attributes (`:prop="$expr"`) are invisible to variable-usage tracking
-
-Laravel's Blade component tag compiler treats any HTML-like tag
-attribute written as `:name="$expr"` (or the `:$var` shorthand) as a
-bound prop whose value is a real PHP expression, evaluated and
-passed to the component/child scope. This applies to first-party
-`<x-...>` components and to package-registered tag namespaces (for
-example Livewire's `<livewire:...>`) alike. The Blade preprocessor
-(`src/blade/preprocessor.rs`) has no handling for this syntax at
-all: everything inside an HTML tag is masked as opaque literal text,
-so the `$expr` in `:src="$image"` or `:key="$item->id"` is never
-emitted as PHP and never seen by the forward walker. Confirmed
-against a production Laravel codebase (`<x-backoffice::img.size
-:src="$image" ... />`, `<livewire:app-channels.edit-channel
-:key="$item->id" ... />`, and similar patterns across 13 files):
-every variable whose only use is inside a bound attribute is
-reported as a false-positive `unused_variable`, and — since the
-expression is never evaluated — go-to-definition, hover, and
-completion inside `:prop="..."` don't work either.
-
-Fix is more involved than the directive-argument gaps above: it
-needs new handling in `Mode::Html` that recognizes a `:name="..."`
-(or `:$var`) attribute while inside a tag's `<...>` span, extracts
-the quoted expression, and emits it as PHP (e.g. via the same
-`blade_directive(...)` pass-through used for attribute directives)
-without disturbing the surrounding tag markup, which must stay
-masked. Care is needed to scope the match to attribute position
-only (inside `<tag ...>`, after whitespace, not preceded by another
-identifier character) so it doesn't misfire on unrelated colons in
-attribute values (e.g. `href="mailto:x"`, a `10:30` time string, or
-CSS/JS content inside the tag).
