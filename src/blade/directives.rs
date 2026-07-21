@@ -34,6 +34,8 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
         "disabled",
         "readonly",
         "required",
+        "json",
+        "dump",
         "extends",
         "section",
         "endsection",
@@ -142,9 +144,8 @@ pub fn translate_directive(directive: &str) -> String {
         "extends" | "include" | "includeIf" | "includeWhen" | "includeUnless" | "includeFirst"
         | "component" | "each" => "blade_view_directive".to_string(),
         "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"
-        | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack" => {
-            "blade_directive".to_string()
-        }
+        | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack"
+        | "json" | "dump" => "blade_directive".to_string(),
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endslot" | "stop" | "show"
         | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),

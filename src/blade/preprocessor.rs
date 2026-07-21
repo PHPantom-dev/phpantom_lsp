@@ -248,6 +248,8 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "readonly"
                                 | "required"
                                 | "stack"
+                                | "json"
+                                | "dump"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(";"); // Directive Args for layout tags
@@ -601,6 +603,45 @@ mod tests {
         assert!(
             php.contains("blade_directive ('scripts');"),
             "unexpected @stack(...) translation: {}",
+            php
+        );
+    }
+
+    /// `@json($var)` must consume its argument as a real expression so a
+    /// variable used only inside it is not silently invisible to the
+    /// forward walker (it previously fell outside `match_directive`
+    /// entirely, so `$var` in `@json($var)` was never emitted as PHP and
+    /// the variable was reported as unused).
+    #[test]
+    fn test_preprocess_json_directive_consumes_argument() {
+        let content = r#"<script>window.foo = @json($value);</script><p>after</p>"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("after"),
+            "content after @json(...) should be masked as HTML, not left as raw PHP: {}",
+            php
+        );
+        assert!(
+            php.contains("blade_directive ($value);"),
+            "unexpected @json(...) translation: {}",
+            php
+        );
+    }
+
+    /// `@dump($var)` must likewise consume its argument as a real
+    /// expression, for the same reason as `@json` above.
+    #[test]
+    fn test_preprocess_dump_directive_consumes_argument() {
+        let content = r#"<div>@dump($value)</div><p>after</p>"#;
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("after"),
+            "content after @dump(...) should be masked as HTML, not left as raw PHP: {}",
+            php
+        );
+        assert!(
+            php.contains("blade_directive ($value);"),
+            "unexpected @dump(...) translation: {}",
             php
         );
     }
