@@ -1359,7 +1359,7 @@ impl Backend {
                     // The type may contain generics like `Collection<int, Model>`
                     // so we use `split_type_token` for correct parsing.
                     let (type_token, _remainder) =
-                        crate::docblock::types::split_type_token(rest_trimmed);
+                        crate::docblock::type_strings::split_type_token(rest_trimmed);
                     let resolved_type =
                         Self::resolve_type_string_via_php_type(type_token, resolver);
                     if resolved_type != type_token

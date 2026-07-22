@@ -405,7 +405,12 @@ impl Backend {
 
             let parsed_uri = match Url::parse(file_uri_str) {
                 Ok(u) => u,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        "rename: dropping edits for file with unparseable URI {file_uri_str:?}: {e}"
+                    );
+                    continue;
+                }
             };
 
             // Find the alias (if any) that imports the old FQN.
@@ -591,7 +596,12 @@ impl Backend {
 
             let parsed_uri = match Url::parse(file_uri_str) {
                 Ok(u) => u,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        "rename: dropping edits for file with unparseable URI {file_uri_str:?}: {e}"
+                    );
+                    continue;
+                }
             };
 
             let file_use_map = self
@@ -982,7 +992,12 @@ impl Backend {
 
             let parsed_uri = match Url::parse(file_uri) {
                 Ok(u) => u,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        "rename: dropping edits for file with unparseable URI {file_uri:?}: {e}"
+                    );
+                    continue;
+                }
             };
 
             let mut file_edits: Vec<TextEdit> = Vec::new();
@@ -1097,10 +1112,10 @@ impl Backend {
         let old_prefix_lower = old_prefix.to_lowercase();
         for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim();
-            if !trimmed.starts_with("namespace ") {
+            let Some(rest) = trimmed.strip_prefix("namespace ") else {
                 continue;
-            }
-            let rest = trimmed.strip_prefix("namespace ").unwrap().trim();
+            };
+            let rest = rest.trim();
             // Strip trailing `;` or `{`.
             let ns_name = rest.trim_end_matches(';').trim_end_matches('{').trim();
 
@@ -1151,11 +1166,10 @@ impl Backend {
         let old_prefix_lower = old_prefix.to_lowercase();
         for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim();
-            if !trimmed.starts_with("use ") {
+            let Some(rest) = trimmed.strip_prefix("use ") else {
                 continue;
-            }
-
-            let rest = trimmed.strip_prefix("use ").unwrap().trim();
+            };
+            let rest = rest.trim();
             // Handle `use function` and `use const` prefixes.
             let rest = rest
                 .strip_prefix("function ")

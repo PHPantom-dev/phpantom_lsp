@@ -698,45 +698,4 @@ quirks (heredoc flavours, escaping); they already differ in what they
 handle, which means position-dependent bugs that reproduce in one
 feature but not another.
 
----
-
-## Error-handling hardening on request paths
-
-**What to do.** Small, targeted fixes from the fragility audit (the
-handlers are otherwise clean — no unguarded unwraps found beyond
-these):
-
-- `server.rs` `handle_with_position`: `f(content, pos.unwrap())`
-  relies on a non-local invariant that callers pass `Some`; replace
-  with an early return.
-- `references/mod.rs` has two `Err(_) => return locations` arms that
-  silently return partial find-references results, and
-  `rename/mod.rs` has two `Err(_) => continue` arms that silently drop
-  edits for files that fail to parse during a rename. A rename that
-  silently omits edits is a correctness hazard: at minimum `log` the
-  failure; consider surfacing a partial-result warning for rename.
-- `rename/mod.rs`'s `strip_prefix(..).unwrap()` pairs are guarded but
-  brittle — convert to `if let Some(rest)` while touching the file.
-
-**Why it matters.** These are the paths where a silent failure looks
-like "the LSP found nothing", which users report as broken features
-with nothing in the logs to go on.
-
----
-
-## Small cleanups
-
-- `src/docblock/types.rs` is now a pure re-export shim (29 lines);
-  delete it and point imports at `type_strings`/`shapes` directly.
-- `code_actions/extract_function.rs::clean_type_for_signature` is a
-  `#[cfg(test)]`-only string shim over
-  `PhpType::parse(...).to_native_hint()`; port its tests to the typed
-  version and drop it.
-- `completion/context/catch_completion.rs` and
-  `completion/source/throws_analysis.rs` hand-split unions on `'|'`
-  and build `PhpType::Named` per part; route through `PhpType::parse`
-  union handling where the input permits. (These are the last remnants
-  of string-based type manipulation — the `PhpType` migration is
-  otherwise complete.)
-
 

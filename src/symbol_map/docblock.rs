@@ -20,7 +20,7 @@ use mago_syntax::cst::*;
 use mago_type_syntax::cst as type_ast;
 
 use crate::docblock::parser::parse_docblock;
-use crate::docblock::types::split_type_token;
+use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 

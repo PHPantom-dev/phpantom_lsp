@@ -25,7 +25,7 @@ use crate::symbol_map::docblock::get_docblock_text_with_offset;
 use crate::types::{AssertionKind, PhpVersion, TypeAssertion};
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
-use super::types::split_type_token;
+use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
 
 // ─── Public API ─────────────────────────────────────────────────────────────

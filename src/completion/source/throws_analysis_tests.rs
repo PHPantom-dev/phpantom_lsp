@@ -303,11 +303,13 @@ fn test_parse_catch_types_basic() {
 #[test]
 fn test_parse_catch_types_multi() {
     let (types, var) = parse_catch_types("\\InvalidArgumentException | \\RuntimeException $e");
+    // The fully-qualified `\` prefix is retained by the type parser; downstream
+    // resolution (`base_name`/`normalize_throw_type`) strips it.
     assert_eq!(
         types,
         vec![
-            PhpType::Named("InvalidArgumentException".to_string()),
-            PhpType::Named("RuntimeException".to_string())
+            PhpType::Named("\\InvalidArgumentException".to_string()),
+            PhpType::Named("\\RuntimeException".to_string())
         ]
     );
     assert_eq!(var.as_deref(), Some("$e"));

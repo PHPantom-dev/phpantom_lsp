@@ -1993,9 +1993,15 @@ impl Backend {
         f: impl FnOnce(&str, Position) -> Option<T>,
     ) -> Result<Option<T>> {
         Ok(self
-            .with_file_content(handler_name, uri, Some(position), |content, pos| {
-                f(content, pos.unwrap())
-            })
+            .with_file_content(
+                handler_name,
+                uri,
+                Some(position),
+                |content, pos| match pos {
+                    Some(pos) => f(content, pos),
+                    None => None,
+                },
+            )
             .flatten())
     }
 

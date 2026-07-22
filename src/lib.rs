@@ -75,9 +75,9 @@
 //!   - `docblock::tags` — tag extraction (`@return`, `@var`, `@property`, `@method`,
 //!     `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval)
 //!   - `docblock::conditional` — PHPStan conditional return type parsing
-//!   - `docblock::types` — type utilities (`split_type_token`),
-//!     PHPStan array shape parsing
-//!     (`parse_array_shape`, `extract_array_shape_value_type`), and object shape
+//!   - `docblock::type_strings` — type utilities (`split_type_token`)
+//!   - `docblock::shapes` — PHPStan array shape parsing
+//!     (`parse_array_shape`, `extract_array_shape_value_type`) and object shape
 //!     parsing (`parse_object_shape`, `extract_object_shape_property_type`,
 //!     `is_object_shape`)
 

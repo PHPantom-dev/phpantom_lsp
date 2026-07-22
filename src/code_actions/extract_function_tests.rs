@@ -317,64 +317,67 @@ fn non_null_guard_with_return_value_is_unsafe() {
 
 // ── Type hint validation ────────────────────────────────────────
 
+/// Parse a docblock-style type string, run it through the production
+/// signature-cleaning path ([`clean_type_for_signature_typed`]), and
+/// render the resulting native hint back to a string for comparison.
+fn clean(type_str: &str) -> String {
+    if type_str.is_empty() {
+        return String::new();
+    }
+    clean_type_for_signature_typed(&PhpType::parse(type_str))
+        .and_then(|t| t.to_native_hint())
+        .unwrap_or_default()
+}
+
 #[test]
 fn clean_scalar_types() {
-    assert_eq!(clean_type_for_signature("int"), "int");
-    assert_eq!(clean_type_for_signature("string"), "string");
-    assert_eq!(clean_type_for_signature("bool"), "bool");
-    assert_eq!(clean_type_for_signature("float"), "float");
-    assert_eq!(clean_type_for_signature("array"), "array");
-    assert_eq!(clean_type_for_signature("void"), "void");
-    assert_eq!(clean_type_for_signature("mixed"), "mixed");
+    assert_eq!(clean("int"), "int");
+    assert_eq!(clean("string"), "string");
+    assert_eq!(clean("bool"), "bool");
+    assert_eq!(clean("float"), "float");
+    assert_eq!(clean("array"), "array");
+    assert_eq!(clean("void"), "void");
+    assert_eq!(clean("mixed"), "mixed");
 }
 
 #[test]
 fn clean_nullable_types() {
-    assert_eq!(clean_type_for_signature("?int"), "?int");
-    assert_eq!(clean_type_for_signature("?string"), "?string");
+    assert_eq!(clean("?int"), "?int");
+    assert_eq!(clean("?string"), "?string");
 }
 
 #[test]
 fn clean_class_types() {
-    assert_eq!(clean_type_for_signature("Foo"), "Foo");
-    assert_eq!(
-        clean_type_for_signature("\\App\\Models\\User"),
-        "\\App\\Models\\User"
-    );
+    assert_eq!(clean("Foo"), "Foo");
+    assert_eq!(clean("\\App\\Models\\User"), "\\App\\Models\\User");
 }
 
 #[test]
 fn clean_union_types() {
-    assert_eq!(clean_type_for_signature("int|string"), "int|string");
-    assert_eq!(clean_type_for_signature("Foo|null"), "Foo|null");
+    assert_eq!(clean("int|string"), "int|string");
+    assert_eq!(clean("Foo|null"), "Foo|null");
 }
 
 #[test]
 fn clean_empty_and_unparseable() {
-    assert_eq!(clean_type_for_signature(""), "");
+    assert_eq!(clean(""), "");
 }
 
 #[test]
 fn clean_generic_stripped() {
-    assert_eq!(clean_type_for_signature("array<string>"), "array");
-    assert_eq!(
-        clean_type_for_signature("Collection<int, string>"),
-        "Collection"
-    );
+    assert_eq!(clean("array<string>"), "array");
+    assert_eq!(clean("Collection<int, string>"), "Collection");
 }
 
 #[test]
 fn clean_callable_types() {
-    assert_eq!(
-        clean_type_for_signature("callable(int): string"),
-        "callable"
-    );
-    assert_eq!(clean_type_for_signature("Closure(int): void"), "Closure");
+    assert_eq!(clean("callable(int): string"), "callable");
+    assert_eq!(clean("Closure(int): void"), "Closure");
 }
 
 #[test]
 fn clean_array_slice_syntax() {
-    assert_eq!(clean_type_for_signature("int[]"), "array");
+    assert_eq!(clean("int[]"), "array");
 }
 
 // ── Build param list ────────────────────────────────────────────

@@ -611,7 +611,10 @@ impl Backend {
         }
         let parsed_uri = match Url::parse(uri) {
             Ok(u) => u,
-            Err(_) => return locations,
+            Err(e) => {
+                tracing::warn!("find-references: could not parse URI {uri:?}: {e}");
+                return locations;
+            }
         };
 
         // Build the set of reachable scopes: the primary (declaring)
@@ -899,7 +902,10 @@ impl Backend {
 
         let parsed_uri = match Url::parse(uri) {
             Ok(u) => u,
-            Err(_) => return locations,
+            Err(e) => {
+                tracing::warn!("find-references: could not parse URI {uri:?}: {e}");
+                return locations;
+            }
         };
 
         for span in &symbol_map.spans {

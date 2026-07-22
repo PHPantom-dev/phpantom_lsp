@@ -980,10 +980,15 @@ fn parse_catch_types(paren_content: &str) -> (Vec<PhpType>, Option<String>) {
         paren_content
     };
 
-    for part in without_var.split('|') {
-        let t = part.trim().trim_start_matches('\\');
-        if !t.is_empty() {
-            types.push(PhpType::Named(t.to_string()));
+    // Parse the (possibly multi-catch) type list through the shared type
+    // parser and flatten any union into its individual members. Downstream
+    // consumers resolve each type via `base_name()`/`normalize_throw_type`,
+    // both of which strip any leading `\`, so no normalization is needed here.
+    let type_list = without_var.trim();
+    if !type_list.is_empty() {
+        match PhpType::parse(type_list) {
+            PhpType::Union(members) => types.extend(members),
+            single => types.push(single),
         }
     }
 

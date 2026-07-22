@@ -274,3 +274,7 @@ fn consume_union_intersection_suffix(s: &str, pos: usize) -> usize {
     }
     end
 }
+
+#[cfg(test)]
+#[path = "type_strings_tests.rs"]
+mod tests;

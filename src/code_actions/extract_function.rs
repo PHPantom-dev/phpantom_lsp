@@ -2476,19 +2476,10 @@ fn build_raw_return_type_for_docblock(
     }
 }
 
-#[cfg(test)]
-fn clean_type_for_signature(type_str: &str) -> String {
-    if type_str.is_empty() {
-        return String::new();
-    }
-
-    let parsed = PhpType::parse(type_str);
-    parsed.to_native_hint().unwrap_or_default()
-}
-
-/// Like [`clean_type_for_signature`] but accepts an already-parsed
-/// [`PhpType`] and returns a structured [`PhpType`] instead of a
-/// `String`, avoiding a redundant `PhpType::parse` round-trip.
+/// Reduces a (possibly generic or docblock-style) type to a native PHP
+/// type hint suitable for a function signature, e.g. `array<string>` →
+/// `array`, `int[]` → `array`, `callable(int): string` → `callable`.
+/// Returns `None` when the type has no valid native hint representation.
 fn clean_type_for_signature_typed(ty: &PhpType) -> Option<PhpType> {
     ty.to_native_hint_typed()
 }

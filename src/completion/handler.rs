@@ -40,7 +40,7 @@ use crate::completion::class_completion::{
 use crate::completion::named_args::{
     NamedArgContext, cursor_inside_nested_bracket, parse_existing_args,
 };
-use crate::docblock::types::PHPDOC_TYPE_KEYWORDS;
+use crate::docblock::type_strings::PHPDOC_TYPE_KEYWORDS;
 use crate::php_type::PhpType;
 use crate::symbol_map::SymbolKind;
 use crate::types::{ClassInfo, ResolvedType};

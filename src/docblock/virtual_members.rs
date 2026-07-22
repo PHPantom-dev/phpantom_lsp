@@ -13,7 +13,7 @@ use mago_docblock::document::TagKind;
 
 use super::parser::parse_docblock_for_tags;
 use super::tags::sanitise_and_parse_docblock_type;
-use super::types::split_type_token;
+use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::types::{MethodInfo, ParameterInfo, Visibility};
 

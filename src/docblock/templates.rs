@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use mago_docblock::document::TagKind;
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
-use super::types::split_type_token;
+use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::types::{TemplateVariance, TypeAliasDef};
 use crate::util::strip_fqn_prefix;
