@@ -3399,6 +3399,57 @@ class Svc {
     }
 
     #[test]
+    fn no_diagnostic_for_new_instance_method_byref_param() {
+        // Issue #253: by-ref out-params on instance methods via `new A()->…`
+        // must define the variable, same as free functions / preg_match.
+        let php = r#"<?php
+class A {
+    public function dosmth(?string &$y, ?string &$x) {
+        $x = "";
+    }
+    public function x() {
+        return true;
+    }
+}
+class B {
+    public function create()
+    {
+        $y = "";
+        new A()->dosmth($y, $foo);
+        echo $foo;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "new A()->method() with by-ref param should not flag $foo. Got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_parenthesized_new_instance_method_byref_param() {
+        let php = r#"<?php
+class A {
+    public function fill(array &$out): void {
+        $out = [1];
+    }
+}
+function test(): void {
+    (new A())->fill($result);
+    echo $result[0];
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "(new A())->method() with by-ref param should not flag $result. Got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
     fn no_diagnostic_for_fqn_user_defined_function_byref_param() {
         let php = r#"<?php
 namespace App;

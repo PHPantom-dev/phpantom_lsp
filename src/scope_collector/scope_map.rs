@@ -17,8 +17,9 @@ pub(crate) enum ByRefCallKind<'a> {
     StaticMethod(&'a str, &'a str),
     /// A constructor call (e.g. `new Cls($var)`).
     Constructor(&'a str),
-    /// An instance method call on `$this` (e.g. `$this->method($var)`).
-    /// The class name is the enclosing class at the call site.
+    /// An instance method call whose receiver class is known
+    /// (e.g. `$this->method($var)`, `new A()->method($var)`).
+    /// The first string is the class name, the second the method name.
     InstanceMethod(&'a str, &'a str),
 }
 

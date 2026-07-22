@@ -894,24 +894,27 @@ fn walk_member_selector_read(
     }
 }
 
+/// Unwrap parentheses to the inner expression.
+fn unwrap_parens<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    let mut current = expr;
+    while let Expression::Parenthesized(p) = current {
+        current = p.expression;
+    }
+    current
+}
+
 /// Walk arguments for an instance method call (`$obj->method(...)`),
 /// checking the optional resolver for by-reference parameter positions
-/// when the receiver is `$this`.
+/// when the receiver class is known (e.g. `$this->…`, `new A()->…`).
+///
+/// Same idea as free-function out-params (`preg_match(..., $matches)`):
+/// by-ref parameters define the variable at the call site.
 fn walk_method_call_arguments_inner(
     object: &Expression<'_>,
     method: &ClassLikeMemberSelector<'_>,
     argument_list: &ArgumentList<'_>,
     collector: &mut Collector<'_>,
 ) {
-    // Only handle `$this->method()` — for arbitrary receivers we cannot
-    // resolve the class type in the scope collector.
-    let is_this =
-        matches!(object, Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this");
-    if !is_this {
-        walk_arguments(argument_list, collector);
-        return;
-    }
-
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => {
@@ -920,10 +923,42 @@ fn walk_method_call_arguments_inner(
         }
     };
 
-    // Find the enclosing class name from the collector's class stack.
-    let enclosing_class = collector.enclosing_class_name();
-    let enclosing_class = match enclosing_class {
+    // Resolve a class name without type inference when the AST makes it
+    // obvious: `$this`, `new ClassName`, `(new ClassName)`, `new self`.
+    let object = unwrap_parens(object);
+    let class_from_new = match object {
+        Expression::Instantiation(inst) => match unwrap_parens(inst.class) {
+            Expression::Identifier(ident) => Some(bytes_to_str(ident.value())),
+            Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_) => None,
+            _ => {
+                walk_arguments(argument_list, collector);
+                return;
+            }
+        },
+        _ => None,
+    };
+    let class_name = match class_from_new {
         Some(name) => name,
+        None if matches!(
+            object,
+            Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
+        ) || matches!(
+            object,
+            Expression::Instantiation(inst)
+                if matches!(
+                    unwrap_parens(inst.class),
+                    Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
+                )
+        ) =>
+        {
+            match collector.enclosing_class_name() {
+                Some(name) => name,
+                None => {
+                    walk_arguments(argument_list, collector);
+                    return;
+                }
+            }
+        }
         None => {
             walk_arguments(argument_list, collector);
             return;
@@ -931,7 +966,7 @@ fn walk_method_call_arguments_inner(
     };
 
     if let Some(ref resolver) = collector.by_ref_resolver {
-        let kind = ByRefCallKind::InstanceMethod(enclosing_class, method_name);
+        let kind = ByRefCallKind::InstanceMethod(class_name, method_name);
         if let Some(positions) = resolver(&kind)
             && !positions.is_empty()
         {
