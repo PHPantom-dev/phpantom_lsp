@@ -6,6 +6,7 @@ features against a real Laravel installation.
 ## What it demos
 
 - **Eloquent models.** Virtual properties from `$fillable`, `$casts`, `$attributes`, relationships, scopes, accessors, custom collections, and query builder forwarding.
+- **Model factories.** Convention-based factories (no `@extends Factory<Model>` needed) get `create()`/`make()` returning the model, plus the dynamic `has{Relationship}()` / `for{Relationship}()` methods synthesized from the model's relationships, and `trashed()` when the model uses `SoftDeletes` — all chaining fluently (e.g. `BlogAuthor::factory()->hasPosts(3)->create()`). See `Demo::factories()`.
 - **Config and env navigation.** Go-to-definition and find-references for `config('app.name')` keys (resolves to `config/app.php`) and `env('APP_KEY')` vars (resolves to `.env`).
 - **View navigation.** Go-to-definition for `view('welcome')` and `View::make('admin.users.index')` (resolves to Blade templates in `resources/views/`).
 - **Route navigation.** Go-to-definition for `route('home')` (resolves to `->name('home')` in route files).

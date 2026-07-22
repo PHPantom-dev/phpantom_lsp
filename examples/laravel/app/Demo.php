@@ -135,6 +135,38 @@ class Demo
     }
 
 
+    // ── Model Factories (has*/for*/trashed dynamic methods) ─────────────────
+    // Laravel's Factory::__call() resolves has{Relationship}(),
+    // for{Relationship}(), and trashed() at runtime. PHPantom derives the
+    // model from the factory naming convention (BlogAuthorFactory →
+    // App\Models\BlogAuthor) and synthesizes these from the model's
+    // relationships. Each returns the factory (static), so the fluent chain
+    // continues into create()/make(), which return the model.
+
+    public function factories(): void
+    {
+        // Convention-based create()/make() return the associated model.
+        BlogAuthor::factory()->create();            // → BlogAuthor
+        BlogAuthor::factory()->make()->displayName; // make() → BlogAuthor
+
+        // has{Relationship}() — one per relationship on the model.
+        BlogAuthor::factory()->hasPosts(3);         // HasMany posts   → factory
+        BlogAuthor::factory()->hasProfile();        // HasOne profile  → factory
+
+        // The chain stays on the factory, so create() still returns the model.
+        BlogAuthor::factory()->hasPosts(3)->create();            // → BlogAuthor
+        BlogAuthor::factory()->count(2)->hasPosts(3)->create();  // → BlogAuthor
+
+        // for{Relationship}() — for the inverse (BelongsTo) side.
+        BlogPost::factory()->forAuthor(['name' => 'Ada']);   // BelongsTo author → factory
+        BlogPost::factory()->forAuthor()->create();          // → BlogPost
+
+        // trashed() is synthesized only because BlogPost uses SoftDeletes.
+        BlogPost::factory()->trashed();                        // → factory
+        BlogPost::factory()->forAuthor()->trashed()->create(); // → BlogPost
+    }
+
+
     // ── Custom Eloquent Collections ─────────────────────────────────────────
 
     public function customCollection(): void
