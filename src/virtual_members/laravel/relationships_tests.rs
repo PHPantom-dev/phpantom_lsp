@@ -708,7 +708,8 @@ fn pivot_using_extracts_custom_class() {
 
 #[test]
 fn pivot_using_extracts_fqn_short_name() {
-    let body = "{ return $this->belongsToMany(Role::class)->using(\\App\\Models\\RoleUser::class); }";
+    let body =
+        "{ return $this->belongsToMany(Role::class)->using(\\App\\Models\\RoleUser::class); }";
     assert_eq!(extract_pivot_using(body), Some("RoleUser".to_string()));
 }
 
@@ -746,11 +747,9 @@ fn with_pivot_handles_chained_calls() {
 
 #[test]
 fn with_pivot_skips_non_literal_arguments() {
-    let body = "{ return $this->belongsToMany(Role::class)->withPivot('active', $dynamic, self::COL); }";
-    assert_eq!(
-        extract_with_pivot_columns(body),
-        vec!["active".to_string()]
-    );
+    let body =
+        "{ return $this->belongsToMany(Role::class)->withPivot('active', $dynamic, self::COL); }";
+    assert_eq!(extract_with_pivot_columns(body), vec!["active".to_string()]);
 }
 
 #[test]

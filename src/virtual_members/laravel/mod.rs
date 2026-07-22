@@ -135,11 +135,11 @@ pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
-pub(crate) use relationships::{extract_pivot_using, extract_with_pivot_columns};
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
 };
+pub(crate) use relationships::{extract_pivot_using, extract_with_pivot_columns};
 
 pub use scopes::build_scope_methods_for_builder;
 use scopes::{build_scope_methods, is_scope_method};
@@ -155,8 +155,8 @@ pub(crate) use factory::{factory_to_model_fqn, model_to_factory_fqn};
 
 use crate::php_type::PhpType;
 use crate::types::{
-    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, PropertyInfo, PropertySource,
-    ELOQUENT_PIVOT_FQN,
+    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_PIVOT_FQN, PropertyInfo,
+    PropertySource,
 };
 
 use super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
