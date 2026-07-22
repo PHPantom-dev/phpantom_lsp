@@ -422,6 +422,46 @@ fn synthesizes_belongs_to_many_property() {
 }
 
 #[test]
+fn synthesizes_pivot_property_on_every_model() {
+    let provider = LaravelModelProvider;
+    let mut model = make_class("App\\Models\\Role");
+    model.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    model.laravel_mut().timestamps = Some(false);
+
+    let result = provider.provide(&model, &no_loader, None);
+    let pivot = result
+        .properties
+        .iter()
+        .find(|p| p.name == "pivot")
+        .expect("every Eloquent model gains a `pivot` attribute");
+    assert_eq!(
+        pivot.type_hint_str().as_deref(),
+        Some("Illuminate\\Database\\Eloquent\\Relations\\Pivot")
+    );
+    assert!(matches!(pivot.source, Some(PropertySource::Pivot)));
+}
+
+#[test]
+fn explicit_pivot_column_is_not_overwritten() {
+    // A model that declares its own `pivot` cast should keep that type;
+    // the synthesized `pivot` attribute must not clobber it.
+    let provider = LaravelModelProvider;
+    let mut model = make_class("App\\Models\\Role");
+    model.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    model.laravel_mut().timestamps = Some(false);
+    model.laravel_mut().casts_definitions = vec![("pivot".to_string(), "array".to_string())];
+
+    let result = provider.provide(&model, &no_loader, None);
+    let pivot: Vec<_> = result
+        .properties
+        .iter()
+        .filter(|p| p.name == "pivot")
+        .collect();
+    assert_eq!(pivot.len(), 1, "only the declared `pivot` cast is emitted");
+    assert!(matches!(pivot[0].source, Some(PropertySource::Cast { .. })));
+}
+
+#[test]
 fn synthesizes_multiple_relationship_properties() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");
@@ -438,8 +478,8 @@ fn synthesizes_multiple_relationship_properties() {
     )));
 
     let result = provider.provide(&user, &no_loader, None);
-    // 3 relationship properties + 3 _count properties = 6
-    assert_eq!(result.properties.len(), 6);
+    // 3 relationship properties + 3 _count properties + `pivot` = 7
+    assert_eq!(result.properties.len(), 7);
 
     let names: Vec<&str> = result.properties.iter().map(|p| p.name.as_str()).collect();
     assert!(names.contains(&"posts"));
@@ -448,6 +488,7 @@ fn synthesizes_multiple_relationship_properties() {
     assert!(names.contains(&"posts_count"));
     assert!(names.contains(&"profile_count"));
     assert!(names.contains(&"roles_count"));
+    assert!(names.contains(&"pivot"));
 }
 
 #[test]
@@ -464,9 +505,11 @@ fn skips_non_relationship_methods() {
         .push(Arc::new(make_method("toArray", Some("array"))));
 
     let result = provider.provide(&user, &no_loader, None);
-    // No relationship properties; only the implicit `id` primary key.
-    assert_eq!(result.properties.len(), 1);
+    // No relationship properties; only the implicit `id` primary key and
+    // the synthesized `pivot` attribute.
+    assert_eq!(result.properties.len(), 2);
     assert_eq!(result.properties[0].name, "id");
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
 }
 
 #[test]
@@ -478,9 +521,11 @@ fn skips_methods_without_return_type() {
     user.methods.push(Arc::new(make_method("posts", None)));
 
     let result = provider.provide(&user, &no_loader, None);
-    // No relationship property from the untyped method; only implicit `id`.
-    assert_eq!(result.properties.len(), 1);
+    // No relationship property from the untyped method; only implicit `id`
+    // and the synthesized `pivot` attribute.
+    assert_eq!(result.properties.len(), 2);
     assert_eq!(result.properties[0].name, "id");
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
 }
 
 #[test]
@@ -727,10 +772,11 @@ fn scope_and_relationship_coexist() {
     )));
 
     let result = provider.provide(&user, &no_loader, None);
-    // posts + posts_count = 2 properties
-    assert_eq!(result.properties.len(), 2);
+    // posts + posts_count + pivot = 3 properties
+    assert_eq!(result.properties.len(), 3);
     assert!(result.properties.iter().any(|p| p.name == "posts"));
     assert!(result.properties.iter().any(|p| p.name == "posts_count"));
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
     assert_eq!(
         result.methods.len(),
         2,
@@ -758,7 +804,7 @@ fn scope_method_not_treated_as_relationship() {
         result
             .properties
             .iter()
-            .all(|p| p.name == "created_at" || p.name == "updated_at"),
+            .all(|p| p.name == "created_at" || p.name == "updated_at" || p.name == "pivot"),
         "Scope methods should not produce relationship properties"
     );
     assert_eq!(result.methods.len(), 2);
@@ -949,7 +995,7 @@ fn scope_attribute_not_treated_as_relationship() {
         result
             .properties
             .iter()
-            .all(|p| p.name == "created_at" || p.name == "updated_at"),
+            .all(|p| p.name == "created_at" || p.name == "updated_at" || p.name == "pivot"),
         "Scope attribute methods should not produce relationship properties"
     );
     assert_eq!(result.methods.len(), 2);
@@ -1293,7 +1339,7 @@ fn get_attribute_method_not_treated_as_accessor() {
         result
             .properties
             .iter()
-            .all(|p| p.name == "created_at" || p.name == "updated_at"),
+            .all(|p| p.name == "created_at" || p.name == "updated_at" || p.name == "pivot"),
         "getAttribute() should not be treated as a legacy accessor, got: {:?}",
         result
             .properties
@@ -1562,9 +1608,10 @@ fn empty_casts_produces_no_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    // Only the implicit `id` primary key is synthesized.
-    assert_eq!(result.properties.len(), 1);
+    // The implicit `id` primary key plus the synthesized `pivot` attribute.
+    assert_eq!(result.properties.len(), 2);
     assert_eq!(result.properties[0].name, "id");
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
 }
 
 #[test]
@@ -1763,9 +1810,10 @@ fn empty_dates_produces_no_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    // Only the implicit `id` primary key is synthesized.
-    assert_eq!(result.properties.len(), 1);
+    // The implicit `id` primary key plus the synthesized `pivot` attribute.
+    assert_eq!(result.properties.len(), 2);
     assert_eq!(result.properties[0].name, "id");
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
 }
 
 #[test]
@@ -1942,9 +1990,10 @@ fn empty_attributes_produces_no_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    // Only the implicit `id` primary key is synthesized.
-    assert_eq!(result.properties.len(), 1);
+    // The implicit `id` primary key plus the synthesized `pivot` attribute.
+    assert_eq!(result.properties.len(), 2);
     assert_eq!(result.properties[0].name, "id");
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
 }
 
 #[test]
@@ -2189,9 +2238,10 @@ fn empty_column_names_produces_no_extra_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    // Only the implicit `id` primary key is synthesized.
-    assert_eq!(result.properties.len(), 1);
+    // The implicit `id` primary key plus the synthesized `pivot` attribute.
+    assert_eq!(result.properties.len(), 2);
     assert_eq!(result.properties[0].name, "id");
+    assert!(result.properties.iter().any(|p| p.name == "pivot"));
 }
 
 // ── Timestamp property synthesis tests ──────────────────────────────
