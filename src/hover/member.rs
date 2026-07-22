@@ -140,6 +140,9 @@ fn format_property_source(source: &PropertySource) -> Vec<String> {
         PropertySource::RelationshipCount { relationship } => {
             vec![format!("source: relationship count `{}`", relationship)]
         }
+        PropertySource::Pivot => {
+            vec!["source: pivot (many-to-many relationship)".to_string()]
+        }
     }
 }
 
