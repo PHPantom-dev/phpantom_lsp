@@ -1056,6 +1056,12 @@ impl Backend {
                     Some(atom(&Self::resolve_name(required, use_map, namespace)));
             }
 
+            class.require_implements = class
+                .require_implements
+                .iter()
+                .map(|i| atom(&Self::resolve_name(i, use_map, namespace)))
+                .collect();
+
             // Resolve trait names in `insteadof` precedence adaptations
             for prec in &mut class.trait_precedences {
                 prec.trait_name = atom(&Self::resolve_name(&prec.trait_name, use_map, namespace));

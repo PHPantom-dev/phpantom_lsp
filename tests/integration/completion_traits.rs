@@ -4629,6 +4629,75 @@ async fn test_completion_require_extends_this_members_cross_file_psr4() {
     }
 }
 
+#[tokio::test]
+async fn test_completion_require_implements_this_members_same_file() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///require_implements_same.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface HasLogger {\n",
+        "    public function logMessage(string $message): void;\n",
+        "}\n",
+        "/** @phpstan-require-implements HasLogger */\n",
+        "trait LogsEvents {\n",
+        "    protected function helper(): void {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"logMessage"),
+                "Should include required interface method 'logMessage', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"helper"),
+                "Should still include the trait's own method 'helper', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ─── Body-inferred `return $this` in trait methods ──────────────────────────
 
 /// A trait method whose body is `return $this;` (no declared return type)

@@ -862,6 +862,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         mixins: Vec::new(),
         mixin_generics: Vec::new(),
         require_extends: None,
+        require_implements: Vec::new(),
         is_final: false,
         is_abstract: false,
         deprecation_message: None,
