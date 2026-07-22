@@ -1065,6 +1065,55 @@ class Foo {
     );
 }
 
+#[test]
+fn missing_return_type_infers_rich_type_from_multiline_array_literal() {
+    // A multi-line array literal must infer the same rich type as the
+    // single-line form: breaking `['a']` across lines is a formatting
+    // change only and must not degrade `list<string>` to `array`/`mixed`.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    public function getItems() {
+        return [
+            'hello',
+        ];
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        2,
+        "Method Foo::getItems() has no return type specified.",
+        "missingType.return",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 2);
+    let action = find_action(&actions, "Add return type").expect("should offer 'Add return type'");
+
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+    let result = apply_edits(content, &edits);
+
+    // Native hint should be `array`, not the PHPStan type.
+    assert!(
+        result.contains("getItems(): array"),
+        "native type should be `array`:\n{}",
+        result
+    );
+
+    // The @return docblock must carry the rich `list<string>` type, not
+    // `array<mixed>` from an unbalanced single-line fragment.
+    assert!(
+        result.contains("@return list<string>"),
+        "multi-line array literal should still infer list<string>:\n{}",
+        result
+    );
+}
+
 // ── return.type — update @return tag ────────────────────────────────────────
 
 #[test]

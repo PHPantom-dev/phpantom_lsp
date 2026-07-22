@@ -526,8 +526,20 @@ pub(crate) fn infer_return_type(
             }
             has_return_with_value = true;
 
-            // Strip trailing `;`
-            let expr = rest.strip_suffix(';').unwrap_or(rest).trim();
+            // A `return` expression may span several physical lines (e.g. a
+            // multi-line array literal).  Extract the full statement text
+            // from the `return` keyword up to the balanced `;`, instead of
+            // assuming the whole expression fits on this line — otherwise a
+            // formatting-only change (breaking `['a']` across lines) would
+            // leave us with an unbalanced fragment like `[` that infers as
+            // `mixed` rather than `list<string>`.
+            let line_start = line_start_byte_offset(content, line_idx);
+            let expr_offset_in_line = line.find("return ").unwrap_or(0) + "return ".len();
+            let expr_byte_offset = line_start + expr_offset_in_line;
+            let expr = match find_semicolon_balanced(&content[expr_byte_offset..]) {
+                Some(semi) => content[expr_byte_offset..expr_byte_offset + semi].trim(),
+                None => rest.strip_suffix(';').unwrap_or(rest).trim(),
+            };
 
             // `return $this;` is a fluent self-return.  Yield the self-like
             // marker so the caller maps it to the actual receiver class
@@ -554,10 +566,7 @@ pub(crate) fn infer_return_type(
             }
 
             // Fall back to the variable/expression resolver.
-            // Compute byte offset of the expression for resolution.
-            let line_start = line_start_byte_offset(content, line_idx);
-            let expr_offset_in_line = line.find("return ").unwrap_or(0) + "return ".len();
-            let expr_offset = (line_start + expr_offset_in_line) as u32;
+            let expr_offset = expr_byte_offset as u32;
 
             // Try variable resolution for `$var` expressions.
             if expr.starts_with('$') && !expr.contains(' ') {
