@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784746245708,
+  "lastUpdate": 1784748260054,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18869,6 +18869,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 151.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "608153125d773873064e5907d38b63f8848903b0",
+          "message": "fix: suppress class completion in method/const name positions\n\nTyping a member name after `function` or `const` (e.g. protected\nfunction getC) was still falling through to bare class/constant/\nfunction completion with ClassNameContext::Any, so project classes\nmatching the partial flooded the list.\n\nDetect function/const name positions and skip that strategy.",
+          "timestamp": "2026-07-22T14:08:13-05:00",
+          "tree_id": "476cf03f35d06abc21f4213dc65d2cb75003399c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/608153125d773873064e5907d38b63f8848903b0"
+        },
+        "date": 1784748258187,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 91.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 147.2,
             "unit": "MiB"
           }
         ]
