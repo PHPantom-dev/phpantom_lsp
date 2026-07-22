@@ -237,10 +237,25 @@ pub(crate) fn is_function_or_const_name_position(content: &str, position: Positi
         return false;
     }
 
-    check_keyword_ending_at(&chars, i, "function")
-        || check_keyword_ending_at(&chars, i, "fn")
-        || check_keyword_ending_at(&chars, i, "const")
-        || check_keyword_ending_at(&chars, i, "case")
+    if check_keyword_ending_at(&chars, i, "fn") || check_keyword_ending_at(&chars, i, "case") {
+        return true;
+    }
+    // `function` / `const` declare member names, but not after `use`
+    // (`use function foo`, `use const BAR` still need symbol completion).
+    if check_keyword_ending_at(&chars, i, "function") {
+        return !preceded_by_use_keyword(&chars, i - "function".len());
+    }
+    if check_keyword_ending_at(&chars, i, "const") {
+        return !preceded_by_use_keyword(&chars, i - "const".len());
+    }
+    false
+}
+
+/// Whether `pos` (end of a keyword span) is preceded by the `use` keyword
+/// with only whitespace between (`use function` / `use const`).
+fn preceded_by_use_keyword(chars: &[char], keyword_start: usize) -> bool {
+    let before = skip_whitespace_backward(chars, keyword_start);
+    check_keyword_ending_at(chars, before, "use")
 }
 
 // ─── Private helpers ────────────────────────────────────────────────────────

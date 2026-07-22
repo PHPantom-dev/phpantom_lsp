@@ -357,6 +357,32 @@ fn type_after_visibility_is_not_function_name_position() {
 }
 
 #[test]
+fn use_const_import_is_not_const_name_position() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\nuse const APP_V";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 1,
+            character: 15
+        }
+    ));
+}
+
+#[test]
+fn use_function_import_is_not_function_name_position() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\nuse function array_m";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 1,
+            character: 22
+        }
+    ));
+}
+
+#[test]
 fn partial_is_function_keyword_after_modifier() {
     // `public function` — the partial "function" should be filtered out
     // so we don't offer type hints when the user is typing the keyword.
