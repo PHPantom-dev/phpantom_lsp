@@ -528,12 +528,6 @@ layer, split:
 - **`src/hover/mod.rs` (1,885)** → `member.rs`, `variable.rs`,
   `class.rs`, `see_refs.rs`, `templates.rs`, `constants.rs`; the
   `formatting` submodule already models the pattern.
-- **`src/virtual_members/laravel/mod.rs` (920)** → move
-  `resolve_laravel_string_key` + reference finding to
-  `string_keys.rs`, and the builder-scope injection cluster
-  (`try_inject_builder_scopes`, `inject_scopes_and_model_methods`, …)
-  to `builder_injection.rs`, keeping only the provider impl and
-  re-exports.
 
 **Why it matters.** Logic in `mod.rs` is harder to find and grep for;
 each of these is a mechanical move-only split.
