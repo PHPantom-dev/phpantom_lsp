@@ -384,6 +384,17 @@ class Demo
         return $items->sumField('price');   // → float
     }
 
+    public function collectionMixin(Collection $items): array
+    {
+        // `toAssoc` is registered via Collection::mixin(new CollectionMixin())
+        // in DemoServiceProvider. A mixin registers one macro per public method,
+        // each with the signature of the closure that method returns; PHPantom
+        // recovers those so the macros resolve on Collection just like a
+        // Collection::macro(...) registration.  `$this` inside the closures resolves via the mixin's
+        // `@mixin Collection` tag.
+        return $items->toAssoc('id', 'name');   // → array
+    }
+
 
     // ── Macros from a path-repository module ──────────────────────────
 

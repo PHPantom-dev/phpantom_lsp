@@ -57,6 +57,16 @@ pub(crate) struct MacroRegistration {
     /// Kept so the backend can infer a return type from the body when the
     /// registration has no explicit `: ReturnType` annotation.
     pub closure_text: Option<String>,
+    /// Optional override for the go-to-definition location, as a file URI.
+    ///
+    /// A plain `Target::macro('name', ...)` registration has its definition in
+    /// the same file it was found in, so this stays `None` and the index keys
+    /// the location under the contributing file's URI. A `mixin()`-derived
+    /// registration instead points `name_offset` at the mixin method's own
+    /// declaration, which lives in a *different* file; this holds that file's
+    /// URI so go-to-definition jumps to the mixin method rather than the
+    /// `::mixin(...)` call site.
+    pub definition_uri: Option<String>,
 }
 
 /// Extract every literal macro registration from a file's source.
@@ -116,6 +126,248 @@ pub(crate) fn macro_closure_this_target(content: &str, cursor_offset: u32) -> Op
         let closure_expr = call.argument_list.arguments.iter().nth(1)?.value();
         cursor_inside_closure_body(closure_expr, cursor_offset).then_some(target)
     })
+}
+
+/// A `Target::mixin(new X)` / `Target::mixin(X::class)` registration recovered
+/// from source.
+///
+/// Unlike a `macro()` call, the macro signatures a mixin contributes live in
+/// the mixin class `X`'s own file, which the single-file scanner cannot read.
+/// This records only the resolved target and mixin class FQNs; the caller loads
+/// `X`'s source and expands it via [`synthesize_mixin_macros`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MixinRegistration {
+    /// FQN of the class written before `::mixin`, resolved via the file's `use`
+    /// statements.  A `Macroable` class (the macros attach to it directly) or a
+    /// facade (the caller resolves it to the concrete class before injecting).
+    pub target: String,
+    /// FQN of the mixin class passed as the sole `mixin()` argument, resolved
+    /// from a literal `new X` / `X::class` via the file's `use` statements.
+    pub mixin_fqn: String,
+}
+
+/// Extract every literal `Target::mixin(new X)` / `Target::mixin(X::class)`
+/// registration from a file's source.
+///
+/// Returns an empty vector when the file contains no `mixin(` substring (a
+/// cheap byte pre-filter).  Non-literal arguments (a variable or computed
+/// value) are skipped, matching the scope of the `macro()` scanner.
+pub(crate) fn extract_mixin_registrations(content: &str) -> Vec<MixinRegistration> {
+    // Byte pre-filter: every registration contains the `mixin(` call token.
+    if memchr::memmem::find(content.as_bytes(), b"mixin(").is_none() {
+        return Vec::new();
+    }
+
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, content.as_bytes());
+    let resolved = NameResolver::new(&arena).resolve(program);
+    let owned = OwnedResolvedNames::from_resolved(&resolved);
+
+    let mut out = Vec::new();
+    collect_mixin_calls(Node::Program(program), &owned, &mut out);
+    out
+}
+
+/// Recursively collect every `X::mixin(new Y)` / `X::mixin(Y::class)` call
+/// whose target and mixin argument both resolve to a class FQN.
+fn collect_mixin_calls(
+    node: Node<'_, '_>,
+    resolved: &OwnedResolvedNames,
+    out: &mut Vec<MixinRegistration>,
+) {
+    if let Node::StaticMethodCall(smc) = node
+        && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+        && bytes_to_str(ident.value).eq_ignore_ascii_case("mixin")
+        && let Some(target) = resolve_target_fqn(smc.class, resolved)
+        && let Some(arg) = smc.argument_list.arguments.first()
+        && let Some(mixin_fqn) = resolve_mixin_argument_fqn(arg.value(), resolved)
+    {
+        out.push(MixinRegistration { target, mixin_fqn });
+    }
+    node.visit_children(|child| collect_mixin_calls(child, resolved, out));
+}
+
+/// Resolve the mixin-class FQN from a `mixin()` argument, accepting only the
+/// two literal shapes `new X` / `new X(...)` and `X::class`.
+fn resolve_mixin_argument_fqn(
+    expr: &Expression<'_>,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
+    match expr {
+        Expression::Instantiation(inst) => resolve_target_fqn(inst.class, resolved),
+        Expression::Access(Access::ClassConstant(access))
+            if matches!(
+                &access.constant,
+                ClassLikeConstantSelector::Identifier(constant)
+                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
+            ) =>
+        {
+            resolve_target_fqn(access.class, resolved)
+        }
+        _ => None,
+    }
+}
+
+/// Synthesize the macros a `Target::mixin(X)` registration contributes by
+/// parsing the mixin class `X`'s source.
+///
+/// Each public/protected, non-static, concrete, non-magic method of `mixin_fqn`
+/// whose body returns a closure/arrow-function becomes a macro on `target_fqn`
+/// named after the method, taking the *returned closure's* parameters and
+/// return type (mirroring Laravel's runtime `mixin()`, which invokes each
+/// method to obtain the closure it registers).  `mixin_uri` is recorded as the
+/// go-to-definition target so a macro call jumps to the mixin method's own
+/// declaration rather than the `::mixin(...)` call site.
+pub(crate) fn synthesize_mixin_macros(
+    mixin_source: &str,
+    mixin_fqn: &str,
+    mixin_uri: &str,
+    target_fqn: &str,
+    php_version: Option<PhpVersion>,
+) -> Vec<MacroRegistration> {
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, mixin_source.as_bytes());
+
+    let mut out = Vec::new();
+    for statement in program.statements.iter() {
+        collect_mixin_class_methods(
+            statement,
+            None,
+            mixin_fqn,
+            mixin_uri,
+            target_fqn,
+            mixin_source,
+            php_version,
+            &mut out,
+        );
+    }
+    out
+}
+
+/// Walk a statement (descending through `namespace` blocks) for the class whose
+/// FQN matches `mixin_fqn`, appending a macro for each of its qualifying
+/// methods.
+#[allow(clippy::too_many_arguments)]
+fn collect_mixin_class_methods(
+    statement: &Statement<'_>,
+    namespace: Option<&str>,
+    mixin_fqn: &str,
+    mixin_uri: &str,
+    target_fqn: &str,
+    content: &str,
+    php_version: Option<PhpVersion>,
+    out: &mut Vec<MacroRegistration>,
+) {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+
+    match statement {
+        Statement::Namespace(ns) => {
+            let ns_name = ns
+                .name
+                .as_ref()
+                .map(|n| bytes_to_str(n.value()).trim_matches('\\').to_string());
+            for inner in ns.statements().iter() {
+                collect_mixin_class_methods(
+                    inner,
+                    ns_name.as_deref(),
+                    mixin_fqn,
+                    mixin_uri,
+                    target_fqn,
+                    content,
+                    php_version,
+                    out,
+                );
+            }
+        }
+        Statement::Class(class) => {
+            let class_name = bytes_to_str(class.name.value);
+            let fqn = match namespace {
+                Some(ns) => format!("{ns}\\{class_name}"),
+                None => class_name.to_string(),
+            };
+            if !fqn.eq_ignore_ascii_case(mixin_fqn.trim_start_matches('\\')) {
+                return;
+            }
+            for member in class.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let Some(reg) =
+                        build_mixin_macro(method, target_fqn, mixin_uri, content, php_version)
+                {
+                    out.push(reg);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Build the macro a single mixin method contributes, or `None` when the method
+/// is not eligible (private/static/abstract/magic) or its body does not return
+/// a closure whose signature we can recover.
+fn build_mixin_macro(
+    method: &Method<'_>,
+    target_fqn: &str,
+    mixin_uri: &str,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    use mago_syntax::cst::class_like::method::MethodBody;
+
+    // Laravel's `mixin()` copies public and protected methods; a private,
+    // static, or abstract method is never registered, and a magic method
+    // (`__construct`, `__call`, …) is not a macro factory.
+    if method
+        .modifiers
+        .iter()
+        .any(|m| m.is_private() || m.is_static() || m.is_abstract())
+    {
+        return None;
+    }
+    let MethodBody::Concrete(body) = &method.body else {
+        return None;
+    };
+    let name = bytes_to_str(method.name.value);
+    if name.starts_with("__") {
+        return None;
+    }
+
+    // The macro's signature comes from the closure the method returns.
+    let closure_expr = returned_closure(body)?;
+    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
+    let closure_text = expr_source_text(Some(closure_expr), content);
+
+    let parameters =
+        crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
+    let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
+
+    let mut synthesized = MethodInfo::virtual_method_typed(name, return_type.as_ref());
+    synthesized.parameters = parameters;
+    synthesized.native_return_type = return_type;
+    synthesized.is_macro = true;
+
+    Some(MacroRegistration {
+        target: target_fqn.to_string(),
+        method: synthesized,
+        name_offset: method.name.span.start.offset,
+        closure_text,
+        definition_uri: Some(mixin_uri.to_string()),
+    })
+}
+
+/// The closure / arrow-function returned by a mixin method body, if the body's
+/// top-level statements contain a `return <closure>;`.
+fn returned_closure<'ast, 'arena>(body: &'ast Block<'arena>) -> Option<&'ast Expression<'arena>> {
+    for statement in body.statements.iter() {
+        if let Statement::Return(ret) = statement
+            && let Some(value) = ret.value
+            && matches!(value, Expression::Closure(_) | Expression::ArrowFunction(_))
+        {
+            return Some(value);
+        }
+    }
+    None
 }
 
 /// Extract the concrete date class selected by `Date::use()` or
@@ -307,6 +559,10 @@ impl LaravelMacroIndex {
         let mut reverse_locations: HashMap<(String, u32), Vec<(String, String)>> = HashMap::new();
         for (uri, regs) in self.by_uri.iter() {
             for reg in regs {
+                // A `mixin()`-derived registration points its location at the
+                // mixin method's own file; a plain macro's location is the file
+                // it was found in.
+                let location_uri = reg.definition_uri.as_deref().unwrap_or(uri.as_str());
                 let bucket = merged.entry(reg.target.clone()).or_default();
                 let mut added = false;
                 for is_static in [false, true] {
@@ -326,10 +582,10 @@ impl LaravelMacroIndex {
                 if added {
                     locations
                         .entry((reg.target.clone(), reg.method.name.to_string()))
-                        .or_insert_with(|| (uri.clone(), reg.name_offset));
+                        .or_insert_with(|| (location_uri.to_string(), reg.name_offset));
                 }
                 reverse_locations
-                    .entry((uri.clone(), reg.name_offset))
+                    .entry((location_uri.to_string(), reg.name_offset))
                     .or_default()
                     .push((reg.target.clone(), reg.method.name.to_string()));
             }
@@ -664,6 +920,7 @@ fn build_instance_registration(
         method,
         name_offset,
         closure_text,
+        definition_uri: None,
     })
 }
 
@@ -699,6 +956,7 @@ fn build_registration(
         method,
         name_offset,
         closure_text,
+        definition_uri: None,
     })
 }
 

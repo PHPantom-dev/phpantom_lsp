@@ -530,6 +530,13 @@ pub struct Backend {
     /// references triggers a full index rebuild; every other edit takes the
     /// cheap single-file refresh path.
     pub(crate) laravel_macro_seeds: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// URIs of the mixin-class files that `Macroable::mixin()` registrations
+    /// pulled macros from at the last macro-index build.  A mixin class's
+    /// methods live in a different file than the `::mixin(...)` call, and that
+    /// file contains no `macro(`/`mixin(` token of its own, so the single-file
+    /// refresh cannot see it as a contributor.  An edit to one of these files
+    /// (e.g. adding a helper method) therefore triggers a full index rebuild.
+    pub(crate) laravel_macro_mixin_uris: Arc<RwLock<std::collections::HashSet<String>>>,
     /// Concrete date class selected by the project's `Date::use()` call.
     ///
     /// The outer option is `None` until startup discovery completes; the inner
@@ -1001,6 +1008,7 @@ impl Backend {
             )),
             laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
+            laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_provider_resources: Arc::new(RwLock::new(
@@ -1113,6 +1121,7 @@ impl Backend {
             )),
             laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
+            laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_provider_resources: Arc::new(RwLock::new(
@@ -1746,6 +1755,7 @@ impl Backend {
             laravel_macros: Arc::clone(&self.laravel_macros),
             laravel_has_macros: Arc::clone(&self.laravel_has_macros),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
+            laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
