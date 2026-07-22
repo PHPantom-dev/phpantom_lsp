@@ -1053,3 +1053,867 @@ namespace App {
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("$undefined"));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Array element assignment defines the variable
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_array_access_assignment() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $b['a'] = 'hello';
+    echo $b;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Array access assignment should define the variable. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_array_append_assignment() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $items[] = 'hello';
+    echo $items;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Array append assignment should define the variable. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_nested_array_access_assignment() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $b['a']['a'] = 'a';
+    echo $b;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Nested array access assignment should define the variable. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_deeply_nested_array_access_assignment() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $config['db']['host']['primary'] = 'localhost';
+    echo $config;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Deeply nested array access assignment should define the variable. Got: {:?}",
+        diags,
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Postfix increment of a defined variable
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_postfix_increment_of_defined_var() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $x = 0;
+    $x++;
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// isset() guards the read inside it, but does not itself define the variable
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_undefined_variable_after_isset_guard() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    if (isset($x)) {
+        echo $x;
+    }
+}
+"#,
+    );
+    // $x inside isset() should not be flagged, but $x is never assigned, so
+    // the echo inside the if body is still a read of an undefined variable.
+    assert_eq!(diags.len(), 1, "Got: {:?}", diags);
+    assert!(diags[0].message.contains("$x"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Nested closures and arrow functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_undefined_in_closure_without_capture_nested() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $outer = function () {
+        $local = 42;
+        $inner = function () {
+            echo $local;
+        };
+    };
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "Closure without use() should not see parent closure variables. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$local"));
+}
+
+#[test]
+fn no_diagnostic_for_nested_closure_use_captures() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $outer = function () {
+        $brandIds = [1, 2, 3];
+        $typeIds = [4, 5, 6];
+
+        $inner = function () use ($brandIds, $typeIds) {
+            return [$brandIds[0], $typeIds[0]];
+        };
+
+        return $inner();
+    };
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Nested closure use() captures should be visible. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_arrow_fn_capturing_closure_variable() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $callback = function (array $ids) {
+        $sortMap = array_flip($ids);
+        return array_map(fn($item) => $sortMap[$item], $ids);
+    };
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Arrow fn should see variables from enclosing closure. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_arrow_fn_in_closure_in_method() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    public function run(): void {
+        $this->process(function (array $products, array $ids) {
+            $sortMap = array_flip($ids);
+            return $products->sortBy(fn($product) => $sortMap[$product->id]);
+        });
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Arrow fn in closure in method should see closure variables. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_deeply_nested_arrow_functions() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $a = 1;
+    $f = function () use ($a) {
+        $b = 2;
+        $g = fn() => fn() => $a + $b;
+        return $g;
+    };
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Deeply nested arrow fns should see all ancestor variables. Got: {:?}",
+        diags,
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Try/catch variable visibility
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_function_param_used_in_catch() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function capture(string $payment, float $amount): void {
+    try {
+        doSomething($amount);
+    } catch (\Exception $e) {
+        echo $payment;
+        echo $amount;
+        echo $e->getMessage();
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Function parameters should be visible inside catch blocks. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_outer_variable_used_in_catch() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $client = getClient();
+    $token = 'abc';
+    try {
+        $client->send($token);
+    } catch (\RuntimeException $e) {
+        log($client, $token, $e->getMessage());
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Variables assigned before try should be visible inside catch blocks. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_try_assigned_variable_used_in_catch() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    try {
+        $response = fetchData();
+    } catch (\Exception $e) {
+        if (isset($response)) {
+            echo $response;
+        }
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Variables assigned in try block should be visible in catch (guarded by isset). Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_catch_inside_closure() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $handler = function (string $payment) {
+        $client = getClient();
+        try {
+            $response = $client->send($payment);
+        } catch (\Exception $e) {
+            log($payment, $client, $e->getMessage());
+        }
+    };
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Catch inside closure should see closure variables. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_variable_assigned_in_try_used_in_catch_inside_closure() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $handler = function () {
+        $fullFilePath = '/tmp/test.jpg';
+        try {
+            process($fullFilePath);
+        } catch (\Throwable $e) {
+            fallback($fullFilePath);
+        }
+    };
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Variable assigned before try should be visible in catch inside closure. Got: {:?}",
+        diags,
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference foreach binding
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_foreach_by_reference_binding() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $values = [1, 2, 3];
+    foreach ($values as &$value) {
+        $value = 4;
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn no_diagnostic_for_foreach_by_reference_key_value_binding() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(array $items): void {
+    foreach ($items as $key => &$value) {
+        echo $key;
+        $value = 'modified';
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference out-parameters (built-in functions)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_preg_match_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $input): ?string {
+    if (preg_match('/(\d+)/', $input, $match) === 1) {
+        return $match[1];
+    }
+    return null;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "preg_match out-param $match should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_fqn_preg_match() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $input): ?string {
+    if (\preg_match('/(\d+)/', $input, $match) === 1) {
+        return $match[1];
+    }
+    return null;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "FQN \\preg_match out-param should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_preg_match_all_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $text): array {
+    preg_match_all('/\w+/', $text, $matches);
+    return $matches[0];
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "preg_match_all out-param $matches should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_parse_str_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $query): string {
+    parse_str($query, $data);
+    return $data['key'] ?? '';
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "parse_str out-param $data should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_mb_parse_str_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $input): array {
+    mb_parse_str($input, $result);
+    return $result;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "mb_parse_str out-param $result should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_curl_multi_exec_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test($mh): int {
+    curl_multi_exec($mh, $running);
+    return $running;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "curl_multi_exec out-param $running should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_fsockopen_out_params() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $fp = fsockopen('example.com', 80, $errno, $errstr);
+    echo $errno . $errstr;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "fsockopen out-params $errno/$errstr should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_openssl_sign_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $data, $key): string {
+    openssl_sign($data, $signature, $key);
+    return $signature;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "openssl_sign out-param $signature should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_getimagesize_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $file): array {
+    $info = getimagesize($file, $imageinfo);
+    return $imageinfo;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "getimagesize out-param $imageinfo should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_headers_sent_out_params() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    headers_sent($file, $line);
+    echo $file . ':' . $line;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "headers_sent out-params $file/$line should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_pcntl_wait_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    pcntl_wait($status);
+    echo $status;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "pcntl_wait out-param $status should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_dns_get_mx_out_params() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(string $host): void {
+    dns_get_mx($host, $mxhosts, $weights);
+    var_dump($mxhosts, $weights);
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "dns_get_mx out-params should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_flock_out_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test($fp): void {
+    flock($fp, LOCK_EX, $wouldblock);
+    echo $wouldblock;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "flock out-param $wouldblock should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference out-parameters via resolver (user-defined functions, static
+// methods, constructors, instance methods)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_user_defined_function_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function myFunc(string $input, array &$output): void {
+    $output = [$input];
+}
+function test(string $val): void {
+    myFunc($val, $result);
+    echo $result[0];
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "User-defined function by-ref $result should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_fqn_user_defined_function_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace App;
+function transform(string $in, array &$out): void {
+    $out = [$in];
+}
+function test(): void {
+    \App\transform('hello', $result);
+    echo $result[0];
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "FQN user-defined function by-ref $result should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Validator {
+    public static function validate(string $input, array &$errors): bool {
+        $errors = [];
+        return true;
+    }
+}
+function test(string $data): void {
+    Validator::validate($data, $errors);
+    var_dump($errors);
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Static method by-ref $errors should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_constructor_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Parser {
+    public function __construct(string $input, array &$warnings) {
+        $warnings = [];
+    }
+}
+function test(string $src): void {
+    $p = new Parser($src, $warnings);
+    var_dump($warnings);
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Constructor by-ref $warnings should be treated as defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_this_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Svc {
+    private function init(?string &$out): void {
+        $out = 'ready';
+    }
+    public function demo(): void {
+        $this->init($result);
+        echo $result;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "$this->method() with by-ref param should not flag $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_new_instance_method_byref_param() {
+    // Regression: by-ref out-params on instance methods via `new A()->…`
+    // must define the variable, same as free functions / preg_match.
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class A {
+    public function dosmth(?string &$y, ?string &$x) {
+        $x = "";
+    }
+    public function x() {
+        return true;
+    }
+}
+class B {
+    public function create()
+    {
+        $y = "";
+        new A()->dosmth($y, $foo);
+        echo $foo;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "new A()->method() with by-ref param should not flag $foo. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_parenthesized_new_instance_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class A {
+    public function fill(array &$out): void {
+        $out = [1];
+    }
+}
+function test(): void {
+    (new A())->fill($result);
+    echo $result[0];
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "(new A())->method() with by-ref param should not flag $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_namespaced_unqualified_function_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace App;
+function initItem(?string &$out): void {
+    $out = 'hello';
+}
+class Svc {
+    public function demo(): void {
+        initItem($result);
+        echo $result;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Unqualified call to namespaced function with by-ref param should not flag $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_namespaced_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace App;
+class Factory {
+    public static function create(?string &$out): void {
+        $out = 'hello';
+    }
+}
+class Svc {
+    public function demo(): void {
+        Factory::create($result);
+        echo $result;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Static method with by-ref param in namespace should not flag $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_namespaced_constructor_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace App;
+class Builder {
+    public function __construct(?string &$out) {
+        $out = 'built';
+    }
+}
+class Svc {
+    public function demo(): void {
+        new Builder($result);
+        echo $result;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "Constructor with by-ref param in namespace should not flag $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn diagnostic_still_fires_for_truly_undefined_after_non_byref_call() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function noRefs(string $a): void {}
+function test(): void {
+    noRefs('hello');
+    echo $undefined;
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "Should flag $undefined even when resolver is active. Got: {:?}",
+        diags,
+    );
+    assert!(
+        diags[0].message.contains("$undefined"),
+        "Diagnostic should be for $undefined",
+    );
+}

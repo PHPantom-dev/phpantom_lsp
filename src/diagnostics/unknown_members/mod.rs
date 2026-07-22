@@ -1045,6 +1045,3 @@ fn display_class_name(class: &ClassInfo) -> String {
     // Show the FQN when available for clarity.
     class.fqn().to_string()
 }
-
-#[cfg(test)]
-mod tests;

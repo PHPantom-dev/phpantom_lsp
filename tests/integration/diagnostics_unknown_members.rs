@@ -6519,3 +6519,5172 @@ function run(): void {
         "unknown property on the enum instance must be flagged, got: {diags:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// $this / self / static suppression inside traits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `$this->` inside a trait method must resolve against the host class
+/// that uses the trait, not the trait itself.
+#[test]
+fn no_diagnostic_for_this_member_access_inside_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait LogsErrors {
+    public function logError(): void {
+        $this->model;
+        $this->eventType;
+    }
+}
+
+class ImportJob {
+    use LogsErrors;
+    public string $model = 'Product';
+    public string $eventType = 'import';
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for $this-> inside trait, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_this_method_call_inside_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait Cacheable {
+    public function cache(): void {
+        $this->getCacheKey();
+    }
+}
+
+class Product {
+    use Cacheable;
+    public function getCacheKey(): string { return ''; }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for $this->method() inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// `self::`/`static::` inside a trait can reference members declared on
+/// the host class.
+#[test]
+fn no_diagnostic_for_self_static_inside_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait HasDefaults {
+    public static function create(): void {
+        self::DEFAULT_NAME;
+        static::factory();
+    }
+}
+
+class User {
+    use HasDefaults;
+    const DEFAULT_NAME = 'admin';
+    public static function factory(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for self::/static:: inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// Only `$this`/`self`/`static`/`parent` are suppressed inside traits; a
+/// typed variable must still be diagnosed normally.
+#[test]
+fn variable_inside_trait_still_diagnosed() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): void {}
+}
+
+trait MyTrait {
+    public function doStuff(Foo $x): void {
+        $x->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("nonexistent") && d.message.contains("Foo")),
+        "expected diagnostic for unknown method on typed variable inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// `$this->` and `static::` inside a closure nested within a trait
+/// method should be suppressed just like direct trait method bodies.
+#[test]
+fn no_diagnostic_for_this_inside_closure_in_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait SalesInfoGlobalTrait {
+    public function getSalesInfo(): void {
+        $items = array_map(function ($item) {
+            $this->model;
+            $this->eventType;
+            static::where();
+            static::query();
+        }, []);
+    }
+}
+
+class SalesReport {
+    use SalesInfoGlobalTrait;
+    public string $model = 'Sale';
+    public string $eventType = 'report';
+    public static function where(): void {}
+    public static function query(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for $this/static:: inside closure in trait, got: {:?}",
+        diags
+    );
+}
+
+/// `$this->` inside an arrow function nested within a trait method.
+#[test]
+fn no_diagnostic_for_this_inside_arrow_fn_in_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait FilterTrait {
+    public function applyFilter(): void {
+        $fn = fn() => $this->filterColumn;
+    }
+}
+
+class Report {
+    use FilterTrait;
+    public string $filterColumn = 'status';
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for $this-> inside arrow fn in trait, got: {:?}",
+        diags
+    );
+}
+
+/// `static::where(...)->update(...)` inside a trait method: the subject
+/// text for `update` is a chain rooted at `static`, so the suppression
+/// must recognise the root keyword rather than require an exact match.
+#[test]
+fn no_diagnostic_for_chain_rooted_at_static_inside_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait SalesInfoGlobalTrait {
+    public function updateSalesInfo(): void {
+        static::where('column', 'value')->update(['sales' => 1]);
+    }
+}
+
+class SalesReport extends \Illuminate\Database\Eloquent\Model {
+    use SalesInfoGlobalTrait;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for static::...->method() chain inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// `$this->relation()->first()` inside a trait method: the subject text
+/// for `first` is a chain rooted at `$this`.
+#[test]
+fn no_diagnostic_for_chain_rooted_at_this_inside_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait HasRelation {
+    public function loadRelation(): void {
+        $this->items()->first();
+    }
+}
+
+class Order {
+    use HasRelation;
+    /** @return \Illuminate\Database\Eloquent\Builder */
+    public function items(): object { return new \stdClass(); }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for $this->...->method() chain inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// `static::where(...)` inside a closure within a trait method.
+#[test]
+fn no_diagnostic_for_chain_rooted_at_static_inside_closure_in_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait SalesInfoGlobalTrait {
+    public function updateSalesInfo(): void {
+        $items = array_map(function ($item) {
+            static::where('col', 'val')->update(['x' => 1]);
+        }, []);
+    }
+}
+
+class SalesReport extends \Illuminate\Database\Eloquent\Model {
+    use SalesInfoGlobalTrait;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for static:: chain inside closure in trait, got: {:?}",
+        diags
+    );
+}
+
+/// `self::create(...)` chain inside a trait.
+#[test]
+fn no_diagnostic_for_self_chain_inside_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait Creatable {
+    public function duplicate(): void {
+        self::create(['name' => 'copy'])->save();
+    }
+}
+
+class Product extends \Illuminate\Database\Eloquent\Model {
+    use Creatable;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for self::...->method() chain inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// Non-self-referencing subjects inside a trait must still be diagnosed;
+/// the `$this`/`self`/`static`/`parent` suppression must not swallow them.
+#[test]
+fn variable_chain_inside_trait_still_diagnosed() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Widget {
+    public function knownMethod(): void {}
+}
+trait BadTrait {
+    public function doStuff(Widget $w): void {
+        $w->nonExistentMethod();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("nonExistentMethod") && d.message.contains("not found")),
+        "expected diagnostic for non-self-referencing subject inside trait, got: {:?}",
+        diags
+    );
+}
+
+/// A trait's own member accessed via a variable holding an anonymous
+/// class instance that uses the trait.
+#[test]
+fn no_diagnostic_for_trait_method_on_anonymous_class_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait Greetable {
+    public function greet(): string { return "hello"; }
+}
+
+function test(): void {
+    $obj = new class {
+        use Greetable;
+    };
+    $obj->greet();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for trait member on anonymous class variable, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// $this / self / parent edge cases
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `$this->` in one class must not be confused with `$this` in an
+/// unrelated class earlier in the same file.
+#[test]
+fn no_diagnostic_for_this_in_second_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class First {
+    public function a(): void {}
+}
+class Second {
+    public function b(): void {
+        $this->b();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for $this->b() in Second, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_unknown_method_on_this_in_second_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class First {
+    public function a(): void {}
+}
+class Second {
+    public function b(): void {
+        $this->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+        "expected diagnostic for $this->nonexistent() scoped to Second, got: {:?}",
+        diags
+    );
+}
+
+/// `parent::` inside an anonymous class body resolves against the
+/// anonymous class's own `extends` target.
+#[test]
+fn no_diagnostic_for_parent_in_anonymous_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    public function baseMethod(): void {}
+}
+class Outer {
+    public function make(): void {
+        $anon = new class extends Base {
+            public function test(): void {
+                parent::baseMethod();
+            }
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for parent::baseMethod() inside anonymous class, got: {:?}",
+        diags
+    );
+}
+
+/// A variable holding an anonymous class instance (assigned outside the
+/// anonymous class body) must resolve members via the anonymous class's
+/// `ClassInfo`, inheriting from its parent.
+#[test]
+fn no_diagnostic_for_method_on_anonymous_class_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    public function hello(): string { return "hi"; }
+}
+
+function test(): void {
+    $model = new class extends Base {};
+    $model->hello();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for method on anonymous class variable, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_unknown_method_on_anonymous_class_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(): void {
+    $obj = new class {
+        public function known(): void {}
+    };
+    $obj->unknown();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("unknown") && d.message.contains("not found")),
+        "expected unknown member diagnostic on anonymous class variable, got: {:?}",
+        diags
+    );
+}
+
+/// A `self::CONST` reference inside a class-level attribute sits before
+/// the `class` keyword and the body braces, so the enclosing class must
+/// be found via its declaration span (which includes the leading
+/// attribute) rather than the body span.
+#[test]
+fn no_diagnostic_for_self_const_in_class_level_attribute() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+#[Route(name: self::ROUTE)]
+class HealthCheckController
+{
+    public const string ROUTE = 'health-check';
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("ROUTE") || d.message.contains("could not be resolved")),
+        "expected no self::ROUTE diagnostic, got: {:?}",
+        diags
+    );
+}
+
+/// A standalone multi-variable `@var` block inside a closure body
+/// (without a following assignment) should declare types for untyped
+/// closure parameters.
+#[test]
+fn no_diagnostic_for_standalone_var_docblock_in_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class App {
+    public function make(string $class): mixed { return new $class; }
+}
+
+class Foo {
+    public function test(): void {
+        $fn = function ($app, $params) {
+            /**
+             * @var App                      $app
+             * @var array{indexName: string} $params
+             */
+            $app->make('Something');
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics when @var declares closure param type, got: {:?}",
+        diags
+    );
+}
+
+/// The flip side: when `@var` resolves the type, unknown members should
+/// still be flagged (proves the type was actually resolved).
+#[test]
+fn flags_unknown_member_with_standalone_var_docblock_in_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class App {
+    public function make(string $class): mixed { return new $class; }
+}
+
+class Foo {
+    public function test(): void {
+        $fn = function ($app) {
+            /** @var App $app */
+            $app->nonExistentMethod();
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("nonExistentMethod")),
+        "expected unknown member diagnostic for nonExistentMethod, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Object shapes (@return object{...})
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_object_shape_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Factory {
+    /**
+     * @return object{name: string, age: int}
+     */
+    public function create(): object {
+        return (object)['name' => 'test', 'age' => 1];
+    }
+}
+
+class Consumer {
+    public function test(): void {
+        $factory = new Factory();
+        $obj = $factory->create();
+        echo $obj->name;
+        echo $obj->age;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for object shape property, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_unknown_property_on_object_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Factory {
+    /**
+     * @return object{name: string, age: int}
+     */
+    public function create(): object {
+        return (object)['name' => 'test', 'age' => 1];
+    }
+}
+
+class Consumer {
+    public function test(): void {
+        $obj = (new Factory())->create();
+        echo $obj->missing;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("missing")),
+        "expected diagnostic for missing property on object shape, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Union type member resolution
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_member_on_any_union_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Cat {
+    public function purr(): void {}
+    public function eat(): void {}
+}
+class Dog {
+    public function bark(): void {}
+    public function eat(): void {}
+}
+class Shelter {
+    /**
+     * @return Cat|Dog
+     */
+    public function adopt(): Cat|Dog {
+        return new Cat();
+    }
+}
+
+class Test {
+    public function run(): void {
+        $shelter = new Shelter();
+        $pet = $shelter->adopt();
+        $pet->eat();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected when the member exists on every union branch, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_missing_from_all_union_branches() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Cat {
+    public function purr(): void {}
+}
+class Dog {
+    public function bark(): void {}
+}
+class Shelter {
+    /**
+     * @return Cat|Dog
+     */
+    public function adopt(): Cat|Dog {
+        return new Cat();
+    }
+}
+
+class Test {
+    public function run(): void {
+        $shelter = new Shelter();
+        $pet = $shelter->adopt();
+        $pet->fly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("fly")),
+        "expected diagnostic for member missing from all union branches, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn union_diagnostic_message_mentions_multiple_types() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Cat {
+    public function purr(): void {}
+}
+class Dog {
+    public function bark(): void {}
+}
+class Shelter {
+    /**
+     * @return Cat|Dog
+     */
+    public function adopt(): Cat|Dog {
+        return new Cat();
+    }
+}
+
+class Test {
+    public function run(): void {
+        $shelter = new Shelter();
+        $pet = $shelter->adopt();
+        $pet->fly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let d = diags
+        .iter()
+        .find(|d| d.message.contains("fly"))
+        .expect("expected diagnostic");
+    assert!(
+        d.message.contains("Cat") && d.message.contains("Dog"),
+        "expected both union member types in message: {}",
+        d.message
+    );
+}
+
+/// When the subject is a union and any branch defines `__call`, the
+/// access is dynamically dispatched through that branch at runtime, so
+/// it must not be flagged.  This is the Mockery higher-order-message
+/// pattern: a fluent method call on a mock return type must not warn.
+#[test]
+fn no_diagnostic_when_any_union_branch_has_magic_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Normal {
+    public function known(): void {}
+}
+class Dynamic {
+    public function __call(string $name, array $args): mixed { return null; }
+}
+
+class Test {
+    /**
+     * @return Normal|Dynamic
+     */
+    public function get(): Normal|Dynamic { return new Normal(); }
+
+    public function run(): void {
+        $x = $this->get();
+        $x->anything();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Method dispatched through a union branch's __call must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// stdClass dynamic property chains
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A property assigned `new stdClass()` resolves to stdClass when read
+/// again, so a further property access on it is not flagged.
+#[test]
+fn no_diagnostic_for_nested_stdclass_property_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(): void {
+    $settings = new stdClass();
+    $settings->cache = new stdClass();
+    $settings->cache->ttl = 3600;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for nested stdClass property chain, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_deeply_nested_stdclass_property_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(): void {
+    $root = new stdClass();
+    $root->a = new stdClass();
+    $root->a->b = new stdClass();
+    $root->a->b->c = 1;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for deeply nested stdClass property chain, got: {:?}",
+        diags
+    );
+}
+
+/// Reassigning `$s` drops the stale `$s->cache` type, so `$s->cache`
+/// resolves against the new object (a typed class here) rather than the
+/// stdClass assigned before the reassignment.
+#[test]
+fn stdclass_property_key_invalidated_on_base_reassignment() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Holder { public ?Holder $cache = null; public int $ttl = 0; }
+function test(): void {
+    $s = new stdClass();
+    $s->cache = new stdClass();
+    $s = new Holder();
+    echo $s->cache->ttl;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "$s->cache must resolve against Holder (not the stale stdClass), got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHPDoc property inheritance
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_phpdoc_property_on_child_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @property string $virtualProp
+ */
+class Base {
+    public function __get(string $name): mixed { return null; }
+}
+
+class Child extends Base {}
+
+function test(): void {
+    $c = new Child();
+    echo $c->virtualProp;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for @property inherited on child class, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_phpdoc_property_from_interface() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @property string $name
+ */
+interface HasName {}
+
+class User implements HasName {
+    public function __get(string $n): mixed { return null; }
+}
+
+function test(): void {
+    $u = new User();
+    echo $u->name;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for @property declared on an implemented interface, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHPDoc virtual members inside type-narrowing contexts
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_phpdoc_members_inside_assert() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @method string getName()
+ */
+class Entity {
+    public function __call(string $name, array $args): mixed { return null; }
+}
+
+class Base {}
+
+class Test {
+    public function run(Base $item): void {
+        assert($item instanceof Entity);
+        echo $item->getName();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for @method virtual member after assert instanceof, got: {:?}",
+        diags
+    );
+}
+
+/// `\assert($item instanceof Entity)` — the leading backslash is the
+/// global-namespace FQN form.  It should narrow the variable type
+/// identically to the unqualified `assert()`.
+#[test]
+fn no_diagnostic_for_fqn_assert_instanceof() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @method string getName()
+ */
+class Entity {
+    public function __call(string $name, array $args): mixed { return null; }
+}
+
+class Base {}
+
+class Test {
+    public function run(Base $item): void {
+        \assert($item instanceof Entity);
+        echo $item->getName();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for FQN \\assert instanceof narrowing, got: {:?}",
+        diags
+    );
+}
+
+/// Combines FQN `\assert()` narrowing and interleaved
+/// array-access/property-chain resolution.
+#[test]
+fn no_diagnostic_for_fqn_assert_with_interleaved_array_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class FormError {
+    public function getMessage(): string { return ''; }
+}
+
+class FormChild {
+    public function getName(): string { return ''; }
+}
+
+/** @var \Iterator<int, mixed> */
+$errorIterator = new \ArrayIterator([]);
+/** @var FormChild $child */
+$child = new FormChild();
+/** @var array<string, list<string>> */
+$errors = [];
+
+foreach ($errorIterator as $error) {
+    \assert(
+        $error instanceof FormError,
+        'Error is not a FormError!',
+    );
+    $errors[$child->getName()][] = $error->getMessage();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for FQN \\assert with interleaved array access, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_phpdoc_members_after_instanceof_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @method string getName()
+ */
+class Entity {
+    public function __call(string $name, array $args): mixed { return null; }
+}
+
+class Base {}
+
+class Test {
+    public function run(Base $item): void {
+        if ($item instanceof Entity) {
+            echo $item->getName();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for @method virtual member after if-instanceof narrowing, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Inline `&&` narrowing (instanceof as the LHS of `&&`)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_instanceof_and_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class QueryException extends \Exception {
+    public array $errorInfo = [];
+}
+
+function test(\Throwable $e): void {
+    $e instanceof QueryException && $e->errorInfo;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for && narrowing, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_instanceof_and_chain_in_catch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class QueryException extends \Exception {
+    public array $errorInfo = [];
+}
+
+function test(): void {
+    try {
+        throw new \Exception('fail');
+    } catch (\Throwable $e) {
+        $e instanceof QueryException && $e->errorInfo;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for && narrowing in catch, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_instanceof_and_chain_method_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class SpecialException extends \Exception {
+    public function getDetail(): string { return ''; }
+}
+
+function test(\Throwable $e): void {
+    $e instanceof SpecialException && $e->getDetail();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for && narrowing with method call, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_instanceof_and_chain_in_if_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class QueryException extends \Exception {
+    public array $errorInfo = [];
+}
+
+function test(\Throwable $e): void {
+    if ($e instanceof QueryException && count($e->errorInfo) > 0) {
+        echo 'has errors';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for && narrowing in if condition, got: {:?}",
+        diags
+    );
+}
+
+/// Real-world repro: instanceof on the LHS of `&&` inside a `return`
+/// statement.  The narrowing must propagate through the entire chained
+/// `&&` even when wrapped in `return`.
+#[test]
+fn no_diagnostic_for_instanceof_and_chain_in_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class QueryException extends \Exception {
+    public array $errorInfo = [];
+}
+
+trait UniqueConstraintViolation {
+    protected function isUniqueConstraintViolation(\Throwable $exception): bool {
+        return $exception instanceof QueryException
+            && is_array($exception->errorInfo)
+            && count($exception->errorInfo) >= 2
+            && ($exception->errorInfo[0] ?? '') === '23000'
+            && ($exception->errorInfo[1] ?? 0) === 1062;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for && narrowing in return, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_ternary_instanceof_in_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class SpecialException extends \Exception {
+    public function getDetail(): string { return ''; }
+}
+
+function test(\Throwable $e): string {
+    return $e instanceof SpecialException ? $e->getDetail() : 'unknown';
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for ternary instanceof in return, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_chained_and_instanceof() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class DetailedException extends \Exception {
+    public string $detail = '';
+    public string $context = '';
+}
+
+function test(\Throwable $e): void {
+    $e instanceof DetailedException && $e->detail !== '' && $e->context !== '';
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for chained && narrowing, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Property chains through nested objects
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_unknown_member_on_property_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function known(): void {}
+}
+class Outer {
+    public Inner $inner;
+}
+
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->inner->missing();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("missing")),
+        "expected diagnostic for unknown member on property chain, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_valid_property_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function known(): void {}
+}
+class Outer {
+    public Inner $inner;
+}
+
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->inner->known();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for valid property chain, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_unknown_member_on_method_return_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function known(): void {}
+}
+class Outer {
+    public function getInner(): Inner { return new Inner(); }
+}
+
+function test(): void {
+    $o = new Outer();
+    $o->getInner()->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("missing")),
+        "expected diagnostic for unknown member on method return chain, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_unknown_member_on_virtual_property_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function known(): void {}
+}
+
+/**
+ * @property Inner $inner
+ */
+class Outer {
+    public function __get(string $name): mixed { return null; }
+}
+
+function test(): void {
+    $o = new Outer();
+    $o->inner->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("missing")),
+        "expected diagnostic for unknown member on virtual property chain, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scalar member access (member access on int/string/bool subjects)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_member_access_on_scalar_property_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public int $value = 0;
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $foo->value->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        "expected ERROR severity for scalar access, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_access_on_string_property_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public string $name = '';
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $foo->name->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_access_on_scalar_method_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function getCount(): int { return 0; }
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $foo->getCount()->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_method_call_on_scalar_method_return_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function getValue(): string { return ''; }
+}
+
+class Middle {
+    public function getInner(): Inner { return new Inner(); }
+}
+
+class Outer {
+    public function getMiddle(): Middle { return new Middle(); }
+}
+
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->getMiddle()->getInner()->getValue()->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_method_call_on_scalar_return_typed_param() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function getCount(): int { return 0; }
+}
+function test(Foo $foo): void {
+    $foo->getCount()->nonexistent();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_static_method_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public static function getCount(): int { return 0; }
+}
+class Test {
+    public function run(): void {
+        Foo::getCount()->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_function_return_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function getNumber(): int { return 42; }
+function test(): void {
+    getNumber()->nonexistent();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_docblock_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    /**
+     * @return string
+     */
+    public function getName() { return ''; }
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $foo->getName()->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_static_return_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function getName(): string { return ''; }
+}
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $foo->getName()->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+/// Fluent chains that return `self`/`$this` never resolve to a scalar,
+/// so no scalar-access diagnostic should ever fire on them.
+#[test]
+fn no_scalar_diagnostic_for_class_returning_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Builder {
+    public function where(): self { return $this; }
+    public function get(): self { return $this; }
+}
+function test(): void {
+    $b = new Builder();
+    $b->where()->get();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no scalar access diagnostic for class-returning chain, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_function_returning_class_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function getName(): string { return ''; }
+}
+function createFoo(): Foo { return new Foo(); }
+function test(): void {
+    createFoo()->getName()->nonexistent();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_array_element_method_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Item {
+    public function getLabel(): string { return ''; }
+}
+
+function test(): void {
+    /** @var array<int, Item> $items */
+    $items = [];
+    $items[0]->getLabel()->nonexistent();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_deeper_method_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function getValue(): int { return 42; }
+}
+class Outer {
+    public function getInner(): Inner { return new Inner(); }
+}
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->getInner()->getValue()->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_property_access_on_deeper_method_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public string $label = '';
+}
+class Outer {
+    public function getInner(): Inner { return new Inner(); }
+}
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->getInner()->label->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_access_on_virtual_scalar_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @property int $age
+ * @property string $name
+ */
+class User {
+    public function __get(string $name): mixed { return null; }
+}
+
+class Test {
+    public function run(): void {
+        $u = new User();
+        $u->age->nonexistent();
+        $u->name->nonexistent2();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic for int virtual property, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_scalar_property_access_itself() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public int $count = 0;
+}
+function test(): void {
+    $f = new Foo();
+    echo $f->count;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "scalar property access itself should not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scalar member access on bare variables and typed parameters
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_member_access_on_bare_int_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function getCount(): int { return 0; }
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $number = $foo->getCount();
+        $number->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic for bare int variable, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_property_access_on_bare_string_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function getName(): string { return ''; }
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $name = $foo->getName();
+        $name->nonexistent;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic for bare string variable, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_method_access_on_bare_bool_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function isValid(): bool { return true; }
+}
+
+class Test {
+    public function run(): void {
+        $foo = new Foo();
+        $valid = $foo->isValid();
+        $valid->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("bool") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic for bare bool variable, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_access_on_scalar_function_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function getNumber(): int { return 42; }
+class Test {
+    public function run(): void {
+        $n = getNumber();
+        $n->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic for function return, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_bare_scalar_variable_without_member_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(): void {
+    $n = 42;
+    echo $n;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "bare scalar variable without member access should not produce diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_access_on_scalar_typed_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(int $value): void {
+    $value->nonexistent();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+        "expected scalar access diagnostic for typed parameter, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Unknown class parameter / return types
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_member_access_on_unknown_class_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(NonExistentClass $obj): void {
+    $obj->doSomething();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| {
+            d.message.contains("doSomething") && d.message.contains("NonExistentClass")
+        }),
+        "expected diagnostic for unknown class parameter, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_member_access_on_unknown_return_type_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/** @return NonExistentClass */
+function createObj() { return new stdClass; }
+function test(): void {
+    $obj = createObj();
+    $obj->doSomething();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.is_empty(),
+        "expected diagnostic for unknown return type, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_unknown_class_diagnostic_for_mixed_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(mixed $obj): void {
+    $obj->doSomething();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for mixed parameter, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_unknown_class_diagnostic_for_class_string_parameter() {
+    let backend = create_test_backend_with_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @param class-string<BackedEnum> $enum
+ */
+function test(string $enum): void {
+    $enum::from('test');
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for class-string parameter, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Array shape / type-alias object values
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_type_alias_array_shape_object_value() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Service {
+    public function getName(): string { return ''; }
+}
+
+class Factory {
+    /**
+     * @return array{service: Service, name: string}
+     */
+    public function create(): array { return []; }
+}
+
+class Test {
+    public function run(): void {
+        $f = new Factory();
+        $result = $f->create();
+        $result['service']->getName();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for array shape object value, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_multiple_type_alias_object_values() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class UserService {
+    public function findAll(): array { return []; }
+}
+
+class PostService {
+    public function findRecent(): array { return []; }
+}
+
+class Container {
+    /**
+     * @return array{users: UserService, posts: PostService}
+     */
+    public function services(): array { return []; }
+}
+
+class Test {
+    public function run(): void {
+        $c = new Container();
+        $services = $c->services();
+        $services['users']->findAll();
+        $services['posts']->findRecent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for multiple array shape object values, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_inline_array_element_function_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Item {
+    public function process(): void {}
+}
+
+function getItems(): array {
+    /** @var Item[] */
+    return [];
+}
+
+function test(): void {
+    getItems()[0]->process();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for inline array element function call, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_when_member_exists_on_pre_resolved_base_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Builder {
+    public function where(): self { return $this; }
+    public function get(): array { return []; }
+}
+function test(): void {
+    $b = new Builder();
+    $b->where();
+    $b->get();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for existing methods, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// @see tag references
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_see_tag_method_reference() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): void {}
+
+    /**
+     * @see Foo::bar()
+     */
+    public function test(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for @see tag method reference, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_see_tag_constant_reference() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    const BAR = 1;
+
+    /**
+     * @see Foo::BAR
+     */
+    public function test(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for @see tag constant reference, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_see_tag_hash_fragment_reference() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): void {}
+
+    /**
+     * @see Foo#bar
+     */
+    public function test(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for @see tag hash-fragment reference, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_inline_see_tag_method_reference() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): void {}
+
+    /**
+     * This delegates to {@see Foo::bar()}.
+     */
+    public function test(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for inline @see reference, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Namespaced stub class member / conditional $this return
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_namespaced_stub_class_member() {
+    let mut stubs: std::collections::HashMap<&'static str, &'static str> =
+        std::collections::HashMap::new();
+    stubs.insert(
+        "Ns\\StubClass",
+        r#"<?php
+namespace Ns;
+class StubClass {
+    public function stubMethod(): void {}
+}
+"#,
+    );
+    let backend = phpantom_lsp::Backend::new_test_with_stubs(stubs);
+    let uri = "file:///test.php";
+    let text = r#"<?php
+use Ns\StubClass;
+
+function test(StubClass $obj): void {
+    $obj->stubMethod();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for namespaced stub class member, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_on_conditional_this_return_in_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Builder {
+    /**
+     * @return $this
+     */
+    public function where(): static { return $this; }
+
+    public function get(): array { return []; }
+}
+class Test {
+    public function run(): void {
+        $b = new Builder();
+        $b->where()->get();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no false positive on conditional $this return chain, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-method / cross-function subject-cache scope isolation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The subject resolution cache must be scoped to the enclosing method,
+/// not just the enclosing class.  Two methods in the same class that
+/// both use `$order->` must not share a cache entry when `$order` has a
+/// completely different type in each method.
+#[test]
+fn no_false_positive_when_same_var_has_different_type_in_different_methods() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class OrderA {
+    public function propOnA(): void {}
+}
+class OrderB {
+    public function propOnB(): void {}
+}
+class Service {
+    public function handleA(OrderA $order): void {
+        $order->propOnA();
+    }
+    public function handleB(OrderB $order): void {
+        $order->propOnB();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no false positives when same-named variable has different types \
+         in different methods, got: {:?}",
+        diags
+    );
+}
+
+/// Same bug as the class-method variant, but with top-level functions
+/// instead of methods.
+#[test]
+fn no_false_positive_same_var_different_type_top_level_functions() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Alpha {
+    public function alphaMethod(): void {}
+}
+class Beta {
+    public function betaMethod(): void {}
+}
+function first(Alpha $x): void {
+    $x->alphaMethod();
+}
+function second(Beta $x): void {
+    $x->betaMethod();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no false positives for same-named variable in different \
+         top-level functions, got: {:?}",
+        diags
+    );
+}
+
+/// The flip side: a member that IS valid in one method must still be
+/// flagged as unknown in another method where the variable has a
+/// different type that lacks the member.
+#[test]
+fn flags_unknown_member_despite_valid_in_other_method() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class HasFoo {
+    public function foo(): void {}
+}
+class NoFoo {
+    public function bar(): void {}
+}
+class Service {
+    public function a(HasFoo $x): void {
+        $x->foo();
+    }
+    public function b(NoFoo $x): void {
+        $x->foo();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("foo") && d.message.contains("NoFoo")),
+        "expected diagnostic for foo() on NoFoo in method b(), got: {:?}",
+        diags
+    );
+    let foo_diags: Vec<_> = diags.iter().filter(|d| d.message.contains("foo")).collect();
+    assert_eq!(
+        foo_diags.len(),
+        1,
+        "expected exactly one 'foo' diagnostic (in method b), got: {:?}",
+        foo_diags
+    );
+}
+
+/// When a method parameter is reassigned mid-body, subsequent accesses
+/// must resolve against the new type, not the original parameter type.
+#[test]
+fn no_false_positive_when_parameter_is_reassigned() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class UploadedFile {
+    public string $originalName;
+}
+class FileModel {
+    public int $id;
+    public string $name;
+}
+class Result {
+    public function getFile(): FileModel { return new FileModel(); }
+}
+class FileUploadService {
+    public function uploadFile(UploadedFile $file): void {
+        $file->originalName;
+        $result = new Result();
+        $file = $result->getFile();
+        $file->id;
+        $file->name;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no false positives when parameter is reassigned mid-body, got: {:?}",
+        diags
+    );
+}
+
+/// The flip side: after reassignment, members from the NEW type that
+/// don't exist should still be flagged.
+#[test]
+fn flags_unknown_member_after_reassignment() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TypeA {
+    public function onlyOnA(): void {}
+}
+class TypeB {
+    public function onlyOnB(): void {}
+}
+class Service {
+    public function process(TypeA $var): void {
+        $var->onlyOnA();
+        $var = new TypeB();
+        $var->onlyOnA();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("onlyOnA") && d.message.contains("TypeB")),
+        "expected diagnostic for onlyOnA() on TypeB after reassignment, got: {:?}",
+        diags
+    );
+    let relevant: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("onlyOnA"))
+        .collect();
+    assert_eq!(
+        relevant.len(),
+        1,
+        "expected exactly one 'onlyOnA' diagnostic (after reassignment), got: {:?}",
+        relevant
+    );
+}
+
+/// `$found = null; foreach (...) { $found = $pen; } $found->write()` must
+/// not produce a scalar_member_access diagnostic when the foreach value
+/// variable has a known type.
+#[test]
+fn no_false_positive_null_init_foreach_var_to_var_reassign() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Pen {
+    public function write(): void {}
+    public function color(): string { return ''; }
+}
+class Svc {
+    /** @param list<Pen> $pens */
+    public function find(array $pens): void {
+        $found = null;
+        foreach ($pens as $pen) {
+            if ($pen->color() === 'blue') {
+                $found = $pen;
+            }
+        }
+        if ($found) {
+            $found->write();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $found->write() after foreach reassign, got: {:?}",
+        scalar_diags
+    );
+    let unknown_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("write"))
+        .collect();
+    assert!(
+        unknown_diags.is_empty(),
+        "should not flag unknown member 'write' on $found after foreach reassign, got: {:?}",
+        unknown_diags
+    );
+}
+
+/// `$valid = null; foreach (...) { if (...) { $valid = $item; break; } }`
+/// `if (!$valid) { return ...; } $valid->details` must not produce a
+/// scalar_member_access diagnostic.  The guard clause strips null from
+/// the scope, leaving only the class type.  Exercises the forward-walker
+/// scope cache.
+#[test]
+fn no_false_positive_null_init_foreach_guard_clause_early_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Mandate {
+    public object $details;
+    public function isInvalid(): bool { return false; }
+}
+class Client {
+    /** @return mixed */
+    public function getMandates(): mixed { return []; }
+}
+class Svc {
+    public function check(): ?object {
+        $client = new Client();
+        $mandates = $client->getMandates();
+        $validMandate = null;
+        /** @var Mandate $mandate */
+        foreach ($mandates as $mandate) {
+            if (!$mandate->isInvalid()) {
+                $validMandate = $mandate;
+                break;
+            }
+        }
+
+        if (!$validMandate) {
+            return null;
+        }
+
+        $details = $validMandate->details;
+        return $details;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $validMandate->details after guard clause, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// `fn($x) => $x instanceof Foo && $x->method()` — an untyped arrow
+/// function parameter narrowed by an earlier `&&` conjunct must be
+/// visible to the member access in a later conjunct, when the
+/// forward-walker scope cache is active.
+#[test]
+fn arrow_fn_param_narrowed_by_and_instanceof_scope_cache() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Collection {
+    public function contains($x): bool { return true; }
+}
+class Svc {
+    public function run(): void {
+        $faq1 = 1;
+        $cb = fn($faqs) => $faqs instanceof Collection && $faqs->contains($faq1);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "arrow-fn param narrowed by `&&` instanceof should resolve, got: {:?}",
+        diags
+    );
+}
+
+/// Same scenario, but through the plain (non-scope-cache) diagnostic
+/// path, to prove the narrowing works uniformly across both.
+#[test]
+fn arrow_fn_param_narrowed_by_and_instanceof_fresh_path() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Collection {
+    public function contains($x): bool { return true; }
+}
+class Svc {
+    public function run(): void {
+        $faq1 = 1;
+        $cb = fn($faqs) => $faqs instanceof Collection && $faqs->contains($faq1);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "arrow-fn param narrowed by `&&` instanceof should resolve (fresh path), got: {:?}",
+        diags
+    );
+}
+
+/// Direct instantiation inside a foreach body (no var-to-var).
+#[test]
+fn no_false_positive_null_init_foreach_direct_reassign() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Transaction {
+    public function commit(): void {}
+}
+class Svc {
+    /** @param list<string> $items */
+    public function process(array $items): void {
+        $tx = null;
+        foreach ($items as $item) {
+            $tx = new Transaction();
+        }
+        if ($tx) {
+            $tx->commit();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let bad_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("commit") || d.message.contains("null"))
+        .collect();
+    assert!(
+        bad_diags.is_empty(),
+        "should not flag commit() or scalar null after foreach reassign, got: {:?}",
+        bad_diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Negative narrowing after early return (guard clauses)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// After `if ($value instanceof Stringable) { return; }`, the variable
+/// should be narrowed to exclude Stringable.  Inside a subsequent
+/// `if ($value instanceof BackedEnum)` block, `$value` must resolve to
+/// BackedEnum (not Stringable).
+#[test]
+fn no_false_positive_after_guard_clause_excludes_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Stringable {
+    public function __toString(): string;
+}
+interface BackedEnum {
+    public readonly int|string $value;
+}
+
+class Svc {
+    public static function toString(mixed $value): string
+    {
+        if ($value instanceof Stringable) {
+            return $value->__toString();
+        }
+        if ($value instanceof BackedEnum) {
+            $value = $value->value;
+        }
+        return '';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let bad: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("value") && d.message.contains("Stringable"))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "should not flag 'value' on Stringable after guard clause excludes it, got: {:?}",
+        bad
+    );
+}
+
+/// Multiple sequential guard clauses should each exclude their type
+/// from subsequent code.
+#[test]
+fn no_false_positive_sequential_instanceof_guards() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Alpha {
+    public function alphaMethod(): void;
+}
+interface Beta {
+    public function betaMethod(): void;
+}
+class Gamma {
+    public function gammaMethod(): void {}
+}
+
+class Svc {
+    public function test(Alpha|Beta|Gamma $x): void
+    {
+        if ($x instanceof Alpha) {
+            return;
+        }
+        if ($x instanceof Beta) {
+            return;
+        }
+        $x->gammaMethod();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let bad: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.message.contains("gammaMethod")
+                && (d.message.contains("Alpha") || d.message.contains("Beta"))
+        })
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "should not flag gammaMethod after two guard clauses exclude Alpha and Beta, got: {:?}",
+        bad
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// self:: / static:: enum case value/name access
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_self_enum_case_value() {
+    let backend = create_test_backend_with_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+enum SizeUnit: string {
+    case pcs = 'pcs';
+    case pair = 'pair';
+    case g = 'g';
+
+    public function translation(): string {
+        return self::pcs->value;
+    }
+
+    public static function units(): array {
+        return [
+            self::pcs->value,
+            self::pair->value,
+            self::g->value,
+        ];
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for self::case->value, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_static_enum_case_value() {
+    let backend = create_test_backend_with_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+enum Currency: string {
+    case USD = 'usd';
+    case EUR = 'eur';
+
+    public static function defaults(): array {
+        return [static::USD->value];
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for static::case->value, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_self_enum_case_name() {
+    let backend = create_test_backend_with_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+enum Color: int {
+    case Red = 1;
+    case Blue = 2;
+
+    public function label(): string {
+        return self::Red->name;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for self::case->name, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ArrayAccess-implementing collections and parent static return chains
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `$obj->prop['key']` where `prop` is a collection class with
+/// `@extends DataCollection<string, Day>` should resolve the bracket
+/// access to the element type.
+#[test]
+fn no_diagnostic_for_property_chain_array_access_on_collection() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Day {
+    public string $from;
+    public string $to;
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @implements \ArrayAccess<TKey, TValue>
+ */
+class DataCollection implements \ArrayAccess {
+    /** @return TValue */
+    public function offsetGet(mixed $offset): mixed {}
+    public function offsetExists(mixed $offset): bool {}
+    public function offsetSet(mixed $offset, mixed $value): void {}
+    public function offsetUnset(mixed $offset): void {}
+}
+
+/**
+ * @extends DataCollection<string, Day>
+ */
+class OpeningHours extends DataCollection {}
+
+class ServicePoint {
+    public ?OpeningHours $opening_hours;
+}
+
+function test(ServicePoint $sp): void {
+    $day = $sp->opening_hours['monday'] ?? null;
+    if ($day !== null) {
+        $day->from;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for property chain array access on collection, got: {:?}",
+        diags
+    );
+}
+
+/// `parent::method()` should resolve the return type from the parent
+/// class so that member access on the result works.
+#[test]
+fn no_diagnostic_for_parent_static_call_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Response {
+    public function status(): int { return 200; }
+    public function body(): string { return ''; }
+}
+
+class BaseConnector {
+    protected function call(string $endpoint): Response
+    {
+        return new Response();
+    }
+}
+
+class LoggedConnection extends BaseConnector {
+    protected function call(string $endpoint): Response
+    {
+        $response = parent::call($endpoint);
+        $response->status();
+        $response->body();
+        return $response;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for parent::call() return type chain, got: {:?}",
+        diags
+    );
+}
+
+/// Bracket access on a class implementing `ArrayAccess` without concrete
+/// generic annotations should NOT resolve to the container class
+/// itself, including when `ArrayAccess` is implemented on a parent
+/// class rather than the concrete subclass.
+#[test]
+fn flags_member_on_array_access_subclass_without_generics() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Tests;
+
+use ArrayAccess;
+
+class Container2 implements ArrayAccess
+{
+    public function offsetExists($offset): bool
+    {
+        return false;
+    }
+
+    public function offsetGet($offset): mixed
+    {
+        return '';
+    }
+
+    public function offsetSet($offset, $value): void
+    {
+    }
+
+    public function offsetUnset($offset): void
+    {
+    }
+}
+
+class Application2 extends Container2
+{
+}
+
+class TestCase
+{
+    public function defineEnvironment(): void
+    {
+        $test4 = new Application2();
+        $test4['config']->set('logging.channels.stack.channels', ['stderr']);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("Application2")),
+        "should not report 'set' as missing on Application2 — bracket access returns mixed, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Assignment inside `if`/`while` conditions
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Variables assigned inside `if` conditions should resolve in the body.
+#[test]
+fn assignment_in_if_condition_resolves_in_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class AdminUser {
+    public function assignRole(string $role): void {}
+    /** @return ?static */
+    public static function first(): ?static { return new static(); }
+}
+function test(string $role): void {
+    if ($admin = AdminUser::first()) {
+        $admin->assignRole($role);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let bad: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("assignRole") || d.message.contains("admin"))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "should resolve $admin from if-condition assignment, got: {:?}",
+        bad
+    );
+}
+
+/// Assignment inside comparison `if (($x = expr()) !== null)` should
+/// resolve.
+#[test]
+fn assignment_in_if_condition_with_comparison() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Conn {
+    public function query(string $sql): void {}
+}
+function getConn(): ?Conn { return new Conn(); }
+function test(): void {
+    if (($conn = getConn()) !== null) {
+        $conn->query('SELECT 1');
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let bad: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("query") || d.message.contains("conn"))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "should resolve $conn from if-condition assignment with !== null, got: {:?}",
+        bad
+    );
+}
+
+/// Assignment in `while` condition should resolve in the loop body.
+#[test]
+fn assignment_in_while_condition_resolves_in_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Row {
+    public function toArray(): array { return []; }
+}
+function nextRow(): ?Row { return new Row(); }
+function test(): void {
+    while ($row = nextRow()) {
+        $row->toArray();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let bad: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("toArray") || d.message.contains("row"))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "should resolve $row from while-condition assignment, got: {:?}",
+        bad
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chain error propagation (broken links suppress downstream links)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `$m->callHome()->callMom()->callDad()` — only `callHome` should be
+/// flagged; `callMom` and `callDad` are downstream of the break.
+#[test]
+fn chain_propagation_flags_only_first_broken_method() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Machine {
+    public function knownMethod(): self { return $this; }
+}
+
+function test(): void {
+    $m = new Machine();
+    $m->callHome()->callMom()->callDad();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (first broken link only), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("callHome"),
+        "expected diagnostic for callHome, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$m->callHome(); $m->callMom();` — separate statements, both should
+/// be flagged independently.
+#[test]
+fn chain_propagation_separate_statements_flag_both() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Machine {
+    public function knownMethod(): self { return $this; }
+}
+
+function test(): void {
+    $m = new Machine();
+    $m->callHome();
+    $m->callMom();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        2,
+        "expected 2 diagnostics (separate statements), got: {:?}",
+        diags
+    );
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("callHome")),
+        "expected callHome diagnostic"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("callMom")),
+        "expected callMom diagnostic"
+    );
+}
+
+/// `$user->getAge()->value->deep` — only `->value` should be flagged
+/// (scalar access on int); `->deep` is downstream of the scalar break.
+#[test]
+fn chain_propagation_scalar_suppresses_downstream() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class User {
+    public function getAge(): int { return 30; }
+}
+
+function test(): void {
+    $user = new User();
+    $user->getAge()->value->deep;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (scalar access only), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("int"),
+        "expected scalar type 'int' in message, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$o->getInner()->fakeMethod()->next()` — only `fakeMethod` should be
+/// flagged; `next()` is downstream.
+#[test]
+fn chain_propagation_second_link_broken_suppresses_rest() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function known(): void {}
+}
+class Outer {
+    public function getInner(): Inner { return new Inner(); }
+}
+
+function test(): void {
+    $o = new Outer();
+    $o->getInner()->fakeMethod()->next()->deep();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (first broken link), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("fakeMethod"),
+        "expected diagnostic for fakeMethod, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$o->getMiddle()->getInner()->getValue()->nonexistent()->another()` —
+/// only `nonexistent()` should be flagged (scalar access on string).
+#[test]
+fn chain_propagation_scalar_method_return_suppresses_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function getValue(): string { return ''; }
+}
+
+class Middle {
+    public function getInner(): Inner { return new Inner(); }
+}
+
+class Outer {
+    public function getMiddle(): Middle { return new Middle(); }
+}
+
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->getMiddle()->getInner()->getValue()->nonexistent()->another();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (scalar access), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("nonexistent"),
+        "expected diagnostic for nonexistent, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// A broken property `value` must not suppress a separate property
+/// `value_extra` on the same subject (no accidental prefix matching).
+#[test]
+fn chain_propagation_property_does_not_match_longer_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public int $value = 0;
+    public string $value_extra = '';
+}
+
+function test(): void {
+    $f = new Foo();
+    $f->value->nope;
+    $f->value_extra->nope;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        2,
+        "expected 2 diagnostics (value and value_extra are independent), got: {:?}",
+        diags
+    );
+}
+
+/// `Foo::create()->unknown()->next()` — only `unknown()` should be
+/// flagged; `next()` is downstream.
+#[test]
+fn chain_propagation_static_method_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public static function create(): self { return new self(); }
+    public function known(): self { return $this; }
+}
+
+function test(): void {
+    Foo::create()->unknown()->next();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (first broken link), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("unknown"),
+        "expected diagnostic for unknown, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$m?->callHome()?->callMom()` — only `callHome` should be flagged.
+#[test]
+fn chain_propagation_null_safe_operator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Machine {
+    public function knownMethod(): self { return $this; }
+}
+
+function test(?Machine $m): void {
+    $m?->callHome()?->callMom();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (null-safe chain), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("callHome"),
+        "expected diagnostic for callHome, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$this->unknownMethod()->next()` inside a class — only
+/// `unknownMethod` should be flagged.
+#[test]
+fn chain_propagation_this_method_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function test(): void {
+        $this->unknownMethod()->next()->deep();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic ($this chain), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("unknownMethod"),
+        "expected diagnostic for unknownMethod, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$o->getInner()->label->nonexistent->deep` — only `->nonexistent`
+/// should be flagged (scalar access on string from label).
+#[test]
+fn chain_propagation_property_chain_suppresses_downstream() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public string $label = '';
+}
+class Outer {
+    public function getInner(): Inner { return new Inner(); }
+}
+class Test {
+    public function run(): void {
+        $o = new Outer();
+        $o->getInner()->label->nonexistent->deep;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (scalar property access), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("nonexistent") || diags[0].message.contains("string"),
+        "expected diagnostic about scalar access on string, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// `$o->getInner()::staticMissing()->next()` — only `staticMissing`
+/// should be flagged.
+#[test]
+fn chain_propagation_mixed_arrow_and_static_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Inner {
+    public function known(): void {}
+}
+class Outer {
+    public function getInner(): Inner { return new Inner(); }
+}
+
+function test(): void {
+    $o = new Outer();
+    $o->getInner()::staticMissing()->next();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 diagnostic (first broken static link), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("staticMissing"),
+        "expected diagnostic for staticMissing, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// Errors inside closure/arrow-function arguments are independent
+/// expressions — they must NOT be suppressed by a broken link in the
+/// outer chain.
+#[test]
+fn chain_propagation_does_not_suppress_errors_inside_closure_arguments() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Joe {
+    public function where(callable $cb): self { return $this; }
+}
+
+class ShowThisError {
+    public function valid(): void {}
+}
+
+function test(): void {
+    $joe = new Joe();
+    $showThisError = new ShowThisError();
+    $joe::whereInvalid()->where(fn() => $showThisError->unknown())->hideMe()->hideMe();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("whereInvalid")),
+        "expected diagnostic for whereInvalid (outer chain), got: {:?}",
+        messages
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("unknown")),
+        "expected diagnostic for unknown (inside closure), got: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("hideMe")),
+        "hideMe should be suppressed (downstream of whereInvalid), got: {:?}",
+        messages
+    );
+    assert_eq!(
+        diags.len(),
+        2,
+        "expected exactly 2 diagnostics (whereInvalid + unknown), got: {:?}",
+        messages
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// `&&` short-circuit null narrowing (distinct from instanceof narrowing)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `$lastPaidEnd !== null && $lastPaidEnd->diffInDays(…)` must not
+/// produce a scalar_member_access diagnostic.  The `!== null` check on
+/// the left side of `&&` should narrow away `null` for the right side.
+#[test]
+fn no_false_positive_and_short_circuit_null_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Carbon {
+    public function diffInDays(Carbon $other): int { return 0; }
+    public function startOfDay(): static { return $this; }
+}
+class Period {
+    public Carbon $ending;
+}
+class Svc {
+    /** @param list<Period> $periods */
+    public function gaps(array $periods): void {
+        $lastPaidEnd = null;
+        $periodStart = new Carbon();
+        foreach ($periods as $period) {
+            if ($lastPaidEnd !== null && $lastPaidEnd->diffInDays($periodStart) > 0) {
+                // should not report: Cannot access method 'diffInDays' on type 'null'
+            }
+            $lastPaidEnd = $period->ending->startOfDay();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $lastPaidEnd->diffInDays() after !== null guard in &&, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// Variant: bare truthy check `$var && $var->method()`.
+#[test]
+fn no_false_positive_and_short_circuit_truthy_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Logger {
+    public function log(string $msg): void {}
+}
+class Svc {
+    public function run(): void {
+        $logger = null;
+        if (rand(0,1)) {
+            $logger = new Logger();
+        }
+        $logger && $logger->log('hello');
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $logger->log() after truthy guard in &&, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// Variant: chained `&&` with a null check as the first operand.
+/// `$a !== null && $b !== null && $a->method()` — the null check for
+/// `$a` is two levels up in the `&&` chain.
+#[test]
+fn no_false_positive_chained_and_null_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): int { return 0; }
+}
+class Svc {
+    public function test(): void {
+        $a = null;
+        $b = null;
+        if (rand(0,1)) { $a = new Foo(); }
+        if (rand(0,1)) { $b = new Foo(); }
+        if ($a !== null && $b !== null && $a->bar() > 0) {
+            // both $a and $b are non-null here
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $a->bar() in chained && with null guards, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// Variant: three null-init vars with a compound `&&` guard, member
+/// access on the third var inside the if-body (not inside the
+/// condition).
+#[test]
+fn no_false_positive_if_body_triple_null_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): int { return 0; }
+    public function baz(): static { return $this; }
+}
+class Svc {
+    public function test(): void {
+        $x = null;
+        $y = null;
+        $z = null;
+        if (rand(0,1)) { $x = new Foo(); }
+        if (rand(0,1)) { $y = new Foo(); }
+        if (rand(0,1)) { $z = new Foo(); }
+        if ($x !== null && $y !== null && $z !== null && $x->baz()->bar() > 0) {
+            $z->bar();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $z->bar() inside if-body after triple && null guard, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// Variant: the null check in the if-condition narrows inside the
+/// then-body for a *different* variable in the same `&&` chain.
+#[test]
+fn no_false_positive_if_body_null_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): int { return 0; }
+}
+class Svc {
+    public function test(): void {
+        $a = null;
+        $b = null;
+        if (rand(0,1)) { $a = new Foo(); }
+        if (rand(0,1)) { $b = new Foo(); }
+        if ($a !== null && $b !== null && $a->bar() > 0) {
+            $b->bar();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $b->bar() inside if-body after && null guard, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// Variant: `&&` inside a ternary condition in a `return` statement.
+#[test]
+fn no_false_positive_ternary_wrapped_and_null_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function val(): int { return 0; }
+}
+class Svc {
+    public function test(): int {
+        $c = null;
+        if (rand(0,1)) { $c = new Foo(); }
+        return $c !== null && $c->val() > 5 ? 1 : 0;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $c->val() inside ternary-wrapped &&, got: {:?}",
+        scalar_diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// __call chain continuation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When a class defines `__call` with a typed return, the dispatched
+/// method is valid PHP and must not be flagged.  Known methods after it
+/// resolve through the `__call` return type.
+#[test]
+fn magic_call_chain_not_flagged_and_continues() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class AppleCart {
+    public function getApples(): array { return []; }
+}
+class Builder {
+    public function __call(string $name, array $args): static { return $this; }
+    public function first(): AppleCart { return new AppleCart(); }
+}
+class Svc {
+    public function run(): void {
+        $b = new Builder();
+        $b->doesntExist()->first()->getApples();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "doesntExist() is dispatched through __call (returns static), so nothing should be flagged, got: {:?}",
+        diags
+    );
+}
+
+/// Multiple `__call`-dispatched methods in a chain are all valid and
+/// none should be flagged; known methods between and after them resolve
+/// through the `__call` return type.
+#[test]
+fn magic_call_chain_multiple_dynamic_methods_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class AppleCart {
+    public function getApples(): array { return []; }
+}
+class Builder {
+    public function __call(string $name, array $args): static { return $this; }
+    public function first(): AppleCart { return new AppleCart(); }
+}
+class Svc {
+    public function run(): void {
+        $b = new Builder();
+        $b->doesntExist()->first()->getApples();
+        $b->doesntExist()->alsoDoesntExist()->first()->getApples();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Dynamic methods dispatched through __call must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+/// When `__call` returns a concrete type (not self/static), the
+/// dispatched method is not flagged and the chain resolves to that type
+/// afterwards.
+#[test]
+fn magic_call_concrete_return_continues_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Result {
+    public function getData(): array { return []; }
+}
+class Proxy {
+    public function __call(string $name, array $args): Result { return new Result(); }
+}
+class Svc {
+    public function run(): void {
+        $p = new Proxy();
+        $p->anything()->getData();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "anything() dispatches through __call (returns Result), getData() resolves — nothing to flag, got: {:?}",
+        diags
+    );
+}
+
+/// When `__call` returns `mixed`, the dispatched method is still not
+/// flagged.  The chain type becomes `mixed`, so downstream accesses are
+/// simply unverifiable rather than flagged as unknown members.
+#[test]
+fn magic_call_mixed_return_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Loose {
+    public function __call(string $name, array $args): mixed { return null; }
+}
+class Svc {
+    public function run(): void {
+        $l = new Loose();
+        $l->unknown()->somethingElse();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("unknown")),
+        "unknown() is dispatched through __call and must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Variable reassignment tracking inside try/catch blocks
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When a variable is reassigned inside a `try` block, accesses after
+/// the reassignment (still inside the try) should resolve against the
+/// new type, not the original.
+#[test]
+fn no_false_positive_when_variable_reassigned_inside_try_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class AppCustomer {
+    public function getName(): string { return ''; }
+}
+class MollieCustomer {
+    public function createPayment(string $data): MolliePayment { return new MolliePayment(); }
+}
+class MolliePayment {
+    public function getCheckoutUrl(): string { return ''; }
+}
+class MollieClient {
+    public function getOrCreateCustomer(AppCustomer $c): MollieCustomer { return new MollieCustomer(); }
+}
+class Gateway {
+    public function charge(AppCustomer $customer): void {
+        $client = new MollieClient();
+        try {
+            $customer = $client->getOrCreateCustomer($customer);
+            $molliePayment = $customer->createPayment('data');
+            $url = $molliePayment->getCheckoutUrl();
+        } catch (\Exception $e) {
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for reassigned variable inside try block, got: {:?}",
+        diags
+    );
+}
+
+/// The flip side: after reassignment inside a try block, members from
+/// the OLD type that don't exist on the NEW type should be flagged.
+#[test]
+fn flags_unknown_member_after_reassignment_inside_try_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class OriginalType {
+    public function onlyOnOriginal(): void {}
+}
+class ReplacementType {
+    public function onlyOnReplacement(): void {}
+}
+class Service {
+    public function process(OriginalType $var): void {
+        try {
+            $var = new ReplacementType();
+            $var->onlyOnOriginal();
+        } catch (\Exception $e) {
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("onlyOnOriginal") && d.message.contains("ReplacementType")),
+        "expected diagnostic for onlyOnOriginal() on ReplacementType after reassignment in try, got: {:?}",
+        diags
+    );
+}
+
+/// After the try/catch block, the variable could be either the original
+/// type (if the try threw before the reassignment) or the new type.
+/// Both types' members should be accepted.
+#[test]
+fn try_block_reassignment_is_conditional_after_try() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class TypeA {
+    public function methodA(): void {}
+}
+class TypeB {
+    public function methodB(): void {}
+}
+class Svc {
+    public function run(TypeA $var): void {
+        try {
+            $var = new TypeB();
+        } catch (\Exception $e) {
+        }
+        $var->methodA();
+        $var->methodB();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "after try/catch, both original and reassigned types should be accepted, got: {:?}",
+        diags
+    );
+}
+
+/// Variable reassignment inside a `catch` block should also be tracked.
+#[test]
+fn catch_block_variable_reassignment_tracked() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class ErrorResult {
+    public function getErrorCode(): int { return 0; }
+}
+class SuccessResult {
+    public function getData(): string { return ''; }
+}
+class Handler {
+    public function handle(): void {
+        $result = new SuccessResult();
+        try {
+            $result->getData();
+        } catch (\Exception $e) {
+            $result = new ErrorResult();
+            $result->getErrorCode();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for reassigned variable inside catch block, got: {:?}",
+        diags
+    );
+}
+
+/// When a class extends `Collection<int, T>` via `@extends`, accessing
+/// `$this->items` should yield `array<int, T>` with the generic
+/// substitution applied, so that iterating it and calling a
+/// generics-aware helper both resolve the element type.
+#[test]
+fn no_diagnostic_for_this_items_on_generic_collection_subclass() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/**
+ * @template TKey
+ * @template TValue
+ */
+class Collection {
+    /** @var array<TKey, TValue> */
+    public array $items = [];
+
+    /** @return TValue|null */
+    public function first(): mixed { return null; }
+}
+
+class PurchaseFileProduct {
+    public int $order_amount = 0;
+    public string $name = '';
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @param array<TKey, TValue> $array
+ * @param callable(TValue, TKey): bool $callback
+ * @return bool
+ */
+function array_any(array $array, callable $callback): bool { return false; }
+
+/**
+ * @extends Collection<int, PurchaseFileProduct>
+ */
+final class PurchaseFileProductCollection extends Collection {
+    public function hasIssues(): bool {
+        return array_any($this->items, fn($item) => $item->order_amount > 0);
+    }
+
+    public function hasName(): bool {
+        return array_any($this->items, fn($item) => $item->name !== '');
+    }
+
+    public function foreachWorks(): void {
+        foreach ($this->items as $item) {
+            $item->order_amount;
+            $item->name;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for $this->items on generic Collection subclass, got: {:?}",
+        diags
+    );
+}
+
+/// When a variable is assigned before a foreach, then reassigned inside
+/// a try block nested inside the foreach body, the type should still
+/// resolve for accesses after the reassignment (still inside the try).
+#[test]
+fn no_false_positive_when_variable_reassigned_inside_try_inside_foreach() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Decimal {
+    public function sub(string $v): self { return new self(); }
+    public function isZero(): bool { return true; }
+    public function isNegative(): bool { return true; }
+    public function isPositive(): bool { return true; }
+    public function toFixed(int $places): string { return ''; }
+}
+
+/**
+ * @property Decimal $amount
+ * @property string $state
+ */
+class Payment {
+}
+
+/**
+ * @property Decimal $amount
+ */
+class Order {
+}
+
+class CaptureException extends \Exception {}
+class InvalidStateException extends \Exception {}
+class CaptureService {
+    public function captureReservedPayment(Payment $p, Decimal $amount): void {}
+}
+
+class OrderService {
+    /** @param list<Payment> $payments */
+    public function capture(Order $order, array $payments): void {
+        $remaining = $order->amount;
+        foreach ($payments as $payment) {
+            if ($payment->state === 'paid') {
+                $remaining = $remaining->sub('1');
+            }
+        }
+
+        $svc = new CaptureService();
+        foreach ($payments as $payment) {
+            if ($payment->state !== 'reserved') {
+                continue;
+            }
+
+            $toCapture = $remaining->isPositive() ? $payment->amount : $remaining;
+            if ($toCapture->isZero() || $toCapture->isNegative()) {
+                break;
+            }
+
+            try {
+                $svc->captureReservedPayment($payment, $toCapture);
+                $remaining = $remaining->sub('1');
+            } catch (CaptureException|InvalidStateException $e) {
+            }
+        }
+
+        if ($remaining->isPositive() && !$remaining->isZero()) {
+            throw new \RuntimeException('remaining: ' . $remaining->toFixed(2));
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for variable reassigned inside try-inside-foreach, got: {:?}",
+        diags
+    );
+}
+
+/// Regression test for self-referential variable reassignment: when a
+/// variable is reassigned inside a *nested* foreach via
+/// `$result = $result->add(...)`, the forward walker must resolve the
+/// outer foreach access correctly without a false "type could not be
+/// resolved" diagnostic.
+#[test]
+fn no_false_positive_when_variable_reassigned_inside_nested_foreach() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Decimal {
+    public function add(string $v): self { return new self(); }
+    public function mul(string $v): self { return new self(); }
+}
+
+class Item {
+    public Decimal $cost;
+    public function isBundle(): bool { return false; }
+    /** @return list<Item> */
+    public function getChildren(): array { return []; }
+}
+
+class OrderService {
+    /** @param list<Item> $items */
+    public function calculateCost(array $items): Decimal {
+        $zero = new Decimal();
+        $result = $zero;
+        foreach ($items as $item) {
+            if ($item->isBundle()) {
+                $children = $item->getChildren();
+                foreach ($children as $child) {
+                    $result = $result->add($child->cost->mul('1'));
+                }
+
+                continue;
+            }
+
+            $result = $result->add($item->cost->mul('1'));
+        }
+
+        return $result->mul('1');
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for variable reassigned inside nested foreach loops, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// `object` return/parameter type and `is_object()` guard clauses
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A call whose return type is `object` is the "any object" escape
+/// hatch: property/method access on the result is always valid at
+/// runtime, so no unresolved-member diagnostic should fire.
+#[test]
+fn no_diagnostic_for_object_return_type_member_access() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Repo {
+    public function all(): object { return new \stdClass(); }
+}
+function test(Repo $r): void {
+    $x = $r->all()->projects ?? [];
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for member access on object return type, got: {:?}",
+        diags
+    );
+}
+
+/// Adding nullability (`?object`) must not lose the `object` type and
+/// leave the subject unresolvable.
+#[test]
+fn no_diagnostic_for_nullable_object_return_type_member_access() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Repo {
+    public function all(): ?object { return new \stdClass(); }
+}
+function test(Repo $r): void {
+    $x = $r->all()->projects ?? [];
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for member access on nullable object return type, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_after_is_object_guard() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(mixed $data): void {
+    if (is_object($data)) {
+        echo $data->error_link;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after is_object() guard, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_after_is_object_guard_on_real_union() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Thing {
+    public function bar(): void {}
+}
+function test(string|Thing $file): void {
+    if (is_object($file)) {
+        $file->bar();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after is_object() guard on a real union, got: {:?}",
+        diags
+    );
+}
+
+/// When upstream type inference produced a plain `string` type for a
+/// variable that can, at runtime, also be an object, an `is_object()`
+/// guard must still stop `scalar_member_access` on the guarded access —
+/// trust the runtime check over the incomplete static type.
+#[test]
+fn no_scalar_member_access_after_is_object_guard_on_plain_string() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(string $file): void {
+    if (is_object($file)) {
+        $file->getPathname();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $file->getPathname() inside is_object() guard, got: {:?}",
+        scalar_diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_empty_on_missing_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Item {
+    public string $name = '';
+}
+
+function test(Item $item): void {
+    if (empty($item->maybeDynamic)) {
+        echo 'ok';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "empty() should suppress unknown-property diagnostics, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_scalar_member_access_for_isset_on_union_with_stdclass() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Item {
+    public string $name = '';
+}
+
+function test(Item|\stdClass $item): void {
+    if (isset($item->maybeDynamic)) {
+        echo 'ok';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "isset() on a union with stdClass should not flag the other union members, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_after_is_object_guard_with_negated_early_return() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(mixed $data): void {
+    if (!is_object($data)) {
+        return;
+    }
+    echo $data->error_link;
+    echo $data->something_else;
+    $data->doStuff();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after negated is_object() early return, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_after_is_object_in_compound_and_condition() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(mixed $data): void {
+    if (is_object($data) && property_exists($data, 'error_link') && is_string($data->error_link)) {
+        echo stripslashes($data->error_link);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after is_object() in compound && condition, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_object_typed_parameter() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(object $data): void {
+    echo $data->name;
+    $data->doStuff();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for object-typed parameter, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// class-string<T> static return type resolution / in_array guards
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When a parameter is typed `class-string<BackedEnum>` and we call
+/// `$class::cases()`, the `static[]` return type should resolve to
+/// `BackedEnum[]`, making foreach items typed as `BackedEnum` with
+/// `->name` and `->value` available.
+#[test]
+fn no_diagnostic_for_class_string_static_return_in_foreach() {
+    let backend = create_test_backend_with_stubs();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class OptionList {
+    /**
+     * @param class-string<BackedEnum> $class
+     */
+    public static function enum(BackedEnum $value, string $class, array $exclude = [], string $method = ''): void {
+        foreach ($class::cases() as $item) {
+            if (in_array($item, $exclude, true)) {
+                continue;
+            }
+
+            $name = $method ? $item->{$method}() : $item->name;
+
+            $val = $item->value;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for class-string<BackedEnum> foreach item members, got: {:?}",
+        diags
+    );
+}
+
+/// `$class::from('foo')` returns `static` which should resolve to
+/// `BackedEnum` when `$class` is `class-string<BackedEnum>`.
+#[test]
+fn no_diagnostic_for_class_string_static_return_chained() {
+    let backend = create_test_backend_with_stubs();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Svc {
+    /**
+     * @param class-string<BackedEnum> $class
+     */
+    public function resolve(string $class): void {
+        $result = $class::from('foo');
+        $name = $result->name;
+        $val  = $result->value;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for class-string<BackedEnum> static return chain, got: {:?}",
+        diags
+    );
+}
+
+/// When `in_array($item, $exclude, true)` is used as a guard clause
+/// (`if (...) { continue; }`), the narrowing must NOT exclude the
+/// variable's type when the haystack's element type matches the
+/// variable's type — the check filters by value, not by type.
+#[test]
+fn in_array_guard_does_not_wipe_type_when_element_matches() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public string $name;
+}
+
+class Svc {
+    /**
+     * @param array<int, Foo> $exclude
+     */
+    public function run(Foo $item, array $exclude): void {
+        if (in_array($item, $exclude, true)) {
+            return;
+        }
+        $name = $item->name;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "in_array guard should not wipe variable type when element type matches, got: {:?}",
+        diags
+    );
+}
+
+/// When the variable is a union type and the haystack element type is
+/// one of the union members, the guard clause SHOULD narrow: removing
+/// one union member still leaves the other narrowed correctly.
+#[test]
+fn in_array_guard_still_narrows_union_type() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public string $fooName;
+}
+class Bar {
+    public string $barName;
+}
+
+class Svc {
+    /**
+     * @param Foo|Bar $item
+     * @param array<int, Foo> $fooList
+     */
+    public function run(object $item, array $fooList): void {
+        if (in_array($item, $fooList, true)) {
+            return;
+        }
+        $name = $item->barName;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "in_array guard should still narrow union types, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Unresolvable instanceof target suppression
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When the instanceof target class cannot be resolved (e.g. it lives
+/// in a phar), the ternary then-branch should not produce false-positive
+/// diagnostics for members that only exist on the unresolvable subclass.
+#[test]
+fn no_diagnostic_when_instanceof_target_unresolvable_ternary() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Type {
+    public function describe(): string;
+}
+
+class Test {
+    /** @param Type $argType */
+    public function run(Type $argType): void {
+        $types = $argType instanceof UnionType ? $argType->getTypes() : [$argType];
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics when instanceof target is unresolvable (ternary), got: {:?}",
+        diags
+    );
+}
+
+/// Same scenario but with an if-body instead of a ternary.
+#[test]
+fn no_diagnostic_when_instanceof_target_unresolvable_if_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Type {
+    public function describe(): string;
+}
+
+class Test {
+    public function run(Type $argType): void {
+        if ($argType instanceof UnionType) {
+            $argType->getTypes();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics when instanceof target is unresolvable (if-body), got: {:?}",
+        diags
+    );
+}
+
+/// Same scenario but with `assert($var instanceof ...)`.
+#[test]
+fn no_diagnostic_when_instanceof_target_unresolvable_assert() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Type {
+    public function describe(): string;
+}
+
+class Test {
+    public function run(Type $argType): void {
+        assert($argType instanceof UnionType);
+        $argType->getTypes();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics when instanceof target is unresolvable (assert), got: {:?}",
+        diags
+    );
+}
+
+/// Same scenario but with inline `&&` narrowing.
+#[test]
+fn no_diagnostic_when_instanceof_target_unresolvable_and_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Type {
+    public function describe(): string;
+}
+
+function test(Type $t): void {
+    $t instanceof UnionType && $t->getTypes();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics when instanceof target is unresolvable (&& chain), got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Regression: variable from a nullsafe method chain must still resolve
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A variable assigned from a method call chain must resolve correctly
+/// for diagnostics.  This catches regressions where the diagnostic
+/// outcome path diverges from completion/hover and incorrectly reports
+/// the variable as untyped.
+#[test]
+fn no_unresolved_for_variable_assigned_from_method_chain() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class DebtCollection {
+    public function isResolved(): bool { return false; }
+}
+
+class Order {
+    public function getDebtCollection(): ?DebtCollection { return null; }
+}
+
+class Period {
+    public function getOrder(): ?Order { return null; }
+}
+
+class Test {
+    public function run(Period $period): void {
+        $debt = $period->getOrder()?->getDebtCollection();
+        if ($debt) {
+            $debt->isResolved();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for variable assigned from method chain, got: {:?}",
+        diags
+    );
+}
+
+/// `$results[$i]->activities[$id]->extras` where `$results` is
+/// `array<int, WeeklyResultDto>` and the property chain walks through
+/// typed properties with array access in between.
+#[test]
+fn no_diagnostic_for_interleaved_array_access_property_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class ExtraPointsDto {
+    public string $label;
+}
+
+class ActivityResultDto {
+    /** @var list<ExtraPointsDto> */
+    public array $extras = [];
+    public int $activityId;
+}
+
+class WeeklyResultDto {
+    /** @var array<int, ActivityResultDto> */
+    public array $activities;
+    public int $week;
+}
+
+function test(): void {
+    /** @var array<int, WeeklyResultDto> */
+    $results = [];
+
+    $results[0]->activities[1]->extras[] = new ExtraPointsDto();
+    $results[0]->activities[1]->activityId;
+    $results[0]->week;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for interleaved array-access property chain, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Property narrowing via guard clauses (property subject, not variable)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_false_positive_after_negated_instanceof_guard_on_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    private Dog|Cat $pet;
+    public function test(): void {
+        if ($this->pet instanceof Dog) {
+            $this->pet->bark();
+        }
+        if (!$this->pet instanceof Cat) {
+            return;
+        }
+        $this->pet->purr();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after negated instanceof guard on property, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_after_positive_instanceof_guard_on_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    private Dog|Cat $pet;
+    public function test(): void {
+        if ($this->pet instanceof Cat) {
+            return;
+        }
+        $this->pet->bark();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after positive instanceof guard excludes Cat on property, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_after_assert_instanceof_on_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    /** @var Dog|Cat|null */
+    public $pet;
+    public function test(): void {
+        assert($this->pet instanceof Dog);
+        $this->pet->bark();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after assert instanceof on property, got: {:?}",
+        diags
+    );
+}
+
+/// When a method has a conditional return type like
+/// `($type is class-string<SomeInterface> ? ThenType : ElseType)`, and
+/// the argument class does NOT implement `SomeInterface`, the analyser
+/// should use the else-branch return type.
+#[test]
+fn no_false_positive_conditional_return_class_string_bound() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface FormInterface {
+    public function submit(mixed $data): void;
+    public function getData(): mixed;
+}
+interface FormFlowTypeInterface {}
+interface FormFlowInterface {}
+abstract class AbstractController {
+    /**
+     * @return ($type is class-string<FormFlowTypeInterface> ? FormFlowInterface : FormInterface)
+     */
+    protected function createForm(string $type, mixed $data = null, array $options = []): FormInterface {}
+}
+class ImageUploadFormType {}
+class ImageController extends AbstractController {
+    public function store(): void {
+        $form = $this->createForm(ImageUploadFormType::class);
+        $form->submit([]);
+        $form->getData();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let unknown_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code == Some(NumberOrString::String("unknown_member".to_string()))
+                || d.code == Some(NumberOrString::String("scalar_member_access".to_string()))
+        })
+        .collect();
+    assert!(
+        unknown_diags.is_empty(),
+        "should not flag unknown members on $form when createForm conditional returns FormInterface, got: {:?}",
+        unknown_diags
+    );
+}
+
+/// Cross-file variant: the base class with the conditional return type
+/// is in a separate file (simulating a vendor package).  This exercises
+/// `conditional_return` being inherited through `resolve_class_fully`
+/// when the method is defined in an ancestor loaded via the class
+/// loader.
+#[test]
+fn no_false_positive_conditional_return_class_string_bound_cross_file() {
+    let backend = create_test_backend();
+    let base_php = r#"<?php
+interface FormInterface {
+    public function submit(mixed $data): void;
+    public function getData(): mixed;
+}
+interface FormFlowTypeInterface {}
+interface FormFlowInterface {}
+abstract class AbstractController {
+    /**
+     * @return ($type is class-string<FormFlowTypeInterface> ? FormFlowInterface : FormInterface)
+     */
+    protected function createForm(string $type, mixed $data = null, array $options = []): FormInterface {}
+}
+"#;
+    let controller_php = r#"<?php
+class ImageUploadFormType {}
+class ImageController extends AbstractController {
+    public function store(): void {
+        $form = $this->createForm(ImageUploadFormType::class);
+        $form->submit([]);
+        $form->getData();
+    }
+}
+"#;
+    // Index the base file first (simulates vendor classes).
+    backend.update_ast("file:///base.php", base_php);
+    // Then index the controller file.
+    backend.update_ast("file:///controller.php", controller_php);
+
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics(
+        "file:///controller.php",
+        controller_php,
+        &mut diags,
+    );
+    let unknown_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code == Some(NumberOrString::String("unknown_member".to_string()))
+                || d.code == Some(NumberOrString::String("scalar_member_access".to_string()))
+        })
+        .collect();
+    assert!(
+        unknown_diags.is_empty(),
+        "cross-file: should not flag unknown members on $form when createForm conditional returns FormInterface, got: {:?}",
+        unknown_diags
+    );
+}
+
+/// When two `array_map` calls in the same method use different closure
+/// parameter names that happen to collide (e.g. `$row`), the second
+/// closure's parameter type must come from its own type hint, not from
+/// the first closure's `@param` docblock.
+#[test]
+fn no_false_positive_closure_param_scope_leak_between_array_maps() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Activity {
+    public int $id = 0;
+    public function toResponseObject(): string { return ''; }
+}
+class Repo {
+    /**
+     * @return list<array{activity: int, distance: int}>
+     */
+    public function getStats(): array { return []; }
+
+    /**
+     * @return list<Activity>
+     */
+    public function getActivities(): array { return []; }
+
+    public function run(): void {
+        $rows = $this->getStats();
+
+        $ids = \array_map(
+            /** @param array{activity: int, distance: int} $row */
+            static fn(array $row): int => $row['activity'],
+            $rows,
+        );
+
+        /** @var list<Activity> */
+        $activities = $this->getActivities();
+
+        $result = \array_map(
+            static fn(Activity $row): string => $row->toResponseObject(),
+            $activities,
+        );
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $row->toResponseObject() in second closure, got: {:?}",
+        scalar_diags
+    );
+    let unknown_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("toResponseObject"))
+        .collect();
+    assert!(
+        unknown_diags.is_empty(),
+        "should not flag unknown member 'toResponseObject' on $row in second closure, got: {:?}",
+        unknown_diags
+    );
+}
+
+/// After `if (!$this->model instanceof Order) { return; }`,
+/// `$this->model` is narrowed to `Order`.  A foreach over
+/// `$this->model->items` should resolve the element type so that member
+/// accesses on the loop variable don't fire.
+#[test]
+fn no_false_positive_foreach_over_narrowed_property_after_guard_clause() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Item {
+    public function name(): string { return ''; }
+}
+class Order {
+    /** @return Item[] */
+    public function getItems(): array { return []; }
+    /** @var Item[] */
+    public array $items;
+}
+class Svc {
+    private ?Order $model;
+    public function test(): void {
+        if (!$this->model instanceof Order) {
+            return;
+        }
+        foreach ($this->model->items as $item) {
+            $item->name();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after guard clause narrowing on property in foreach, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_diagnostic_for_arbitrary_method_on_soap_client() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(\SoapClient $client): void {
+    $client->gettransactionlist(['foo' => 'bar']);
+    $client->delete(123);
+    $client->capture('abc');
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for arbitrary methods on SoapClient, got: {:?}",
+        diags
+    );
+}
+
+/// When a class extends `SoapClient`, it inherits `__call`, so any
+/// method call on it (or on a value returned as `SoapClient`) is valid.
+#[test]
+fn no_diagnostic_for_arbitrary_method_on_soap_client_subclass() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class MyService extends \SoapClient {
+    public function getConnection(): \SoapClient { return $this; }
+}
+function test(): void {
+    $svc = new MyService('http://example.com?wsdl');
+    $svc->getConnection()->customMethod();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for arbitrary methods on SoapClient subclass, got: {:?}",
+        diags
+    );
+}
+
+/// `$m->prop = null;` records the property as exactly `null`.  A
+/// following not-null assertion (`@phpstan-assert !null`, e.g.
+/// PHPUnit's `assertNotNull`) must strip that tracked `null` so the
+/// subsequent member access is not flagged as scalar member access on
+/// `null`.
+#[test]
+fn not_null_assert_strips_tracked_null_on_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Clock {
+    public function toString(): string { return ''; }
+}
+class Model {
+    public ?Clock $at = null;
+    public function save(): void {}
+}
+class Helper {
+    /** @phpstan-assert !null $actual */
+    public static function assertNotNull(mixed $actual): void {}
+}
+class Demo {
+    public function run(Model $m): void {
+        $m->at = null;
+        $m->save();
+        Helper::assertNotNull($m->at);
+        echo $m->at->toString();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "assertNotNull should strip the tracked null, got: {:?}",
+        scalar_diags
+    );
+}
+
+/// A `@var array{First, Second}` annotation on an assignment must let
+/// integer-indexed access resolve each positional entry to its own
+/// type, so member access on `$pair[0]` / `$pair[1]` verifies against
+/// the right class instead of reporting the subject type as unresolved.
+#[test]
+fn positional_shape_var_annotation_resolves_int_index_element() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Label {
+    public function labelOnly(): void {}
+}
+class Stmt {
+    public function stmtOnly(): void {}
+}
+class Node {
+    /** @return Node[] */
+    public function getChildren(): array { return []; }
+}
+function test(Node $n): void {
+    /** @var array{Label, Stmt} $pair */
+    $pair = $n->getChildren();
+    $pair[0]->labelOnly();
+    $pair[1]->stmtOnly();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "positional shape entries should resolve to their own type, got: {:?}",
+        diags
+    );
+}
+
+/// The same positional-shape resolution must work for a multiline
+/// `@var array{...}` block with a trailing comma, and each entry must
+/// resolve to the correct class (so a method that only exists on the
+/// wrong entry is still flagged).
+#[test]
+fn positional_shape_multiline_var_annotation_resolves_int_index_element() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let php = r#"<?php
+class Label {
+    public function labelOnly(): void {}
+}
+class Stmt {
+    public function stmtOnly(): void {}
+}
+class Node {
+    /** @return Node[] */
+    public function getChildren(): array { return []; }
+}
+function test(Node $n): void {
+    /**
+     * @var array{
+     *     Label,
+     *     Stmt,
+     * } $pair
+     */
+    $pair = $n->getChildren();
+    $pair[0]->labelOnly();
+    $pair[1]->stmtOnly();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "multiline positional shape entries should resolve, got: {:?}",
+        diags
+    );
+
+    // A method that only exists on the *other* entry must still be flagged,
+    // proving each index resolves to its own distinct type.
+    let php_wrong = php.replace("$pair[0]->labelOnly();", "$pair[0]->stmtOnly();");
+    let diags_wrong = unknown_member_diagnostics(&backend, "file:///test2.php", &php_wrong);
+    assert!(
+        diags_wrong
+            .iter()
+            .any(|d| d.message.contains("stmtOnly") && d.message.contains("Label")),
+        "calling Stmt's method on $pair[0] (a Label) should be flagged, got: {:?}",
+        diags_wrong
+    );
+}

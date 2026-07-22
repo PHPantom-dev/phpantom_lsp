@@ -108,6 +108,7 @@ mod diagnostics_return_type_errors;
 mod diagnostics_syntax_errors;
 mod diagnostics_type_errors;
 mod diagnostics_undefined_variables;
+mod diagnostics_unknown_classes;
 mod diagnostics_unknown_functions;
 mod diagnostics_unknown_members;
 mod diagnostics_unused_variables;
