@@ -1169,41 +1169,62 @@ pub(crate) fn extract_visibility<'a>(
 }
 
 /// Extract property information from a class member Property node.
-pub(crate) fn extract_property_info(property: &Property) -> Vec<PropertyInfo> {
+pub(crate) fn extract_property_info(
+    property: &Property,
+    content: Option<&str>,
+) -> Vec<PropertyInfo> {
+    use mago_syntax::cst::class_like::property::PropertyItem;
+
     let is_static = property.modifiers().iter().any(|m| m.is_static());
     let visibility = extract_visibility(property.modifiers().iter());
 
     let native_hint = property.hint().map(|h| extract_hint_type(h));
 
-    property
-        .variables()
-        .iter()
-        .map(|var| {
-            let raw_name = bytes_to_str(var.name).to_string();
-            // Strip the leading `$` for property names since PHP access
-            // syntax is `$this->name` not `$this->$name`.
-            let name = if let Some(stripped) = raw_name.strip_prefix('$') {
-                atom(stripped)
-            } else {
-                atom(&raw_name)
-            };
+    let mut props = Vec::with_capacity(property.variables().len());
+    let mut push_item = |item: &PropertyItem| {
+        let default_value = match item {
+            PropertyItem::Concrete(c) => content.and_then(|src| {
+                let start = c.value.span().start.offset as usize;
+                let end = c.value.span().end.offset as usize;
+                src.get(start..end).map(Box::from)
+            }),
+            PropertyItem::Abstract(_) => None,
+        };
 
-            PropertyInfo {
-                name,
-                name_offset: var.span.start.offset,
-                type_hint: native_hint.clone(),
-                native_type_hint: native_hint.clone(),
-                description: None,
-                is_static,
-                visibility,
-                deprecation_message: None,
-                deprecated_replacement: None,
-                see_refs: Vec::new(),
-                is_virtual: false,
-                source: None,
+        let var = item.variable();
+        let raw_name = bytes_to_str(var.name).to_string();
+        let name = if let Some(stripped) = raw_name.strip_prefix('$') {
+            atom(stripped)
+        } else {
+            atom(&raw_name)
+        };
+
+        props.push(PropertyInfo {
+            name,
+            name_offset: var.span.start.offset,
+            type_hint: native_hint.clone(),
+            native_type_hint: native_hint.clone(),
+            description: None,
+            is_static,
+            visibility,
+            deprecation_message: None,
+            deprecated_replacement: None,
+            see_refs: Vec::new(),
+            is_virtual: false,
+            source: default_value.map(|value| PropertySource::DeclaredDefault { value }),
+        });
+    };
+
+    match property {
+        Property::Plain(plain) => {
+            for item in &plain.items {
+                push_item(item);
             }
-        })
-        .collect()
+        }
+        Property::Hooked(hooked) => push_item(&hooked.item),
+    }
+
+    props
 }
 
 use crate::Backend;

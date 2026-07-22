@@ -1,4 +1,5 @@
 use crate::common::create_test_backend;
+use phpantom_lsp::types::PhpVersion;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -1076,6 +1077,676 @@ async fn test_completion_after_function_keyword_does_not_suggest_classes() {
             .iter()
             .map(|i| format!("{:?}:{}", i.kind, i.label))
             .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_parent_method_overrides() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_methods.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Article {\n",
+        "    public function getContent(): string { return ''; }\n",
+        "    protected function getTitle(): string { return ''; }\n",
+        "    private function secret(): void {}\n",
+        "    public function getFormattedDate(string $format = 'Y-m-d'): string { return ''; }\n",
+        "}\n",
+        "class Post extends Article {\n",
+        "    protected function get\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 26,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let filter_names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        filter_names.contains(&"getContent"),
+        "should suggest public parent method getContent, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        filter_names.contains(&"getTitle"),
+        "should suggest protected parent method getTitle, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        filter_names.contains(&"getFormattedDate"),
+        "should suggest getFormattedDate with params, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        !filter_names.contains(&"secret"),
+        "must not suggest private parent method, got: {:?}",
+        filter_names
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+        "must not suggest classes alongside overrides, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+
+    let dated = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("getFormattedDate"))
+        .expect("getFormattedDate item");
+    let insert = dated
+        .insert_text
+        .as_deref()
+        .or_else(|| {
+            dated.text_edit.as_ref().map(|te| match te {
+                CompletionTextEdit::Edit(e) => e.new_text.as_str(),
+                CompletionTextEdit::InsertAndReplace(e) => e.new_text.as_str(),
+            })
+        })
+        .unwrap_or("");
+    assert!(
+        insert.contains("getFormattedDate(")
+            && (insert.contains("$format") || insert.contains("\\$format")),
+        "insert should include full signature with $param names, got: {insert}"
+    );
+    // Snippet insert must escape `$` so clients don't treat `$format` as a tabstop.
+    assert!(
+        insert.contains("\\$format"),
+        "param $ must be snippet-escaped as \\$, got: {insert}"
+    );
+    assert!(
+        !insert.contains("(format") && !insert.contains(", format"),
+        "param names must not omit $, got: {insert}"
+    );
+    assert!(
+        !insert.contains("function getFormattedDate"),
+        "snippet must not re-insert the function keyword, got: {insert}"
+    );
+    // Brace lines must not carry member indent — clients re-indent them.
+    assert!(
+        insert.contains("\n{\n") && insert.contains("\n}\n") || insert.ends_with("\n}"),
+        "braces should start at column 0 of the snippet line, got: {insert:?}"
+    );
+    assert!(
+        !insert.contains("\n    {") && !insert.contains("\n        {"),
+        "braces must not be pre-indented (avoids double indent), got: {insert:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_override_skips_already_implemented() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_skip.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function getContent(): string { return ''; }\n",
+        "    public function getTitle(): string { return ''; }\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public function getContent(): string { return 'x'; }\n",
+        "    protected function get\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 26,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let filter_names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        filter_names.contains(&"getTitle"),
+        "should still suggest unimplemented getTitle, got: {filter_names:?}"
+    );
+    assert!(
+        !filter_names.contains(&"getContent"),
+        "should not re-suggest already implemented getContent, got: {filter_names:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_override_includes_override_attribute_on_php83() {
+    // Default test backend uses PhpVersion::default() = 8.5, so #[Override] applies.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_attr.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function getContent(): string { return ''; }\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public function get\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 23,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("getContent"))
+        .expect("getContent override");
+    let additional = item
+        .additional_text_edits
+        .as_ref()
+        .expect("additional edits");
+    assert!(
+        additional
+            .iter()
+            .any(|e| e.new_text.contains("#[\\Override]") || e.new_text.contains("#[Override]")),
+        "PHP 8.3+ should insert #[Override], got: {additional:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_parent_property_overrides() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_props.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public string $title = '';\n",
+        "    protected int $count = 0;\n",
+        "    private string $secret = '';\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    protected $\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    // Cursor right after `$`
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"title"),
+        "should suggest parent property title, got: {names:?}"
+    );
+    assert!(
+        names.contains(&"count"),
+        "should suggest protected parent property count, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"secret"),
+        "must not suggest private parent property, got: {names:?}"
+    );
+
+    let title = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("title"))
+        .expect("title item");
+    let insert = title.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.contains("title = ''") || insert.contains("title = \"\""),
+        "property override should include default value, got: {insert:?}"
+    );
+    assert!(
+        title
+            .additional_text_edits
+            .as_ref()
+            .is_some_and(|edits| edits.iter().any(|e| e.new_text.contains("#[\\Override]"))),
+        "PHP 8.5+ should insert #[Override] for property overrides"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_property_override_skips_override_attribute_before_php85() {
+    let backend = create_test_backend();
+    backend.set_php_version(PhpVersion::new(8, 4));
+
+    let uri = Url::parse("file:///override_props_php84.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public string $title = '';\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    protected $\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let title = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("title"))
+        .expect("title item");
+    assert!(
+        title.additional_text_edits.is_none(),
+        "PHP 8.4 should not insert #[Override] for property overrides"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_parent_property_overrides_after_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_typed_props.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    protected array $attributes = [];\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    protected array $att\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let attributes = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("attributes"))
+        .expect("attributes item");
+    let insert = attributes.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.contains("attributes = []"),
+        "typed property override should include default value, got: {insert:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_parent_constant_overrides() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_consts.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public const STATUS_OK = 1;\n",
+        "    protected const STATUS_PENDING = 2;\n",
+        "    private const SECRET = 3;\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public const STATUS_\n",
+        "    public function keepClassOpen(): void {}\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.clone(),
+            },
+        })
+        .await;
+
+    // "    public const STATUS_" → length 24
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"STATUS_OK"),
+        "should suggest STATUS_OK, got: {names:?}"
+    );
+    assert!(
+        names.contains(&"STATUS_PENDING"),
+        "should suggest STATUS_PENDING, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"SECRET"),
+        "must not suggest private constant, got: {names:?}"
+    );
+
+    let ok = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("STATUS_OK"))
+        .expect("STATUS_OK item");
+    let insert = ok.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.contains("STATUS_OK = 1"),
+        "constant override should include value, got: {insert:?}"
+    );
+    assert!(
+        ok.additional_text_edits.is_none(),
+        "PHP 8.5 should not insert #[Override] for constant overrides"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_constant_override_includes_override_attribute_on_php86() {
+    let backend = create_test_backend();
+    backend.set_php_version(PhpVersion::new(8, 6));
+
+    let uri = Url::parse("file:///override_consts_php86.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public const STATUS_OK = 1;\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public const STATUS_\n",
+        "    public function keepClassOpen(): void {}\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let ok = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("STATUS_OK"))
+        .expect("STATUS_OK item");
+    assert!(
+        ok.additional_text_edits
+            .as_ref()
+            .is_some_and(|edits| edits.iter().any(|e| e.new_text.contains("#[\\Override]"))),
+        "PHP 8.6+ should insert #[Override] for constant overrides"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_parent_constant_overrides_after_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_typed_consts.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public const string STATUS_OK = 'ok';\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public const string STATUS_\n",
+        "    public function keepClassOpen(): void {}\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 31,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let ok = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("STATUS_OK"))
+        .expect("STATUS_OK item");
+    let insert = ok.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.contains("STATUS_OK = 'ok'"),
+        "typed constant override should include value, got: {insert:?}"
     );
 }
 

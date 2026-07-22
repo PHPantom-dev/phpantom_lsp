@@ -451,7 +451,7 @@ fn build_method_stubs(
 }
 
 /// Format the parameter list for a method stub.
-fn format_params(
+pub(crate) fn format_params(
     method: &MethodInfo,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
@@ -461,12 +461,16 @@ fn format_params(
     for param in &method.parameters {
         let mut s = String::new();
 
-        // Type hint — prefer native type hint (what appears in PHP source)
-        // over the docblock-enriched one.
+        // Type hint — only the native PHP signature.  Do not fall back to
+        // docblock `@param` types: parameter types are contravariant, so
+        // promoting a docblock type (e.g. `string`) onto an untyped parent
+        // parameter would illegally narrow the override.
         if let Some(ref hint) = param.native_type_hint {
             let shortened = shorten_php_type_direct(hint, use_map, file_namespace);
-            s.push_str(&shortened);
-            s.push(' ');
+            if !shortened.is_empty() {
+                s.push_str(&shortened);
+                s.push(' ');
+            }
         }
 
         // Variadic and reference markers.
@@ -477,7 +481,13 @@ fn format_params(
             s.push_str("...");
         }
 
-        s.push_str(&param.name);
+        // Parser stores names without `$`; virtual/docblock params may
+        // already include it.  Always emit a single leading `$`.
+        let pname = param.name.as_str();
+        if !pname.starts_with('$') {
+            s.push('$');
+        }
+        s.push_str(pname);
 
         // Default value.
         if let Some(ref default) = param.default_value {
@@ -513,7 +523,7 @@ fn is_valid_native_hint(ty: &PhpType) -> bool {
 }
 
 /// Format the return type hint for a method stub.
-fn format_return_type(
+pub(crate) fn format_return_type(
     method: &MethodInfo,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
@@ -712,6 +722,28 @@ mod tests {
 
         let result = format_params(&method, &HashMap::new(), &None);
         assert_eq!(result, "string $name, int $age = 0");
+    }
+
+    #[test]
+    fn format_params_adds_dollar_when_name_has_none() {
+        // Real parsed methods store names without `$`.
+        let method = MethodInfo {
+            parameters: vec![ParameterInfo {
+                name: crate::atom::atom("key"),
+                is_required: true,
+                type_hint: Some(PhpType::parse("string")),
+                native_type_hint: None,
+                description: None,
+                default_value: None,
+                is_variadic: false,
+                is_reference: false,
+                closure_this_type: None,
+            }],
+            ..MethodInfo::virtual_method("getAttribute", None)
+        };
+        let result = format_params(&method, &HashMap::new(), &None);
+        // Docblock-only type must not be promoted (contravariance).
+        assert_eq!(result, "$key");
     }
 
     #[test]

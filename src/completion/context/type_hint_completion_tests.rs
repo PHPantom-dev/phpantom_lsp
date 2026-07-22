@@ -316,6 +316,19 @@ fn const_name_position_after_const_keyword() {
 }
 
 #[test]
+fn typed_const_name_position_after_const_type() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\nclass Foo {\n    public const string FO\n}";
+    assert!(is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 26
+        }
+    ));
+}
+
+#[test]
 fn case_name_position_in_enum() {
     use super::is_function_or_const_name_position;
     let src = "<?php\nenum Status {\n    case Pend\n}";

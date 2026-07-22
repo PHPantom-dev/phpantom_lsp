@@ -13,6 +13,7 @@
 
 use crate::completion::named_args::{find_enclosing_open_paren, position_to_char_offset};
 use crate::text_scan::skip_string_backward;
+use crate::util::position_to_offset;
 use tower_lsp::lsp_types::Position;
 
 /// PHP native types valid in type-hint positions (PHP 8.x).
@@ -54,6 +55,13 @@ pub(crate) fn detect_type_hint_context(
 ) -> Option<TypeHintContext> {
     let chars: Vec<char> = content.chars().collect();
     let cursor = position_to_char_offset(&chars, position)?;
+
+    // Member *names* after `function` / `const` / `case` are not types.
+    // Without this, `public const ST` looks like a property type position
+    // (modifier keyword earlier on the line) and steals completion.
+    if is_function_or_const_name_position_chars(&chars, cursor) {
+        return None;
+    }
 
     // ── Extract partial identifier ──────────────────────────────────
     let mut partial_start = cursor;
@@ -209,21 +217,19 @@ pub(crate) fn detect_type_hint_context(
 /// by `$`.  Type positions like `protected User|` intentionally still
 /// offer class names.
 pub(crate) fn is_function_or_const_name_position(content: &str, position: Position) -> bool {
-    let chars: Vec<char> = content.chars().collect();
-    let Some(cursor) = position_to_char_offset(&chars, position) else {
-        return false;
-    };
+    let bytes = content.as_bytes();
+    let cursor = (position_to_offset(content, position) as usize).min(bytes.len());
 
     // Skip the partial identifier being typed.
     let mut i = cursor;
-    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+    while i > 0 && is_ident_byte(bytes[i - 1]) {
         i -= 1;
     }
 
     // Require whitespace between the keyword and the name (or empty name
     // still after the keyword: `function |`).
     let after_ident = i;
-    while i > 0 && chars[i - 1].is_ascii_whitespace() {
+    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
     if i == after_ident && after_ident != cursor {
@@ -237,25 +243,122 @@ pub(crate) fn is_function_or_const_name_position(content: &str, position: Positi
         return false;
     }
 
-    if check_keyword_ending_at(&chars, i, "fn") || check_keyword_ending_at(&chars, i, "case") {
+    if check_keyword_ending_at_bytes(bytes, i, b"fn")
+        || check_keyword_ending_at_bytes(bytes, i, b"case")
+    {
         return true;
     }
     // `function` / `const` declare member names, but not after `use`
     // (`use function foo`, `use const BAR` still need symbol completion).
-    if check_keyword_ending_at(&chars, i, "function") {
-        return !preceded_by_use_keyword(&chars, i - "function".len());
+    if check_keyword_ending_at_bytes(bytes, i, b"function") {
+        return !preceded_by_use_keyword_bytes(bytes, i - "function".len());
     }
-    if check_keyword_ending_at(&chars, i, "const") {
-        return !preceded_by_use_keyword(&chars, i - "const".len());
+    if check_keyword_ending_at_bytes(bytes, i, b"const") {
+        return !preceded_by_use_keyword_bytes(bytes, i - "const".len());
+    }
+    has_const_keyword_before_name(bytes, i)
+}
+
+fn is_function_or_const_name_position_chars(chars: &[char], cursor: usize) -> bool {
+    let mut i = cursor;
+    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+        i -= 1;
+    }
+
+    let after_ident = i;
+    while i > 0 && chars[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i == after_ident && after_ident != cursor {
+        return false;
+    }
+    if i == after_ident {
+        return false;
+    }
+
+    if check_keyword_ending_at(chars, i, "fn") || check_keyword_ending_at(chars, i, "case") {
+        return true;
+    }
+    if check_keyword_ending_at(chars, i, "function") {
+        return !preceded_by_use_keyword_chars(chars, i - "function".len());
+    }
+    if check_keyword_ending_at(chars, i, "const") {
+        return !preceded_by_use_keyword_chars(chars, i - "const".len());
+    }
+    has_const_keyword_before_name_chars(chars, i)
+}
+
+fn preceded_by_use_keyword_chars(chars: &[char], keyword_start: usize) -> bool {
+    let before = skip_whitespace_backward(chars, keyword_start);
+    check_keyword_ending_at(chars, before, "use")
+}
+
+fn has_const_keyword_before_name_chars(chars: &[char], pos: usize) -> bool {
+    let mut line_start = pos;
+    while line_start > 0 && chars[line_start - 1] != '\n' {
+        line_start -= 1;
+    }
+    let mut i = line_start;
+    while i + "const".len() <= pos {
+        let end = i + "const".len();
+        if check_keyword_ending_at(chars, end, "const")
+            && (end >= chars.len() || !(chars[end].is_alphanumeric() || chars[end] == '_'))
+            && !preceded_by_use_keyword_chars(chars, i)
+        {
+            return true;
+        }
+        i += 1;
     }
     false
 }
 
-/// Whether `pos` (end of a keyword span) is preceded by the `use` keyword
-/// with only whitespace between (`use function` / `use const`).
-fn preceded_by_use_keyword(chars: &[char], keyword_start: usize) -> bool {
-    let before = skip_whitespace_backward(chars, keyword_start);
-    check_keyword_ending_at(chars, before, "use")
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn check_keyword_ending_at_bytes(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    if pos < keyword.len() {
+        return false;
+    }
+    let start = pos - keyword.len();
+    if &bytes[start..pos] != keyword {
+        return false;
+    }
+    if start > 0 && is_ident_byte(bytes[start - 1]) {
+        return false;
+    }
+    if pos < bytes.len() && is_ident_byte(bytes[pos]) {
+        return false;
+    }
+    true
+}
+
+fn preceded_by_use_keyword_bytes(bytes: &[u8], keyword_start: usize) -> bool {
+    let mut before = keyword_start;
+    while before > 0 && bytes[before - 1].is_ascii_whitespace() {
+        before -= 1;
+    }
+    check_keyword_ending_at_bytes(bytes, before, b"use")
+}
+
+fn has_const_keyword_before_name(bytes: &[u8], pos: usize) -> bool {
+    let mut line_start = pos;
+    while line_start > 0 && bytes[line_start - 1] != b'\n' {
+        line_start -= 1;
+    }
+    bytes[line_start..pos]
+        .windows(b"const".len())
+        .enumerate()
+        .any(|(idx, window)| {
+            if window != b"const" {
+                return false;
+            }
+            let start = line_start + idx;
+            let end = start + b"const".len();
+            (start == 0 || !is_ident_byte(bytes[start - 1]))
+                && (end >= bytes.len() || !is_ident_byte(bytes[end]))
+                && !preceded_by_use_keyword_bytes(bytes, start)
+        })
 }
 
 // ─── Private helpers ────────────────────────────────────────────────────────
