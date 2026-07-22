@@ -13,6 +13,7 @@ const COMPOSER_JSON: &str = r#"{
             "App\\Concerns\\": "src/Concerns/",
             "Database\\Factories\\": "database/factories/",
             "Illuminate\\Support\\": "vendor/illuminate/Support/",
+            "Illuminate\\Support\\Traits\\": "vendor/illuminate/Support/Traits/",
             "Illuminate\\Contracts\\Database\\Eloquent\\": "vendor/illuminate/Contracts/",
             "Illuminate\\Database\\Eloquent\\": "vendor/illuminate/Eloquent/",
             "Illuminate\\Database\\Eloquent\\Attributes\\": "vendor/illuminate/Eloquent/Attributes/",
@@ -104,11 +105,21 @@ namespace Illuminate\\Database\\Eloquent\\Relations;
 class HasManyThrough {}
 ";
 
+const FORWARDS_CALLS_TRAIT_PHP: &str = "\
+<?php
+namespace Illuminate\\Support\\Traits;
+trait ForwardsCalls {
+    protected function forwardCallTo(mixed $object, string $method, array $parameters): mixed { return null; }
+    protected function forwardDecoratedCallTo(mixed $object, string $method, array $parameters): mixed { return null; }
+}
+";
+
 const BUILDER_PHP: &str = "\
 <?php
 namespace Illuminate\\Database\\Eloquent;
 
 use Illuminate\\Database\\Concerns\\BuildsQueries;
+use Illuminate\\Support\\Traits\\ForwardsCalls;
 
 /**
  * @template TModel of \\Illuminate\\Database\\Eloquent\\Model
@@ -116,10 +127,16 @@ use Illuminate\\Database\\Concerns\\BuildsQueries;
  */
 class Builder {
     /** @use BuildsQueries<TModel> */
-    use BuildsQueries;
+    use BuildsQueries, ForwardsCalls;
 
-    /** @return static */
-    public function where(string $column, mixed $operator = null, mixed $value = null): static { return $this; }
+    /**
+     * @param  (\\Closure(static): mixed)|string|array|\\Illuminate\\Contracts\\Database\\Query\\Expression  $column
+     * @param  mixed  $operator
+     * @param  mixed  $value
+     * @param  string  $boolean
+     * @return $this
+     */
+    public function where($column, $operator = null, $value = null, $boolean = 'and') { return $this; }
     /** @return static */
     public function orderBy(string $column, string $direction = 'asc'): static { return $this; }
     /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel> */
@@ -131,6 +148,11 @@ class Builder {
      * @return ($id is (\\Illuminate\\Contracts\\Support\\Arrayable<array-key, mixed>|array<mixed>) ? \\Illuminate\\Database\\Eloquent\\Collection<int, TModel> : TModel)
      */
     public function findOrFail(mixed $id, array $columns = ['*']): mixed { return null; }
+    /**
+     * @param  array|string  $columns
+     * @return TModel
+     */
+    public function firstOrFail($columns = ['*']): mixed { return null; }
     /** @return static */
     public function limit(int $value): static { return $this; }
     /** @return bool */
@@ -173,7 +195,12 @@ class Builder {
 const QUERY_BUILDER_PHP: &str = "\
 <?php
 namespace Illuminate\\Database\\Query;
+/**
+ * @template TValue of \\stdClass = \\stdClass
+ * @use \\Illuminate\\Database\\Concerns\\BuildsQueries<\\stdClass>
+ */
 class Builder {
+    use \\Illuminate\\Database\\Concerns\\BuildsQueries;
     /** @return static */
     public function whereIn(string $column, array $values): static { return $this; }
     /** @return static */
@@ -182,6 +209,14 @@ class Builder {
     public function groupBy(string ...$groups): static { return $this; }
     /** @return static */
     public function having(string $column, mixed $operator = null, mixed $value = null): static { return $this; }
+    /** @return $this */
+    public function lockForUpdate() { return $this; }
+    /** @return $this */
+    public function sharedLock() { return $this; }
+    /**
+     * @return \\Illuminate\\Database\\Query\\Builder
+     */
+    public function newQuery() { return $this; }
 }
 ";
 
@@ -333,6 +368,10 @@ fn framework_stubs() -> Vec<(&'static str, &'static str)> {
         (
             "vendor/illuminate/Concerns/BuildsQueries.php",
             BUILDS_QUERIES_PHP,
+        ),
+        (
+            "vendor/illuminate/Support/Traits/ForwardsCalls.php",
+            FORWARDS_CALLS_TRAIT_PHP,
         ),
         ("vendor/illuminate/Eloquent/Collection.php", COLLECTION_PHP),
         ("vendor/illuminate/Eloquent/Builder.php", BUILDER_PHP),
@@ -1779,6 +1818,184 @@ class User extends Model {
     assert!(
         methods.contains(&"getName"),
         "first() via BuildsQueries should return User with getName(), got: {:?}",
+        methods
+    );
+}
+
+#[tokio::test]
+async fn test_builder_lock_for_update_preserves_model_type() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    public function getName(): string { return ''; }
+    public function onlyOnUser(): int { return 1; }
+    public function test() {
+        $user = User::where([
+            'client_id' => 'client_id',
+            'name' => 'whatever',
+        ])
+            ->lockForUpdate()
+            ->firstOrFail();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    // Arrow after lockForUpdate on the next line should still be Builder.
+    let builder_items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 12, 14).await;
+    let builder_methods = method_names(&builder_items);
+    assert!(
+        builder_methods.contains(&"firstOrFail") || builder_methods.contains(&"where"),
+        "lockForUpdate() should return Eloquent Builder, got: {:?}",
+        builder_methods
+    );
+
+    // "$user->" after firstOrFail()
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 13, 15).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"onlyOnUser"),
+        "where([...])->lockForUpdate()->firstOrFail() should return User, got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"getName"),
+        "where([...])->lockForUpdate()->firstOrFail() should return User with getName(), got: {:?}",
+        methods
+    );
+
+    // Hover must be the concrete model, not Model|stdClass / Eloquent|stdClass.
+    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on $user");
+    let hover_text = match hover.contents {
+        HoverContents::Markup(m) => m.value,
+        _ => panic!("expected markup hover"),
+    };
+    assert!(
+        hover_text.contains("User")
+            && !hover_text.contains("stdClass")
+            && !hover_text.contains("Builder"),
+        "hover on $user after lockForUpdate()->firstOrFail() should be User, got: {hover_text}"
+    );
+}
+
+#[tokio::test]
+async fn test_builder_lock_for_update_via_intermediate_variable() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    public function getName(): string { return ''; }
+    public function onlyOnUser(): int { return 1; }
+    public function test() {
+        $query = User::where('active', true);
+        $query = $query->lockForUpdate();
+        $user = $query->firstOrFail();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    // "$user->" on line 10
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"onlyOnUser"),
+        "intermediate lockForUpdate() chain should still yield User, got: {:?}",
+        methods
+    );
+
+    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on $user");
+    let hover_text = match hover.contents {
+        HoverContents::Markup(m) => m.value,
+        _ => panic!("expected markup hover"),
+    };
+    assert!(
+        hover_text.contains("User")
+            && !hover_text.contains("stdClass")
+            && !hover_text.contains("Builder"),
+        "hover on $user after intermediate lockForUpdate should be User, got: {hover_text}"
+    );
+}
+
+#[tokio::test]
+async fn test_relation_query_mixin_chain_returns_relation_then_model() {
+    let post_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Post extends Model {
+    public function getTitle(): string { return ''; }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class User extends Model {
+    /** @return HasMany<\\App\\Models\\Post, $this> */
+    public function posts(): HasMany { return $this->hasMany(Post::class); }
+    public function test() {
+        $post = $this->posts()
+            ->lockForUpdate()
+            ->firstOrFail();
+        $post->
+    }
+}
+";
+    let (backend, dir) = make_workspace_full_relations(&[
+        ("src/Models/Post.php", post_php),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    // After lockForUpdate on a relation, chain should still offer firstOrFail.
+    let rel_items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 14).await;
+    let rel_methods = method_names(&rel_items);
+    assert!(
+        rel_methods.contains(&"firstOrFail") || rel_methods.contains(&"getTitle"),
+        "relation->lockForUpdate() should keep a chainable relation/builder, got: {:?}",
+        rel_methods
+    );
+
+    // "$post->" after firstOrFail — line 11
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 11, 15).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getTitle"),
+        "posts()->lockForUpdate()->firstOrFail() should be Post, got: {:?}",
         methods
     );
 }
@@ -10607,6 +10824,7 @@ class Setting extends Model {
 const RELATION_FULL_PHP: &str = "\
 <?php
 namespace Illuminate\\Database\\Eloquent\\Relations;
+use Illuminate\\Support\\Traits\\ForwardsCalls;
 /**
  * @template TRelatedModel of \\Illuminate\\Database\\Eloquent\\Model
  * @template TDeclaringModel of \\Illuminate\\Database\\Eloquent\\Model
@@ -10614,6 +10832,7 @@ namespace Illuminate\\Database\\Eloquent\\Relations;
  * @mixin \\Illuminate\\Database\\Eloquent\\Builder<TRelatedModel>
  */
 class Relation {
+    use ForwardsCalls;
     /** @return static */
     public function where(string $column, mixed $operator = null, mixed $value = null): static { return $this; }
     /** @return static */
@@ -10675,6 +10894,10 @@ fn make_workspace_full_relations(
         (
             "vendor/illuminate/Concerns/BuildsQueries.php",
             BUILDS_QUERIES_PHP,
+        ),
+        (
+            "vendor/illuminate/Support/Traits/ForwardsCalls.php",
+            FORWARDS_CALLS_TRAIT_PHP,
         ),
         ("vendor/illuminate/Eloquent/Collection.php", COLLECTION_PHP),
         ("vendor/illuminate/Eloquent/Builder.php", BUILDER_PHP),

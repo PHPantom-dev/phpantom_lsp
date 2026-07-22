@@ -1410,14 +1410,23 @@ impl Backend {
                                 // Resolve self/static/parent keywords to
                                 // concrete class names so that downstream
                                 // consumers see real FQNs, not keywords.
+                                // Prefer the receiver's full generic type
+                                // (e.g. Builder<User>) so fluent chains like
+                                // where()->lockForUpdate()->firstOrFail()
+                                // keep TModel.
                                 let resolved_hint = if substituted.is_parent_ref() {
                                     owner
                                         .parent_class
                                         .as_ref()
                                         .map(|p| PhpType::Named(p.to_string()))
                                         .unwrap_or(substituted)
-                                } else if substituted.is_self_like() {
-                                    PhpType::Named(owner.fqn().to_string())
+                                } else if substituted.contains_self_ref() {
+                                    match &rt.type_string {
+                                        PhpType::Generic(_, _) => {
+                                            substituted.replace_self_with_type(&rt.type_string)
+                                        }
+                                        _ => substituted.replace_self(&owner.fqn()),
+                                    }
                                 } else {
                                     substituted
                                 };

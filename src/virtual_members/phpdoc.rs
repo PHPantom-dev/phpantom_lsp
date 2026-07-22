@@ -32,6 +32,13 @@ use crate::types::{
 };
 use crate::util::short_name;
 
+/// Laravel's call-forwarding trait.  Classes that use it (Eloquent
+/// `Builder`, `Relation`, …) implement the decorated-forward rule:
+/// when a call is forwarded to another object and that object returns
+/// itself, the forwarder returns `$this` instead.
+const FORWARDS_CALLS_FQN: &str = "Illuminate\\Support\\Traits\\ForwardsCalls";
+const FORWARDS_CALLS_SHORT: &str = "ForwardsCalls";
+
 /// Global generation counter, incremented every time a file is re-parsed.
 /// Thread-local caches compare against this to detect staleness.
 static MIXIN_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -112,9 +119,9 @@ struct MixinDedup {
 
 /// The substitution environment for a single [`collect_mixin_members`] level.
 ///
-/// Groups the two maps used to resolve a `@mixin` name that is a template
-/// parameter into a concrete class, keeping the argument count of
-/// [`collect_mixin_members`] within clippy's limit.
+/// Groups the maps used to resolve a `@mixin` name that is a template
+/// parameter into a concrete class, plus the ForwardsCalls flag, keeping
+/// the argument count of [`collect_mixin_members`] within clippy's limit.
 struct MixinSubs<'a> {
     /// Concrete type per template param (from generic arguments provided by
     /// a subclass via `@extends`/`@mixin` generics).  Checked first.
@@ -123,6 +130,9 @@ struct MixinSubs<'a> {
     /// as a fallback when no concrete type is bound, so a `@mixin T` still
     /// resolves members through the constraint.
     bounds: &'a crate::atom::AtomMap<PhpType>,
+    /// Whether the outermost consumer uses `ForwardsCalls` (decorated
+    /// forward: target-self returns become the forwarder's `$this`).
+    decorated_forward: bool,
 }
 
 use super::{VirtualMemberProvider, VirtualMembers};
@@ -504,6 +514,7 @@ impl VirtualMemberProvider for PHPDocProvider {
         // (e.g. `@mixin TWraps`) on the own class are resolved during
         // the ancestor walk when a child class provides concrete types
         // via `@extends`.
+        let decorated_forward = uses_forwards_calls(class, class_loader);
         collect_mixin_members(
             &class.mixins,
             &class.mixin_generics,
@@ -512,6 +523,7 @@ impl VirtualMemberProvider for PHPDocProvider {
             &MixinSubs {
                 subs: &HashMap::new(),
                 bounds: &class.template_param_bounds,
+                decorated_forward,
             },
             0,
             cache,
@@ -577,6 +589,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                     &MixinSubs {
                         subs: &level_subs,
                         bounds: &parent.template_param_bounds,
+                        decorated_forward,
                     },
                     0,
                     cache,
@@ -627,6 +640,7 @@ fn collect_mixin_members(
     }
 
     let template_subs = subs.subs;
+    let decorated_forward = subs.decorated_forward;
 
     for mixin_name in mixin_names {
         // If the mixin name is a template parameter, substitute it
@@ -783,15 +797,21 @@ fn collect_mixin_members(
                 method.return_type = Some(resolved);
                 method.conditional_return = None;
             }
-            // `@return $this` / `self` / `static` in mixin methods are
-            // left as-is.  When the method is later called on the
-            // consuming class, `$this` resolves to the consumer (not the
-            // mixin), which is the correct semantic: fluent chains
-            // continue with the consumer's full API (own methods + all
-            // mixin methods).  In the builder-as-static forwarding path,
-            // the substitution map rewrites `$this` to
-            // `\Illuminate\Database\Eloquent\Builder<Model>`, so the
-            // return type must still be the raw keyword at this stage.
+            // Decorated forward (ForwardsCalls / forwardDecoratedCallTo):
+            // when the target returns itself, the forwarder returns
+            // `$this`.  Self-like returns are left as `$this`/`self`/
+            // `static` so call-site resolution binds them to the
+            // consumer (and preserves generics like `Builder<TModel>`).
+            // Returns that name the mixin class FQN are rewritten to
+            // `$this` for the same reason.  Non-self returns (int, bool,
+            // Collection, …) pass through unchanged.
+            //
+            // Builder-as-static forwarding still needs the raw keyword
+            // so its substitution map can rewrite `$this` →
+            // `Builder<ConcreteModel>`.
+            if decorated_forward {
+                apply_decorated_forward_return(&mut method, &resolved_mixin_name, &mixin_class);
+            }
             method.is_virtual = true;
             collector.methods.push(method);
         }
@@ -836,6 +856,9 @@ fn collect_mixin_members(
                 if !subs.is_empty() {
                     inheritance::apply_substitution_to_method(&mut m, &subs);
                 }
+                if decorated_forward {
+                    apply_decorated_forward_return(&mut m, &resolved_mixin_name, &mixin_class);
+                }
                 m.is_virtual = true;
                 collector.methods.push(m);
             }
@@ -866,7 +889,10 @@ fn collect_mixin_members(
             }
         }
 
-        // Recurse into mixins declared by the mixin class itself.
+        // Recurse into mixins declared by the mixin class itself
+        // (e.g. Relation → Builder → Query\Builder).  Keep the original
+        // consumer's decorated-forward flag so nested target returns
+        // still rewrite to the outermost forwarder.
         if !mixin_class.mixins.is_empty() {
             collect_mixin_members(
                 &mixin_class.mixins,
@@ -876,11 +902,137 @@ fn collect_mixin_members(
                 &MixinSubs {
                     subs: &HashMap::new(),
                     bounds: &mixin_class.template_param_bounds,
+                    decorated_forward,
                 },
                 depth + 1,
                 cache,
             );
         }
+    }
+}
+
+/// Whether `class` (or an ancestor) uses Laravel's `ForwardsCalls` trait.
+fn uses_forwards_calls(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    if class
+        .used_traits
+        .iter()
+        .any(|t| is_forwards_calls_trait(t.as_str()))
+    {
+        return true;
+    }
+    let mut parent_name = class.parent_class;
+    let mut depth = 0u32;
+    while let Some(ref p) = parent_name {
+        depth += 1;
+        if depth > MAX_INHERITANCE_DEPTH {
+            break;
+        }
+        let Some(parent) = class_loader(p) else {
+            break;
+        };
+        if parent
+            .used_traits
+            .iter()
+            .any(|t| is_forwards_calls_trait(t.as_str()))
+        {
+            return true;
+        }
+        parent_name = parent.parent_class;
+    }
+    false
+}
+
+fn is_forwards_calls_trait(name: &str) -> bool {
+    name == FORWARDS_CALLS_FQN
+        || name == FORWARDS_CALLS_SHORT
+        || short_name(name) == FORWARDS_CALLS_SHORT
+}
+
+/// Apply `forwardDecoratedCallTo` return semantics to a mixed-in method.
+///
+/// - Self-like (`$this` / `self` / `static`) → left as-is (call site binds
+///   to the consumer, preserving generics).
+/// - Return type whose base is the mixin class → rewritten to `$this`.
+/// - Anything else (scalars, collections, models, …) → unchanged.
+fn apply_decorated_forward_return(
+    method: &mut MethodInfo,
+    mixin_resolved_name: &str,
+    mixin_class: &ClassInfo,
+) {
+    let Some(ret) = method.return_type.as_ref() else {
+        return;
+    };
+    if ret.is_self_like() || ret.contains_self_ref() {
+        return;
+    }
+    let mixin_fqn = mixin_class.fqn();
+    let mixin_fqn = mixin_fqn.as_str();
+    let mixin_short = mixin_class.name.as_str();
+    let resolved_short = short_name(mixin_resolved_name);
+    if return_type_is_mixin_self(
+        ret,
+        mixin_fqn,
+        mixin_short,
+        mixin_resolved_name,
+        resolved_short,
+    ) {
+        method.return_type = Some(PhpType::this());
+        if method.native_return_type.as_ref().is_some_and(|n| {
+            return_type_is_mixin_self(
+                n,
+                mixin_fqn,
+                mixin_short,
+                mixin_resolved_name,
+                resolved_short,
+            )
+        }) {
+            method.native_return_type = Some(PhpType::this());
+        }
+    }
+}
+
+fn return_type_is_mixin_self(
+    ty: &PhpType,
+    mixin_fqn: &str,
+    mixin_short: &str,
+    mixin_resolved_name: &str,
+    resolved_short: &str,
+) -> bool {
+    let check_name = |name: &str| {
+        let stripped = name.strip_prefix('\\').unwrap_or(name);
+        stripped == mixin_fqn
+            || stripped == mixin_resolved_name
+            || stripped == mixin_short
+            || stripped == resolved_short
+            || short_name(stripped) == mixin_short
+    };
+    match ty {
+        PhpType::Named(n) => check_name(n),
+        PhpType::Generic(n, _) => check_name(n),
+        PhpType::Nullable(inner) => return_type_is_mixin_self(
+            inner,
+            mixin_fqn,
+            mixin_short,
+            mixin_resolved_name,
+            resolved_short,
+        ),
+        PhpType::Union(members) => {
+            let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
+            !non_null.is_empty()
+                && non_null.iter().all(|m| {
+                    return_type_is_mixin_self(
+                        m,
+                        mixin_fqn,
+                        mixin_short,
+                        mixin_resolved_name,
+                        resolved_short,
+                    )
+                })
+        }
+        _ => false,
     }
 }
 
@@ -950,6 +1102,7 @@ pub fn resolve_template_param_mixins(
         dedup,
     };
 
+    let decorated_forward = uses_forwards_calls(original_class, class_loader);
     collect_mixin_members(
         &template_mixins,
         &original_class.mixin_generics,
@@ -958,6 +1111,7 @@ pub fn resolve_template_param_mixins(
         &MixinSubs {
             subs: template_subs,
             bounds: &original_class.template_param_bounds,
+            decorated_forward,
         },
         0,
         None,

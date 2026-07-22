@@ -429,6 +429,67 @@ fn mixin_leaves_this_return_type_as_is_for_consumer_resolution() {
 }
 
 #[test]
+fn forwards_calls_rewrites_mixin_class_return_to_this() {
+    let provider = PHPDocProvider;
+    let mut class = make_class("Illuminate\\Database\\Eloquent\\Builder");
+    class.mixins = vec![atom("Illuminate\\Database\\Query\\Builder")];
+    class.used_traits = vec![atom("Illuminate\\Support\\Traits\\ForwardsCalls")];
+
+    let mut query = make_class("Illuminate\\Database\\Query\\Builder");
+    query
+        .methods
+        .push(Arc::new(make_method("lockForUpdate", Some("$this"))));
+    query.methods.push(Arc::new(make_method(
+        "newQuery",
+        Some("Illuminate\\Database\\Query\\Builder"),
+    )));
+    query
+        .methods
+        .push(Arc::new(make_method("count", Some("int"))));
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "Illuminate\\Database\\Query\\Builder"
+            || name.ends_with("\\Query\\Builder")
+            || name == "Builder"
+        {
+            Some(Arc::new(query.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&class, &class_loader, None);
+    let lock = result
+        .methods
+        .iter()
+        .find(|m| m.name == "lockForUpdate")
+        .expect("lockForUpdate");
+    assert_eq!(lock.return_type_str().as_deref(), Some("$this"));
+
+    let new_query = result
+        .methods
+        .iter()
+        .find(|m| m.name == "newQuery")
+        .expect("newQuery");
+    assert_eq!(
+        new_query.return_type_str().as_deref(),
+        Some("$this"),
+        "explicit mixin-class return should rewrite to $this under ForwardsCalls"
+    );
+
+    let count = result
+        .methods
+        .iter()
+        .find(|m| m.name == "count")
+        .expect("count");
+    assert_eq!(
+        count.return_type_str().as_deref(),
+        Some("int"),
+        "non-self returns must pass through"
+    );
+}
+
+#[test]
 fn mixin_collects_from_ancestor_mixins() {
     let provider = PHPDocProvider;
     let mut class = make_class("Child");

@@ -3420,14 +3420,15 @@ fn resolve_rhs_method_call_inner<'b>(
             // and the receiver was resolved with generic parameters,
             // use the receiver's full type (e.g. `Builder<Article>`)
             // for substitution so the generics are preserved.
+            let owner_key = owner.fqn();
             let receiver_type = if substituted.contains_self_ref() {
-                receiver_type_for_owner(&receiver_resolved, &owner.name)
+                receiver_type_for_owner(&receiver_resolved, &owner_key)
             } else {
                 None
             };
             match receiver_type {
                 Some(rt) => substituted.replace_self_with_type(&rt),
-                None => substituted.replace_self(&owner.fqn()),
+                None => substituted.replace_self(&owner_key),
             }
         });
 
@@ -3452,9 +3453,12 @@ fn resolve_rhs_method_call_inner<'b>(
             ctx.class_loader,
             &template_subs,
             Some(&arg_ty_resolver),
-            |ty| match receiver_type_for_owner(&receiver_resolved, &owner.name) {
-                Some(rt) => ty.replace_self_with_type(&rt),
-                None => ty.replace_self(&owner.fqn()),
+            |ty| {
+                let owner_key = owner.fqn();
+                match receiver_type_for_owner(&receiver_resolved, &owner_key) {
+                    Some(rt) => ty.replace_self_with_type(&rt),
+                    None => ty.replace_self(&owner_key),
+                }
             },
         );
 
@@ -3698,25 +3702,37 @@ fn expand_union_generic_owners(
 /// Find the receiver's type string that matches the given owner class name.
 ///
 /// Scans `receiver_resolved` for a `ResolvedType` whose `class_info`
-/// name matches `owner_name` and whose `type_string` is a `Generic`
-/// (i.e. carries generic parameters like `Builder<Article>`).  Returns
-/// the matching `PhpType` so that `replace_self_with_type` can preserve
-/// those generic parameters when the method returns `static`/`self`/`$this`.
+/// matches `owner_name` (short name or FQN) and whose `type_string` is a
+/// `Generic` (i.e. carries generic parameters like `Builder<Article>`).
+/// Returns the matching `PhpType` so that `replace_self_with_type` can
+/// preserve those generic parameters when the method returns
+/// `static`/`self`/`$this`.
+///
+/// Matching by short name alone is ambiguous for Laravel's dual
+/// `Eloquent\Builder` / `Query\Builder` classes; FQN is preferred when
+/// available so Query-mixin fluents like `lockForUpdate()` keep the
+/// Eloquent receiver's `Builder<TModel>` type.
 fn receiver_type_for_owner(
     receiver_resolved: &[ResolvedType],
     owner_name: &str,
 ) -> Option<PhpType> {
+    let owner_short = crate::util::short_name(owner_name);
+    let mut short_match = None;
     for rt in receiver_resolved {
-        let matches = rt
-            .class_info
-            .as_ref()
-            .is_some_and(|ci| ci.name == owner_name)
-            && matches!(rt.type_string, PhpType::Generic(_, _));
-        if matches {
+        let Some(ci) = rt.class_info.as_ref() else {
+            continue;
+        };
+        if !matches!(rt.type_string, PhpType::Generic(_, _)) {
+            continue;
+        }
+        if ci.fqn().as_str() == owner_name || ci.name.as_str() == owner_name {
             return Some(rt.type_string.clone());
         }
+        if short_match.is_none() && ci.name.as_str() == owner_short {
+            short_match = Some(rt.type_string.clone());
+        }
     }
-    None
+    short_match
 }
 
 /// Resolve a method's PHPStan conditional return type against the call-site
