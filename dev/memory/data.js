@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784675854444,
+  "lastUpdate": 1784688852963,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18053,6 +18053,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 113.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f7edebdef4c51e438c167d8a054c571ba1daa29c",
+          "message": "Eloquent models always expose their primary key",
+          "timestamp": "2026-07-22T04:38:22+02:00",
+          "tree_id": "0dc40e9ef3a3aced0a6ee1b7f08556dd6efe1afa",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f7edebdef4c51e438c167d8a054c571ba1daa29c"
+        },
+        "date": 1784688850412,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 54.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 110.5,
             "unit": "MiB"
           }
         ]
