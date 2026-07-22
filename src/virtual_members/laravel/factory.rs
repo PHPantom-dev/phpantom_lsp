@@ -338,7 +338,11 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
         cache: Option<&crate::virtual_members::ResolvedClassCache>,
     ) -> VirtualMembers {
         let mut methods = build_factory_model_methods(class, class_loader);
-        methods.extend(build_factory_relationship_methods(class, class_loader, cache));
+        methods.extend(build_factory_relationship_methods(
+            class,
+            class_loader,
+            cache,
+        ));
         VirtualMembers {
             methods,
             properties: Vec::new(),

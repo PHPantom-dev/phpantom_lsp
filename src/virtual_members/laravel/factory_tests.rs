@@ -293,9 +293,10 @@ fn factory_provider_synthesizes_has_and_for_relationship_methods() {
     model
         .methods
         .push(Arc::new(make_method("posts", Some("HasMany<Post, $this>"))));
-    model
-        .methods
-        .push(Arc::new(make_method("author", Some("BelongsTo<User, $this>"))));
+    model.methods.push(Arc::new(make_method(
+        "author",
+        Some("BelongsTo<User, $this>"),
+    )));
 
     let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\User" {
@@ -308,7 +309,11 @@ fn factory_provider_synthesizes_has_and_for_relationship_methods() {
     let result = provider.provide(&factory, &loader, None);
 
     // has{Relationship} for each relationship, returning the factory itself.
-    let has_posts = result.methods.iter().find(|m| m.name == "hasPosts").unwrap();
+    let has_posts = result
+        .methods
+        .iter()
+        .find(|m| m.name == "hasPosts")
+        .unwrap();
     assert!(!has_posts.is_static);
     assert_eq!(has_posts.return_type_str().as_deref(), Some("static"));
     assert_eq!(has_posts.parameters.len(), 2);
@@ -317,7 +322,11 @@ fn factory_provider_synthesizes_has_and_for_relationship_methods() {
     assert!(result.methods.iter().any(|m| m.name == "hasAuthor"));
 
     // for{Relationship} for each relationship, single optional $state param.
-    let for_author = result.methods.iter().find(|m| m.name == "forAuthor").unwrap();
+    let for_author = result
+        .methods
+        .iter()
+        .find(|m| m.name == "forAuthor")
+        .unwrap();
     assert!(!for_author.is_static);
     assert_eq!(for_author.return_type_str().as_deref(), Some("static"));
     assert_eq!(for_author.parameters.len(), 1);
