@@ -81,6 +81,16 @@ namespace Illuminate\\Database\\Eloquent\\Relations;
 class MorphTo {}
 ";
 
+const PIVOT_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Relations;
+use Illuminate\\Database\\Eloquent\\Model;
+class Pivot extends Model {
+    /** @return array<string, mixed> */
+    public function getAttributes(): array { return []; }
+}
+";
+
 const MORPH_ONE_PHP: &str = "\
 <?php
 namespace Illuminate\\Database\\Eloquent\\Relations;
@@ -396,6 +406,7 @@ fn framework_stubs() -> Vec<(&'static str, &'static str)> {
             "vendor/illuminate/Eloquent/Relations/MorphTo.php",
             MORPH_TO_PHP,
         ),
+        ("vendor/illuminate/Eloquent/Relations/Pivot.php", PIVOT_PHP),
         (
             "vendor/illuminate/Eloquent/Relations/MorphOne.php",
             MORPH_ONE_PHP,
@@ -779,6 +790,58 @@ class UserService {
         !props.contains(&"posts"),
         "'posts' should NOT be synthesized on non-Model class, got: {:?}",
         props
+    );
+    assert!(
+        !props.contains(&"pivot"),
+        "'pivot' should NOT be synthesized on non-Model class, got: {:?}",
+        props
+    );
+}
+
+// ─── $pivot attribute is synthesized on every model and chains to Pivot ──────
+
+#[tokio::test]
+async fn test_pivot_property_appears_on_model_and_chains_to_pivot() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    public function test() {
+        $user = new User();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    // `$user->` should offer the synthesized `pivot` attribute.
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 6, 15).await;
+    let props = property_names(&items);
+    assert!(
+        props.contains(&"pivot"),
+        "every model should expose a 'pivot' attribute, got: {:?}",
+        props
+    );
+
+    // `$user->pivot->` should resolve to the Pivot class members.
+    let chained = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    public function test() {
+        $user = new User();
+        $user->pivot->
+    }
+}
+";
+    let items = complete_at(&backend, &dir, "src/Models/User.php", chained, 6, 22).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getAttributes"),
+        "'$user->pivot' should resolve to the Pivot class, got methods: {:?}",
+        methods
     );
 }
 
