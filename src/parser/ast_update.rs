@@ -179,14 +179,36 @@ impl Backend {
             return false;
         }
 
+        // Drop any result whose file is currently open in the editor. This
+        // batch comes from a background/workspace parse that read the file
+        // straight from disk (or from a pre-edit buffer snapshot); the open
+        // buffer's own `did_change` -> `update_ast` has already published
+        // newer state for it. Publishing the stale batch result here would
+        // clobber that state and leave hover, diagnostics, and references
+        // computed from pre-edit content until the next keystroke. Open
+        // buffers are always kept fresh by `did_change`, so skipping them
+        // here loses nothing.
+        let open_uris = self.open_files.read();
+
         let mut updates = Vec::new();
         let mut failures = Vec::new();
         for result in results {
             match result {
-                AstIndexParseResult::Update(update) => updates.push(update),
-                AstIndexParseResult::ParseFailed { uri, errors } => failures.push((uri, errors)),
+                AstIndexParseResult::Update(update) => {
+                    if open_uris.contains_key(&update.uri) {
+                        continue;
+                    }
+                    updates.push(update);
+                }
+                AstIndexParseResult::ParseFailed { uri, errors } => {
+                    if open_uris.contains_key(&uri) {
+                        continue;
+                    }
+                    failures.push((uri, errors));
+                }
             }
         }
+        drop(open_uris);
 
         if !failures.is_empty() {
             let mut parse_errors = self.parse_errors.write();
@@ -1659,6 +1681,68 @@ mod tests {
         assert!(
             changed,
             "Class method return type change must still be detected"
+        );
+    }
+
+    /// A background/workspace parse batch must not clobber the state of a
+    /// file that is currently open in the editor. The open buffer's own
+    /// `update_ast` has already published newer (post-edit) state; the
+    /// batch result was parsed from stale disk content and must be skipped.
+    #[test]
+    fn batch_publish_skips_open_files() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Widget.php";
+
+        // The editor buffer has been edited: method `edited` exists.
+        let edited = "<?php\nclass Widget {\n    public function edited(): int { return 1; }\n}\n";
+        backend.update_ast(uri, edited);
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(edited.to_string()));
+
+        // A background index parses the file straight from disk, where it
+        // still has the pre-edit method `stale`.
+        let stale = "<?php\nclass Widget {\n    public function stale(): int { return 1; }\n}\n";
+        let result = backend.parse_ast_index_update_for_index(uri, stale);
+        backend.apply_ast_index_parse_results_batch(vec![result]);
+
+        // The open buffer's state must survive: the class still exposes
+        // `edited`, not the stale `stale`.
+        let classes = backend.uri_classes_index.read();
+        let widget = classes
+            .get(uri)
+            .and_then(|c| c.first())
+            .expect("Widget class should still be indexed");
+        assert!(
+            widget.methods.iter().any(|m| m.name == "edited"),
+            "open buffer's edited method must survive the batch publish"
+        );
+        assert!(
+            !widget.methods.iter().any(|m| m.name == "stale"),
+            "stale disk parse must not clobber the open buffer"
+        );
+    }
+
+    /// The open-file skip must not affect files that are not open: a
+    /// background parse of an unopened file still publishes normally.
+    #[test]
+    fn batch_publish_applies_unopened_files() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Gadget.php";
+
+        let content = "<?php\nclass Gadget {\n    public function run(): int { return 1; }\n}\n";
+        let result = backend.parse_ast_index_update_for_index(uri, content);
+        backend.apply_ast_index_parse_results_batch(vec![result]);
+
+        let classes = backend.uri_classes_index.read();
+        let gadget = classes
+            .get(uri)
+            .and_then(|c| c.first())
+            .expect("unopened Gadget class should be indexed by the batch");
+        assert!(
+            gadget.methods.iter().any(|m| m.name == "run"),
+            "unopened file must publish normally"
         );
     }
 
