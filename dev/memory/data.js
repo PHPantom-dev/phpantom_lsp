@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784729297058,
+  "lastUpdate": 1784729525880,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18427,6 +18427,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 110.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "87ef7827ea8eab3ff1158bb46c24a0403ddcfb0f",
+          "message": "feat: support Carbon trait-based mixin() registrations\n\nCarbon supports mixing in traits via `mixin(Trait::class)` since\nv2.23.0, where each public method of the trait becomes a method on\nthe target directly using its own signature. This is distinct from\nLaravel class-based mixins, where each mixin method is a factory that\nreturns the closure to register.\n\nThe mixin scanner now handles `Statement::Trait` in addition to\n`Statement::Class` when synthesizing macros from a mixin source file.\nClass mixins keep the existing closure-factory behavior. Trait mixins\nalways use the trait method signature directly, including methods that\nreturn `Closure`, because Carbon mixes the trait implementation into\nthe target instead of invoking the method as a closure factory.\n\nThis also confirms that Carbon `macro()` calls work through the same\ngeneric `X::macro(name, closure)` pipeline as Laravel Macroable.\n\nAdds unit tests for trait direct methods, Closure-returning trait\nmethods, method filtering, FQN matching, and Carbon macro/mixin\nextraction, plus integration tests for completion and diagnostics.\nAdds Carbon mixin/macro examples to the Laravel example project.",
+          "timestamp": "2026-07-22T08:55:54-05:00",
+          "tree_id": "f3530c0765d2d4dc072efd9b9533ddeec8c79ab7",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/87ef7827ea8eab3ff1158bb46c24a0403ddcfb0f"
+        },
+        "date": 1784729523232,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 53.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 107.2,
             "unit": "MiB"
           }
         ]
