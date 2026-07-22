@@ -17,12 +17,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::types::{ClassInfo, PropertyInfo, PropertySource, ELOQUENT_PIVOT_FQN};
 use crate::php_type::PhpType;
+use crate::types::{ClassInfo, ELOQUENT_PIVOT_FQN, PropertyInfo, PropertySource};
 
 use super::relationships::{
-    classify_relationship_typed, extract_pivot_type_typed, extract_related_type_typed,
-    is_pivot_relationship, resolve_related_fqn, RelationshipKind,
+    RelationshipKind, classify_relationship_typed, extract_pivot_type_typed,
+    extract_related_type_typed, is_pivot_relationship, resolve_related_fqn,
 };
 
 /// Project-wide map from a related-model FQN to the pivot type exposed on its

@@ -132,6 +132,7 @@ use accessors::{
 };
 pub(crate) use where_property::where_property_method_to_column;
 
+pub(crate) use pivots::{LaravelPivotIndex, build_pivot_index, inject_pivot};
 pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
@@ -143,7 +144,6 @@ use relationships::{
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
 };
-pub(crate) use pivots::{LaravelPivotIndex, build_pivot_index, inject_pivot};
 
 pub use scopes::build_scope_methods_for_builder;
 use scopes::{build_scope_methods, is_scope_method};

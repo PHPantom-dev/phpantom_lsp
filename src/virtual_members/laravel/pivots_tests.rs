@@ -189,7 +189,11 @@ fn inject_respects_declared_pivot() {
             Some(&PhpType::Named("App\\Models\\Custom".to_string())),
         ));
     let out = inject_pivot(&index, Arc::new(permission_with_pivot));
-    let pivots: Vec<_> = out.properties.iter().filter(|p| p.name == "pivot").collect();
+    let pivots: Vec<_> = out
+        .properties
+        .iter()
+        .filter(|p| p.name == "pivot")
+        .collect();
     assert_eq!(pivots.len(), 1, "declared pivot is not duplicated");
     assert_eq!(
         pivots[0].type_hint_str().as_deref(),

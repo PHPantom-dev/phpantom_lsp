@@ -267,9 +267,7 @@ impl Backend {
             let classes: Vec<(String, Arc<ClassInfo>)> = {
                 let idx = self.uri_classes_index.read();
                 idx.iter()
-                    .flat_map(|(uri, list)| {
-                        list.iter().map(move |c| (uri.clone(), Arc::clone(c)))
-                    })
+                    .flat_map(|(uri, list)| list.iter().map(move |c| (uri.clone(), Arc::clone(c))))
                     .collect()
             };
             let loader = |name: &str| self.find_or_load_class(name);
