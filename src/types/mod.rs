@@ -774,6 +774,15 @@ pub enum PropertySource {
     RelationshipCount {
         relationship: String,
     },
+    /// The `$pivot` attribute synthesized on every Eloquent model.
+    ///
+    /// Related models accessed through a `belongsToMany`/`morphToMany`
+    /// relationship gain a `$pivot` instance at runtime.  Because member
+    /// resolution is keyed only on class FQN, we cannot tell whether a
+    /// given instance was reached through such a relationship, so the
+    /// property is attached to every model as a lenient over-approximation
+    /// (mirroring how `*_count` is emitted unconditionally).
+    Pivot,
 }
 
 impl PropertyInfo {
@@ -2122,6 +2131,13 @@ impl FileContext {
 /// Used by the `LaravelModelProvider` to detect and replace collection
 /// return types when a model declares a custom collection class.
 pub const ELOQUENT_COLLECTION_FQN: &str = "Illuminate\\Database\\Eloquent\\Collection";
+
+/// The fully-qualified name of the Eloquent `Pivot` class.
+///
+/// Used by the `LaravelModelProvider` to type the synthesized `$pivot`
+/// attribute that appears on models reached through a many-to-many
+/// (`belongsToMany` / `morphToMany`) relationship.
+pub const ELOQUENT_PIVOT_FQN: &str = "Illuminate\\Database\\Eloquent\\Relations\\Pivot";
 
 // ─── Recursion Depth Limits ─────────────────────────────────────────────────
 //
