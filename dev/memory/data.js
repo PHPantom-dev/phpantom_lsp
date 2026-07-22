@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784730337598,
+  "lastUpdate": 1784730615122,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18495,6 +18495,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 110.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "c0ffa26d147176b5e58d582042e6f25bbd83b4e8",
+          "message": "feat: support phpstan require-implements trait bounds\n\nTraits annotated with `@phpstan-require-implements InterfaceName`\nnow resolve `$this` against the required interface while editing the\ntrait itself. This mirrors the existing `@phpstan-require-extends`\nsupport for required base classes and makes required interface\nmethods available in completion, hover, and member resolution.\n\n`require_implements` is stored as a list on `ClassInfo` because a\nclass can implement multiple interfaces and traits may declare multiple\nrequire-implements tags. The parser extracts phpstan, psalm, and bare\nrequire-implements variants, and post-processing resolves them to fully\nqualified names alongside other class-like references.",
+          "timestamp": "2026-07-22T09:14:33-05:00",
+          "tree_id": "ae4f4a0590f7d3c8cbc1a7a73a504b19198f621c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c0ffa26d147176b5e58d582042e6f25bbd83b4e8"
+        },
+        "date": 1784730612590,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 55.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 111.6,
             "unit": "MiB"
           }
         ]
