@@ -671,3 +671,176 @@ class StrMixin {
         .collect();
     assert_eq!(names, vec!["yes".to_string()]);
 }
+
+// ─── Trait-based mixin() (Carbon pattern) ───────────────────────────────────
+
+#[test]
+fn synthesizes_macros_from_trait_mixin_direct_methods() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+
+use Carbon\CarbonInterface;
+
+trait TimezoneMixin {
+    public function toTz(string $tz, bool $shift = false): CarbonInterface
+    {
+        return $shift
+            ? $this->shiftTimezone($tz)
+            : $this->timezone($tz);
+    }
+
+    public function toAppTz(bool $shift = false): CarbonInterface
+    {
+        return $this->toTz(config('app.timezone'), $shift);
+    }
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\TimezoneMixin",
+        "file:///app/Mixins/TimezoneMixin.php",
+        "Carbon\\CarbonImmutable",
+        None,
+    );
+    assert_eq!(regs.len(), 2);
+
+    let to_tz = regs
+        .iter()
+        .find(|r| r.method.name.as_str() == "toTz")
+        .unwrap();
+    assert_eq!(to_tz.target, "Carbon\\CarbonImmutable");
+    assert_eq!(to_tz.method.parameters.len(), 2);
+    assert_eq!(to_tz.method.parameters[0].name.as_str(), "$tz");
+    assert_eq!(to_tz.method.parameters[1].name.as_str(), "$shift");
+    assert!(to_tz.method.is_macro);
+    assert_eq!(
+        to_tz.definition_uri.as_deref(),
+        Some("file:///app/Mixins/TimezoneMixin.php")
+    );
+
+    let to_app = regs
+        .iter()
+        .find(|r| r.method.name.as_str() == "toAppTz")
+        .unwrap();
+    assert_eq!(to_app.method.parameters.len(), 1);
+}
+
+#[test]
+fn trait_mixin_uses_direct_signature_even_when_returning_closure() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+use Closure;
+
+trait HybridMixin {
+    public function returnsClosure(): Closure {
+        return function (string $value): string {
+            return strtoupper($value);
+        };
+    }
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\HybridMixin",
+        "file:///m.php",
+        "Carbon\\CarbonImmutable",
+        None,
+    );
+    assert_eq!(regs.len(), 1);
+    let reg = &regs[0];
+    assert_eq!(reg.method.name.as_str(), "returnsClosure");
+    assert_eq!(reg.method.parameters.len(), 0);
+    assert_eq!(
+        reg.method.return_type.as_ref().map(|t| t.to_string()),
+        Some("Closure".to_string()),
+        "trait mixins should use the trait method's own return type, not a returned closure"
+    );
+}
+
+#[test]
+fn trait_mixin_skips_private_static_abstract_magic_methods() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+
+trait FilteredMixin {
+    public function ok(): int { return 1; }
+    private function secret(): int { return 2; }
+    public static function boot(): void {}
+    public function __construct() {}
+    abstract public function nope(): int;
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\FilteredMixin",
+        "file:///m.php",
+        "Carbon\\CarbonImmutable",
+        None,
+    );
+    let names: Vec<_> = regs
+        .iter()
+        .map(|r| r.method.name.as_str().to_string())
+        .collect();
+    assert_eq!(names, vec!["ok".to_string()]);
+}
+
+#[test]
+fn trait_mixin_ignores_other_traits_in_file() {
+    let mixin = r#"<?php
+namespace App\Mixins;
+
+trait Other {
+    public function nope(): int { return 1; }
+}
+trait TargetMixin {
+    public function yes(): int { return 1; }
+}
+"#;
+    let regs = synthesize_mixin_macros(
+        mixin,
+        "App\\Mixins\\TargetMixin",
+        "file:///m.php",
+        "Carbon\\CarbonImmutable",
+        None,
+    );
+    let names: Vec<_> = regs
+        .iter()
+        .map(|r| r.method.name.as_str().to_string())
+        .collect();
+    assert_eq!(names, vec!["yes".to_string()]);
+}
+
+#[test]
+fn carbon_macro_registration_works() {
+    let content = r#"<?php
+namespace App\Providers;
+use Carbon\CarbonImmutable;
+class AppServiceProvider {
+    public function boot(): void {
+        CarbonImmutable::macro('diffFromYear', function (int $year, bool $absolute = false): string {
+            return '';
+        });
+    }
+}
+"#;
+    let regs = extract_macro_registrations(content, None);
+    assert_eq!(regs.len(), 1);
+    assert_eq!(regs[0].target, "Carbon\\CarbonImmutable");
+    assert_eq!(regs[0].method.name.as_str(), "diffFromYear");
+    assert_eq!(regs[0].method.parameters.len(), 2);
+    assert_eq!(regs[0].method.parameters[0].name.as_str(), "$year");
+    assert_eq!(regs[0].method.parameters[1].name.as_str(), "$absolute");
+}
+
+#[test]
+fn carbon_mixin_registration_with_trait() {
+    let content = r#"<?php
+use Carbon\CarbonImmutable;
+use App\Mixins\TimezoneMixin;
+CarbonImmutable::mixin(TimezoneMixin::class);
+"#;
+    let regs = extract_mixin_registrations(content);
+    assert_eq!(regs.len(), 1);
+    assert_eq!(regs[0].target, "Carbon\\CarbonImmutable");
+    assert_eq!(regs[0].mixin_fqn, "App\\Mixins\\TimezoneMixin");
+}

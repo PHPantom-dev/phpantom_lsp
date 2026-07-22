@@ -1490,3 +1490,281 @@ class Consumer {
         markup.value
     );
 }
+
+// ─── Trait-based mixin() (Carbon pattern) ───────────────────────────────────
+
+const TRAIT_MIXIN_COMPOSER_JSON: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "Carbon\\": "vendor/carbon/Carbon/"
+        }
+    }
+}"#;
+
+const CARBON_IMMUTABLE_PHP: &str = "\
+<?php
+namespace Carbon;
+class CarbonImmutable {
+    public function shiftTimezone(string $tz): CarbonImmutable { return $this; }
+    public function timezone(string $tz): CarbonImmutable { return $this; }
+    public function format(string $f): string { return ''; }
+}
+";
+
+const CARBON_INTERFACE_PHP: &str = "\
+<?php
+namespace Carbon;
+interface CarbonInterface {}
+";
+
+const TRAIT_MIXIN_PROVIDER_PHP: &str = "\
+<?php
+namespace App\\Providers;
+use Carbon\\CarbonImmutable;
+use App\\Mixins\\DateMixin;
+class AppServiceProvider {
+    public function boot(): void {
+        CarbonImmutable::mixin(DateMixin::class);
+    }
+}
+";
+
+const DATE_TRAIT_MIXIN_PHP: &str = "\
+<?php
+namespace App\\Mixins;
+
+use Carbon\\CarbonInterface;
+
+trait DateMixin {
+    public function toTz(string $tz, bool $shift = false): CarbonInterface
+    {
+        return $shift
+            ? $this->shiftTimezone($tz)
+            : $this->timezone($tz);
+    }
+
+    public function toAppTz(bool $shift = false): CarbonInterface
+    {
+        return $this->toTz(config('app.timezone'), $shift);
+    }
+}
+";
+
+#[tokio::test]
+async fn trait_mixin_macro_appears_in_completion() {
+    let consumer = "\
+<?php
+namespace App;
+use Carbon\\CarbonImmutable;
+class Consumer {
+    public function go(CarbonImmutable $date): void {
+        $date->
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        TRAIT_MIXIN_COMPOSER_JSON,
+        &[
+            (
+                "vendor/carbon/Carbon/CarbonImmutable.php",
+                CARBON_IMMUTABLE_PHP,
+            ),
+            (
+                "vendor/carbon/Carbon/CarbonInterface.php",
+                CARBON_INTERFACE_PHP,
+            ),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            (
+                "src/Providers/AppServiceProvider.php",
+                TRAIT_MIXIN_PROVIDER_PHP,
+            ),
+            ("src/Mixins/DateMixin.php", DATE_TRAIT_MIXIN_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result.expect("completion should return results") {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"toTz"),
+        "trait mixin method should appear in completion, got: {names:?}"
+    );
+    assert!(
+        names.contains(&"toAppTz"),
+        "trait mixin method should appear in completion, got: {names:?}"
+    );
+    assert!(
+        names.contains(&"format"),
+        "real methods should still appear, got: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn trait_mixin_macro_call_is_not_flagged() {
+    let consumer = "\
+<?php
+namespace App;
+use Carbon\\CarbonImmutable;
+use Carbon\\CarbonInterface;
+class Consumer {
+    public function go(CarbonImmutable $date): CarbonInterface {
+        return $date->toTz('UTC');
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        TRAIT_MIXIN_COMPOSER_JSON,
+        &[
+            (
+                "vendor/carbon/Carbon/CarbonImmutable.php",
+                CARBON_IMMUTABLE_PHP,
+            ),
+            (
+                "vendor/carbon/Carbon/CarbonInterface.php",
+                CARBON_INTERFACE_PHP,
+            ),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            (
+                "src/Providers/AppServiceProvider.php",
+                TRAIT_MIXIN_PROVIDER_PHP,
+            ),
+            ("src/Mixins/DateMixin.php", DATE_TRAIT_MIXIN_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = "file:///src/Consumer.php";
+    open(&backend, uri, consumer).await;
+    backend.update_ast(uri, consumer);
+    let mut diagnostics = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, consumer, &mut diagnostics);
+
+    let members: Vec<&str> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+        })
+        .map(|d| d.message.as_str())
+        .collect();
+
+    assert!(
+        members.is_empty(),
+        "trait mixin method call should not be flagged as unknown, got: {members:?}"
+    );
+}
+
+#[tokio::test]
+async fn carbon_macro_registration_appears_in_completion() {
+    let provider = "\
+<?php
+namespace App\\Providers;
+use Carbon\\CarbonImmutable;
+class AppServiceProvider {
+    public function boot(): void {
+        CarbonImmutable::macro('diffFromYear', function (int $year): string {
+            return '';
+        });
+    }
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Carbon\\CarbonImmutable;
+class Consumer {
+    public function go(CarbonImmutable $date): void {
+        $date->
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        TRAIT_MIXIN_COMPOSER_JSON,
+        &[
+            (
+                "vendor/carbon/Carbon/CarbonImmutable.php",
+                CARBON_IMMUTABLE_PHP,
+            ),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/AppServiceProvider.php", provider),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result.expect("completion should return results") {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        names.contains(&"diffFromYear"),
+        "Carbon macro should appear in completion, got: {names:?}"
+    );
+}
