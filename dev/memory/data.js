@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784698645737,
+  "lastUpdate": 1784726445551,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18291,6 +18291,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 111.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "kirnevartem30@gmail.com",
+            "name": "Arti",
+            "username": "AbyssWaIker"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "ccbc866ad94d98e5e6b64d0ebdf7ee742765918b",
+          "message": "Fix setup instruction for officiail php extension",
+          "timestamp": "2026-07-22T08:05:57-05:00",
+          "tree_id": "faf77704763d6107832e962b2d92694a03345644",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ccbc866ad94d98e5e6b64d0ebdf7ee742765918b"
+        },
+        "date": 1784726443785,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 55.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 109.4,
             "unit": "MiB"
           }
         ]
