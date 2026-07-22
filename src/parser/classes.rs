@@ -150,6 +150,7 @@ use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str, last_segment};
 use crate::docblock;
 use crate::types::*;
 use crate::virtual_members::laravel::infer_relationship_from_body;
+use crate::virtual_members::laravel::{extract_pivot_using, extract_with_pivot_columns};
 
 use super::{
     DeprecationInfo, DocblockCtx, extract_hint_type, extract_parameters, extract_property_info,
@@ -1007,6 +1008,61 @@ fn infer_relationship_from_method<'a>(
     infer_relationship_from_body(body_text)
 }
 
+/// Recover pivot configuration from `belongsToMany`/`morphToMany` relationship
+/// method bodies in a class.
+///
+/// Scans each concrete method body for a many-to-many builder call chained
+/// with `->using(CustomPivot::class)` and/or `->withPivot('col', …)`, and
+/// returns one [`PivotRelation`] per method that declares either. Methods
+/// without a many-to-many call, or without any pivot chain, are skipped.
+///
+/// Works from the method body text (via source offsets), so it covers both
+/// annotated relationships (`@return BelongsToMany<…>`) and un-annotated ones.
+fn extract_pivot_relations<'a>(
+    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    content: &str,
+) -> Vec<PivotRelation> {
+    let mut relations = Vec::new();
+    for member in members {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        let MethodBody::Concrete(block) = &method.body else {
+            continue;
+        };
+        let start = block.left_brace.start.offset as usize;
+        let end = block.right_brace.end.offset as usize;
+        if end > content.len() || start >= end {
+            continue;
+        }
+        let start = content.floor_char_boundary(start);
+        let end = content.floor_char_boundary(end);
+        let body = &content[start..end];
+
+        // `using`/`withPivot` only appear on many-to-many relationships;
+        // require the builder call so unrelated methods are not scanned.
+        if !body.contains("belongsToMany(")
+            && !body.contains("morphToMany(")
+            && !body.contains("morphedByMany(")
+        {
+            continue;
+        }
+
+        let using = extract_pivot_using(body);
+        let columns = extract_with_pivot_columns(body);
+        if using.is_none() && columns.is_empty() {
+            continue;
+        }
+
+        relations.push(PivotRelation {
+            method: String::from_utf8_lossy(method.name.value).into_owned(),
+            using,
+            columns,
+        });
+    }
+    relations
+}
+
 impl Backend {
     /// De-duplicate parsed class-likes by `(name, namespace)`, keeping the
     /// first declaration in source order.
@@ -1109,6 +1165,9 @@ impl Backend {
 
                     let casts_definitions =
                         extract_casts_definitions(class.members.iter(), content);
+
+                    let belongs_to_many_pivots =
+                        extract_pivot_relations(class.members.iter(), content);
 
                     let attributes_definitions =
                         extract_attributes_definitions(class.members.iter(), content);
@@ -1216,6 +1275,7 @@ impl Backend {
                             created_at_name,
                             updated_at_name,
                             custom_builder,
+                            belongs_to_many_pivots,
                         })),
                     });
 
