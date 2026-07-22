@@ -296,56 +296,6 @@ to subsequent code:
 This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than `if` + early return.
 
-#### L6. Factory `has*`/`for*` relationship methods
-
-**Impact: Low-Medium · Effort: Medium**
-
-Convenience for factory-heavy test suites. Without this, no completion
-after `->has` or `->for` on factory instances.
-
-Laravel's `Factory` class supports dynamic `has{Relationship}()` and
-`for{Relationship}()` calls via `__call()`.  For example,
-`UserFactory::new()->hasPosts(3)` checks that `posts` is a valid
-relationship on the `User` model, and
-`UserFactory::new()->forAuthor($state)` delegates to the `for()`
-method.
-
-```php
-UserFactory::new()->hasPosts(3)->create();     // works at runtime
-UserFactory::new()->forAuthor(['name' => 'J'])->create(); // works at runtime
-```
-
-The framework has no `@method` annotations for these — they are
-purely `__call` magic.  Larastan handles this in
-`ModelFactoryMethodsClassReflectionExtension`, which inspects the
-factory's `TModel` template type, checks whether the camelCase
-remainder (after stripping `has`/`for`) is a valid relationship
-method, and synthesizes the method reflection dynamically.
-
-Our `LaravelFactoryProvider` currently only synthesizes `create()`
-and `make()` methods.
-
-**Where to change:** In `LaravelFactoryProvider::provide`, after
-synthesizing `create()`/`make()`, load the associated model class.
-For each relationship method on the model, push a `has{Relationship}`
-and `for{Relationship}` virtual method (PascalCase of the method
-name) that returns `static` (i.e. the factory class itself).
-
-Larastan's `ModelFactoryMethodsClassReflectionExtension` reveals the
-exact parameter signatures to synthesize:
-
-- **`has{Rel}()`** — four overloads: no args, `int $count`,
-  `array|callable $state`, or `int $count, array|callable $state`.
-- **`for{Rel}()`** — two overloads: no args, or
-  `array|callable $state`.
-- **`trashed()`** — only synthesized when the model uses
-  `SoftDeletes`. No parameters, returns `static`.
-
-The strip-and-match algorithm: strip the `has`/`for` prefix, convert
-the remainder to camelCase, and check whether the model has a
-relationship method with that name. If not, the dynamic method is
-not offered.
-
 #### L7. `$pivot` property on BelongsToMany related models
 
 **Impact: Medium · Effort: Medium-High**
