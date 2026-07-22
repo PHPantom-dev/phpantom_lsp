@@ -239,19 +239,27 @@ and drowning the production code they sit next to.
 `Backend` (`new_test_with_stubs`, `update_ast`) and are integration
 tests by the project's own definition. `deprecated.rs` and
 `type_errors.rs` already follow the correct convention (zero inline
-tests, suites in `tests/integration/diagnostics_*.rs`) — extend it to:
+tests, suites in `tests/integration/diagnostics_*.rs`). The
+`argument_count.rs`, `unused_variables.rs`, `invalid_class_kind.rs`,
+`implementation_errors.rs`, `unknown_functions.rs`, and
+`syntax_errors.rs` blocks have been moved. Remaining:
 
-- `src/diagnostics/unknown_members/tests.rs` (5,294 lines, 217
+- `src/diagnostics/unknown_members/tests.rs` (5,705 lines, 217
   Backend uses). A parallel suite already exists at
-  `tests/integration/diagnostics_unknown_members.rs` (5,033 lines) —
+  `tests/integration/diagnostics_unknown_members.rs` (6,521 lines) —
   consolidate, checking for overlapping coverage while porting.
 - `src/diagnostics/undefined_variables.rs` (~1,563 test lines;
   `tests/integration/diagnostics_undefined_variables.rs` also
   already exists — same consolidation).
-- Inline blocks in `unknown_classes.rs` (~1,009), `argument_count.rs`
-  (~962), `unused_variables.rs` (~792), `invalid_class_kind.rs`
-  (~563), `implementation_errors.rs` (~493), `unknown_functions.rs`
-  (~446), `syntax_errors.rs` (~143).
+- `unknown_classes.rs` (~1,009 test lines). Blocked: ~10 of its 39
+  tests directly seed the resolver index (`fqn_uri_index`,
+  `class_not_found_cache`, `find_or_load_class`,
+  `util::path_to_uri` — all `pub(crate)`/private) to build cross-file
+  resolution scenarios without parsing. Moving them either exposes
+  core resolver internals publicly (encapsulation cost, test-only
+  benefit) or rewrites them onto a real PSR-4 tempdir workspace
+  (changes what they test). Decide the approach before moving; the
+  ~29 collector-only tests can move regardless.
 
 **Why it matters.** The file-size and test-placement checklist sections
 fail on these files every gate pass.
