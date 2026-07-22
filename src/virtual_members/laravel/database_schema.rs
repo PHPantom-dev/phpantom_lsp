@@ -934,13 +934,15 @@ pub fn database_type_to_php_type(database_type: &str, nullable: bool) -> PhpType
         .trim()
         .trim_matches('`')
         .trim_matches('"');
-    let ty = if base.contains("bigint")
-        || base.contains("int")
-        || base == "serial"
-        || base == "bigserial"
-        || base == "smallserial"
-        || base == "year"
-    {
+    // Postgres array types (`integer[]`, `text[]`, ...) must be matched
+    // before the scalar element checks below: the element name would
+    // otherwise fall into the `int`/`float`/`bool` branches (e.g.
+    // `integer[]` contains `int`) and lose the array-ness entirely.
+    let ty = if base.ends_with("[]") || base == "array" || base.contains("json") {
+        PhpType::array()
+    } else if is_boolean_database_type(base, &lower) {
+        PhpType::bool()
+    } else if is_integer_database_type(base) {
         PhpType::int()
     } else if base.contains("double")
         || base.contains("float")
@@ -949,10 +951,6 @@ pub fn database_type_to_php_type(database_type: &str, nullable: bool) -> PhpType
         || base.contains("numeric")
     {
         PhpType::float()
-    } else if base.contains("bool") || base == "bit" {
-        PhpType::bool()
-    } else if base.contains("json") || base.ends_with("[]") || base == "array" {
-        PhpType::array()
     } else {
         PhpType::string()
     };
@@ -961,6 +959,36 @@ pub fn database_type_to_php_type(database_type: &str, nullable: bool) -> PhpType
     } else {
         ty
     }
+}
+
+/// Whether a base SQL type is a boolean.
+///
+/// MySQL exposes `bool`/`boolean` as aliases for `tinyint(1)`, and
+/// Laravel's `$table->boolean()` emits exactly `tinyint(1)` in a schema
+/// dump, so a one-width tinyint is treated as a bool.  Wider tinyints
+/// (`tinyint(3)`, `tinyint(4)`, ...) remain integers.
+fn is_boolean_database_type(base: &str, lower: &str) -> bool {
+    base == "bool"
+        || base == "boolean"
+        || base == "bit"
+        || (base == "tinyint" && lower.contains("(1)"))
+}
+
+/// Whether a base SQL type is an integer.
+///
+/// `interval` and the spatial `point` family embed the substring `int`
+/// (e.g. `point` ends with `int`) but are not integers, so they are
+/// excluded before the broad substring test that catches `int`,
+/// `integer`, `bigint`, `int4`, and friends.
+fn is_integer_database_type(base: &str) -> bool {
+    if base == "interval" || base.contains("point") {
+        return false;
+    }
+    base.contains("int")
+        || base == "serial"
+        || base == "bigserial"
+        || base == "smallserial"
+        || base == "year"
 }
 
 fn apply_migration_file(index: &mut SchemaIndex, content: &str) {
@@ -1703,6 +1731,34 @@ fn skip_php_whitespace(input: &str, mut offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_type_to_php_type_maps_arrays_before_scalar_elements() {
+        // Postgres array types must resolve to `array`, not the scalar
+        // element type embedded in the name.
+        assert_eq!(database_type_to_php_type("integer[]", false), PhpType::array());
+        assert_eq!(database_type_to_php_type("bigint[]", false), PhpType::array());
+        assert_eq!(database_type_to_php_type("numeric[]", false), PhpType::array());
+        assert_eq!(database_type_to_php_type("boolean[]", false), PhpType::array());
+        assert_eq!(database_type_to_php_type("text[]", false), PhpType::array());
+    }
+
+    #[test]
+    fn database_type_to_php_type_does_not_treat_interval_as_int() {
+        // `interval` embeds "int" but is a string type.
+        assert_eq!(database_type_to_php_type("interval", false), PhpType::string());
+    }
+
+    #[test]
+    fn database_type_to_php_type_treats_tinyint_one_as_bool() {
+        // `$table->boolean()` renders as `tinyint(1)` in a MySQL dump.
+        assert_eq!(database_type_to_php_type("tinyint(1)", false), PhpType::bool());
+        // Wider tinyints stay integers.
+        assert_eq!(database_type_to_php_type("tinyint(3)", false), PhpType::int());
+        assert_eq!(database_type_to_php_type("tinyint", false), PhpType::int());
+        // Plain integer types are unaffected.
+        assert_eq!(database_type_to_php_type("bigint", false), PhpType::int());
+    }
 
     #[test]
     fn parses_postgres_create_table() {
