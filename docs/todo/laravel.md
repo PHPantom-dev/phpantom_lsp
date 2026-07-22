@@ -296,53 +296,6 @@ to subsequent code:
 This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than `if` + early return.
 
-#### L7. `$pivot` property on BelongsToMany related models
-
-**Impact: Medium · Effort: Medium-High**
-
-Pivot access is common in apps with many-to-many relationships.
-However, Larastan doesn't handle this either, and `@property` on
-custom Pivot classes covers most needs.
-
-When a model is accessed through a `BelongsToMany` (or `MorphToMany`)
-relationship, each related model instance gains a `$pivot` property at
-runtime that provides access to intermediate table columns.
-
-```php
-/** @return BelongsToMany<Role, $this> */
-public function roles(): BelongsToMany {
-    return $this->belongsToMany(Role::class)->withPivot('expires_at');
-}
-
-$user->roles->first()->pivot;           // Pivot instance — we know nothing about it
-$user->roles->first()->pivot->expires_at; // accessible at runtime, invisible to us
-```
-
-There are several layers of complexity here:
-
-1. **Basic `$pivot` property.** Related models accessed through a
-   `BelongsToMany` or `MorphToMany` relationship should have a `$pivot`
-   property typed as `\Illuminate\Database\Eloquent\Relations\Pivot`
-   (or the custom pivot class when `->using(CustomPivot::class)` is
-   used). We don't currently synthesize this property at all.
-
-2. **`withPivot()` columns.** The `withPivot('col1', 'col2')` call
-   declares which extra columns are available on the pivot object.
-   Tracking these requires parsing the relationship method body for
-   chained `withPivot` calls — similar in difficulty to the
-   `withCount` call-site problem (gap 5).
-
-3. **Custom pivot models (`using()`).** When `->using(OrderItem::class)`
-   is declared, the pivot is an instance of that custom class, which
-   may have its own properties, casts, and accessors. Detecting this
-   requires parsing the `->using()` call in the relationship body.
-
-Note: Larastan does **not** handle pivot properties either — the
-`$pivot` property comes from Laravel's own `@property` annotations on
-the `BelongsToMany` relationship stubs. If the user's stub set
-includes these annotations, it already works through our PHPDoc
-provider.
-
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
 **Impact: Low-Medium · Effort: Medium-High**
