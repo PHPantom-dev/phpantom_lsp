@@ -235,6 +235,7 @@ mod tests {
             mixins: Vec::new(),
             mixin_generics: Vec::new(),
             require_extends: None,
+            require_implements: Vec::new(),
             is_final: false,
             is_abstract: false,
             deprecation_message: None,

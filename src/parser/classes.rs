@@ -188,6 +188,8 @@ struct ClassDocblockInfo {
     mixin_generics: Vec<(Atom, Vec<PhpType>)>,
     /// Required base class from a `@phpstan-require-extends` tag (traits only).
     require_extends: Option<Atom>,
+    /// Required interfaces from `@phpstan-require-implements` tags (traits only).
+    require_implements: Vec<Atom>,
     /// URLs from `@link` and `@see` tags in the class-level docblock.
     links: Vec<String>,
     /// `@see` references from the class-level docblock.
@@ -259,6 +261,10 @@ fn extract_class_docblock<'a>(
         mixins,
         mixin_generics,
         require_extends: docblock::extract_require_extends_from_info(&info).map(|n| atom(&n)),
+        require_implements: docblock::extract_require_implements_from_info(&info)
+            .into_iter()
+            .map(|n| atom(&n))
+            .collect(),
         links: docblock::extract_link_urls_from_info(&info),
         see_refs: docblock::extract_see_references_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
@@ -1170,6 +1176,7 @@ impl Backend {
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
+                        require_implements: doc_info.require_implements,
                         is_final: class.modifiers.contains_final(),
                         is_abstract: class.modifiers.contains_abstract(),
                         deprecation_message: class_depr.message,
@@ -1290,6 +1297,7 @@ impl Backend {
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
+                        require_implements: doc_info.require_implements,
                         is_final: false,
                         is_abstract: false,
                         deprecation_message: iface_depr.message,
@@ -1378,6 +1386,7 @@ impl Backend {
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
+                        require_implements: doc_info.require_implements,
                         is_final: false,
                         is_abstract: false,
                         deprecation_message: trait_depr.message,
@@ -1515,6 +1524,7 @@ impl Backend {
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
+                        require_implements: doc_info.require_implements,
                         is_final: true,
                         is_abstract: false,
                         deprecation_message: enum_depr.message,
@@ -1717,6 +1727,7 @@ impl Backend {
             mixins: vec![],
             mixin_generics: vec![],
             require_extends: None,
+            require_implements: Vec::new(),
             is_final: false,
             is_abstract: false,
             deprecation_message: None,

@@ -323,6 +323,35 @@ pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> 
     None
 }
 
+/// Extract required interfaces from `@phpstan-require-implements`
+/// (or `@psalm-require-implements` / bare `@require-implements`) tags.
+///
+/// This tag appears on traits to declare that any using class must implement
+/// the named interface. Returns interface names as written (minus any generic
+/// arguments), resolved to fully-qualified names later during post-processing.
+pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> {
+    let mut out = Vec::new();
+    for tag in info.tags_by_kinds(&[
+        TagKind::RequireImplements,
+        TagKind::PhpstanRequireImplements,
+        TagKind::PsalmRequireImplements,
+    ]) {
+        let desc = tag.description.trim();
+        if desc.is_empty() {
+            continue;
+        }
+        let (type_token, _remainder) = split_type_token(desc);
+        let interface = match PhpType::parse(type_token) {
+            PhpType::Generic(name, _) | PhpType::Named(name) => name,
+            _ => continue,
+        };
+        if !interface.is_empty() {
+            out.push(interface);
+        }
+    }
+    out
+}
+
 /// Strip a leading `\` from a `PhpType` without a `to_string()` →
 /// `PhpType::parse()` round-trip.  Uses `resolve_names` which already
 /// walks the entire type structure recursively.

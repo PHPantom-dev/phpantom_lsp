@@ -1600,6 +1600,15 @@ pub struct ClassInfo {
     /// `None` when the trait has no such tag (or the declaration is not a
     /// trait).
     pub require_extends: Option<Atom>,
+    /// Required interfaces from `@phpstan-require-implements` tags.
+    ///
+    /// Only meaningful on traits. When a trait carries
+    /// `@phpstan-require-implements \Countable`, any class that uses the trait
+    /// must implement that interface, so inside the trait's methods `$this` has
+    /// access to the interface's members. Resolved to fully-qualified names
+    /// during post-processing (see `resolve_parent_class_names` in
+    /// `parser/ast_update.rs`).
+    pub require_implements: Vec<Atom>,
     /// Whether the class is declared `final`.
     ///
     /// Final classes cannot be extended, so `static::` is equivalent to
@@ -1883,6 +1892,7 @@ impl ClassInfo {
             || self.mixins != other.mixins
             || self.mixin_generics != other.mixin_generics
             || self.require_extends != other.require_extends
+            || self.require_implements != other.require_implements
             || self.is_final != other.is_final
             || self.is_abstract != other.is_abstract
             || self.deprecation_message != other.deprecation_message

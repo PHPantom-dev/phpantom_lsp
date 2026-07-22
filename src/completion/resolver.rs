@@ -523,21 +523,31 @@ fn resolve_target_classes_expr_inner_impl(
                     .collect()
             };
 
-            // A trait annotated `@phpstan-require-extends Base` guarantees
-            // that every class using the trait extends `Base`, so inside
-            // the trait's own methods `$this` can access `Base`'s members.
-            // PHPStan only ever analyzes traits in the context of a using
-            // class, but we analyze them standalone, so we resolve the
-            // required base class alongside the trait itself.
+            // A trait annotated `@phpstan-require-extends Base` or
+            // `@phpstan-require-implements Contract` guarantees that every
+            // class using the trait satisfies that bound, so inside the
+            // trait's own methods `$this` can access those members. PHPStan
+            // only ever analyzes traits in the context of a using class, but
+            // we analyze them standalone, so resolve the required types
+            // alongside the trait itself.
             if let Some(cc) = current_class
                 && cc.kind == ClassLikeKind::Trait
-                && let Some(ref required) = cc.require_extends
             {
-                let resolved = find_class_by_name(all_classes, required)
-                    .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
-                    .or_else(|| class_loader(required).map(ResolvedType::from_arc));
-                if let Some(rt) = resolved {
-                    ResolvedType::extend_unique(&mut this_types, vec![rt]);
+                if let Some(ref required) = cc.require_extends {
+                    let resolved = find_class_by_name(all_classes, required)
+                        .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
+                        .or_else(|| class_loader(required).map(ResolvedType::from_arc));
+                    if let Some(rt) = resolved {
+                        ResolvedType::extend_unique(&mut this_types, vec![rt]);
+                    }
+                }
+                for required in &cc.require_implements {
+                    let resolved = find_class_by_name(all_classes, required)
+                        .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
+                        .or_else(|| class_loader(required).map(ResolvedType::from_arc));
+                    if let Some(rt) = resolved {
+                        ResolvedType::extend_unique(&mut this_types, vec![rt]);
+                    }
                 }
             }
 
