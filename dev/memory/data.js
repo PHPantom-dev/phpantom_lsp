@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784744719112,
+  "lastUpdate": 1784745689890,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18801,6 +18801,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 162.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "dea4516d46a70b57d0c2b60e0935f5a9986b753f",
+          "message": "fix: seed mixed for untyped foreach loop values\n\nWhen the iterable has no known element type (e.g. an untyped\nparameter), foreach left $value with empty types. Assignments like\n$x = $value after $x = null were then no-ops, so is_null early-return\nnarrowing still saw pure null and flagged later uses.\n\nSeed mixed for undetermined foreach values, matching bare array\nhandling, so post-loop merge and null guards work.\n\nFixes #252.",
+          "timestamp": "2026-07-22T13:25:34-05:00",
+          "tree_id": "bbb939cebf2b802748992784b0af721c8d63ccf6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/dea4516d46a70b57d0c2b60e0935f5a9986b753f"
+        },
+        "date": 1784745688003,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 106.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 164.1,
             "unit": "MiB"
           }
         ]
