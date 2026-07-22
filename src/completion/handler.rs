@@ -348,6 +348,18 @@ impl Backend {
                 return Ok(self.complete_type_hint(&content, &th_ctx, &ctx, position, &uri));
             }
 
+            if crate::completion::context::override_completion::is_member_declaration_name_position_at_offset(
+                &content,
+                cursor_offset as usize,
+            ) {
+                if let Some(items) = self.try_method_override_completion(&content, position, &ctx)
+                    && !items.is_empty()
+                {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+                return Ok(None);
+            }
+
             // ── Named argument completion (collected, not short-circuited) ──
             // Named arg items are always valid alongside normal
             // completions, so collect them here and merge them into
@@ -1492,6 +1504,101 @@ impl Backend {
             return None;
         }
         Some(name.into_owned())
+    }
+
+    /// Suggest parent/interface members to override when typing a member
+    /// name in a class body (methods after `function`, constants after
+    /// `const`, properties after `$`).
+    fn try_method_override_completion(
+        &self,
+        content: &str,
+        position: Position,
+        ctx: &FileContext,
+    ) -> Option<Vec<CompletionItem>> {
+        use crate::completion::context::override_completion::{
+            NameOverrideCompletionOpts, build_constant_override_completions,
+            build_override_completions, build_property_override_completions,
+            collect_overridable_constants, collect_overridable_methods,
+            collect_overridable_properties, enclosing_class_at_position,
+            extract_method_name_partial, indent_for_position, is_after_const_keyword,
+            is_after_function_keyword, is_property_declaration_name_position, line_start_position,
+        };
+
+        let class = enclosing_class_at_position(&ctx.classes, content, position)?;
+        if !matches!(
+            class.kind,
+            crate::types::ClassLikeKind::Class | crate::types::ClassLikeKind::Trait
+        ) {
+            return None;
+        }
+        if class.parent_class.is_none() && class.interfaces.is_empty() {
+            return None;
+        }
+
+        let class_loader = self.class_loader(ctx);
+        let (partial, range) = extract_method_name_partial(content, position)?;
+
+        if is_after_function_keyword(content, position) {
+            let methods = collect_overridable_methods(class, &partial, &class_loader);
+            if methods.is_empty() {
+                return None;
+            }
+            let indent = indent_for_position(content, position, class);
+            let items = build_override_completions(
+                &methods,
+                &crate::completion::context::override_completion::OverrideCompletionOpts {
+                    use_map: &ctx.use_map,
+                    file_namespace: &ctx.namespace,
+                    indent: &indent,
+                    replace_range: range,
+                    php_version: self.php_version(),
+                    line_start: line_start_position(content, position),
+                },
+            );
+            return if items.is_empty() { None } else { Some(items) };
+        }
+
+        if is_after_const_keyword(content, position) {
+            let constants = collect_overridable_constants(class, &partial, &class_loader);
+            if constants.is_empty() {
+                return None;
+            }
+            let indent = indent_for_position(content, position, class);
+            let items = build_constant_override_completions(
+                &constants,
+                &NameOverrideCompletionOpts {
+                    use_map: &ctx.use_map,
+                    file_namespace: &ctx.namespace,
+                    indent: &indent,
+                    replace_range: range,
+                    php_version: self.php_version(),
+                    line_start: line_start_position(content, position),
+                },
+            );
+            return if items.is_empty() { None } else { Some(items) };
+        }
+
+        if is_property_declaration_name_position(content, position) {
+            let props = collect_overridable_properties(class, &partial, &class_loader);
+            if props.is_empty() {
+                return None;
+            }
+            let indent = indent_for_position(content, position, class);
+            let items = build_property_override_completions(
+                &props,
+                &NameOverrideCompletionOpts {
+                    use_map: &ctx.use_map,
+                    file_namespace: &ctx.namespace,
+                    indent: &indent,
+                    replace_range: range,
+                    php_version: self.php_version(),
+                    line_start: line_start_position(content, position),
+                },
+            );
+            return if items.is_empty() { None } else { Some(items) };
+        }
+
+        None
     }
 
     fn try_class_constant_function_completion(

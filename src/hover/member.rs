@@ -65,6 +65,7 @@ fn format_attribute_default_details(source: &AttributeDefaultSource) -> Vec<Stri
 
 pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
     match source {
+        PropertySource::DeclaredDefault { .. } => Vec::new(),
         PropertySource::DatabaseColumn {
             column,
             attribute_default,
@@ -642,7 +643,10 @@ impl Backend {
         }
 
         if let Some(ref source) = property.source {
-            lines.push(format_property_source(source).join("\n"));
+            let source_lines = format_property_source(source);
+            if !source_lines.is_empty() {
+                lines.push(source_lines.join("\n"));
+            }
         }
 
         if let Some(ref msg) = property.deprecation_message {

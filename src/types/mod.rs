@@ -742,6 +742,9 @@ pub struct AttributeDefaultSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PropertySource {
+    DeclaredDefault {
+        value: Box<str>,
+    },
     DatabaseColumn {
         column: DatabaseColumnSource,
         attribute_default: Option<AttributeDefaultSource>,

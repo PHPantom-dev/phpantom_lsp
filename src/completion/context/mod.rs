@@ -15,5 +15,6 @@ pub(crate) mod constant_completion;
 pub(crate) mod function_completion;
 pub(crate) mod keyword_completion;
 pub(crate) mod namespace_completion;
+pub(crate) mod override_completion;
 pub(crate) mod symbol_ranking;
 pub(crate) mod type_hint_completion;

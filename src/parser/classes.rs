@@ -2723,7 +2723,8 @@ impl Backend {
                     });
                 }
                 ClassLikeMember::Property(property) => {
-                    let mut prop_infos = extract_property_info(property);
+                    let mut prop_infos =
+                        extract_property_info(property, doc_ctx.map(|c| c.content));
 
                     // Extract the attribute lists from the property variant
                     // so we can check for #[Deprecated] below.
