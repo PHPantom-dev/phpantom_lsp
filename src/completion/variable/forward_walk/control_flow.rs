@@ -1309,12 +1309,17 @@ pub(crate) fn bind_foreach_value<'b>(
                 }
             }
         }
-        // Couldn't determine the element type.  Store empty in the
-        // scope so that `lookup_diagnostic_scope` returns
-        // `Some(vec![])` instead of `None`, preventing a pointless
-        // fallthrough to the backward scanner.
-        if !scope.contains(&var_name) {
-            scope.set_empty(&var_name);
+        // Couldn't determine the element type (untyped/unknown iterable).
+        // Seed `mixed` so body assignments like `$x = $value` after
+        // `$x = null` overwrite pure-null and participate in post-loop
+        // merge + `is_null` early-return narrowing.  Bare `array` is
+        // already seeded as `mixed` above; fully untyped parameters
+        // hit this path with `iter_type = None`.
+        if scope.get(&var_name).is_empty() {
+            scope.set(
+                &var_name,
+                vec![ResolvedType::from_type_string(PhpType::mixed())],
+            );
         }
     } else if let Expression::Array(_) | Expression::List(_) = value_expr {
         // Array/list destructuring in foreach: `foreach ($items as [$a, $b])`

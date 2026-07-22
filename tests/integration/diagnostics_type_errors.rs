@@ -2995,6 +2995,61 @@ function test(?int $val): void {
     );
 }
 
+#[test]
+fn no_diagnostic_null_init_foreach_untyped_array_is_null_guard() {
+    // Issue #252: untyped foreach iterable must still seed the loop
+    // value as mixed so `$x = $value` after `$x = null` is not a no-op,
+    // and `if (is_null($x)) return;` can strip null before the call.
+    let php = r#"<?php
+function non_nullable(int $y): void {}
+
+function x($array): void {
+    $x = null;
+
+    foreach ($array as $value) {
+        $x = $value;
+    }
+
+    if (is_null($x)) {
+        return;
+    }
+
+    non_nullable($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "untyped foreach + is_null early return should not leave $x as null, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_null_init_foreach_typed_array_is_null_guard() {
+    let php = r#"<?php
+function non_nullable(int $y): void {}
+
+function x(array $array): void {
+    $x = null;
+
+    foreach ($array as $value) {
+        $x = $value;
+    }
+
+    if (is_null($x)) {
+        return;
+    }
+
+    non_nullable($x);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "typed array foreach + is_null early return control case failed, got: {diags:?}"
+    );
+}
+
 // ─── Foreach variable reassignment should not leak into RHS ─────────────────
 
 #[test]
