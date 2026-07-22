@@ -1347,6 +1347,73 @@ fn require_extends_tag_absent() {
 }
 
 #[test]
+fn require_implements_tag_simple() {
+    let doc = concat!("/**\n", " * @phpstan-require-implements Countable\n", " */",);
+    assert_eq!(
+        extract_require_implements(doc),
+        vec!["Countable".to_string()]
+    );
+}
+
+#[test]
+fn require_implements_tag_fqn() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-implements \\App\\Contracts\\HasLogger\n",
+        " */",
+    );
+    assert_eq!(
+        extract_require_implements(doc),
+        vec!["\\App\\Contracts\\HasLogger".to_string()]
+    );
+}
+
+#[test]
+fn require_implements_tag_psalm_variant() {
+    let doc = concat!("/**\n", " * @psalm-require-implements HasLogger\n", " */",);
+    assert_eq!(
+        extract_require_implements(doc),
+        vec!["HasLogger".to_string()]
+    );
+}
+
+#[test]
+fn require_implements_tag_strips_generic_arguments() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-implements IteratorAggregate<int, string>\n",
+        " */",
+    );
+    assert_eq!(
+        extract_require_implements(doc),
+        vec!["IteratorAggregate".to_string()]
+    );
+}
+
+#[test]
+fn require_implements_tag_multiple() {
+    let doc = concat!(
+        "/**\n",
+        " * @phpstan-require-implements Countable\n",
+        " * @phpstan-require-implements \\App\\Contracts\\HasLogger\n",
+        " */",
+    );
+    assert_eq!(
+        extract_require_implements(doc),
+        vec![
+            "Countable".to_string(),
+            "\\App\\Contracts\\HasLogger".to_string()
+        ]
+    );
+}
+
+#[test]
+fn require_implements_tag_absent() {
+    let doc = concat!("/**\n", " * @mixin ShoppingCart\n", " */",);
+    assert_eq!(extract_require_implements(doc), Vec::<String>::new());
+}
+
+#[test]
 fn mixin_tag_fqn() {
     let doc = concat!("/**\n", " * @mixin \\App\\Models\\ShoppingCart\n", " */",);
     let mixins = extract_mixin_tags(doc);

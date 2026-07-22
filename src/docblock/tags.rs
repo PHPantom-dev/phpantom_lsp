@@ -328,7 +328,17 @@ pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> 
 ///
 /// This tag appears on traits to declare that any using class must implement
 /// the named interface. Returns interface names as written (minus any generic
-/// arguments), resolved to fully-qualified names later during post-processing.
+/// arguments), which are resolved to fully-qualified names later during
+/// post-processing. Returns an empty vector when no such tag is present.
+pub fn extract_require_implements(docblock: &str) -> Vec<String> {
+    match parse_docblock_for_tags(docblock) {
+        Some(info) => extract_require_implements_from_info(&info),
+        None => Vec::new(),
+    }
+}
+
+/// Like [`extract_require_implements`], but operates on a pre-parsed
+/// [`DocblockInfo`].
 pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> {
     let mut out = Vec::new();
     for tag in info.tags_by_kinds(&[
