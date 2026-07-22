@@ -360,7 +360,7 @@ impl Backend {
     /// `#[Override]`) rather than the method signature line, so we
     /// search the full span of the member declaration.
     fn find_visibility_diagnostic(&self, uri: &str, line_range: (u32, u32)) -> Option<Diagnostic> {
-        let cache = self.phpstan_last_diags.lock();
+        let cache = self.phpstan_tool.last_diags.lock();
         let diags = cache.get(uri)?;
         let (start_line, end_line) = line_range;
         diags

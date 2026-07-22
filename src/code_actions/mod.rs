@@ -458,7 +458,7 @@ impl Backend {
 
         let existing_diags = action.diagnostics.get_or_insert_with(Vec::new);
 
-        let cache = self.phpstan_last_diags.lock();
+        let cache = self.phpstan_tool.last_diags.lock();
         let cached = match cache.get(&data.uri) {
             Some(c) => c,
             None => return,
@@ -507,7 +507,7 @@ impl Backend {
     /// Remove specific diagnostics from the PHPStan cache after a
     /// quickfix has been applied via `codeAction/resolve`.
     fn clear_phpstan_diagnostics_after_resolve(&self, uri: &str, resolved_diags: &[Diagnostic]) {
-        let mut cache = self.phpstan_last_diags.lock();
+        let mut cache = self.phpstan_tool.last_diags.lock();
         if let Some(cached) = cache.get_mut(uri) {
             cached.retain(|cached_d| {
                 !resolved_diags.iter().any(|resolved_d| {

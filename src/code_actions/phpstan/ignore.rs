@@ -44,7 +44,7 @@ impl Backend {
         // Look at the diagnostics attached to this code action request
         // and also at all cached PHPStan diagnostics for the file.
         let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_last_diags.lock();
+            let cache = self.phpstan_tool.last_diags.lock();
             cache.get(uri).cloned().unwrap_or_default()
         };
 

@@ -588,10 +588,10 @@ impl LanguageServer for Backend {
         // Wake all workers so they see the flag immediately instead
         // of sleeping until the next edit arrives.
         self.diag_notify.notify_one();
-        self.phpstan_notify.notify_one();
-        self.phpcs_notify.notify_one();
-        self.mago_lint_notify.notify_one();
-        self.mago_analyze_notify.notify_one();
+        self.phpstan_tool.notify.notify_one();
+        self.phpcs_tool.notify.notify_one();
+        self.mago_lint_tool.notify.notify_one();
+        self.mago_analyze_tool.notify.notify_one();
         Ok(())
     }
 

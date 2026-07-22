@@ -218,14 +218,31 @@ Each item must include:
 
 `src/completion/source/helpers.rs` still has one `rfind`-based backward
 scanner: `extract_function_return_from_source` uses `rfind("/**")` backward
-to get a function's `@return` type when it is not yet in `global_functions`.
-This is a fallback for unindexed functions and is harder to replace than the
-closure/first-class-callable walkers that used to sit alongside it (those
-were eliminated by teaching `infer_closure_literal_type` in
-`rhs_resolution.rs` to produce a `PhpType::Callable` with an embedded return
-type for closures, arrow functions, and first-class callables alike). This
-one could be eliminated once all reachable functions are guaranteed to be
-indexed before resolution runs.
+to get a function's `@return` type. Its only call site
+(`rhs_resolution.rs`, guarded by `!loader_found`) fires when
+`resolve_function_name` fails to find the callee via `function_loader`.
+
+The blocker is **not** indexing completeness — `content` here is always
+the current file's own source text, so this scanner can only ever find
+same-file function definitions; it was never a fallback for a function
+in a different, un-indexed file. The actual gap is in
+`resolve_function_name` (`resolution.rs`): it builds candidates from a
+single `file_namespace` (the call site's own namespace block, from
+`FileContext::namespace` / `namespace_at_offset`), so in a multi-namespace
+file where the callee is declared under a *different* namespace block
+than the call site, none of the candidates match even though the
+function is already sitting in `global_functions` under its own FQN.
+
+`FileContext::resolve_name_at` already solves this correctly for other
+identifiers by consulting `resolved_names` (mago-names' per-offset
+resolution, which understands multiple namespace blocks). Eliminating
+this scanner means threading the call expression's byte offset through
+to `resolve_function_name` (or building an offset-aware variant) so it
+can try `ctx.resolve_name_at(name, offset)` as a candidate before
+falling back to the single-namespace guess. `function_loader` is bound
+once per `FileContext` today across ~30 call sites (completion, hover,
+definition, references, code actions), so this is a real refactor, not
+a one-line fix — file it as its own scoped task before attempting it.
 
 ---
 
@@ -476,23 +493,20 @@ sprawl as the feature continues to grow.
 
 ---
 
-## Group `Backend`'s 67 fields into sub-systems
+## Group `Backend`'s remaining fields into sub-systems
 
-**What to do.** `struct Backend` in `src/lib.rs` has 67 fields that
-cluster into implicit sub-systems. Highest value first:
+**What to do.** `struct Backend` in `src/lib.rs` still has fields that
+cluster into implicit sub-systems (the four external-tool field triples
+have already been consolidated into an `ExternalToolWorker` struct —
+`phpstan_tool`, `phpcs_tool`, `mago_lint_tool`, `mago_analyze_tool`):
 
-1. **`ExternalToolWorker` struct.** The four external tools each add an
-   identical `*_notify` / `*_pending_uri` / `*_last_diags` field triple
-   (phpstan, phpcs, mago_lint, mago_analyze). One reusable struct
-   removes twelve fields and makes adding the next tool (D10, PHPMD,
-   already scheduled) a one-field change.
-2. Diagnostic state (`diag_version`, `diag_notify`, `diag_pending_uris`,
+1. Diagnostic state (`diag_version`, `diag_notify`, `diag_pending_uris`,
    `diag_last_*`, `diag_result_ids`, `diag_suppressed`) →
    `DiagnosticState`.
-3. Symbol/class indexes (`uri_classes_index`, `fqn_class_index`,
+2. Symbol/class indexes (`uri_classes_index`, `fqn_class_index`,
    `fqn_uri_index`, `gti_index`, `method_store`, `global_functions`,
    …) → `SymbolIndex`.
-4. Workspace config (`workspace_root`, `psr4_mappings`, `vendor_*`,
+3. Workspace config (`workspace_root`, `psr4_mappings`, `vendor_*`,
    `php_version`, `config`) → `WorkspaceConfig`.
 
 **Why it matters.** Item 1 directly de-risks the scheduled D10 task;

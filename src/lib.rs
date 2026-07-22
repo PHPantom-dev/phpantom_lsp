@@ -268,6 +268,45 @@ impl LaravelStringKeyCache {
     }
 }
 
+/// Shared state for one external diagnostic tool's dedicated background
+/// worker (PHPStan, PHPCS, Mago lint, Mago analyze).
+///
+/// Each worker runs as its own task so that a slow external process never
+/// blocks native diagnostics or the other external tools. At most one
+/// process per tool runs at a time; if the user edits while it is running,
+/// `pending_uri` is overwritten and the worker picks up the newest file
+/// once the current run finishes (older requests are superseded, not
+/// queued — these tools are too slow to queue).
+pub(crate) struct ExternalToolWorker {
+    /// Wakes the worker task when a new URI is pending.
+    pub(crate) notify: Arc<tokio::sync::Notify>,
+    /// The single file URI the worker should analyse next.
+    pub(crate) pending_uri: Arc<Mutex<Option<String>>>,
+    /// Last-published diagnostics per file URI, merged into fast/slow
+    /// diagnostic publishes so results stay visible between tool runs.
+    pub(crate) last_diags: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+}
+
+impl ExternalToolWorker {
+    fn new() -> Self {
+        Self {
+            notify: Arc::new(tokio::sync::Notify::new()),
+            pending_uri: Arc::new(Mutex::new(None)),
+            last_diags: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+impl Clone for ExternalToolWorker {
+    fn clone(&self) -> Self {
+        Self {
+            notify: Arc::clone(&self.notify),
+            pending_uri: Arc::clone(&self.pending_uri),
+            last_diags: Arc::clone(&self.last_diags),
+        }
+    }
+}
+
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -674,73 +713,15 @@ pub struct Backend {
     /// unused variables) per file URI.  Used by `assemble_and_push` to
     /// merge fast results with other source caches without recomputing.
     pub(crate) diag_last_fast: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
-    /// Notification handle used to wake the PHPStan worker task.
-    ///
-    /// The PHPStan worker is a dedicated background task, separate from
-    /// the main diagnostic worker, because PHPStan is extremely slow
-    /// and resource-intensive.  Running it in its own task ensures that
-    /// native diagnostics (fast + slow phases) are never blocked by a
-    /// PHPStan invocation that may take tens of seconds.
-    ///
-    /// At most one PHPStan process runs at a time.  If the user edits
-    /// a file while PHPStan is running, the pending URI is updated and
-    /// the worker picks it up after the current run finishes.
-    pub(crate) phpstan_notify: Arc<tokio::sync::Notify>,
-    /// The single file URI that the PHPStan worker should analyse next.
-    ///
-    /// Only the most recent file is kept: if the user switches files or
-    /// edits rapidly, earlier requests are superseded.  This is
-    /// intentional — PHPStan is too slow to queue up multiple files.
-    pub(crate) phpstan_pending_uri: Arc<Mutex<Option<String>>>,
-    /// Last-published PHPStan diagnostics per file URI.
-    ///
-    /// The fast and slow diagnostic phases merge these cached results
-    /// into their publish calls so that PHPStan errors remain visible
-    /// while the user edits (without waiting for a fresh PHPStan run).
-    /// The PHPStan worker updates this cache after each successful run
-    /// and triggers a re-publish of the affected file.
-    pub(crate) phpstan_last_diags:
-        Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
-    /// Notification handle used to wake the PHPCS worker task.
-    ///
-    /// The PHPCS worker is a dedicated background task, separate from
-    /// the main diagnostic worker and the PHPStan worker, because PHPCS
-    /// is an external process that can take several seconds.  Running it
-    /// in its own task ensures that native diagnostics and PHPStan are
-    /// never blocked.
-    ///
-    /// At most one PHPCS process runs at a time.  If the user edits
-    /// a file while PHPCS is running, the pending URI is updated and
-    /// the worker picks it up after the current run finishes.
-    pub(crate) phpcs_notify: Arc<tokio::sync::Notify>,
-    /// The single file URI that the PHPCS worker should analyse next.
-    ///
-    /// Only the most recent file is kept: if the user switches files or
-    /// edits rapidly, earlier requests are superseded.  This is
-    /// intentional — PHPCS is too slow to queue up multiple files.
-    pub(crate) phpcs_pending_uri: Arc<Mutex<Option<String>>>,
-    /// Last-published PHPCS diagnostics per file URI.
-    ///
-    /// The fast and slow diagnostic phases merge these cached results
-    /// into their publish calls so that PHPCS errors remain visible
-    /// while the user edits (without waiting for a fresh PHPCS run).
-    /// The PHPCS worker updates this cache after each successful run
-    /// and triggers a re-publish of the affected file.
-    pub(crate) phpcs_last_diags: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
-    /// Notification handle used to wake the Mago lint worker task.
-    pub(crate) mago_lint_notify: Arc<tokio::sync::Notify>,
-    /// The single file URI that the Mago lint worker should analyse next.
-    pub(crate) mago_lint_pending_uri: Arc<Mutex<Option<String>>>,
-    /// Last-published Mago lint diagnostics per file URI.
-    pub(crate) mago_lint_last_diags:
-        Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
-    /// Notification handle used to wake the Mago analyze worker task.
-    pub(crate) mago_analyze_notify: Arc<tokio::sync::Notify>,
-    /// The single file URI that the Mago analyze worker should analyse next.
-    pub(crate) mago_analyze_pending_uri: Arc<Mutex<Option<String>>>,
-    /// Last-published Mago analyze diagnostics per file URI.
-    pub(crate) mago_analyze_last_diags:
-        Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+    /// PHPStan's dedicated background worker state (extremely slow and
+    /// resource-intensive, so it runs separately from native diagnostics).
+    pub(crate) phpstan_tool: ExternalToolWorker,
+    /// PHPCS's dedicated background worker state.
+    pub(crate) phpcs_tool: ExternalToolWorker,
+    /// Mago lint's dedicated background worker state.
+    pub(crate) mago_lint_tool: ExternalToolWorker,
+    /// Mago analyze's dedicated background worker state.
+    pub(crate) mago_analyze_tool: ExternalToolWorker,
     /// Per-file `resultId` for pull diagnostics (`textDocument/diagnostic`).
     ///
     /// Maps file URI → monotonically increasing counter.  Bumped whenever
@@ -1028,18 +1009,10 @@ impl Backend {
             diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
             diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
-            phpstan_notify: Arc::new(tokio::sync::Notify::new()),
-            phpstan_pending_uri: Arc::new(Mutex::new(None)),
-            phpstan_last_diags: Arc::new(Mutex::new(HashMap::new())),
-            phpcs_notify: Arc::new(tokio::sync::Notify::new()),
-            phpcs_pending_uri: Arc::new(Mutex::new(None)),
-            phpcs_last_diags: Arc::new(Mutex::new(HashMap::new())),
-            mago_lint_notify: Arc::new(tokio::sync::Notify::new()),
-            mago_lint_pending_uri: Arc::new(Mutex::new(None)),
-            mago_lint_last_diags: Arc::new(Mutex::new(HashMap::new())),
-            mago_analyze_notify: Arc::new(tokio::sync::Notify::new()),
-            mago_analyze_pending_uri: Arc::new(Mutex::new(None)),
-            mago_analyze_last_diags: Arc::new(Mutex::new(HashMap::new())),
+            phpstan_tool: ExternalToolWorker::new(),
+            phpcs_tool: ExternalToolWorker::new(),
+            mago_lint_tool: ExternalToolWorker::new(),
+            mago_analyze_tool: ExternalToolWorker::new(),
             diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
             diag_last_full: Arc::new(Mutex::new(HashMap::new())),
             workspace_diags: Arc::new(Mutex::new(
@@ -1141,18 +1114,10 @@ impl Backend {
             diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
             diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
-            phpstan_notify: Arc::new(tokio::sync::Notify::new()),
-            phpstan_pending_uri: Arc::new(Mutex::new(None)),
-            phpstan_last_diags: Arc::new(Mutex::new(HashMap::new())),
-            phpcs_notify: Arc::new(tokio::sync::Notify::new()),
-            phpcs_pending_uri: Arc::new(Mutex::new(None)),
-            phpcs_last_diags: Arc::new(Mutex::new(HashMap::new())),
-            mago_lint_notify: Arc::new(tokio::sync::Notify::new()),
-            mago_lint_pending_uri: Arc::new(Mutex::new(None)),
-            mago_lint_last_diags: Arc::new(Mutex::new(HashMap::new())),
-            mago_analyze_notify: Arc::new(tokio::sync::Notify::new()),
-            mago_analyze_pending_uri: Arc::new(Mutex::new(None)),
-            mago_analyze_last_diags: Arc::new(Mutex::new(HashMap::new())),
+            phpstan_tool: ExternalToolWorker::new(),
+            phpcs_tool: ExternalToolWorker::new(),
+            mago_lint_tool: ExternalToolWorker::new(),
+            mago_analyze_tool: ExternalToolWorker::new(),
             diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
             diag_last_full: Arc::new(Mutex::new(HashMap::new())),
             workspace_diags: Arc::new(Mutex::new(
@@ -1456,7 +1421,7 @@ impl Backend {
     pub fn phpstan_last_diags(
         &self,
     ) -> &Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>> {
-        &self.phpstan_last_diags
+        &self.phpstan_tool.last_diags
     }
 
     /// Borrow the PHPCS diagnostics cache (used by integration tests
@@ -1464,7 +1429,7 @@ impl Backend {
     pub fn phpcs_last_diags(
         &self,
     ) -> &Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>> {
-        &self.phpcs_last_diags
+        &self.phpcs_tool.last_diags
     }
 
     /// Clear the member completion cache.
@@ -1776,18 +1741,10 @@ impl Backend {
             diag_pending_uris: Arc::clone(&self.diag_pending_uris),
             diag_last_slow: Arc::clone(&self.diag_last_slow),
             diag_last_fast: Arc::clone(&self.diag_last_fast),
-            phpstan_notify: Arc::clone(&self.phpstan_notify),
-            phpstan_pending_uri: Arc::clone(&self.phpstan_pending_uri),
-            phpstan_last_diags: Arc::clone(&self.phpstan_last_diags),
-            phpcs_notify: Arc::clone(&self.phpcs_notify),
-            phpcs_pending_uri: Arc::clone(&self.phpcs_pending_uri),
-            phpcs_last_diags: Arc::clone(&self.phpcs_last_diags),
-            mago_lint_notify: Arc::clone(&self.mago_lint_notify),
-            mago_lint_pending_uri: Arc::clone(&self.mago_lint_pending_uri),
-            mago_lint_last_diags: Arc::clone(&self.mago_lint_last_diags),
-            mago_analyze_notify: Arc::clone(&self.mago_analyze_notify),
-            mago_analyze_pending_uri: Arc::clone(&self.mago_analyze_pending_uri),
-            mago_analyze_last_diags: Arc::clone(&self.mago_analyze_last_diags),
+            phpstan_tool: self.phpstan_tool.clone(),
+            phpcs_tool: self.phpcs_tool.clone(),
+            mago_lint_tool: self.mago_lint_tool.clone(),
+            mago_analyze_tool: self.mago_analyze_tool.clone(),
             diag_result_ids: Arc::clone(&self.diag_result_ids),
             diag_last_full: Arc::clone(&self.diag_last_full),
             workspace_diags: Arc::clone(&self.workspace_diags),

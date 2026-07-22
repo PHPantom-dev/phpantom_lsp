@@ -713,10 +713,10 @@ impl Backend {
         }
         for (uri, diags) in open_results {
             let cache = match source {
-                "phpstan" => &self.phpstan_last_diags,
-                "phpcs" => &self.phpcs_last_diags,
-                "mago-lint" => &self.mago_lint_last_diags,
-                "mago-analyze" => &self.mago_analyze_last_diags,
+                "phpstan" => &self.phpstan_tool.last_diags,
+                "phpcs" => &self.phpcs_tool.last_diags,
+                "mago-lint" => &self.mago_lint_tool.last_diags,
+                "mago-analyze" => &self.mago_analyze_tool.last_diags,
                 _ => continue,
             };
             cache.lock().insert(uri.clone(), diags);
@@ -949,7 +949,8 @@ mod tests {
 
         let uri = "file:///closed.php";
         backend
-            .phpstan_last_diags
+            .phpstan_tool
+            .last_diags
             .lock()
             .insert(uri.to_string(), vec![diag("argument.type", 3)]);
 
@@ -962,7 +963,7 @@ mod tests {
             "PHPStan results should migrate to the workspace store on close"
         );
         assert!(
-            backend.phpstan_last_diags.lock().get(uri).is_none(),
+            backend.phpstan_tool.last_diags.lock().get(uri).is_none(),
             "the per-file cache entry should still be purged"
         );
     }

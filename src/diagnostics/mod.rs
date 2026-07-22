@@ -137,12 +137,12 @@
 //!
 //! | Cache                    | Source             |
 //! | ------------------------ | ------------------ |
-//! | `diag_last_fast`         | syntax, unused use |
-//! | `diag_last_slow`         | type resolution    |
-//! | `phpstan_last_diags`     | PHPStan            |
-//! | `phpcs_last_diags`       | PHPCS              |
-//! | `mago_lint_last_diags`   | Mago lint          |
-//! | `mago_analyze_last_diags`| Mago analyze       |
+//! | `diag_last_fast`           | syntax, unused use |
+//! | `diag_last_slow`           | type resolution    |
+//! | `phpstan_tool.last_diags`  | PHPStan            |
+//! | `phpcs_tool.last_diags`    | PHPCS              |
+//! | `mago_lint_tool.last_diags`| Mago lint          |
+//! | `mago_analyze_tool.last_diags` | Mago analyze  |
 //!
 //! When any source finishes, [`Backend::assemble_and_push`] reads all
 //! per-source caches for the URI, merges them into a single set,
@@ -950,7 +950,7 @@ impl Backend {
         }
 
         let phpstan_before: Vec<Diagnostic> = {
-            let cache = self.phpstan_last_diags.lock();
+            let cache = self.phpstan_tool.last_diags.lock();
             cache.get(uri_str).cloned().unwrap_or_default()
         };
 
@@ -971,26 +971,26 @@ impl Backend {
                 .cloned()
                 .collect();
             if filtered.len() != phpstan_before.len() {
-                let mut cache = self.phpstan_last_diags.lock();
+                let mut cache = self.phpstan_tool.last_diags.lock();
                 cache.insert(uri_str.to_string(), filtered.clone());
             }
             full.extend(filtered);
         }
 
         {
-            let cache = self.phpcs_last_diags.lock();
+            let cache = self.phpcs_tool.last_diags.lock();
             if let Some(phpcs_diags) = cache.get(uri_str) {
                 full.extend(phpcs_diags.iter().cloned());
             }
         }
         {
-            let cache = self.mago_lint_last_diags.lock();
+            let cache = self.mago_lint_tool.last_diags.lock();
             if let Some(mago_diags) = cache.get(uri_str) {
                 full.extend(mago_diags.iter().cloned());
             }
         }
         {
-            let cache = self.mago_analyze_last_diags.lock();
+            let cache = self.mago_analyze_tool.last_diags.lock();
             if let Some(mago_diags) = cache.get(uri_str) {
                 full.extend(mago_diags.iter().cloned());
             }
@@ -1032,7 +1032,7 @@ impl Backend {
                 .into_iter()
                 .filter(|d| full.iter().any(|f| f.range == d.range))
                 .collect();
-            let mut cache = self.phpstan_last_diags.lock();
+            let mut cache = self.phpstan_tool.last_diags.lock();
             cache.insert(uri_str.to_string(), pruned);
         }
 
@@ -1297,8 +1297,8 @@ impl Backend {
     /// Only the most recent file is kept: if the user switches files or
     /// saves rapidly, earlier requests are superseded.
     fn schedule_phpstan(&self, uri: String) {
-        *self.phpstan_pending_uri.lock() = Some(uri);
-        self.phpstan_notify.notify_one();
+        *self.phpstan_tool.pending_uri.lock() = Some(uri);
+        self.phpstan_tool.notify.notify_one();
     }
 
     /// Long-lived background task that runs PHPStan on pending files.
@@ -1331,7 +1331,7 @@ impl Backend {
             }
 
             // ── Step 1: wait for work ───────────────────────────────
-            self.phpstan_notify.notified().await;
+            self.phpstan_tool.notify.notified().await;
 
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
@@ -1340,11 +1340,14 @@ impl Backend {
             // Drain any extra stored permits so that notifications
             // that arrived between the last run finishing and this
             // `notified()` call don't cause an immediate second run.
-            let _ = tokio::time::timeout(std::time::Duration::ZERO, self.phpstan_notify.notified())
-                .await;
+            let _ = tokio::time::timeout(
+                std::time::Duration::ZERO,
+                self.phpstan_tool.notify.notified(),
+            )
+            .await;
 
             // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.phpstan_pending_uri.lock().take() {
+            let uri = match self.phpstan_tool.pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1443,7 +1446,7 @@ impl Backend {
             }
 
             {
-                let mut cache = self.phpstan_last_diags.lock();
+                let mut cache = self.phpstan_tool.last_diags.lock();
                 cache.insert(uri.clone(), phpstan_diags);
             }
 
@@ -1469,8 +1472,8 @@ impl Backend {
     /// types rapidly, earlier requests are superseded.  This is
     /// intentional — PHPCS is too slow to queue up multiple files.
     fn schedule_phpcs(&self, uri: String) {
-        *self.phpcs_pending_uri.lock() = Some(uri);
-        self.phpcs_notify.notify_one();
+        *self.phpcs_tool.pending_uri.lock() = Some(uri);
+        self.phpcs_tool.notify.notify_one();
     }
 
     /// Long-lived background task that runs PHPCS on pending files.
@@ -1503,7 +1506,7 @@ impl Backend {
             }
 
             // ── Step 1: wait for work ───────────────────────────────
-            self.phpcs_notify.notified().await;
+            self.phpcs_tool.notify.notified().await;
 
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
@@ -1512,10 +1515,11 @@ impl Backend {
             // Drain any extra stored permits (same rationale as the
             // PHPStan worker).
             let _ =
-                tokio::time::timeout(std::time::Duration::ZERO, self.phpcs_notify.notified()).await;
+                tokio::time::timeout(std::time::Duration::ZERO, self.phpcs_tool.notify.notified())
+                    .await;
 
             // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.phpcs_pending_uri.lock().take() {
+            let uri = match self.phpcs_tool.pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1601,7 +1605,7 @@ impl Backend {
             }
 
             {
-                let mut cache = self.phpcs_last_diags.lock();
+                let mut cache = self.phpcs_tool.last_diags.lock();
                 cache.insert(uri.clone(), phpcs_diags);
             }
 
@@ -1626,8 +1630,8 @@ impl Backend {
     /// Only the most recent file is kept: if the user switches files or
     /// types rapidly, earlier requests are superseded.
     fn schedule_mago_lint(&self, uri: String) {
-        *self.mago_lint_pending_uri.lock() = Some(uri);
-        self.mago_lint_notify.notify_one();
+        *self.mago_lint_tool.pending_uri.lock() = Some(uri);
+        self.mago_lint_tool.notify.notify_one();
     }
 
     /// Long-lived background task that runs `mago lint` on pending files.
@@ -1645,19 +1649,21 @@ impl Backend {
             }
 
             // ── Step 1: wait for work ───────────────────────────────
-            self.mago_lint_notify.notified().await;
+            self.mago_lint_tool.notify.notified().await;
 
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
             }
 
             // Drain any extra stored permits.
-            let _ =
-                tokio::time::timeout(std::time::Duration::ZERO, self.mago_lint_notify.notified())
-                    .await;
+            let _ = tokio::time::timeout(
+                std::time::Duration::ZERO,
+                self.mago_lint_tool.notify.notified(),
+            )
+            .await;
 
             // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.mago_lint_pending_uri.lock().take() {
+            let uri = match self.mago_lint_tool.pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1733,7 +1739,7 @@ impl Backend {
             }
 
             {
-                let mut cache = self.mago_lint_last_diags.lock();
+                let mut cache = self.mago_lint_tool.last_diags.lock();
                 cache.insert(uri.clone(), mago_diags);
             }
 
@@ -1756,8 +1762,8 @@ impl Backend {
     /// Only the most recent file is kept: if the user switches files or
     /// types rapidly, earlier requests are superseded.
     fn schedule_mago_analyze(&self, uri: String) {
-        *self.mago_analyze_pending_uri.lock() = Some(uri);
-        self.mago_analyze_notify.notify_one();
+        *self.mago_analyze_tool.pending_uri.lock() = Some(uri);
+        self.mago_analyze_tool.notify.notify_one();
     }
 
     /// Long-lived background task that runs `mago analyze` on pending files.
@@ -1775,7 +1781,7 @@ impl Backend {
             }
 
             // ── Step 1: wait for work ───────────────────────────────
-            self.mago_analyze_notify.notified().await;
+            self.mago_analyze_tool.notify.notified().await;
 
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
@@ -1784,12 +1790,12 @@ impl Backend {
             // Drain any extra stored permits.
             let _ = tokio::time::timeout(
                 std::time::Duration::ZERO,
-                self.mago_analyze_notify.notified(),
+                self.mago_analyze_tool.notify.notified(),
             )
             .await;
 
             // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.mago_analyze_pending_uri.lock().take() {
+            let uri = match self.mago_analyze_tool.pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -1865,7 +1871,7 @@ impl Backend {
             }
 
             {
-                let mut cache = self.mago_analyze_last_diags.lock();
+                let mut cache = self.mago_analyze_tool.last_diags.lock();
                 cache.insert(uri.clone(), mago_diags);
             }
 
@@ -1892,7 +1898,8 @@ impl Backend {
             let migrations: [(&'static str, Vec<Diagnostic>); 4] = [
                 (
                     "phpstan",
-                    self.phpstan_last_diags
+                    self.phpstan_tool
+                        .last_diags
                         .lock()
                         .get(uri_str)
                         .cloned()
@@ -1900,7 +1907,8 @@ impl Backend {
                 ),
                 (
                     "phpcs",
-                    self.phpcs_last_diags
+                    self.phpcs_tool
+                        .last_diags
                         .lock()
                         .get(uri_str)
                         .cloned()
@@ -1908,7 +1916,8 @@ impl Backend {
                 ),
                 (
                     "mago-lint",
-                    self.mago_lint_last_diags
+                    self.mago_lint_tool
+                        .last_diags
                         .lock()
                         .get(uri_str)
                         .cloned()
@@ -1916,7 +1925,8 @@ impl Backend {
                 ),
                 (
                     "mago-analyze",
-                    self.mago_analyze_last_diags
+                    self.mago_analyze_tool
+                        .last_diags
                         .lock()
                         .get(uri_str)
                         .cloned()
@@ -1933,10 +1943,10 @@ impl Backend {
         self.diag_last_fast.lock().remove(uri_str);
         self.diag_last_slow.lock().remove(uri_str);
         // Remove cached PHPStan, PHPCS, and Mago diagnostics too.
-        self.phpstan_last_diags.lock().remove(uri_str);
-        self.phpcs_last_diags.lock().remove(uri_str);
-        self.mago_lint_last_diags.lock().remove(uri_str);
-        self.mago_analyze_last_diags.lock().remove(uri_str);
+        self.phpstan_tool.last_diags.lock().remove(uri_str);
+        self.phpcs_tool.last_diags.lock().remove(uri_str);
+        self.mago_lint_tool.last_diags.lock().remove(uri_str);
+        self.mago_analyze_tool.last_diags.lock().remove(uri_str);
         // Remove pull-diagnostic caches.
         self.diag_result_ids.lock().remove(uri_str);
         self.diag_last_full.lock().remove(uri_str);
