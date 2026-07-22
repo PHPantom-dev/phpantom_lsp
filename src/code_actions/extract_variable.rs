@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
+use crate::code_actions::naming::{snake_to_camel, to_camel_case};
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::ScopeMap;
@@ -487,43 +488,6 @@ fn strip_accessor_prefix(name: &str) -> &str {
         }
     }
     name
-}
-
-/// Convert a string to camelCase, starting with a lowercase letter.
-fn to_camel_case(s: &str) -> String {
-    if s.is_empty() {
-        return "variable".to_string();
-    }
-
-    // If it contains underscores, treat as snake_case
-    if s.contains('_') {
-        return snake_to_camel(s);
-    }
-
-    // Just lowercase the first character
-    let mut chars = s.chars();
-    let first = chars.next().unwrap();
-    let mut result = first.to_lowercase().to_string();
-    result.extend(chars);
-    result
-}
-
-/// Convert `snake_case` to `camelCase`.
-fn snake_to_camel(s: &str) -> String {
-    let parts: Vec<&str> = s.split('_').filter(|p| !p.is_empty()).collect();
-    if parts.is_empty() {
-        return "variable".to_string();
-    }
-
-    let mut result = parts[0].to_lowercase();
-    for part in &parts[1..] {
-        let mut chars = part.chars();
-        if let Some(first) = chars.next() {
-            result.extend(first.to_uppercase());
-            result.push_str(&chars.as_str().to_lowercase());
-        }
-    }
-    result
 }
 
 /// Deduplicate a variable name against existing variables in scope.

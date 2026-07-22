@@ -92,6 +92,7 @@ pub(crate) mod implement_methods;
 mod import_class;
 mod inline_variable;
 mod mago;
+mod naming;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;

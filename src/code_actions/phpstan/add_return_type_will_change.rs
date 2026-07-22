@@ -22,11 +22,10 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
+use super::{InsertionPoint, find_method_insertion_point};
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{
-    contains_function_keyword, contains_php_attribute, offset_to_position, ranges_overlap,
-};
+use crate::util::{contains_php_attribute, offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
 const TENTATIVE_RETURN_TYPE_ID: &str = "method.tentativeReturnType";
@@ -155,23 +154,6 @@ impl Backend {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Information about where to insert an attribute above a method.
-struct InsertionPoint {
-    /// The byte offset where the attribute line should be inserted.
-    /// This is the start of the line containing the first token of
-    /// the method declaration (attribute, modifier, or `function`).
-    insert_offset: usize,
-    /// The indentation whitespace of the method declaration line.
-    indent: String,
-    /// The byte offset of the start of the first attribute list (if
-    /// any), or the start of the first modifier / `function` keyword.
-    first_token_offset: usize,
-    /// The byte offset just past the end of the last attribute list
-    /// before the modifiers/function keyword.  If no attributes exist,
-    /// this equals `first_token_offset`.
-    attrs_end_offset: usize,
-}
-
 /// Extract the method name from a PHPStan `method.tentativeReturnType`
 /// message.
 ///
@@ -194,98 +176,6 @@ fn extract_method_name(message: &str) -> Option<&str> {
         return None;
     }
     Some(name)
-}
-
-/// Find the insertion point for an attribute on a method whose PHPStan
-/// diagnostic is on `diag_line`.
-///
-/// Walks backward from the diagnostic line to find:
-/// 1. The `function` keyword on or before the diagnostic line
-/// 2. Any modifiers (`public`, `static`, etc.) before `function`
-/// 3. Any attribute lists (`#[...]`) before the modifiers
-///
-/// The insertion point is the start of the line containing the
-/// earliest attribute list, or the start of the line containing the
-/// first modifier/`function` keyword if no attributes exist.
-fn find_method_insertion_point(content: &str, diag_line: usize) -> Option<InsertionPoint> {
-    let lines: Vec<&str> = content.lines().collect();
-    if diag_line >= lines.len() {
-        return None;
-    }
-
-    // Find the `function` keyword on or near the diagnostic line.
-    let search_start = diag_line.min(lines.len().saturating_sub(1));
-    let mut func_line = None;
-    for i in (search_start.saturating_sub(5)..=search_start).rev() {
-        if contains_function_keyword(lines[i]) {
-            func_line = Some(i);
-            break;
-        }
-    }
-    let func_line = func_line?;
-
-    // Walk backward from the function line past modifier keywords.
-    let mut first_decl_line = func_line;
-    let mut check_line = func_line;
-    loop {
-        if check_line == 0 {
-            break;
-        }
-        let prev = check_line - 1;
-        let prev_trimmed = lines[prev].trim();
-        if prev_trimmed.is_empty() {
-            break;
-        }
-        if is_modifier_line(prev_trimmed) {
-            first_decl_line = prev;
-            check_line = prev;
-            continue;
-        }
-        break;
-    }
-
-    // Walk backward from `first_decl_line` to find attribute lists.
-    let mut first_attr_line = first_decl_line;
-    let mut check_line = first_decl_line;
-    loop {
-        if check_line == 0 {
-            break;
-        }
-        let prev = check_line - 1;
-        let prev_trimmed = lines[prev].trim();
-        if prev_trimmed.is_empty() {
-            break;
-        }
-        if is_attribute_line(prev_trimmed) {
-            first_attr_line = prev;
-            check_line = prev;
-            continue;
-        }
-        break;
-    }
-
-    let target_line = first_attr_line;
-    let insert_offset = line_byte_offset(content, target_line);
-
-    let indent: String = lines[func_line]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect();
-
-    let first_token_offset = insert_offset;
-
-    let attrs_end_offset = if first_attr_line < first_decl_line {
-        line_byte_offset(content, first_decl_line)
-    } else {
-        first_token_offset
-    };
-
-    Some(InsertionPoint {
-        insert_offset,
-        indent,
-        first_token_offset,
-        attrs_end_offset,
-    })
 }
 
 /// Check if the method already has a `#[ReturnTypeWillChange]` or
@@ -323,41 +213,6 @@ fn already_has_return_type_will_change(content: &str, insertion: &InsertionPoint
     }
 
     false
-}
-
-/// Check if a trimmed line starts with a PHP modifier keyword.
-fn is_modifier_line(trimmed: &str) -> bool {
-    let modifiers = [
-        "public",
-        "protected",
-        "private",
-        "static",
-        "abstract",
-        "final",
-        "readonly",
-    ];
-    modifiers.iter().any(|kw| {
-        trimmed.starts_with(kw)
-            && trimmed[kw.len()..].starts_with(|c: char| c.is_whitespace() || c == '\0')
-    })
-}
-
-/// Check if a trimmed line is a PHP attribute line (`#[...]`).
-fn is_attribute_line(trimmed: &str) -> bool {
-    trimmed.starts_with("#[")
-}
-
-/// Compute the byte offset of the start of the given line number
-/// (0-based).
-fn line_byte_offset(content: &str, line: usize) -> usize {
-    let mut offset = 0;
-    for (i, l) in content.lines().enumerate() {
-        if i == line {
-            return offset;
-        }
-        offset += l.len() + 1; // +1 for newline
-    }
-    content.len()
 }
 
 /// Check whether a `method.tentativeReturnType` diagnostic is stale

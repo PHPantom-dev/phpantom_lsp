@@ -191,6 +191,7 @@ pub mod subject_expr;
 pub(crate) mod subject_extraction;
 pub(crate) mod subject_resolution;
 pub(crate) mod symbol_map;
+pub(crate) mod text_scan;
 pub(crate) mod toposort;
 mod type_hierarchy;
 pub mod types;

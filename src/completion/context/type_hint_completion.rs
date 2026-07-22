@@ -12,6 +12,7 @@
 //! call) or a property/promoted-parameter declaration.
 
 use crate::completion::named_args::{find_enclosing_open_paren, position_to_char_offset};
+use crate::text_scan::skip_string_backward;
 use tower_lsp::lsp_types::Position;
 
 /// PHP native types valid in type-hint positions (PHP 8.x).
@@ -289,39 +290,16 @@ fn find_matching_paren_backward(chars: &[char], close_pos: usize) -> Option<usiz
                 }
             }
             '\'' => {
-                i = skip_string_literal_backward(chars, i, '\'');
+                i = skip_string_backward(chars, i, '\'');
             }
             '"' => {
-                i = skip_string_literal_backward(chars, i, '"');
+                i = skip_string_backward(chars, i, '"');
             }
             '{' | '[' | ';' => return None,
             _ => {}
         }
     }
     None
-}
-
-/// Skip backward past a string literal whose closing quote is at `end`.
-fn skip_string_literal_backward(chars: &[char], end: usize, q: char) -> usize {
-    if end == 0 {
-        return 0;
-    }
-    let mut j = end - 1;
-    while j > 0 {
-        if chars[j] == q {
-            let mut backslashes = 0u32;
-            let mut k = j;
-            while k > 0 && chars[k - 1] == '\\' {
-                backslashes += 1;
-                k -= 1;
-            }
-            if backslashes.is_multiple_of(2) {
-                return j;
-            }
-        }
-        j -= 1;
-    }
-    0
 }
 
 /// Check whether a type modifier (`?`, `|`, or `&`) at `mod_pos` sits

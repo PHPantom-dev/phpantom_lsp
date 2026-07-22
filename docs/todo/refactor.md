@@ -574,11 +574,7 @@ backlog:
    used in code actions only by `phpstan/add_throws.rs`; ~29 other
    files hand-build `Range { start: offset_to_position(..), end: .. }`
    (183 `offset_to_position` calls).
-3. **Merge the verbatim duplicate `find_method_insertion_point`** in
-   `phpstan/add_override.rs` and
-   `phpstan/add_return_type_will_change.rs` (~60 identical lines) into
-   `phpstan/mod.rs`.
-4. **Consolidate indent helpers.** Nine near-identical
+3. **Consolidate indent helpers.** Nine near-identical
    line-indent-at-offset extractors and two copies of
    `detect_indent_unit` across `extract_function.rs`,
    `generate_property_hooks.rs`, `update_docblock.rs`,
@@ -586,18 +582,25 @@ backlog:
    `phpstan/new_static.rs`, `implement_methods.rs`. Provide
    `indent_of_line_at` / `indent_unit` next to
    `detect_indent_from_members`.
-5. **Consolidate naming helpers.** `to_camel_case`, `snake_to_camel`,
-   `to_pascal_case`, `string_to_screaming_snake`, `capitalise`, and
-   two `deduplicate_name` implementations across the extract handlers
-   → one `code_actions/naming.rs`.
-6. **`find_docblock_above_line` helper.** At least three independent
+4. **Unify the name-deduplication helpers.** `deduplicate_name` in
+   `extract_variable.rs` (checks a `&[String]` of in-scope names,
+   numeric suffix), `deduplicate_constant_name` in `extract_constant.rs`
+   (same shape, `_N` suffix), and `deduplicate_name` in
+   `extract_function.rs` (scans sibling method names or `function <name>`
+   patterns in the file) all solve "make this name unique." Back them
+   with one helper in `code_actions/naming.rs` that takes an
+   `exists: impl Fn(&str) -> bool` predicate and a suffix separator. (The
+   pure casing transforms — `to_camel_case`, `snake_to_camel`,
+   `to_pascal_case`, `string_to_screaming_snake`, `capitalise` — already
+   live in `code_actions/naming.rs`.)
+5. **`find_docblock_above_line` helper.** At least three independent
    copies (`phpstan/remove_throws.rs`, `phpstan/add_throws.rs`,
    `phpstan/add_iterable_type.rs`) locate the `/** */` block above a
    line; `update_docblock.rs` additionally owns a private docblock
    line-model (`parse_docblock_lines`/`rebuild_docblock`) that the
    other handlers re-approximate. Extract a shared
    `code_actions/docblock_edit.rs`.
-7. **Relocate PHPStan-specific logic out of `code_actions/mod.rs`**
+6. **Relocate PHPStan-specific logic out of `code_actions/mod.rs`**
    (`expand_sibling_checked_exception_diags`,
    `clear_phpstan_diagnostics_after_resolve`) into `phpstan/mod.rs`.
 
@@ -627,23 +630,5 @@ every inference improvement (shapes, generics, literals) silently
 misses this code action, and its answers can contradict hover.
 
 ---
-
-## Shared PHP byte-scanning primitives
-
-**What to do.** Four-plus modules maintain independent
-"skip string / comment / heredoc while scanning bytes" primitives:
-`classmap_scanner.rs` (inside `find_classes`/`find_symbols`),
-`completion/source/throws_analysis.rs` (`skip_string_forward`,
-`skip_line_comment`, `skip_block_comment`,
-`find_matching_delimiter_forward`), `completion/named_args.rs`
-(`skip_string_backward`), and
-`completion/context/type_hint_completion.rs`
-(`skip_string_literal_backward`). Consolidate into one shared module
-(e.g. `src/text_scan.rs`) with forward and backward variants.
-
-**Why it matters.** Each copy must independently track PHP lexical
-quirks (heredoc flavours, escaping); they already differ in what they
-handle, which means position-dependent bugs that reproduce in one
-feature but not another.
 
 

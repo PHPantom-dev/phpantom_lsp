@@ -30,6 +30,9 @@ use tower_lsp::lsp_types::Position;
 
 use super::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
+use crate::text_scan::{
+    find_matching_delimiter_forward, skip_block_comment, skip_line_comment, skip_string_forward,
+};
 use crate::types::{ClassInfo, FunctionLoader};
 
 /// Optional reference to a class-loader closure, used by nested
@@ -599,93 +602,6 @@ fn skip_modifiers_backward(text: &str) -> &str {
         }
     }
     s
-}
-
-/// Find the matching closing delimiter for an opening delimiter at
-/// `open_pos`, respecting string literal nesting.
-///
-/// `open` and `close` are the delimiter bytes (e.g. `b'('` / `b')'`
-/// or `b'{'` / `b'}'`).
-fn find_matching_delimiter_forward(
-    text: &str,
-    open_pos: usize,
-    open: u8,
-    close: u8,
-) -> Option<usize> {
-    let bytes = text.as_bytes();
-    if open_pos >= bytes.len() || bytes[open_pos] != open {
-        return None;
-    }
-
-    let mut depth = 1i32;
-    let mut pos = open_pos + 1;
-
-    while pos < bytes.len() && depth > 0 {
-        match bytes[pos] {
-            b if b == open => depth += 1,
-            b if b == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(pos);
-                }
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[pos];
-                pos += 1;
-                while pos < bytes.len() {
-                    if bytes[pos] == b'\\' {
-                        pos += 1;
-                    } else if bytes[pos] == quote {
-                        break;
-                    }
-                    pos += 1;
-                }
-            }
-            _ => {}
-        }
-        pos += 1;
-    }
-
-    None
-}
-
-/// Skip past a string literal starting at `pos` (which must point to
-/// the opening quote).  Returns the position after the closing quote.
-fn skip_string_forward(bytes: &[u8], pos: usize) -> usize {
-    let quote = bytes[pos];
-    let mut i = pos + 1;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 1; // skip escaped char
-        } else if bytes[i] == quote {
-            return i + 1;
-        }
-        i += 1;
-    }
-    i
-}
-
-/// Skip past a line comment (`//…`) starting at `pos`.  Returns the
-/// position of the newline (or end of input).
-fn skip_line_comment(bytes: &[u8], pos: usize) -> usize {
-    let mut i = pos;
-    while i < bytes.len() && bytes[i] != b'\n' {
-        i += 1;
-    }
-    i
-}
-
-/// Skip past a block comment (`/* … */`) starting at `pos`.  Returns
-/// the position after the closing `*/` (or end of input).
-fn skip_block_comment(bytes: &[u8], pos: usize) -> usize {
-    let mut i = pos + 2;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-            return i + 2;
-        }
-        i += 1;
-    }
-    i
 }
 
 // ─── High-Level Uncaught Throws Analysis ────────────────────────────────────

@@ -29,6 +29,7 @@ use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use super::detect_indent_from_members;
+use super::naming::to_pascal_case;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
@@ -349,43 +350,6 @@ fn collect_existing_method_names<'a>(members: &Sequence<'a, ClassLikeMember<'a>>
             }
         })
         .collect()
-}
-
-/// Convert a property name to PascalCase for use in method names.
-///
-/// `name` → `Name`, `first_name` → `FirstName`, `firstName` → `FirstName`.
-fn to_pascal_case(name: &str) -> String {
-    if name.is_empty() {
-        return String::new();
-    }
-
-    // If it contains underscores, treat as snake_case.
-    if name.contains('_') {
-        return name
-            .split('_')
-            .filter(|part| !part.is_empty())
-            .map(|part| {
-                let mut chars = part.chars();
-                match chars.next() {
-                    Some(c) => {
-                        let upper: String = c.to_uppercase().collect();
-                        format!("{}{}", upper, chars.as_str())
-                    }
-                    None => String::new(),
-                }
-            })
-            .collect();
-    }
-
-    // Simple case: just capitalize the first letter.
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) => {
-            let upper: String = c.to_uppercase().collect();
-            format!("{}{}", upper, chars.as_str())
-        }
-        None => String::new(),
-    }
 }
 
 /// Compute the getter method name for a property.

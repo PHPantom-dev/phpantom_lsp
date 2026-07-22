@@ -20,6 +20,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
+use crate::code_actions::naming::string_to_screaming_snake;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
 use crate::types::PhpVersion;
@@ -315,33 +316,6 @@ fn literal_type_name(value: &str) -> Option<PhpType> {
     }
 
     None
-}
-
-/// Convert a string to SCREAMING_SNAKE_CASE.
-///
-/// Non-alphanumeric characters become underscores. Consecutive
-/// underscores are collapsed.
-fn string_to_screaming_snake(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for ch in s.chars() {
-        if ch.is_ascii_alphanumeric() {
-            result.push(ch.to_ascii_uppercase());
-        } else if (ch == '_' || ch == '-' || ch == ' ' || ch == '/' || ch == '.')
-            && !result.ends_with('_')
-        {
-            result.push('_');
-        }
-        // Skip other characters (e.g. special symbols).
-    }
-    // Trim trailing underscore
-    while result.ends_with('_') {
-        result.pop();
-    }
-    // Trim leading underscore
-    while result.starts_with('_') {
-        result.remove(0);
-    }
-    result
 }
 
 /// Ensure the generated name doesn't collide with existing constants.

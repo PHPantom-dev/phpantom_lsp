@@ -18,6 +18,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
+use crate::code_actions::naming::capitalise;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::completion::phpdoc::generation::enrichment_plain;
 use crate::completion::resolver::Loaders;
@@ -475,18 +476,6 @@ fn derive_base_name(ctx: &NamingContext) -> String {
 
     // 9. Fallback
     "extracted".to_string()
-}
-
-/// Capitalise the first character of a string (ASCII).
-fn capitalise(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) => {
-            let upper: String = c.to_uppercase().collect();
-            format!("{}{}", upper, chars.as_str())
-        }
-        None => String::new(),
-    }
 }
 
 /// Detect if the body text is a factory pattern: the extracted code

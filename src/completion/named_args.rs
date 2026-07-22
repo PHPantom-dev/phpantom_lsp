@@ -20,6 +20,8 @@
 
 use tower_lsp::lsp_types::*;
 
+use crate::text_scan::skip_string_backward;
+
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
 /// Check whether `cursor` (byte offset) sits inside a `[…]` or `{…}` pair
@@ -193,34 +195,6 @@ pub fn find_enclosing_open_paren(chars: &[char], start: usize) -> Option<usize> 
     }
 
     None
-}
-
-/// Skip backward past a string literal ending at position `end` (which
-/// points to the closing quote character `q`).
-///
-/// Returns the position of the opening quote, or 0 if not found.
-pub fn skip_string_backward(chars: &[char], end: usize, q: char) -> usize {
-    if end == 0 {
-        return 0;
-    }
-    let mut j = end - 1;
-    while j > 0 {
-        if chars[j] == q {
-            // Check it's not escaped
-            let mut backslashes = 0u32;
-            let mut k = j;
-            while k > 0 && chars[k - 1] == '\\' {
-                backslashes += 1;
-                k -= 1;
-            }
-            if backslashes.is_multiple_of(2) {
-                // Not escaped — this is the opening quote
-                return j;
-            }
-        }
-        j -= 1;
-    }
-    0
 }
 
 /// Extract the call expression that precedes the opening paren at `open`.
