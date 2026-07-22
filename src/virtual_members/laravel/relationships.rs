@@ -344,6 +344,65 @@ pub(super) fn count_property_name(method_name: &str) -> String {
     format!("{}_count", camel_to_snake(method_name))
 }
 
+/// Extract the custom pivot class from a `->using(X::class)` chained call
+/// in a many-to-many relationship method body.
+///
+/// Given the full method body text, returns the short class name from the
+/// first `->using(...)` call, e.g. `"RecipeIngredient"` for
+/// `$this->belongsToMany(...)->using(RecipeIngredient::class)`.
+///
+/// Returns `None` when no `->using(` call is present or its argument is not
+/// a `::class` literal (variable/computed arguments are skipped by design,
+/// mirroring the relationship-target scanner).
+pub(crate) fn extract_pivot_using(body_text: &str) -> Option<String> {
+    let needle = "->using(";
+    let call_pos = body_text.find(needle)?;
+    let after_paren = &body_text[call_pos + needle.len()..];
+    extract_class_argument(after_paren)
+}
+
+/// Extract the extra pivot columns from `->withPivot('a', 'b', …)` chained
+/// calls in a many-to-many relationship method body.
+///
+/// Collects the string-literal arguments across every `->withPivot(` call
+/// (Laravel allows chaining multiple), preserving order and skipping
+/// non-literal arguments.  Returns an empty vec when none are present.
+pub(crate) fn extract_with_pivot_columns(body_text: &str) -> Vec<String> {
+    let needle = "->withPivot(";
+    let mut columns = Vec::new();
+    let mut rest = body_text;
+    while let Some(call_pos) = rest.find(needle) {
+        let after_paren = &rest[call_pos + needle.len()..];
+        if let Some(end) = after_paren.find(')') {
+            for segment in after_paren[..end].split(',') {
+                if let Some(col) = string_literal_argument(segment.trim())
+                    && !col.is_empty()
+                {
+                    columns.push(col);
+                }
+            }
+            rest = &after_paren[end..];
+        } else {
+            break;
+        }
+    }
+    columns
+}
+
+/// Extract a single-quoted or double-quoted string literal from an argument
+/// fragment, e.g. `'expires_at'` → `expires_at`.  Returns `None` for
+/// non-literal fragments (variables, constants, array spreads).
+fn string_literal_argument(fragment: &str) -> Option<String> {
+    let bytes = fragment.as_bytes();
+    let quote = *bytes.first()?;
+    if quote != b'\'' && quote != b'"' {
+        return None;
+    }
+    let inner = &fragment[1..];
+    let close = inner.find(quote as char)?;
+    Some(inner[..close].to_string())
+}
+
 /// Walk a dot-separated relation chain starting from `model` and return
 /// the fully-qualified name of the final related model.
 ///
