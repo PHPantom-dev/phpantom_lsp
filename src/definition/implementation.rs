@@ -635,6 +635,15 @@ impl Backend {
     /// examined.  This keeps callers that need only project implementors
     /// (e.g. the Laravel auth-model floor) from paying the cost of loading
     /// and parsing every class in a large vendor tree.
+    ///
+    /// Independently of `project_only`, once the workspace index is ready
+    /// the function returns only the Phase 1 reverse-index results, and
+    /// those are restricted to project classes (excluding `/vendor/` and
+    /// embedded stubs).  The reverse index is populated by every parse, so
+    /// a vendor or stub class that happened to be loaded earlier in the
+    /// session would otherwise appear non-deterministically.  The full
+    /// workspace index only parses project files, so user-only results are
+    /// both deterministic and consistent with the indexed set.
     pub(crate) fn find_implementors(
         &self,
         target_short: &str,
@@ -644,18 +653,6 @@ impl Backend {
         direct_only: bool,
         project_only: bool,
     ) -> Vec<ClassInfo> {
-        // Whether an FQN's indexed source lives outside `/vendor/`.  A class
-        // with no indexed URI is treated as project-local (mirrors the
-        // downstream filter in `project_auth_implementors`).
-        let is_project_fqn = |fqn: &str| -> bool {
-            if !project_only {
-                return true;
-            }
-            match self.fqn_uri_index.read().get(fqn) {
-                Some(uri) => !uri.contains("/vendor/"),
-                None => true,
-            }
-        };
         let mut result: Vec<ClassInfo> = Vec::new();
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
@@ -665,6 +662,36 @@ impl Backend {
             self.ensure_workspace_indexed_for_request();
         }
         let workspace_index_ready = self.workspace_indexed.load(Ordering::Acquire);
+
+        // Whether an FQN's indexed source is project code (outside
+        // `/vendor/` and not an embedded stub).  A class with no indexed
+        // URI is treated as project-local (mirrors the downstream filter in
+        // `project_auth_implementors`).
+        //
+        // The filter applies to the Phase 1 reverse-index candidates
+        // whenever those candidates are returned without the follow-up
+        // vendor/classmap/stub scans: a `project_only` caller, or the
+        // workspace-index-ready fast path below.  The reverse index is
+        // populated by *every* parse, so a vendor or stub class loaded
+        // earlier in the session (via hover, completion, or resolution)
+        // would otherwise leak into results while an identical class that
+        // was never loaded would not, making results depend on session
+        // history.  The full workspace index parses only project files, so
+        // user-only is the deterministic set the fast path should return.
+        let exclude_non_project = project_only || workspace_index_ready;
+        let is_project_fqn = |fqn: &str| -> bool {
+            if !exclude_non_project {
+                return true;
+            }
+            match self.fqn_uri_index.read().get(fqn) {
+                Some(uri) => {
+                    !uri.contains("/vendor/")
+                        && !uri.starts_with("phpantom-stub://")
+                        && !uri.starts_with("phpantom-stub-fn://")
+                }
+                None => true,
+            }
+        };
 
         // ── Phase 1: GTI index lookup ───────────────────────────────────
         // Use the reverse inheritance index for O(1) lookup of classes

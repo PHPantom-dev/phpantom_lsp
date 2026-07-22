@@ -1822,3 +1822,90 @@ async fn test_implementation_transitive_interface_cross_file() {
         "Should find AuditService via transitive AuditLoggable extends Loggable"
     );
 }
+
+// ─── Vendor implementors are excluded once the workspace index is ready ─────
+
+/// A vendor class that implements a project interface must NOT appear in
+/// go-to-implementation results once the workspace index is ready, even if
+/// that vendor class was parsed earlier in the session (which populates the
+/// reverse-inheritance index). The full workspace index only parses project
+/// files, so results must be user-only and independent of session history.
+#[tokio::test]
+async fn test_implementation_excludes_loaded_vendor_implementor() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/Contracts/Cacheable.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Contracts;\n",
+                    "interface Cacheable {\n",
+                    "    public function cacheKey(): string;\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Cache/FileCache.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Cache;\n",
+                    "use App\\Contracts\\Cacheable;\n",
+                    "class FileCache implements Cacheable {\n",
+                    "    public function cacheKey(): string { return 'file'; }\n",
+                    "}\n",
+                ),
+            ),
+            // A vendor package that also implements the project interface.
+            (
+                "vendor/acme/cache/src/AcmeCache.php",
+                concat!(
+                    "<?php\n",
+                    "namespace Acme\\Cache;\n",
+                    "use App\\Contracts\\Cacheable;\n",
+                    "class AcmeCache implements Cacheable {\n",
+                    "    public function cacheKey(): string { return 'acme'; }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    // Simulate the vendor class being loaded earlier in the session (e.g.
+    // the user hovered or completed something that resolved it). This puts
+    // AcmeCache into the reverse-inheritance index under Cacheable and maps
+    // its FQN to a `/vendor/` URI in the FQN → URI index.
+    let acme_uri = Url::from_file_path(dir.path().join("vendor/acme/cache/src/AcmeCache.php"))
+        .expect("vendor uri");
+    let acme_text =
+        std::fs::read_to_string(dir.path().join("vendor/acme/cache/src/AcmeCache.php")).unwrap();
+    open(&backend, &acme_uri, &acme_text).await;
+
+    let iface_uri =
+        Url::from_file_path(dir.path().join("src/Contracts/Cacheable.php")).expect("iface uri");
+    let iface_text =
+        std::fs::read_to_string(dir.path().join("src/Contracts/Cacheable.php")).unwrap();
+    open(&backend, &iface_uri, &iface_text).await;
+
+    // Cursor on "Cacheable" (line 2). The first request builds the workspace
+    // index (which parses only project files) and then uses the index-ready
+    // fast path.
+    let locations = implementation_at(&backend, &iface_uri, 2, 12).await;
+
+    let uris: Vec<String> = locations.iter().map(|l| l.uri.to_string()).collect();
+
+    assert!(
+        uris.iter().any(|u| u.contains("FileCache")),
+        "Should find the project implementor FileCache, got: {uris:?}"
+    );
+    assert!(
+        !uris.iter().any(|u| u.contains("/vendor/")),
+        "Vendor implementor AcmeCache must be excluded once the index is ready, got: {uris:?}"
+    );
+}

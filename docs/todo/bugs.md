@@ -23,22 +23,3 @@ on large projects), and the same race exists for any
 batch-publish time, skip updates whose URI is currently in
 `open_files` (the open buffer's `update_ast` already produced newer
 state), or re-check open-file content per update before applying.
-
-## Go-to-implementation results for vendor classes are session-dependent once the workspace index is ready
-
-`find_implementors` returns early after the reverse-inheritance-index
-phase once the workspace index is ready, intentionally skipping the
-vendor/classmap/stub scan phases (the tests assert vendor
-implementors are not returned). But the reverse inheritance index is
-populated by *every* `update_ast`, including vendor files parsed
-lazily during class resolution. So a vendor implementor that happens
-to have been loaded earlier in the session (because the user hovered
-or completed something that resolved it) **does** appear in
-go-to-implementation and type hierarchy results, while an identical
-vendor implementor that was never loaded does not. Results depend on
-session history. Pick one behaviour and enforce it: either filter
-vendor FQNs out of the index-ready fast path (deterministic user-only
-results, matching the tests' intent), or keep a bounded vendor
-fallback so vendor implementors are always included. If user-only is
-chosen, consider whether stub implementors (e.g. SPL classes
-implementing `Iterator`) need the same treatment.
