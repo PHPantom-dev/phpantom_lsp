@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784744132814,
+  "lastUpdate": 1784744719112,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18767,6 +18767,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 165.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "5858e963a2d3f33a1e24867d3a38645b561496fe",
+          "message": "fix: treat by-ref instance method args as defined\n\nUndefined-variable analysis already marked by-ref out-params as\nwrites for free functions, static methods, constructors, and\n$this->method(). Instance calls on new ClassName() still walked\nargs as reads, so new A()->dosmth($y, $foo) falsely flagged $foo.\n\nResolve the receiver class from the AST when it is obvious ($this,\nnew Class, (new Class), new self) and mark by-ref positions as\nReadWrite, same as preg_match out-params.\n\nFixes #253.",
+          "timestamp": "2026-07-22T13:09:56-05:00",
+          "tree_id": "4e3b269185df14950c42a373c185ac55b52e0659",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5858e963a2d3f33a1e24867d3a38645b561496fe"
+        },
+        "date": 1784744716649,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 97.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 162.7,
             "unit": "MiB"
           }
         ]
