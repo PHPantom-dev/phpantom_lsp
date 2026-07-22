@@ -13,11 +13,14 @@ use tower_lsp::{LspService, Server};
 // Use mimalloc on every platform we ship a binary for. It is markedly
 // faster than musl's built-in allocator under our parallel,
 // allocation-heavy workload and a modest win on glibc as well.
-#[cfg(any(
-    target_os = "macos",
-    target_os = "windows",
-    target_env = "musl",
-    target_env = "gnu"
+#[cfg(all(
+    feature = "mimalloc",
+    any(
+        target_os = "macos",
+        target_os = "windows",
+        target_env = "musl",
+        target_env = "gnu"
+    )
 ))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -194,6 +197,11 @@ impl From<FormatArg> for phpantom_lsp::analyse::OutputFormat {
 }
 
 fn main() {
+    // Tune the allocator before the runtime spawns any threads so freed
+    // parse data is returned to the OS after indexing rather than held
+    // resident. Must run before the runtime builder below.
+    phpantom_lsp::configure_allocator();
+
     // Build the Tokio runtime by hand (rather than `#[tokio::main]`) so
     // its worker and blocking threads get a larger stack. LSP request
     // handlers parse and walk PHP ASTs on these threads (didOpen runs

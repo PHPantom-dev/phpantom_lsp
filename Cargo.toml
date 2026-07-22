@@ -51,12 +51,20 @@ zip = "2"
 # binary performs on par with the glibc build. It is a modest win on
 # glibc too. Gated to the platforms we actually ship.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_env = "musl", target_env = "gnu"))'.dependencies]
-mimalloc = "0.1.47"
+mimalloc = { version = "0.1.47", optional = true }
+libmimalloc-sys = { version = "0.1", optional = true, features = ["extended"] }
 
 [build-dependencies]
 ureq = "3"
 tar = "0.4"
 flate2 = "1"
+
+[features]
+# mimalloc is the default allocator on every shipped platform (see the
+# note on the target-specific dependency above). It is a feature so it
+# can be toggled off for benchmarking or debugging without editing code.
+default = ["mimalloc"]
+mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys"]
 
 [dev-dependencies]
 datatest-stable = "0.3"
