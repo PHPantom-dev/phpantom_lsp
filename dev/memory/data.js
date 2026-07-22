@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784748260054,
+  "lastUpdate": 1784748995151,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18903,6 +18903,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 147.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "cfcb06a1a7759f7ffa2ce1d7b9d1ff3560703fcf",
+          "message": "fix: allow use const/function completion after name-position guard\n\nThe member-name suppression for `const`/`function` also matched\n`use const FOO` and `use function bar`, which still need symbol\ncompletion. Skip the guard when those keywords are preceded by `use`.",
+          "timestamp": "2026-07-22T14:20:11-05:00",
+          "tree_id": "6feda5991491689ecd97981f35267f363cad872b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cfcb06a1a7759f7ffa2ce1d7b9d1ff3560703fcf"
+        },
+        "date": 1784748993106,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 87.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 145.3,
             "unit": "MiB"
           }
         ]
