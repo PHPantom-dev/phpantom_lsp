@@ -81,6 +81,17 @@
 //!     parsing (`parse_object_shape`, `extract_object_shape_property_type`,
 //!     `is_object_shape`)
 
+// Use mimalloc on musl builds (the static Linux binaries we ship),
+// where the system allocator is 4-6x slower for our parallel,
+// allocation-heavy workload. Defined in the library rather than the
+// binary so every artifact built from this crate uses the same
+// allocator: the language server, and also the benchmark and test
+// harnesses, which link the library but not `main.rs`. Everywhere else
+// the system allocator performs fine and holds less memory when idle.
+#[cfg(all(feature = "mimalloc", target_env = "musl"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
