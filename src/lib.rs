@@ -625,6 +625,18 @@ pub struct Backend {
     /// when the index holds at least one macro, so the hot class-load path
     /// skips the lock entirely for the common (no-macro) case.
     pub(crate) laravel_has_macros: Arc<std::sync::atomic::AtomicBool>,
+    /// Reverse index mapping a related-model FQN to the pivot type exposed on
+    /// its `$pivot` attribute when reached through a many-to-many relationship.
+    /// Built lazily (and rebuilt when a pivot-bearing file changes) and
+    /// consulted at class load; see [`virtual_members::laravel::pivots`].
+    pub(crate) laravel_pivots: Arc<RwLock<virtual_members::laravel::LaravelPivotIndex>>,
+    /// Fast gate for [`laravel_pivots`](Self::laravel_pivots): `true` only when
+    /// the index holds at least one many-to-many target.
+    pub(crate) laravel_has_pivots: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether [`laravel_pivots`](Self::laravel_pivots) needs rebuilding
+    /// (a pivot-bearing file changed, or the index was never built). Starts
+    /// `true` so the first class load builds it.
+    pub(crate) laravel_pivots_dirty: Arc<std::sync::atomic::AtomicBool>,
     /// Laravel macro seed files (service providers plus the app's provider
     /// registration files), mapped to the class references each contributed
     /// at the last macro-index build.  An edit that changes a seed's
@@ -1050,6 +1062,11 @@ impl Backend {
                 virtual_members::laravel::LaravelMacroIndex::default(),
             )),
             laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_pivots: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelPivotIndex::default(),
+            )),
+            laravel_has_pivots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_pivots_dirty: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1155,6 +1172,11 @@ impl Backend {
                 virtual_members::laravel::LaravelMacroIndex::default(),
             )),
             laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_pivots: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelPivotIndex::default(),
+            )),
+            laravel_has_pivots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_pivots_dirty: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1781,6 +1803,9 @@ impl Backend {
             laravel_aliases: Arc::clone(&self.laravel_aliases),
             laravel_macros: Arc::clone(&self.laravel_macros),
             laravel_has_macros: Arc::clone(&self.laravel_has_macros),
+            laravel_pivots: Arc::clone(&self.laravel_pivots),
+            laravel_has_pivots: Arc::clone(&self.laravel_has_pivots),
+            laravel_pivots_dirty: Arc::clone(&self.laravel_pivots_dirty),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),

@@ -178,6 +178,57 @@ pub(super) fn extract_related_type_typed(return_type: &PhpType) -> Option<&PhpTy
     None
 }
 
+/// Relationship class short names that expose a `$pivot` on the related
+/// model — the many-to-many family (`MorphToMany`/`MorphedByMany` extend
+/// `BelongsToMany`).
+const PIVOT_RELATIONSHIPS: &[&str] = &["BelongsToMany", "MorphToMany", "MorphedByMany"];
+
+/// Whether a relationship return type is a many-to-many relationship, i.e.
+/// one whose related models carry a `$pivot` attribute at runtime.
+///
+/// Accepts short names and fully-qualified Eloquent relation names, applying
+/// the same namespace guard as [`classify_relationship_typed`].
+pub(crate) fn is_pivot_relationship(return_type: &PhpType) -> bool {
+    let Some(base) = return_type.base_name() else {
+        return false;
+    };
+    if base.contains('\\') && !base.starts_with(ELOQUENT_RELATIONS_NS) {
+        return false;
+    }
+    PIVOT_RELATIONSHIPS.contains(&short_name(base))
+}
+
+/// Whether `class` declares at least one many-to-many relationship method,
+/// i.e. one whose related models carry a `$pivot`.
+pub(crate) fn class_declares_pivot_relationship(class: &ClassInfo) -> bool {
+    class
+        .methods
+        .iter()
+        .any(|m| m.return_type.as_ref().is_some_and(is_pivot_relationship))
+}
+
+/// Extract the `TPivotModel` type from a many-to-many relationship return
+/// type's generics.
+///
+/// Laravel types `BelongsToMany` as
+/// `BelongsToMany<TRelatedModel, TDeclaringModel, TPivotModel, TAccessor>`,
+/// so the custom pivot class is the **third** generic argument. Given
+/// `BelongsToMany<Permission, $this, PermissionRole>` this returns
+/// `Some(&PhpType::Named("PermissionRole"))`.
+///
+/// Returns `None` when there is no third argument, it is empty, or it is a
+/// `$this`/`static`/`self` self-reference (the default `Pivot`).
+pub(crate) fn extract_pivot_type_typed(return_type: &PhpType) -> Option<&PhpType> {
+    if let PhpType::Generic(_, args) = return_type {
+        let pivot = args.get(2)?;
+        if pivot.is_empty() || pivot.is_self_ref() {
+            return None;
+        }
+        return Some(pivot);
+    }
+    None
+}
+
 /// Pre-built `Illuminate\Database\Eloquent\Model` type for fallback related types.
 fn eloquent_model_type() -> PhpType {
     PhpType::Named("Illuminate\\Database\\Eloquent\\Model".to_owned())
@@ -490,7 +541,7 @@ fn extract_related_type_for_chain(
 /// 1. Direct load (works for FQNs).
 /// 2. Prepend the declaring class's namespace (works for short names
 ///    in the same namespace, e.g. `Article` → `App\Models\Article`).
-fn resolve_related_fqn(
+pub(crate) fn resolve_related_fqn(
     related_type: &str,
     declaring_class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,

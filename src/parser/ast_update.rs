@@ -132,6 +132,10 @@ impl Backend {
         // register macros.  Cheap no-op for files without a `macro(` call.
         self.refresh_laravel_macros(uri, content);
 
+        // Keep the reverse pivot index coherent with edits to files that
+        // declare (or previously declared) a many-to-many relationship.
+        self.refresh_laravel_pivots(uri, content);
+
         match result {
             Some(changed) => changed,
             None => {
@@ -215,6 +219,22 @@ impl Backend {
             for (uri, errors) in failures {
                 parse_errors.insert(uri, errors);
             }
+        }
+
+        // Invalidate the reverse pivot index when a background-indexed file
+        // declares a many-to-many relationship, so its target models pick up
+        // `$pivot` on the next class load.
+        if !self
+            .laravel_pivots_dirty
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && updates.iter().any(|u| {
+                u.classes
+                    .iter()
+                    .any(crate::virtual_members::laravel::class_declares_pivot_relationship)
+            })
+        {
+            self.laravel_pivots_dirty
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.apply_ast_index_updates_batch(updates)

@@ -72,15 +72,15 @@ class Demo
         $bakery->headbaker->getName(); // HasOne (lower-case)       → Baker
         $bakery->MasterRecipe;         // BelongsToMany (mixed)     → Collection<BakeryRecipe>
 
-        // $pivot attribute — synthesized on every Eloquent model, exposing the
-        // intermediate row when a model is reached through a many-to-many
-        // relationship. Typed as the base Pivot class (per-instance retyping to
-        // a custom pivot is not modelled — the access path is not tracked).
-        $bakery->masterRecipe->first()->pivot; // synthesized pivot   → Pivot
-        // Hover over masterRecipe() surfaces the pivot config recovered from
-        // the relationship body:
-        //   pivot: `App\Models\RecipeIngredient`
-        //   pivot columns: quantity, unit
+        // $pivot attribute — attached to models that are the *target* of a
+        // many-to-many relationship (belongsToMany/morphToMany). BakeryRecipe
+        // is the target of Bakery::masterRecipe(), which declares a custom
+        // pivot via ->using(RecipeIngredient::class), so its $pivot is typed as
+        // that class. When the relationship annotation carries a third generic
+        // (BelongsToMany<Related, $this, Pivot>), that type is used instead.
+        $bakery->masterRecipe->first()->pivot;                      // custom pivot → RecipeIngredient
+        $bakery->masterRecipe->first()->pivot->getQuantityLabel(); // pivot method → string
+        // Hover over masterRecipe() also lists the ->withPivot() columns.
 
         // BelongsTo relationship property + method call with covariant $this
         $post = new BlogPost();

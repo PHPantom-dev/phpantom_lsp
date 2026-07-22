@@ -89,6 +89,7 @@ mod factory;
 mod helpers;
 mod macros;
 pub(crate) mod patches;
+mod pivots;
 mod provider_resources;
 mod relationships;
 mod route_names;
@@ -139,7 +140,10 @@ pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
 };
-pub(crate) use relationships::{extract_pivot_using, extract_with_pivot_columns};
+pub(crate) use relationships::{
+    class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
+};
+pub(crate) use pivots::{LaravelPivotIndex, build_pivot_index, inject_pivot};
 
 pub use scopes::build_scope_methods_for_builder;
 use scopes::{build_scope_methods, is_scope_method};
@@ -155,8 +159,7 @@ pub(crate) use factory::{factory_to_model_fqn, model_to_factory_fqn};
 
 use crate::php_type::PhpType;
 use crate::types::{
-    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_PIVOT_FQN, PropertyInfo,
-    PropertySource,
+    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, PropertyInfo, PropertySource,
 };
 
 use super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
@@ -737,25 +740,6 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     relationship: method.name.to_string(),
                 }),
                 ..PropertyInfo::virtual_property_typed(&count_name, Some(&PhpType::int()))
-            });
-        }
-
-        // ── Pivot attribute (`$pivot`) ──────────────────────────────
-        // Models reached through a `belongsToMany`/`morphToMany`
-        // relationship gain a `$pivot` instance at runtime.  Member
-        // resolution is keyed only on class FQN, so we cannot tell whether
-        // a given instance was reached through such a relationship;
-        // instead we attach `$pivot` to every Eloquent model as a lenient
-        // over-approximation (the same trade-off `*_count` makes).  Skip
-        // when the model already declares a `pivot` column/cast, and let
-        // `merge_virtual_members` keep a more specific `@property $pivot`.
-        if seen_props.insert("pivot".to_string()) {
-            properties.push(PropertyInfo {
-                source: Some(PropertySource::Pivot),
-                ..PropertyInfo::virtual_property_typed(
-                    "pivot",
-                    Some(&PhpType::Named(ELOQUENT_PIVOT_FQN.to_owned())),
-                )
             });
         }
 

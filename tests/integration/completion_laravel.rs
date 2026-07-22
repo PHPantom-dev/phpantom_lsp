@@ -798,50 +798,97 @@ class UserService {
     );
 }
 
-// ─── $pivot attribute is synthesized on every model and chains to Pivot ──────
+// ─── $pivot is attached only to many-to-many targets, typed from TPivot ──────
+
+const ROLE_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Role extends Model {}
+";
+
+const ROLE_USER_PIVOT_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Relations\\Pivot;
+class RoleUser extends Pivot {
+    public function getAssignedAt(): string { return ''; }
+}
+";
 
 #[tokio::test]
-async fn test_pivot_property_appears_on_model_and_chains_to_pivot() {
+async fn test_pivot_attached_to_belongs_to_many_target_typed_from_generic() {
+    // `User::roles()` targets Role with a custom `RoleUser` pivot (third
+    // generic), so a Role instance gains `$pivot` typed as `RoleUser`.
     let user_php = "\
 <?php
 namespace App\\Models;
 use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
 class User extends Model {
+    /** @return BelongsToMany<Role, $this, RoleUser> */
+    public function roles(): BelongsToMany { return $this->belongsToMany(Role::class)->using(RoleUser::class); }
+    public function test() {
+        $role = new Role();
+        $role->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/RoleUser.php", ROLE_USER_PIVOT_PHP),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    // A Role instance (Role is a belongsToMany target) exposes `pivot`.
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
+    let props = property_names(&items);
+    assert!(
+        props.contains(&"pivot"),
+        "a belongsToMany target should expose 'pivot', got: {:?}",
+        props
+    );
+
+    // `$role->pivot->` resolves to the custom `RoleUser` pivot class.
+    let chained = user_php.replace("$role->\n", "$role->pivot->\n");
+    let items = complete_at(&backend, &dir, "src/Models/User.php", &chained, 9, 22).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getAssignedAt"),
+        "'$role->pivot' should resolve to RoleUser (third generic), got methods: {:?}",
+        methods
+    );
+}
+
+#[tokio::test]
+async fn test_pivot_not_attached_to_non_target_model() {
+    // User is never the target of a many-to-many relationship, so it gets
+    // no `$pivot` attribute.
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(): BelongsToMany { return $this->belongsToMany(Role::class); }
     public function test() {
         $user = new User();
         $user->
     }
 }
 ";
-    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/User.php", user_php),
+    ]);
 
-    // `$user->` should offer the synthesized `pivot` attribute.
-    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 6, 15).await;
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
     let props = property_names(&items);
     assert!(
-        props.contains(&"pivot"),
-        "every model should expose a 'pivot' attribute, got: {:?}",
+        !props.contains(&"pivot"),
+        "a non-target model must not expose 'pivot', got: {:?}",
         props
-    );
-
-    // `$user->pivot->` should resolve to the Pivot class members.
-    let chained = "\
-<?php
-namespace App\\Models;
-use Illuminate\\Database\\Eloquent\\Model;
-class User extends Model {
-    public function test() {
-        $user = new User();
-        $user->pivot->
-    }
-}
-";
-    let items = complete_at(&backend, &dir, "src/Models/User.php", chained, 6, 22).await;
-    let methods = method_names(&items);
-    assert!(
-        methods.contains(&"getAttributes"),
-        "'$user->pivot' should resolve to the Pivot class, got methods: {:?}",
-        methods
     );
 }
 
