@@ -1,7 +1,7 @@
 use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
-use crate::test_fixtures::{make_class, no_loader};
+use crate::test_fixtures::{make_class, make_method, no_loader};
 use std::sync::Arc;
 
 // ── model_to_factory_fqn tests ──────────────────────────────────────
@@ -279,6 +279,166 @@ fn factory_provider_empty_when_model_not_found() {
 
     let result = provider.provide(&factory, &no_loader, None);
     assert!(result.methods.is_empty());
+}
+
+// ── has{Rel}() / for{Rel}() / trashed() synthesis ──────────────────
+
+#[test]
+fn factory_provider_synthesizes_has_and_for_relationship_methods() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+
+    let mut model = make_class("App\\Models\\User");
+    model
+        .methods
+        .push(Arc::new(make_method("posts", Some("HasMany<Post, $this>"))));
+    model
+        .methods
+        .push(Arc::new(make_method("author", Some("BelongsTo<User, $this>"))));
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Models\\User" {
+            Some(Arc::new(model.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+
+    // has{Relationship} for each relationship, returning the factory itself.
+    let has_posts = result.methods.iter().find(|m| m.name == "hasPosts").unwrap();
+    assert!(!has_posts.is_static);
+    assert_eq!(has_posts.return_type_str().as_deref(), Some("static"));
+    assert_eq!(has_posts.parameters.len(), 2);
+    assert!(has_posts.parameters.iter().all(|p| !p.is_required));
+
+    assert!(result.methods.iter().any(|m| m.name == "hasAuthor"));
+
+    // for{Relationship} for each relationship, single optional $state param.
+    let for_author = result.methods.iter().find(|m| m.name == "forAuthor").unwrap();
+    assert!(!for_author.is_static);
+    assert_eq!(for_author.return_type_str().as_deref(), Some("static"));
+    assert_eq!(for_author.parameters.len(), 1);
+
+    assert!(result.methods.iter().any(|m| m.name == "forPosts"));
+
+    // create()/make() are still present alongside the relationship methods.
+    assert!(result.methods.iter().any(|m| m.name == "create"));
+    assert!(result.methods.iter().any(|m| m.name == "make"));
+}
+
+#[test]
+fn factory_provider_ignores_non_relationship_methods() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+
+    let mut model = make_class("App\\Models\\User");
+    model
+        .methods
+        .push(Arc::new(make_method("getName", Some("string"))));
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Models\\User" {
+            Some(Arc::new(model.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+    assert!(!result.methods.iter().any(|m| m.name == "hasGetName"));
+    assert!(!result.methods.iter().any(|m| m.name == "forGetName"));
+}
+
+#[test]
+fn factory_provider_synthesizes_trashed_for_soft_deletes_model() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+
+    let mut model = make_class("App\\Models\\User");
+    model.used_traits = vec![atom("Illuminate\\Database\\Eloquent\\SoftDeletes")];
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Models\\User" {
+            Some(Arc::new(model.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+    let trashed = result.methods.iter().find(|m| m.name == "trashed").unwrap();
+    assert!(!trashed.is_static);
+    assert_eq!(trashed.return_type_str().as_deref(), Some("static"));
+    assert!(trashed.parameters.is_empty());
+}
+
+#[test]
+fn factory_provider_synthesizes_trashed_for_short_trait_name() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+
+    let mut model = make_class("App\\Models\\User");
+    model.used_traits = vec![atom("SoftDeletes")];
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Models\\User" {
+            Some(Arc::new(model.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+    assert!(result.methods.iter().any(|m| m.name == "trashed"));
+}
+
+#[test]
+fn factory_provider_no_trashed_without_soft_deletes() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+
+    let model = make_class("App\\Models\\User");
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Models\\User" {
+            Some(Arc::new(model.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+    assert!(!result.methods.iter().any(|m| m.name == "trashed"));
+}
+
+#[test]
+fn factory_provider_trashed_from_soft_deletes_on_parent() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+
+    let mut model = make_class("App\\Models\\User");
+    model.parent_class = Some(atom("App\\Models\\BaseModel"));
+
+    let mut base = make_class("App\\Models\\BaseModel");
+    base.used_traits = vec![atom("Illuminate\\Database\\Eloquent\\SoftDeletes")];
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "App\\Models\\User" => Some(Arc::new(model.clone())),
+            "App\\Models\\BaseModel" => Some(Arc::new(base.clone())),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+    assert!(result.methods.iter().any(|m| m.name == "trashed"));
 }
 
 #[test]
