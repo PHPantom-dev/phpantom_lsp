@@ -61,6 +61,87 @@ fn synthesizes_has_many_property() {
     assert!(result.properties.iter().any(|p| p.name == "posts_count"));
 }
 
+// ── provide: implicit primary key ───────────────────────────────────
+
+#[test]
+fn synthesizes_default_primary_key_without_schema() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    // Touch the metadata so the class is recognized as a model.
+    user.laravel_mut();
+
+    let result = provider.provide(&user, &no_loader, None);
+    let id = result.properties.iter().find(|p| p.name == "id").unwrap();
+    assert_eq!(id.type_hint_str().as_deref(), Some("int"));
+    assert_eq!(id.visibility, Visibility::Public);
+    assert!(!id.is_static);
+}
+
+#[test]
+fn implicit_primary_key_respects_string_key_type() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().key_type = Some("string".to_string());
+
+    let result = provider.provide(&user, &no_loader, None);
+    let id = result.properties.iter().find(|p| p.name == "id").unwrap();
+    assert_eq!(id.type_hint_str().as_deref(), Some("string"));
+}
+
+#[test]
+fn implicit_primary_key_respects_custom_name() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().primary_key = Some("uuid".to_string());
+    user.laravel_mut().key_type = Some("string".to_string());
+
+    let result = provider.provide(&user, &no_loader, None);
+    assert!(result.properties.iter().all(|p| p.name != "id"));
+    let key = result.properties.iter().find(|p| p.name == "uuid").unwrap();
+    assert_eq!(key.type_hint_str().as_deref(), Some("string"));
+}
+
+#[test]
+fn implicit_primary_key_skipped_when_get_key_name_overridden() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().has_get_key_name_method = true;
+
+    let result = provider.provide(&user, &no_loader, None);
+    assert!(result.properties.iter().all(|p| p.name != "id"));
+}
+
+#[test]
+fn schema_id_column_takes_precedence_over_implicit_primary_key() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut();
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump("primary", "CREATE TABLE users (id bigint NOT NULL);"),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let ids: Vec<_> = result
+        .properties
+        .iter()
+        .filter(|p| p.name == "id")
+        .collect();
+    assert_eq!(ids.len(), 1);
+    assert!(matches!(
+        ids[0].source,
+        Some(PropertySource::DatabaseColumn { .. })
+    ));
+}
+
 #[test]
 fn synthesizes_schema_columns_with_cast_source_precedence() {
     let provider = LaravelModelProvider;
@@ -383,7 +464,9 @@ fn skips_non_relationship_methods() {
         .push(Arc::new(make_method("toArray", Some("array"))));
 
     let result = provider.provide(&user, &no_loader, None);
-    assert!(result.properties.is_empty());
+    // No relationship properties; only the implicit `id` primary key.
+    assert_eq!(result.properties.len(), 1);
+    assert_eq!(result.properties[0].name, "id");
 }
 
 #[test]
@@ -395,7 +478,9 @@ fn skips_methods_without_return_type() {
     user.methods.push(Arc::new(make_method("posts", None)));
 
     let result = provider.provide(&user, &no_loader, None);
-    assert!(result.properties.is_empty());
+    // No relationship property from the untyped method; only implicit `id`.
+    assert_eq!(result.properties.len(), 1);
+    assert_eq!(result.properties[0].name, "id");
 }
 
 #[test]
@@ -1477,7 +1562,9 @@ fn empty_casts_produces_no_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    assert!(result.properties.is_empty());
+    // Only the implicit `id` primary key is synthesized.
+    assert_eq!(result.properties.len(), 1);
+    assert_eq!(result.properties[0].name, "id");
 }
 
 #[test]
@@ -1676,7 +1763,9 @@ fn empty_dates_produces_no_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    assert!(result.properties.is_empty());
+    // Only the implicit `id` primary key is synthesized.
+    assert_eq!(result.properties.len(), 1);
+    assert_eq!(result.properties[0].name, "id");
 }
 
 #[test]
@@ -1853,7 +1942,9 @@ fn empty_attributes_produces_no_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    assert!(result.properties.is_empty());
+    // Only the implicit `id` primary key is synthesized.
+    assert_eq!(result.properties.len(), 1);
+    assert_eq!(result.properties[0].name, "id");
 }
 
 #[test]
@@ -2098,7 +2189,9 @@ fn empty_column_names_produces_no_extra_properties() {
     user.laravel_mut().timestamps = Some(false);
 
     let result = provider.provide(&user, &no_loader, None);
-    assert!(result.properties.is_empty());
+    // Only the implicit `id` primary key is synthesized.
+    assert_eq!(result.properties.len(), 1);
+    assert_eq!(result.properties[0].name, "id");
 }
 
 // ── Timestamp property synthesis tests ──────────────────────────────

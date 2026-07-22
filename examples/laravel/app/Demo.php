@@ -45,6 +45,7 @@ class Demo
         $bakery->headBaker;           // relationship HasOne        → Baker
         $bakery->head_baker_count;    // relationship count         → int
         $bakery->icing;               // $casts custom class        → ?Frosting
+        $bakery->id;                  // implicit primary key       → int
         $bakery->jam_flavor;          // $casts enum                → JamFlavor
         $bakery->kitchen_id;          // $guarded (no cast/attr)    → mixed
         $bakery->loaf_name;           // legacy accessor            → string

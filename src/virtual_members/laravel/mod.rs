@@ -973,6 +973,28 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 }
             }
 
+            // ── Implicit primary key ────────────────────────────────
+            // Every Eloquent model exposes a primary key column (default
+            // `id`) even when no migration or schema dump describes the
+            // table. Synthesize it when schema/casts/attributes have not
+            // already provided it, respecting `$primaryKey` and `$keyType`
+            // overrides. Skip when `getKeyName()` is declared, since the key
+            // name is then computed at runtime and cannot be resolved here.
+            if !laravel.has_get_key_name_method {
+                let primary_key = laravel.primary_key.as_deref().unwrap_or("id");
+                if seen_props.insert(primary_key.to_string()) {
+                    let php_type = if laravel.key_type.as_deref() == Some("string") {
+                        PhpType::string()
+                    } else {
+                        PhpType::int()
+                    };
+                    properties.push(PropertyInfo::virtual_property_typed(
+                        primary_key,
+                        Some(&php_type),
+                    ));
+                }
+            }
+
             // ── Timestamp properties ────────────────────────────────
             // Add timestamp properties only when schema/casts/attributes did
             // not already provide the column. Schema-backed timestamp columns

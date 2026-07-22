@@ -1442,6 +1442,25 @@ pub struct LaravelMetadata {
     pub has_get_connection_name_method: bool,
     /// Whether the model declares `getTable()`.
     pub has_get_table_method: bool,
+    /// Explicit Eloquent `$primaryKey` property.
+    ///
+    /// - `None` — not declared (inherits the default `"id"`).
+    /// - `Some("uuid")` — custom primary key column name.
+    pub primary_key: Option<String>,
+    /// Explicit Eloquent `$keyType` property.
+    ///
+    /// - `None` — not declared (inherits the default `"int"`).
+    /// - `Some("string")` — custom key type (e.g. for UUID/ULID keys).
+    ///
+    /// Determines the PHP type of the synthesized primary key property,
+    /// matching Laravel's `Model::getKeyType()`.
+    pub key_type: Option<String>,
+    /// Whether the model declares `getKeyName()`.
+    ///
+    /// When `true`, the primary key column name is computed at runtime
+    /// and cannot be resolved statically, so no implicit primary key
+    /// property is synthesized.
+    pub has_get_key_name_method: bool,
     /// Whether `$timestamps` is explicitly set on the model.
     ///
     /// - `None` — not declared (inherits the default, which is `true`

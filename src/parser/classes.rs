@@ -1133,6 +1133,14 @@ impl Backend {
                         .iter()
                         .any(|m| m.name.eq_ignore_ascii_case("getTable"));
 
+                    let primary_key =
+                        extract_string_property(class.members.iter(), content, "primaryKey");
+                    let key_type =
+                        extract_string_property(class.members.iter(), content, "keyType");
+                    let has_get_key_name_method = methods
+                        .iter()
+                        .any(|m| m.name.eq_ignore_ascii_case("getKeyName"));
+
                     let dates_definitions =
                         extract_dates_definitions(class.members.iter(), content);
 
@@ -1194,6 +1202,9 @@ impl Backend {
                             table_name,
                             has_get_connection_name_method,
                             has_get_table_method,
+                            primary_key,
+                            key_type,
+                            has_get_key_name_method,
                             timestamps,
                             created_at_name,
                             updated_at_name,
@@ -3114,6 +3125,27 @@ class ReportRow {
         let laravel = class.laravel().unwrap();
         assert!(laravel.has_get_table_method);
         assert!(laravel.has_get_connection_name_method);
+    }
+
+    #[test]
+    fn laravel_model_primary_key_config_is_extracted() {
+        let src = r#"<?php
+class Passport {
+    protected $primaryKey = 'passport_number';
+    protected $keyType = 'string';
+    public function getKeyName(): string { return $this->primaryKey; }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let class = classes
+            .iter()
+            .find(|(c, _)| c.name == atom("Passport"))
+            .map(|(c, _)| c)
+            .unwrap();
+        let laravel = class.laravel().unwrap();
+        assert_eq!(laravel.primary_key.as_deref(), Some("passport_number"));
+        assert_eq!(laravel.key_type.as_deref(), Some("string"));
+        assert!(laravel.has_get_key_name_method);
     }
 
     /// When the same class name is declared in both branches of a conditional
