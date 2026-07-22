@@ -44,15 +44,17 @@ flate2 = "1"
 self-replace = "1"
 zip = "2"
 
-# A faster general-purpose allocator than the platform default. This
-# matters most for the musl builds: musl's built-in malloc is very slow
-# under the multi-threaded, allocation-heavy load of parallel indexing
-# and parse workers, and mimalloc closes that gap so the static musl
-# binary performs on par with the glibc build. It is a modest win on
-# glibc too. Gated to the platforms we actually ship.
-[target.'cfg(any(target_os = "macos", target_os = "windows", target_env = "musl", target_env = "gnu"))'.dependencies]
+# musl's built-in malloc is very slow under the multi-threaded,
+# allocation-heavy load of parallel indexing and parse workers (4-6x
+# slower whole-project analysis), so the static musl binaries we ship
+# for Linux use mimalloc instead. Scoped to musl only: glibc, macOS,
+# and Windows system allocators perform fine, and mimalloc retains
+# freed pages more aggressively than they do, so enabling it where it
+# isn't needed just raises resident memory.
+[target.'cfg(target_env = "musl")'.dependencies]
 mimalloc = { version = "0.1.47", optional = true }
 libmimalloc-sys = { version = "0.1", optional = true, features = ["extended"] }
+libc = { version = "0.2", optional = true }
 
 [build-dependencies]
 ureq = "3"
@@ -64,7 +66,7 @@ flate2 = "1"
 # note on the target-specific dependency above). It is a feature so it
 # can be toggled off for benchmarking or debugging without editing code.
 default = ["mimalloc"]
-mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys"]
+mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys", "dep:libc"]
 
 [dev-dependencies]
 datatest-stable = "0.3"

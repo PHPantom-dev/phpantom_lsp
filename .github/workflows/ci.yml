@@ -178,8 +178,20 @@ jobs:
           echo 'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' >> .cargo/config.toml
       - name: Build release binary
         run: cargo build --release
+      - name: Build musl release binary (the shipped Linux artifact)
+        run: |
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl
       - name: Measure memory usage
-        run: python3 benches/memory_usage.py --binary target/release/phpantom_lsp | tee memory_output.json
+        run: |
+          # Interpreting the numbers requires knowing the runner's THP
+          # mode: in `always` mode the kernel backs allocations with
+          # 2 MiB pages, which inflates resident memory.
+          cat /sys/kernel/mm/transparent_hugepage/enabled || true
+          python3 benches/memory_usage.py --binary target/release/phpantom_lsp > memory_glibc.json
+          python3 benches/memory_usage.py --binary target/x86_64-unknown-linux-musl/release/phpantom_lsp --suffix _musl > memory_musl.json
+          python3 -c "import json; print(json.dumps(json.load(open('memory_glibc.json')) + json.load(open('memory_musl.json')), indent=2))" | tee memory_output.json
       - name: Store memory benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -214,6 +226,11 @@ jobs:
           echo 'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' >> .cargo/config.toml
       - name: Build release binary
         run: cargo build --release
+      - name: Build musl release binary (the shipped Linux artifact)
+        run: |
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl
       - name: Check gh-pages branch exists
         id: check-gh-pages
         run: |
@@ -225,7 +242,11 @@ jobs:
           fi
       - name: Measure memory usage
         if: steps.check-gh-pages.outputs.exists == 'true'
-        run: python3 benches/memory_usage.py --binary target/release/phpantom_lsp | tee memory_output.json
+        run: |
+          cat /sys/kernel/mm/transparent_hugepage/enabled || true
+          python3 benches/memory_usage.py --binary target/release/phpantom_lsp > memory_glibc.json
+          python3 benches/memory_usage.py --binary target/x86_64-unknown-linux-musl/release/phpantom_lsp --suffix _musl > memory_musl.json
+          python3 -c "import json; print(json.dumps(json.load(open('memory_glibc.json')) + json.load(open('memory_musl.json')), indent=2))" | tee memory_output.json
       - name: Compare against baseline
         if: steps.check-gh-pages.outputs.exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1

@@ -145,31 +145,33 @@ pub const PARSE_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 /// Tune the global allocator for a language-server workload.
 ///
-/// The Rust mimalloc build retains freed pages effectively indefinitely
-/// by default, so the tens of megabytes of transient parse data freed
-/// during a burst of indexing stay resident while the server then sits
-/// idle. Giving mimalloc a small purge delay makes each thread return
-/// those pages to the OS shortly after they fall idle, which on a large
-/// project roughly halves resident memory at no measurable throughput
-/// cost (the pages are only decommitted once, after the burst, not
-/// churned on the hot path).
+/// Only does anything on musl builds, where mimalloc is the global
+/// allocator (musl's own malloc is 4-6x slower for our parallel,
+/// allocation-heavy indexing). Two adjustments keep mimalloc's
+/// resident memory close to the live working set:
 ///
-/// This is configured through mimalloc's environment interface rather
-/// than `mi_option_set` because the numeric option ids are not stable
-/// across mimalloc versions while the variable names are. A value the
-/// user has already set in the environment is left untouched. Must be
-/// called at the very start of `main`, before the async runtime spawns
-/// any threads. No-op when mimalloc is not the active allocator.
+/// * **Purge delay.** The Rust mimalloc build retains freed pages
+///   effectively indefinitely by default, so the tens of megabytes of
+///   transient parse data freed during an indexing burst stay resident
+///   while the server then sits idle. A small purge delay makes each
+///   thread return pages to the OS shortly after they fall idle, at no
+///   measurable throughput cost (pages are decommitted once, after the
+///   burst, not churned on the hot path).
+///
+/// * **Transparent huge pages off for this process.** On distros where
+///   THP is `always` (RHEL and derivatives most notably), the kernel
+///   backs the allocator's arenas with 2 MiB pages; partially-freed
+///   huge pages cannot be returned piecemeal and khugepaged re-collapses
+///   ranges behind the purger's back, so resident memory stays tens of
+///   MiB above the working set no matter how eagerly mimalloc purges.
+///   mimalloc would issue this same prctl itself if its `allow_thp`
+///   option were 0, but it reads that option during pre-`main` heap
+///   initialization, before we run, so we make the call ourselves.
+///
+/// Must be called at the very start of `main`, before the async runtime
+/// spawns any threads. No-op when mimalloc is not the active allocator.
 pub fn configure_allocator() {
-    #[cfg(all(
-        feature = "mimalloc",
-        any(
-            target_os = "macos",
-            target_os = "windows",
-            target_env = "musl",
-            target_env = "gnu"
-        )
-    ))]
+    #[cfg(all(feature = "mimalloc", target_env = "musl"))]
     unsafe {
         // `mi_option_purge_delay` is index 15 in mimalloc v3's option
         // enum (see c_src/mimalloc/v3/include/mimalloc.h in libmimalloc-sys),
@@ -183,6 +185,11 @@ pub fn configure_allocator() {
         if (30000..40000).contains(&version) {
             libmimalloc_sys::mi_option_set(MI_OPTION_PURGE_DELAY_V3, 10);
         }
+
+        // Process-scoped THP opt-out (does not touch system settings).
+        // Ignore the result: on kernels without THP support the prctl
+        // fails and there is nothing to opt out of.
+        let _ = libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
     }
 }
 

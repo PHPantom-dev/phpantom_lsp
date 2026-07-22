@@ -1646,6 +1646,7 @@ dependencies = [
  "flate2",
  "globset",
  "ignore",
+ "libc",
  "libmimalloc-sys",
  "mago-allocator",
  "mago-composer",
