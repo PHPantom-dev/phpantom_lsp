@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784693530719,
+  "lastUpdate": 1784694679392,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18155,6 +18155,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 112.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b877d962045be937185fe20dccf76ed7ec9c93e3",
+          "message": "Recognize Laravel `Macroable::mixin()` registrations (#256)",
+          "timestamp": "2026-07-22T06:15:34+02:00",
+          "tree_id": "26c1083e70c256249d58b8c346e514b792422999",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b877d962045be937185fe20dccf76ed7ec9c93e3"
+        },
+        "date": 1784694677636,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 52.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 112.8,
             "unit": "MiB"
           }
         ]
