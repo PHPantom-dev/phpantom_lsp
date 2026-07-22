@@ -555,9 +555,6 @@ layer, split:
 - **`src/hover/mod.rs` (1,885)** → `member.rs`, `variable.rs`,
   `class.rs`, `see_refs.rs`, `templates.rs`, `constants.rs`; the
   `formatting` submodule already models the pattern.
-- **`src/scope_collector/mod.rs` (1,853)** → `scope_map.rs` (the query
-  API), `collector.rs` (the recursive walker, ~1,050 lines),
-  `build.rs` (the `collect_scope*` constructors).
 - **`src/rename/mod.rs` (1,266)** → `class.rs`, `namespace.rs` (~450
   lines of namespace-rename edit building), `prepare.rs`.
 - **`src/virtual_members/laravel/mod.rs` (920)** → move

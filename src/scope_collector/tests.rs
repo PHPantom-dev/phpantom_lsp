@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::parser::with_parsed_program;
+use mago_syntax::cst::{ClassLikeMember, MethodBody, Statement};
 
 /// Helper: parse PHP code and collect scope from the first function body found.
 fn collect_from_function(php: &str) -> ScopeMap {
