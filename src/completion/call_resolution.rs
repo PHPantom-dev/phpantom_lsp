@@ -186,6 +186,38 @@ thread_local! {
     /// index the traversal needs).
     static AUTH_USER_RESOLVER: RefCell<Option<AuthUserResolverFn>> =
         const { RefCell::new(None) };
+
+    /// Re-entry guard for [`Backend::resolve_inline_arg_raw_type`].
+    /// Tracks the argument texts currently being resolved on this stack.
+    ///
+    /// Resolving an inline argument runs the full variable-resolution
+    /// pipeline over the entire enclosing file at the caller's cursor
+    /// offset.  When that argument is itself a nested call expression
+    /// (e.g. `array_map(...)` nested inside `array_filter(...)`), the
+    /// re-walk re-reaches the same enclosing call and asks for the same
+    /// argument's raw type again.  Because the re-walk always covers the
+    /// whole program at the same cursor, this cycle is not bounded by the
+    /// expression's finite nesting depth and recurses until the stack
+    /// overflows.  Keying by argument text breaks the cycle on the second
+    /// entry while leaving distinct arguments (and sequential resolution
+    /// of identically-spelled sibling arguments) unaffected.
+    static INLINE_ARG_RESOLVING: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
+}
+
+/// RAII guard that removes an argument text from [`INLINE_ARG_RESOLVING`]
+/// on drop, so the many early returns in `resolve_inline_arg_raw_type`
+/// cannot leak an in-flight key.
+struct InlineArgResolvingGuard {
+    key: String,
+}
+
+impl Drop for InlineArgResolvingGuard {
+    fn drop(&mut self) {
+        INLINE_ARG_RESOLVING.with(|cell| {
+            cell.borrow_mut().remove(&self.key);
+        });
+    }
 }
 
 /// RAII guard that clears the callable target cache on drop.
@@ -3503,6 +3535,21 @@ impl Backend {
     /// Returns the structured type (e.g. `array<int, Customer>`) so
     /// that the caller can extract element types from it.
     fn resolve_inline_arg_raw_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+        // Break re-entrant resolution of the same argument text.  This
+        // function re-walks the whole enclosing program at the caller's
+        // cursor, so a nested call-expression argument re-reaches the same
+        // call and re-requests its own raw type; without this guard that
+        // cycle recurses until the stack overflows (nested `array_map` /
+        // `array_filter` chains being the common trigger).
+        let newly_inserted =
+            INLINE_ARG_RESOLVING.with(|cell| cell.borrow_mut().insert(arg_text.to_string()));
+        if !newly_inserted {
+            return None;
+        }
+        let _guard = InlineArgResolvingGuard {
+            key: arg_text.to_string(),
+        };
+
         let current_class = ctx.current_class;
         let all_classes = ctx.all_classes;
         let class_loader = ctx.class_loader;

@@ -163,3 +163,36 @@ class Controller {
         "Diagnostic should mention nonExistentMethod, got: {diags:#?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Deeply nested calls that pass closures/arrow functions to array_map /
+// array_filter used to recurse without bound: resolving an inline call
+// argument re-walks the whole file at the same cursor, so a nested
+// `array_map(...)` inside `array_filter(...)` re-reached the same call and
+// re-requested its own raw type until the stack overflowed.  The forward
+// walker must complete instead of aborting the process.
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn nested_array_map_filter_closures_do_not_overflow() {
+    let backend = create_test_backend();
+    let uri = "file:///test/nested_closures.php";
+    let text = r#"<?php
+
+$envVars = array_filter(
+    array_map(
+        fn($arg) => array_slice(explode("=", trim($arg, "\"'")), 1, 2),
+        array_filter(
+            $argv,
+            fn($arg) => str_starts_with(trim($arg, "\"'"), "--env="),
+        ),
+    ),
+    fn($keyAndValue) => is_array($keyAndValue) && count($keyAndValue) === 2,
+);
+"#;
+    // Running slow diagnostics exercises the forward walker + inline
+    // argument resolution.  A regression here aborts the whole test
+    // process with a stack overflow, so simply reaching the assertion
+    // proves the cycle is broken.
+    let _diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+}
