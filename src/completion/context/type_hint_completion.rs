@@ -197,6 +197,52 @@ pub(crate) fn detect_type_hint_context(
     None
 }
 
+/// Whether the cursor is typing a declared member *name* (not a type).
+///
+/// True for positions like:
+/// - `protected function getC|` (method name)
+/// - `public const FO|` (class constant name)
+/// - `case Pend|` (enum case name)
+///
+/// Property names are not covered here: they always start with `$`, and
+/// the class-name completer already bails when the partial is preceded
+/// by `$`.  Type positions like `protected User|` intentionally still
+/// offer class names.
+pub(crate) fn is_function_or_const_name_position(content: &str, position: Position) -> bool {
+    let chars: Vec<char> = content.chars().collect();
+    let Some(cursor) = position_to_char_offset(&chars, position) else {
+        return false;
+    };
+
+    // Skip the partial identifier being typed.
+    let mut i = cursor;
+    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+        i -= 1;
+    }
+
+    // Require whitespace between the keyword and the name (or empty name
+    // still after the keyword: `function |`).
+    let after_ident = i;
+    while i > 0 && chars[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i == after_ident && after_ident != cursor {
+        // Identifier jammed against previous token without space — not a
+        // declaration name (e.g. `functionfoo`).
+        return false;
+    }
+    // Empty partial right after keyword still needs the keyword check;
+    // `function|` (no space yet) is not a name position.
+    if i == after_ident {
+        return false;
+    }
+
+    check_keyword_ending_at(&chars, i, "function")
+        || check_keyword_ending_at(&chars, i, "fn")
+        || check_keyword_ending_at(&chars, i, "const")
+        || check_keyword_ending_at(&chars, i, "case")
+}
+
 // ─── Private helpers ────────────────────────────────────────────────────────
 
 /// Skip whitespace (spaces, tabs, newlines) backward from `pos`

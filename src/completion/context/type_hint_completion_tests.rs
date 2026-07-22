@@ -268,6 +268,95 @@ fn not_after_function_keyword() {
 }
 
 #[test]
+fn function_name_position_after_function_keyword() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\nclass Foo {\n    protected function getC\n}";
+    // Cursor after `getC` ("    protected function getC" → len 27)
+    assert!(is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 27
+        }
+    ));
+    // Cursor right after `function `
+    assert!(is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 23
+        }
+    ));
+}
+
+#[test]
+fn function_name_position_not_in_call() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\ngetC();";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 1,
+            character: 4
+        }
+    ));
+}
+
+#[test]
+fn const_name_position_after_const_keyword() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\nclass Foo {\n    public const FO\n}";
+    assert!(is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 19
+        }
+    ));
+}
+
+#[test]
+fn case_name_position_in_enum() {
+    use super::is_function_or_const_name_position;
+    let src = "<?php\nenum Status {\n    case Pend\n}";
+    assert!(is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 13
+        }
+    ));
+}
+
+#[test]
+fn property_name_after_dollar_is_not_function_name_position() {
+    use super::is_function_or_const_name_position;
+    // Property names use `$`; class completion already suppresses on `$`.
+    let src = "<?php\nclass Foo {\n    protected $pro\n}";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 17
+        }
+    ));
+}
+
+#[test]
+fn type_after_visibility_is_not_function_name_position() {
+    use super::is_function_or_const_name_position;
+    // `protected User` is a type-hint position — classes should still be offered.
+    let src = "<?php\nclass Foo {\n    protected Us\n}";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 16
+        }
+    ));
+}
+
+#[test]
 fn partial_is_function_keyword_after_modifier() {
     // `public function` — the partial "function" should be filtered out
     // so we don't offer type hints when the user is typing the keyword.

@@ -1010,6 +1010,76 @@ async fn test_completion_after_visibility_suggests_member_keywords() {
 }
 
 #[tokio::test]
+async fn test_completion_after_function_keyword_does_not_suggest_classes() {
+    // Issue #249 / #126: typing a method name must not offer class names.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///method_name_no_classes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Cache {}\n",
+        "class Carbon {}\n",
+        "class Collection {}\n",
+        "class Scheduler {\n",
+        "    protected function getC\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.clone(),
+            },
+        })
+        .await;
+
+    // Cursor after `getC` on the method name line.
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 27,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let class_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        !class_labels
+            .iter()
+            .any(|l| *l == "Cache" || *l == "Carbon" || *l == "Collection"),
+        "method name position must not suggest classes, got: {:?}",
+        items
+            .iter()
+            .map(|i| format!("{:?}:{}", i.kind, i.label))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
     let backend = create_test_backend();
 

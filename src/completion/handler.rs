@@ -1512,6 +1512,15 @@ impl Backend {
             return Some(CompletionResponse::Array(items));
         }
 
+        // Method/function/const *names* are not type/class positions.
+        // Without this, `protected function getC` suggests classes like
+        // Cache/Carbon that match the partial (issue #249 / #126).
+        if crate::completion::type_hint_completion::is_function_or_const_name_position(
+            content, position,
+        ) {
+            return None;
+        }
+
         let class_ctx = detect_class_name_context(content, position);
         let keyword_ctx = {
             let cursor_offset = position_to_offset(content, position);
