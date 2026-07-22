@@ -515,25 +515,6 @@ constructor.
 
 ---
 
-## Split the logic-heavy `mod.rs` files
-
-**What to do.** Per the project rule that `mod.rs` is a thin re-export
-layer, split:
-
-- **`src/references/mod.rs` (2,175)** → per-symbol-kind finders:
-  `variables.rs`, `classes.rs`, `members.rs` (including the
-  member-hierarchy resolution helpers), `functions.rs`, and a
-  `dispatch.rs` for the entry points. (Workspace-indexing functions
-  move out entirely — see the server.rs item.)
-- **`src/hover/mod.rs` (1,885)** → `member.rs`, `variable.rs`,
-  `class.rs`, `see_refs.rs`, `templates.rs`, `constants.rs`; the
-  `formatting` submodule already models the pattern.
-
-**Why it matters.** Logic in `mod.rs` is harder to find and grep for;
-each of these is a mechanical move-only split.
-
----
-
 ## Split the remaining oversized single-concern files
 
 **What to do.** After the test-block moves, these production bodies

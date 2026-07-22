@@ -1,5 +1,8 @@
+use super::constants::extract_constant_value_from_source;
+use super::variable::build_variable_hover_body;
 use super::*;
 use crate::php_type::PhpType;
+use crate::util::short_name;
 
 #[test]
 fn extract_description_simple() {
