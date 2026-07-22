@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784739027748,
+  "lastUpdate": 1784739861616,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18665,6 +18665,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 174.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "0d799b69c5d4671ddd5c11dde227b865141106c6",
+          "message": "feat: resolve Larastan model-property<Model> type against model properties\n\nAdd type validation, completion, and hover for Larastan's\nmodel-property<Model> pseudo-type.\n\nDiagnostics: string literals passed where model-property<Model> is\nexpected are checked against the model's known properties. Invalid\nproperty names produce a type mismatch diagnostic; non-literal\nstrings are accepted conservatively. Array arguments are also\nvalidated: string literals inside array or list arguments whose\nparameter type wraps model-property<Model> in a generic position\nare checked against the model's properties.\n\nCompletion: typing inside a string argument whose parameter is\ntyped as model-property<Model> (including array/list wrappers)\nsuggests the model's property names with partial filtering, using\nthe same fully-resolved property list as regular member completion.\n\nHover: hovering over a string literal inside a model-property<Model>\nparameter shows the same property info as hovering over the\ncorresponding $model->property access.\n\nThe type parser now handles hyphenated pseudo-type names that\nmago_type_syntax cannot parse. Known hyphenated names are replaced\nwith underscore placeholders before parsing and restored in the\nresult, so types like array<model-property<T>, mixed> parse\ncorrectly instead of falling back to Raw.\n\nThe completion infrastructure was refactored to extract a shared\ndetect_string_call_context() from the existing Eloquent string\ndetection, reused by completion, hover, and diagnostics.\n\nCloses #33",
+          "timestamp": "2026-07-22T11:48:29-05:00",
+          "tree_id": "427318e496114e8632b0ddd109c847b9c9356976",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0d799b69c5d4671ddd5c11dde227b865141106c6"
+        },
+        "date": 1784739858814,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 104,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 159.9,
             "unit": "MiB"
           }
         ]
