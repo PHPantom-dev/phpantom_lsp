@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784739861616,
+  "lastUpdate": 1784740618108,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18699,6 +18699,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 159.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "3d6653b16e951ca8af778d86da555479860b0fa3",
+          "message": "fix: use FQN for Eloquent TModel substitutions\n\nBuilder forwarding and where{Property}() virtual methods were\nsubstituting TModel with the model short name. At call sites that\nimport the model under an alias alongside another class with the same\nshort name, that bare name resolved through the wrong use-map entry.\n\nUse class.fqn() so return types stay independent of call-site imports.\nFixes #258.",
+          "timestamp": "2026-07-22T12:00:42-05:00",
+          "tree_id": "4212c3f5a4d9f50a24c8e68b19cbfd85a73fa883",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3d6653b16e951ca8af778d86da555479860b0fa3"
+        },
+        "date": 1784740616066,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 106.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 158,
             "unit": "MiB"
           }
         ]
