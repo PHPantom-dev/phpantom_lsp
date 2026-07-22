@@ -72,6 +72,16 @@ class Demo
         $bakery->headbaker->getName(); // HasOne (lower-case)       → Baker
         $bakery->MasterRecipe;         // BelongsToMany (mixed)     → Collection<BakeryRecipe>
 
+        // $pivot attribute — synthesized on every Eloquent model, exposing the
+        // intermediate row when a model is reached through a many-to-many
+        // relationship. Typed as the base Pivot class (per-instance retyping to
+        // a custom pivot is not modelled — the access path is not tracked).
+        $bakery->masterRecipe->first()->pivot; // synthesized pivot   → Pivot
+        // Hover over masterRecipe() surfaces the pivot config recovered from
+        // the relationship body:
+        //   pivot: `App\Models\RecipeIngredient`
+        //   pivot columns: quantity, unit
+
         // BelongsTo relationship property + method call with covariant $this
         $post = new BlogPost();
         $post->author;                // relationship BelongsTo     → BlogAuthor
