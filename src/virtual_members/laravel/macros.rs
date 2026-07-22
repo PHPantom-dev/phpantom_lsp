@@ -299,6 +299,29 @@ fn collect_mixin_class_methods(
                 }
             }
         }
+        Statement::Trait(trait_def) => {
+            let trait_name = bytes_to_str(trait_def.name.value);
+            let fqn = match namespace {
+                Some(ns) => format!("{ns}\\{trait_name}"),
+                None => trait_name.to_string(),
+            };
+            if !fqn.eq_ignore_ascii_case(mixin_fqn.trim_start_matches('\\')) {
+                return;
+            }
+            for member in trait_def.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let Some(reg) = build_direct_mixin_macro(
+                        method,
+                        target_fqn,
+                        mixin_uri,
+                        content,
+                        php_version,
+                    )
+                {
+                    out.push(reg);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -352,6 +375,55 @@ fn build_mixin_macro(
         method: synthesized,
         name_offset: method.name.span.start.offset,
         closure_text,
+        definition_uri: Some(mixin_uri.to_string()),
+    })
+}
+
+/// Build a macro from a trait mixin method whose own signature is used directly
+/// (Carbon's trait-based `mixin()` pattern, where the method's parameters and
+/// return type become the macro's signature, rather than the Laravel class-based
+/// pattern where each method returns a closure).
+fn build_direct_mixin_macro(
+    method: &Method<'_>,
+    target_fqn: &str,
+    mixin_uri: &str,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    use mago_syntax::cst::class_like::method::MethodBody;
+
+    if method
+        .modifiers
+        .iter()
+        .any(|m| m.is_private() || m.is_static() || m.is_abstract())
+    {
+        return None;
+    }
+    let MethodBody::Concrete(_) = &method.body else {
+        return None;
+    };
+    let name = bytes_to_str(method.name.value);
+    if name.starts_with("__") {
+        return None;
+    }
+
+    let parameters =
+        crate::parser::extract_parameters(&method.parameter_list, Some(content), php_version, None);
+    let return_type = method
+        .return_type_hint
+        .as_ref()
+        .map(|rth| crate::parser::extract_hint_type(&rth.hint));
+
+    let mut synthesized = MethodInfo::virtual_method_typed(name, return_type.as_ref());
+    synthesized.parameters = parameters;
+    synthesized.native_return_type = return_type;
+    synthesized.is_macro = true;
+
+    Some(MacroRegistration {
+        target: target_fqn.to_string(),
+        method: synthesized,
+        name_offset: method.name.span.start.offset,
+        closure_text: None,
         definition_uri: Some(mixin_uri.to_string()),
     })
 }

@@ -13,6 +13,7 @@ use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
 use Illuminate\Http\Request;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -425,6 +426,27 @@ class Demo
         // Collection::macro(...) registration.  `$this` inside the closures resolves via the mixin's
         // `@mixin Collection` tag.
         return $items->toAssoc('id', 'name');   // → array
+    }
+
+
+    // ── Carbon macro() and trait-based mixin() ───────────────────────
+
+    public function carbonMacro(CarbonImmutable $date): string
+    {
+        // `diffFromYear` is registered via CarbonImmutable::macro(...)
+        // in DemoServiceProvider::boot(). Carbon's macro() works the same
+        // as Laravel's Macroable, so the closure's signature is recovered.
+        return $date->diffFromYear(2020);   // → string
+    }
+
+    public function carbonTraitMixin(CarbonImmutable $date): \Carbon\CarbonInterface
+    {
+        // `toTz` and `toAppTz` come from CarbonImmutable::mixin(CarbonMixin::class)
+        // in DemoServiceProvider. Carbon supports trait-based mixins: the trait's
+        // own method signatures become the macro signatures directly, without
+        // the closure-factory wrapper that class-based mixins require.
+        $date->toAppTz();                   // → CarbonInterface
+        return $date->toTz('UTC', true);    // → CarbonInterface
     }
 
 
