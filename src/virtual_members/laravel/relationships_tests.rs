@@ -697,3 +697,64 @@ fn count_property_name_simple() {
 fn count_property_name_camel_case() {
     assert_eq!(count_property_name("headBaker"), "head_baker_count");
 }
+
+// ── extract_pivot_using ─────────────────────────────────────────────
+
+#[test]
+fn pivot_using_extracts_custom_class() {
+    let body = "{ return $this->belongsToMany(Role::class)->using(RoleUser::class); }";
+    assert_eq!(extract_pivot_using(body), Some("RoleUser".to_string()));
+}
+
+#[test]
+fn pivot_using_extracts_fqn_short_name() {
+    let body = "{ return $this->belongsToMany(Role::class)->using(\\App\\Models\\RoleUser::class); }";
+    assert_eq!(extract_pivot_using(body), Some("RoleUser".to_string()));
+}
+
+#[test]
+fn pivot_using_absent_returns_none() {
+    let body = "{ return $this->belongsToMany(Role::class)->withPivot('active'); }";
+    assert_eq!(extract_pivot_using(body), None);
+}
+
+#[test]
+fn pivot_using_skips_non_class_argument() {
+    let body = "{ return $this->belongsToMany(Role::class)->using($pivotClass); }";
+    assert_eq!(extract_pivot_using(body), None);
+}
+
+// ── extract_with_pivot_columns ──────────────────────────────────────
+
+#[test]
+fn with_pivot_extracts_multiple_columns() {
+    let body = "{ return $this->belongsToMany(Role::class)->withPivot('expires_at', 'active'); }";
+    assert_eq!(
+        extract_with_pivot_columns(body),
+        vec!["expires_at".to_string(), "active".to_string()]
+    );
+}
+
+#[test]
+fn with_pivot_handles_chained_calls() {
+    let body = "{ return $this->belongsToMany(Role::class)->withPivot('a')->withTimestamps()->withPivot(\"b\", \"c\"); }";
+    assert_eq!(
+        extract_with_pivot_columns(body),
+        vec!["a".to_string(), "b".to_string(), "c".to_string()]
+    );
+}
+
+#[test]
+fn with_pivot_skips_non_literal_arguments() {
+    let body = "{ return $this->belongsToMany(Role::class)->withPivot('active', $dynamic, self::COL); }";
+    assert_eq!(
+        extract_with_pivot_columns(body),
+        vec!["active".to_string()]
+    );
+}
+
+#[test]
+fn with_pivot_absent_returns_empty() {
+    let body = "{ return $this->belongsToMany(Role::class); }";
+    assert!(extract_with_pivot_columns(body).is_empty());
+}
