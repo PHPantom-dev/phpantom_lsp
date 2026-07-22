@@ -258,55 +258,6 @@ fail on these files every gate pass.
 
 ---
 
-## Split `forward_walk.rs` (9,476 lines) along its section banners
-
-**What to do.** `src/completion/variable/forward_walk.rs` is the largest
-file in the crate and does at least seven jobs: hover/diagnostic scope
-caches, whole-file diagnostic walking, callable parameter inference, the
-core `ScopeState` data structure, the assignment engine, control-flow
-processing with loop clamping, and a ~1,700-line narrowing subsystem.
-The file already carries section banners that map onto submodules.
-Convert it to a `forward_walk/` directory:
-
-- `diagnostic_cache.rs` — `HOVER_SCOPE_CACHE`, `DIAGNOSTIC_SCOPE`,
-  `BUILDING_SCOPES` thread-locals, RAII guards, snapshot recording.
-- `diagnostic_walk.rs` — `walk_body_for_diagnostics`,
-  `walk_closures_in_*`, `walk_top_level_statements`,
-  `analyze_function_body`.
-- `callable_inference.rs` — the `infer_callable_params_from_*_fw`
-  family, `find_callable_params_on_*_fw`, `seed_this`.
-- `scope_state.rs` — `ScopeState`, `ForwardWalkCtx`, `merge_branch`,
-  `simplify_class_hierarchy_unions`, `is_subclass_of`.
-- `assignment.rs` — `process_assignment_expr`,
-  `process_compound_assignment`, `process_destructuring_assignment`,
-  `process_array_key_assignment`, `resolve_rhs_with_scope`, inline
-  `@var` docblock handling, superglobal/pass-by-ref seeding. (Note: the
-  banner over this region says "ternary/match(true) narrowing" but the
-  code is the assignment engine — fix the banner while splitting.)
-- `snapshot_narrowing.rs` — `&&`/`||` chain operands, match/ternary
-  snapshot recording.
-- `control_flow.rs` — `process_if`/`process_foreach`/`process_while`/
-  `process_for`/`process_do_while`/`process_try`/`process_switch` plus
-  the assignment-dependency-depth helpers.
-- `narrowing.rs` — the ~24 `apply_*_narrowing` / `strip_*_from_scope`
-  functions and isset/empty extractors.
-- `closures.rs` — `try_enter_closure`, `try_enter_closure_expr`,
-  `widen_literal`.
-- `loop_control.rs` — `LOOP_DEPTH`, `enter_loop`/`leave_loop`,
-  `clamp_iterations_for_depth`.
-
-All four thread-locals are referenced only within this file, so they
-migrate cleanly with their sections. This is a mechanical move-only
-split — no behaviour change.
-
-**Why it matters.** Every type-inference task touches this file, and at
-9,476 lines with mislabeled sections it is the highest-friction file in
-the codebase. It is also shared by diagnostics, completion, hover,
-go-to-definition, and signature help, so navigability here de-risks
-everything.
-
----
-
 ## Split the other resolution-pipeline giants
 
 **What to do.** Same mechanical treatment for the three files that,
