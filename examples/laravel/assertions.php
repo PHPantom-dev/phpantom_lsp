@@ -260,6 +260,66 @@ check(
     !method_exists(\Illuminate\Contracts\View\View::class, 'getName')
 );
 
+// ─── Model factory dynamic methods (has*/for*/trashed) ───────────────────────
+
+// Factory routes has{Rel}()/for{Rel}()/trashed() through __call — none of
+// them are declared methods, which is why the analyzer must synthesize them.
+check(
+    'Factory uses __call (has*/for*/trashed are magic)',
+    method_exists(\Illuminate\Database\Eloquent\Factories\Factory::class, '__call')
+);
+check(
+    'Factory does NOT declare hasPosts()',
+    !method_exists(\Illuminate\Database\Eloquent\Factories\Factory::class, 'hasPosts')
+);
+
+// Convention resolves App\Models\BlogAuthor → Database\Factories\BlogAuthorFactory
+// without an @extends Factory<Model> generic on the factory.
+$authorFactory = \App\Models\BlogAuthor::factory();
+check(
+    'BlogAuthor::factory() resolves to BlogAuthorFactory by convention',
+    $authorFactory instanceof \Database\Factories\BlogAuthorFactory
+);
+
+// has{Relationship} is valid because posts() is a real relationship, and it
+// returns the factory so the chain continues into create()/make().
+check(
+    'BlogAuthor::posts() is a HasMany relationship',
+    (new \App\Models\BlogAuthor())->posts() instanceof \Illuminate\Database\Eloquent\Relations\HasMany
+);
+check(
+    'BlogAuthor::factory()->hasPosts(3) returns a Factory',
+    $authorFactory->hasPosts(3) instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+
+// for{Relationship} is valid because author() is a BelongsTo relationship.
+check(
+    'BlogPost::author() is a BelongsTo relationship',
+    (new \App\Models\BlogPost())->author() instanceof \Illuminate\Database\Eloquent\Relations\BelongsTo
+);
+check(
+    'BlogPost::factory()->forAuthor() returns a Factory',
+    \App\Models\BlogPost::factory()->forAuthor() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+
+// trashed() is only synthesized when the model is soft-deletable.
+check(
+    'BlogPost uses SoftDeletes',
+    in_array(
+        \Illuminate\Database\Eloquent\SoftDeletes::class,
+        class_uses_recursive(\App\Models\BlogPost::class),
+        true
+    )
+);
+check(
+    'BlogAuthor is NOT soft-deletable (no trashed())',
+    ! \App\Models\BlogAuthor::isSoftDeletable()
+);
+check(
+    'BlogPost::factory()->trashed() returns a Factory',
+    \App\Models\BlogPost::factory()->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
