@@ -2548,9 +2548,19 @@ impl Backend {
             if reg.method.return_type.is_some() || reg.method.native_return_type.is_some() {
                 continue;
             }
-            let Some(closure_text) = reg.closure_text.as_deref() else {
+            if reg.closure_text.is_none() {
                 continue;
-            };
+            }
+            // A mixin-derived macro's closure lives in the mixin class file, not
+            // in the registration site, and its `name_offset` points into that
+            // file.  Resolving the closure body against the registration file's
+            // content would use a mismatched offset and the wrong scope, so
+            // route it through its own file context instead.
+            if let Some(def_uri) = reg.definition_uri.clone() {
+                self.infer_mixin_macro_return_type(reg, &def_uri);
+                continue;
+            }
+            let closure_text = reg.closure_text.as_deref().unwrap_or_default();
             let Some(target_class) = self.find_or_load_class(&reg.target) else {
                 continue;
             };
@@ -2571,6 +2581,55 @@ impl Backend {
                 reg.method.return_type = Some(ty);
                 reg.method.is_inferred_return = true;
             }
+        }
+    }
+
+    /// Infer a mixin-derived macro's return type from the closure its mixin
+    /// method returns, resolving against the mixin class file (where the closure
+    /// actually lives) rather than the `::mixin(...)` registration site.
+    ///
+    /// A no-op when the mixin file cannot be read or the target class cannot be
+    /// resolved.  `reg.name_offset` is an offset into `def_uri`'s content, so
+    /// the file context and content must both come from that file.
+    fn infer_mixin_macro_return_type(
+        &self,
+        reg: &mut crate::virtual_members::laravel::MacroRegistration,
+        def_uri: &str,
+    ) {
+        let Some(content) = self.get_file_content(def_uri).or_else(|| {
+            let path = tower_lsp::lsp_types::Url::parse(def_uri)
+                .ok()?
+                .to_file_path()
+                .ok()?;
+            std::fs::read_to_string(path).ok()
+        }) else {
+            return;
+        };
+        let Some(closure_text) = reg.closure_text.clone() else {
+            return;
+        };
+        let Some(target_class) = self.find_or_load_class(&reg.target) else {
+            return;
+        };
+        let file_ctx = self.file_context(def_uri);
+        let class_loader = self.class_loader(&file_ctx);
+        let function_loader = self.function_loader(&file_ctx);
+        let rctx = crate::completion::resolver::ResolutionCtx {
+            current_class: Some(target_class.as_ref()),
+            all_classes: &file_ctx.classes,
+            content: &content,
+            cursor_offset: reg.name_offset,
+            class_loader: &class_loader,
+            laravel_macro_this_resolver: None,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: Some(&function_loader),
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: true,
+        };
+        if let Some(ty) = Self::infer_closure_return_type(&closure_text, &rctx) {
+            reg.method.return_type = Some(ty);
+            reg.method.is_inferred_return = true;
         }
     }
 

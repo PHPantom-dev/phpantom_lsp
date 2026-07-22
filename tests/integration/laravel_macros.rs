@@ -1392,3 +1392,101 @@ class Consumer {
         markup.value
     );
 }
+
+#[tokio::test]
+async fn mixin_macro_return_type_is_inferred_against_the_mixin_file() {
+    // A mixin method whose returned closure has no explicit return type: the
+    // type is inferred from the closure body, which must be resolved against
+    // the mixin class file's imports, not the registration site's. Here the
+    // closure builds a `Widget` imported only in the mixin file, so inference
+    // only succeeds when it uses that file's use-map and namespace.
+    let collection = "\
+<?php
+namespace Illuminate\\Support;
+class Collection {}
+";
+    let widget = "\
+<?php
+namespace App\\Models;
+class Widget {
+    public function label(): string { return ''; }
+}
+";
+    let provider = "\
+<?php
+namespace App\\Providers;
+use App\\Support\\InferMixin;
+use Illuminate\\Support\\Collection;
+class DemoServiceProvider {
+    public function boot(): void {
+        Collection::mixin(new InferMixin());
+    }
+}
+";
+    let mixin = "\
+<?php
+namespace App\\Support;
+use Closure;
+use App\\Models\\Widget;
+class InferMixin {
+    public function makeWidget(): Closure {
+        return function () {
+            return new Widget();
+        };
+    }
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Collection;
+class Consumer {
+    public function go(Collection $c): void {
+        $c->makeWidget();
+    }
+}
+";
+    let (backend, _dir) = create_psr4_workspace(
+        MIXIN_COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Support/Collection.php", collection),
+            (
+                "bootstrap/providers.php",
+                "<?php\nreturn [\n    App\\Providers\\DemoServiceProvider::class,\n];\n",
+            ),
+            ("src/Providers/DemoServiceProvider.php", provider),
+            ("src/Support/InferMixin.php", mixin),
+            ("src/Models/Widget.php", widget),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    backend.initialized(InitializedParams {}).await;
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+
+    // Hover on `makeWidget` in `$c->makeWidget()` (name starts at col 12).
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
+                },
+                position: Position {
+                    line: 5,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover should resolve the mixin macro call");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover");
+    };
+    assert!(
+        markup.value.contains("Widget"),
+        "return type should be inferred against the mixin file's imports, got:\n{}",
+        markup.value
+    );
+}
