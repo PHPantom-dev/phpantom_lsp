@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784738743675,
+  "lastUpdate": 1784739562958,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -105407,6 +105407,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.505,
             "range": "± 0.034",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "0d799b69c5d4671ddd5c11dde227b865141106c6",
+          "message": "feat: resolve Larastan model-property<Model> type against model properties\n\nAdd type validation, completion, and hover for Larastan's\nmodel-property<Model> pseudo-type.\n\nDiagnostics: string literals passed where model-property<Model> is\nexpected are checked against the model's known properties. Invalid\nproperty names produce a type mismatch diagnostic; non-literal\nstrings are accepted conservatively. Array arguments are also\nvalidated: string literals inside array or list arguments whose\nparameter type wraps model-property<Model> in a generic position\nare checked against the model's properties.\n\nCompletion: typing inside a string argument whose parameter is\ntyped as model-property<Model> (including array/list wrappers)\nsuggests the model's property names with partial filtering, using\nthe same fully-resolved property list as regular member completion.\n\nHover: hovering over a string literal inside a model-property<Model>\nparameter shows the same property info as hovering over the\ncorresponding $model->property access.\n\nThe type parser now handles hyphenated pseudo-type names that\nmago_type_syntax cannot parse. Known hyphenated names are replaced\nwith underscore placeholders before parsing and restored in the\nresult, so types like array<model-property<T>, mixed> parse\ncorrectly instead of falling back to Raw.\n\nThe completion infrastructure was refactored to extract a shared\ndetect_string_call_context() from the existing Eloquent string\ndetection, reused by completion, hover, and diagnostics.\n\nCloses #33",
+          "timestamp": "2026-07-22T11:48:29-05:00",
+          "tree_id": "427318e496114e8632b0ddd109c847b9c9356976",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0d799b69c5d4671ddd5c11dde227b865141106c6"
+        },
+        "date": 1784739559735,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 6.322,
+            "range": "± 0.083",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.048,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.124,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.167,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.256,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.26,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.008,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.923,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.116,
+            "range": "± 0.016",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.058,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.051,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.074,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 4.091,
+            "range": "± 0.036",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.21,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.267,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.088,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.056,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.121,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.121,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.108,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.242,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.286,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 6.613,
+            "range": "± 0.165",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.296,
+            "range": "± 0.029",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.042,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.039,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 76.399,
+            "range": "± 0.265",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.807,
+            "range": "± 0.031",
             "unit": "ms"
           }
         ]
