@@ -48,7 +48,7 @@ PHPantom is supported directly by Zed's official PHP extension, no separate PHPa
 {
   "languages": {
     "PHP": {
-      "language_servers": ["phpantom_lsp", "!intelephense", "!phpactor", "!phptools", "..."]
+      "language_servers": ["phpantom", "!intelephense", "!phpactor", "!phptools", "..."]
     }
   }
 }
