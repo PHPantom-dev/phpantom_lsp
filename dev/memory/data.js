@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784731377559,
+  "lastUpdate": 1784732123577,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18563,6 +18563,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 112,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c62ac393ff97296ba9ff1c789ae4ddd1484f5b67",
+          "message": "extract dock block info for @phpstan-require-implements",
+          "timestamp": "2026-07-22T16:40:09+02:00",
+          "tree_id": "7ce902777246d5199bce62efe207bcf9eeec93a0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c62ac393ff97296ba9ff1c789ae4ddd1484f5b67"
+        },
+        "date": 1784732121507,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 54,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 110.5,
             "unit": "MiB"
           }
         ]
