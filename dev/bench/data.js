@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784747972756,
+  "lastUpdate": 1784748671847,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -106751,6 +106751,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.824,
             "range": "± 0.047",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "cfcb06a1a7759f7ffa2ce1d7b9d1ff3560703fcf",
+          "message": "fix: allow use const/function completion after name-position guard\n\nThe member-name suppression for `const`/`function` also matched\n`use const FOO` and `use function bar`, which still need symbol\ncompletion. Skip the guard when those keywords are preceded by `use`.",
+          "timestamp": "2026-07-22T14:20:11-05:00",
+          "tree_id": "6feda5991491689ecd97981f35267f363cad872b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cfcb06a1a7759f7ffa2ce1d7b9d1ff3560703fcf"
+        },
+        "date": 1784748669986,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 6.96,
+            "range": "± 0.08",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.04,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.108,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.159,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.257,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.268,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.091,
+            "range": "± 0.036",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.1,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.108,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.052,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.046,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.06,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.004,
+            "range": "± 0.091",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.227,
+            "range": "± 0.015",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.277,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.067,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.046,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.115,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.105,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.085,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.226,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.286,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 7.073,
+            "range": "± 0.309",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.302,
+            "range": "± 0.031",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.043,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.04,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 75.818,
+            "range": "± 0.246",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.725,
+            "range": "± 0.043",
             "unit": "ms"
           }
         ]
