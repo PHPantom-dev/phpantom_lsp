@@ -138,7 +138,7 @@ pub fn build_where_property_methods_for_class(
 
     let return_type = PhpType::Generic(
         builder_fqn.to_string(),
-        vec![PhpType::Named(class.name.to_string())],
+        vec![PhpType::Named(class.fqn().to_string())],
     );
 
     let value_param = ParameterInfo {

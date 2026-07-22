@@ -75,6 +75,22 @@ fn where_methods_return_builder_with_model_generic() {
 }
 
 #[test]
+fn where_methods_return_builder_with_fqn_when_name_is_short() {
+    let mut channel = make_model("Channel");
+    channel.file_namespace = Some(atom("App\\Models"));
+    channel.laravel_mut().casts_definitions = vec![("name".to_string(), "string".to_string())];
+
+    let methods = build_where_property_methods_for_class(&channel, &HashSet::new());
+
+    let method = methods.iter().find(|m| m.name == "whereName").unwrap();
+    let ret = method.return_type.as_ref().unwrap().to_string();
+    assert_eq!(
+        ret,
+        "Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Channel>"
+    );
+}
+
+#[test]
 fn where_methods_have_value_parameter() {
     let mut user = make_model("App\\Models\\User");
     user.laravel_mut().casts_definitions = vec![("email".to_string(), "string".to_string())];

@@ -172,6 +172,36 @@ fn builder_forwarding_maps_tmodel_to_concrete_class() {
 }
 
 #[test]
+fn builder_forwarding_maps_tmodel_to_fqn_when_name_is_short() {
+    let builder = make_builder(vec![
+        make_method("where", Some("static")),
+        make_method("firstOrFail", Some("TModel")),
+    ]);
+    let mut channel = make_class("Channel");
+    channel.file_namespace = Some(atom("App\\Models"));
+
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == ELOQUENT_BUILDER_FQN {
+            Some(Arc::new(builder.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = build_builder_forwarded_methods(&channel, &loader, None);
+    let where_m = result.iter().find(|m| m.name == "where").unwrap();
+    assert_eq!(
+        where_m.return_type_str().as_deref(),
+        Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Channel>"),
+    );
+    let first = result.iter().find(|m| m.name == "firstOrFail").unwrap();
+    assert_eq!(
+        first.return_type_str().as_deref(),
+        Some("App\\Models\\Channel"),
+    );
+}
+
+#[test]
 fn custom_builder_forwarding_maps_parent_tmodel_to_concrete_class() {
     let builder = make_builder(vec![make_method("first", Some("TModel|null"))]);
     let mut custom_builder = make_class("App\\Models\\UserBuilder");

@@ -1783,6 +1783,66 @@ class User extends Model {
     );
 }
 
+#[tokio::test]
+async fn test_builder_first_or_fail_with_aliased_model() {
+    let other_channel_php = "\
+<?php
+namespace App\\Casts;
+class Channel {
+    public function getCastValue(): string { return ''; }
+}
+";
+    let channel_model_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Channel extends Model {
+    /** @var array<int, string> */
+    protected $fillable = ['name'];
+    public function getSlug(): string { return ''; }
+}
+";
+    let consumer_php = "\
+<?php
+namespace App\\Services;
+use App\\Casts\\Channel;
+use App\\Models\\Channel as ChannelModel;
+class Finder {
+    public function find(string $channelName) {
+        $channel = ChannelModel::whereName($channelName)->firstOrFail();
+        $channel->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Casts/Channel.php", other_channel_php),
+        ("src/Models/Channel.php", channel_model_php),
+        ("src/Services/Finder.php", consumer_php),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Services/Finder.php",
+        consumer_php,
+        7,
+        18,
+    )
+    .await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"getSlug"),
+        "aliased ChannelModel::whereName()->firstOrFail() should be App\\Models\\Channel, got: {:?}",
+        methods
+    );
+    assert!(
+        !methods.contains(&"getCastValue"),
+        "should not resolve to the colliding App\\Casts\\Channel short name, got: {:?}",
+        methods
+    );
+}
+
 // ─── Builder mixin methods forwarded ────────────────────────────────────────
 
 #[tokio::test]
