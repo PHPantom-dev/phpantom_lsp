@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784748995151,
+  "lastUpdate": 1784749442509,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18937,6 +18937,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 145.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3664dc0c86ec02eafcbfb022995951da1364e7ea",
+          "message": "Only use mimalloc on musl",
+          "timestamp": "2026-07-22T21:25:45+02:00",
+          "tree_id": "1d509f879f20cde560bc951f43b610a1c30e30cc",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3664dc0c86ec02eafcbfb022995951da1364e7ea"
+        },
+        "date": 1784749440646,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 55.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 111.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world_musl",
+            "value": 47.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model_musl",
+            "value": 95.1,
             "unit": "MiB"
           }
         ]
