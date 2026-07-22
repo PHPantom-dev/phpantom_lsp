@@ -26,6 +26,12 @@ Download the latest binary for your platform from [GitHub Releases](https://gith
 - `aarch64-apple-darwin`
 - `x86_64-pc-windows-msvc`
 
+The Linux binaries are statically linked (musl), so they have no
+minimum glibc requirement and run on any Linux distribution, including
+old-glibc systems (RHEL/CentOS 8, Debian 11) and musl-based ones
+(Alpine). The `-unknown-linux-gnu` name is retained for compatibility
+with existing installers.
+
 ### Build from Source
 
 See [BUILDING.md](BUILDING.md) for full instructions. Quick version:

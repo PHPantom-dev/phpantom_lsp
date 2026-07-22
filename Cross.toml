@@ -1,0 +1,9 @@
+# cross-rs configuration for the release workflow.
+#
+# The aarch64 Linux binary is cross-compiled with `cross` (inside a
+# container) as a static musl build. `build.rs` embeds the release tag
+# from PHPANTOM_GIT_VERSION, so that variable must be passed through
+# into the container environment or the binary would report the wrong
+# version.
+[build.env]
+passthrough = ["PHPANTOM_GIT_VERSION"]

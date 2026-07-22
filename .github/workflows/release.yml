@@ -29,25 +29,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Linux binaries are built as static musl so they run on any
+        # Linux with no libc or dynamic-loader dependency: old-glibc
+        # distros (RHEL 8, glibc 2.28) and musl distros (Alpine) alike,
+        # which the old dynamically-linked glibc build could not. They
+        # are published under the historical `-unknown-linux-gnu` asset
+        # names (`asset_target`) so the editor extensions keep resolving
+        # the same asset with no change on their side; a static musl
+        # binary runs on glibc systems just as well.
         include:
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
+            asset_target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-          - target: aarch64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
+            asset_target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
+            use_cross: true
           - target: x86_64-apple-darwin
+            asset_target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
             macos_sign: true
           - target: aarch64-apple-darwin
+            asset_target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
             macos_sign: true
           - target: x86_64-pc-windows-msvc
+            asset_target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
           - target: aarch64-pc-windows-msvc
+            asset_target: aarch64-pc-windows-msvc
             os: windows-latest
             archive: zip
 
@@ -62,23 +77,39 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # x86_64 musl builds natively on the runner (build scripts, and
+      # the phpstorm-stubs download they perform, run on the host with
+      # normal network access). musl-gcc links ring's C code.
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          sudo apt-get install -y musl-tools
+
+      # aarch64 musl cannot build natively on an x86_64 runner, so it is
+      # cross-compiled with cross inside a container.
+      - name: Install cross
+        if: matrix.use_cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
       - name: Build
+        shell: bash
         env:
           # Embed the tag as the version explicitly; actions/checkout
           # fetches a shallow clone, so `git describe` may not see it.
           PHPANTOM_GIT_VERSION: ${{ env.RELEASE_TAG }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       # --- macOS: import certificate and sign the binary ---
 
@@ -155,7 +186,7 @@ jobs:
         if: matrix.archive == 'tar.gz'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../phpantom_lsp-${{ matrix.target }}.tar.gz phpantom_lsp
+          tar czf ../../../phpantom_lsp-${{ matrix.asset_target }}.tar.gz phpantom_lsp
           cd ../../..
 
       - name: Package (windows)
@@ -164,13 +195,13 @@ jobs:
         run: |
           Compress-Archive `
             -Path "target/${{ matrix.target }}/release/phpantom_lsp.exe" `
-            -DestinationPath "phpantom_lsp-${{ matrix.target }}.zip"
+            -DestinationPath "phpantom_lsp-${{ matrix.asset_target }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: phpantom_lsp-${{ matrix.target }}
-          path: phpantom_lsp-${{ matrix.target }}.${{ matrix.archive }}
+          name: phpantom_lsp-${{ matrix.asset_target }}
+          path: phpantom_lsp-${{ matrix.asset_target }}.${{ matrix.archive }}
 
   release:
     name: Attach assets to draft

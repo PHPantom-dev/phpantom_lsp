@@ -10,6 +10,18 @@ use phpantom_lsp::config;
 use tokio::net::TcpListener;
 use tower_lsp::{LspService, Server};
 
+// Use mimalloc on every platform we ship a binary for. It is markedly
+// faster than musl's built-in allocator under our parallel,
+// allocation-heavy workload and a modest win on glibc as well.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_env = "musl",
+    target_env = "gnu"
+))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
     .usage(AnsiColor::Yellow.on_default().bold())
