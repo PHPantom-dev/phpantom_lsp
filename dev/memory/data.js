@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784740618108,
+  "lastUpdate": 1784744132814,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18733,6 +18733,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 158,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "ead56b5806535bf1d3b17d69497b46e227e5393e",
+          "message": "fix: preserve model type through ForwardsCalls mixin chains\n\nQuery-only fluents like lockForUpdate() are mixed onto Eloquent\nBuilder and Relation via @mixin. Call-site $this expansion was\nstripping Builder<TModel> generics and matching the short name\n\"Builder\", so firstOrFail() resolved as Model|stdClass.\n\nDetect ForwardsCalls and apply decorated-forward return semantics\nwhen merging mixin methods (self/mixin-class returns stay the\nforwarder's $this; other returns pass through). Preserve the\nreceiver's full generic type when expanding $this at call sites,\nmatching owners by FQN. Covers Builder and Relation chains.\n\nFixes #257.",
+          "timestamp": "2026-07-22T12:59:20-05:00",
+          "tree_id": "9f70866a051e9aa4d0d0161fcb1d221332b14e52",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ead56b5806535bf1d3b17d69497b46e227e5393e"
+        },
+        "date": 1784744130458,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 106.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 165.1,
             "unit": "MiB"
           }
         ]
