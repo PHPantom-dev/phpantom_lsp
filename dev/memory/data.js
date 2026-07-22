@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784728094159,
+  "lastUpdate": 1784729297058,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18393,6 +18393,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 110.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "26cfb2f9980879f786d3e1518f3271749afbde27",
+          "message": " Factory has*/for* relationship methods (L6) (#260)",
+          "timestamp": "2026-07-22T15:52:30+02:00",
+          "tree_id": "69cee7c9855d63bcc06777050335c5f2b942f65a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/26cfb2f9980879f786d3e1518f3271749afbde27"
+        },
+        "date": 1784729295164,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 52.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 110.8,
             "unit": "MiB"
           }
         ]
