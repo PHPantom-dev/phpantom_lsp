@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\CollectedBy;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -17,6 +18,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[CollectedBy(AuthorCollection::class)]
 class BlogAuthor extends Model
 {
+    // Convention-based factory: PHPantom maps BlogAuthor to
+    // Database\Factories\BlogAuthorFactory (no @use generic needed).
+    use HasFactory;
+
     protected $fillable = ['name', 'email', 'genre'];
 
     protected $casts = [
