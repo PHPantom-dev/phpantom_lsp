@@ -3514,13 +3514,11 @@ fn process_by_ref_closure_captures<'b>(
                 return;
             };
 
-            for (arg_idx, arg) in fc.argument_list.arguments.iter().enumerate() {
-                let arg_expr = match arg {
-                    Argument::Positional(pos) => pos.value,
-                    Argument::Named(named) => named.value,
-                };
+            let mut next_positional = 0usize;
+            for arg in fc.argument_list.arguments.iter() {
+                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr
-                    && function_invokes_callable_arg_immediately(&func_name, arg_idx, ctx)
+                    && function_invokes_callable_arg_immediately(&func_name, &selector, ctx)
                 {
                     process_by_ref_closure_capture(closure, scope, ctx);
                 }
@@ -3540,16 +3538,14 @@ fn process_by_ref_closure_captures<'b>(
                 return;
             }
 
-            for (arg_idx, arg) in mc.argument_list.arguments.iter().enumerate() {
-                let arg_expr = match arg {
-                    Argument::Positional(pos) => pos.value,
-                    Argument::Named(named) => named.value,
-                };
+            let mut next_positional = 0usize;
+            for arg in mc.argument_list.arguments.iter() {
+                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr
                     && method_invokes_callable_arg_immediately(
                         &receiver_names,
                         &method_name,
-                        arg_idx,
+                        &selector,
                         ctx,
                     )
                 {
@@ -3571,16 +3567,14 @@ fn process_by_ref_closure_captures<'b>(
                 return;
             }
 
-            for (arg_idx, arg) in mc.argument_list.arguments.iter().enumerate() {
-                let arg_expr = match arg {
-                    Argument::Positional(pos) => pos.value,
-                    Argument::Named(named) => named.value,
-                };
+            let mut next_positional = 0usize;
+            for arg in mc.argument_list.arguments.iter() {
+                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr
                     && method_invokes_callable_arg_immediately(
                         &receiver_names,
                         &method_name,
-                        arg_idx,
+                        &selector,
                         ctx,
                     )
                 {
@@ -3602,16 +3596,14 @@ fn process_by_ref_closure_captures<'b>(
                 return;
             }
 
-            for (arg_idx, arg) in sc.argument_list.arguments.iter().enumerate() {
-                let arg_expr = match arg {
-                    Argument::Positional(pos) => pos.value,
-                    Argument::Named(named) => named.value,
-                };
+            let mut next_positional = 0usize;
+            for arg in sc.argument_list.arguments.iter() {
+                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr
                     && method_invokes_callable_arg_immediately(
                         &receiver_names,
                         &method_name,
-                        arg_idx,
+                        &selector,
                         ctx,
                     )
                 {
@@ -3629,9 +3621,56 @@ fn process_by_ref_closure_captures<'b>(
     }
 }
 
+/// Identifies which callee parameter a call argument fills.
+///
+/// Positional arguments bind by their ordinal position; named arguments
+/// (`foo(callback: ...)`) bind by the declared parameter name and may
+/// appear out of their natural position, so they must be resolved by
+/// name rather than by their slot in the argument list.
+enum ArgSelector {
+    Position(usize),
+    Name(String),
+}
+
+/// Extract a call argument's value expression and the selector that
+/// identifies which parameter it fills. `next_positional` tracks the
+/// running position of positional arguments (PHP requires positional
+/// arguments to precede named ones, so this stays aligned with the
+/// parameter list).
+fn arg_expr_and_selector<'b>(
+    arg: &'b Argument<'b>,
+    next_positional: &mut usize,
+) -> (&'b Expression<'b>, ArgSelector) {
+    match arg {
+        Argument::Positional(pos) => {
+            let selector = ArgSelector::Position(*next_positional);
+            *next_positional += 1;
+            (pos.value, selector)
+        }
+        Argument::Named(named) => (
+            named.value,
+            ArgSelector::Name(bytes_to_str(named.name.value).to_string()),
+        ),
+    }
+}
+
+/// Find the callee parameter that a call argument fills, honouring both
+/// positional and named binding.
+fn select_param<'p>(
+    parameters: impl Iterator<Item = &'p FunctionLikeParameter<'p>>,
+    selector: &ArgSelector,
+) -> Option<&'p FunctionLikeParameter<'p>> {
+    match selector {
+        ArgSelector::Position(idx) => parameters.into_iter().nth(*idx),
+        ArgSelector::Name(name) => parameters
+            .into_iter()
+            .find(|param| bytes_to_str(param.variable.name).trim_start_matches('$') == name),
+    }
+}
+
 fn function_invokes_callable_arg_immediately(
     func_name: &str,
-    arg_idx: usize,
+    selector: &ArgSelector,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
     with_parsed_program(
@@ -3644,7 +3683,8 @@ fn function_invokes_callable_arg_immediately(
                 if let Statement::Function(func) = stmt
                     && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
                 {
-                    let Some(param) = func.parameter_list.parameters.iter().nth(arg_idx) else {
+                    let Some(param) = select_param(func.parameter_list.parameters.iter(), selector)
+                    else {
                         return false;
                     };
                     return !function_param_has_invocation_tag(
@@ -3727,7 +3767,7 @@ fn static_receiver_class_names(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) 
 fn method_invokes_callable_arg_immediately(
     receiver_names: &[String],
     method_name: &str,
-    arg_idx: usize,
+    selector: &ArgSelector,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
     with_parsed_program(ctx.content, "method_invokes_callable_arg", |program, _| {
@@ -3751,7 +3791,9 @@ fn method_invokes_callable_arg_immediately(
                 if let ClassLikeMember::Method(method) = member
                     && bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name)
                 {
-                    let Some(param) = method.parameter_list.parameters.iter().nth(arg_idx) else {
+                    let Some(param) =
+                        select_param(method.parameter_list.parameters.iter(), selector)
+                    else {
                         return false;
                     };
                     return node_param_has_invocation_tag(

@@ -1288,6 +1288,90 @@ $foo;
     assert_eq!(ts, "int");
 }
 
+#[test]
+fn by_ref_closure_capture_matches_named_argument_by_name_for_function() {
+    // `$b` is stored (later-invoked), not called immediately. Passing the
+    // closure as the named argument `b:` places it in the first argument
+    // slot, but it must still be matched to `$b` (not `$a`) so its
+    // later-invoked tag suppresses propagation.
+    let content = r#"<?php
+/** @param-later-invoked-callable $b */
+function c(callable $a, callable $b) {
+    $a();
+}
+
+$foo = null;
+
+c(b: function () use (&$foo) {
+    $foo = 1;
+}, a: function () {});
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null");
+}
+
+#[test]
+fn by_ref_closure_capture_matches_named_argument_by_name_for_method() {
+    // Only `$b` is immediately invoked. Passing the closure as the named
+    // argument `b:` puts it in the first argument slot; it must still be
+    // matched to `$b` so its immediately-invoked tag propagates the
+    // capture.
+    let content = r#"<?php
+class A {
+    /** @param-immediately-invoked-callable $b */
+    public function c(callable $a, callable $b) {}
+}
+
+$a = new A();
+$foo = null;
+
+$a->c(b: function () use (&$foo) {
+    $foo = 1;
+});
+
+$foo;
+"#;
+    let a_class = make_class("A");
+    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(a_class.clone())];
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "A" {
+            Some(Arc::new(a_class.clone()))
+        } else {
+            None
+        }
+    };
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &all_classes,
+        content,
+        cursor_offset,
+        &class_loader,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "int");
+}
+
 /// `array_reduce` with a class initial value should resolve to that class.
 #[test]
 fn resolve_var_array_reduce_initial_value() {
