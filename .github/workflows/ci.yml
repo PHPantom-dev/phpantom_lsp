@@ -8,6 +8,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The Linux binaries we ship are static musl builds (see
+  # release.yml). CI builds, tests, and benchmarks the same target so
+  # it exercises exactly what users run, including the mimalloc
+  # allocator that is only compiled in for musl.
+  CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
 
 jobs:
   lint:
@@ -18,16 +23,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
-      - name: Install mold linker
-        run: sudo apt-get install -y mold
-      - name: Configure mold
+      - name: Set up musl build
         run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
           mkdir -p .cargo
-          echo '[target.x86_64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' >> .cargo/config.toml
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo clippy --tests -- -D warnings
@@ -38,16 +43,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: coverage
-      - name: Install mold linker
-        run: sudo apt-get install -y mold
-      - name: Configure mold
+      - name: Set up musl build
         run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
           mkdir -p .cargo
-          echo '[target.x86_64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' >> .cargo/config.toml
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - name: Install cargo-llvm-cov and cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -84,9 +90,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
+      - name: Set up musl build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
+          mkdir -p .cargo
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - name: Ensure gh-pages branch exists
         run: |
           if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
@@ -118,9 +132,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
+      - name: Set up musl build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
+          mkdir -p .cargo
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - name: Check gh-pages branch exists
         id: check-gh-pages
         run: |
@@ -162,6 +184,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
@@ -169,29 +193,20 @@ jobs:
         with:
           php-version: "8.4"
           tools: composer
-      - name: Install mold linker
-        run: sudo apt-get install -y mold
-      - name: Configure mold
+      - name: Set up musl build
         run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
           mkdir -p .cargo
-          echo '[target.x86_64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' >> .cargo/config.toml
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - name: Build release binary
         run: cargo build --release
-      - name: Build musl release binary (the shipped Linux artifact)
-        run: |
-          sudo apt-get install -y musl-tools
-          rustup target add x86_64-unknown-linux-musl
-          cargo build --release --target x86_64-unknown-linux-musl
       - name: Measure memory usage
         run: |
-          # Interpreting the numbers requires knowing the runner's THP
-          # mode: in `always` mode the kernel backs allocations with
-          # 2 MiB pages, which inflates resident memory.
+          # THP mode affects resident memory (2 MiB backing pages in
+          # `always` mode); log it so the numbers are interpretable.
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
-          python3 benches/memory_usage.py --binary target/release/phpantom_lsp > memory_glibc.json
-          python3 benches/memory_usage.py --binary target/x86_64-unknown-linux-musl/release/phpantom_lsp --suffix _musl > memory_musl.json
-          python3 -c "import json; print(json.dumps(json.load(open('memory_glibc.json')) + json.load(open('memory_musl.json')), indent=2))" | tee memory_output.json
+          python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json
       - name: Store memory benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -210,6 +225,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
@@ -217,20 +234,14 @@ jobs:
         with:
           php-version: "8.4"
           tools: composer
-      - name: Install mold linker
-        run: sudo apt-get install -y mold
-      - name: Configure mold
+      - name: Set up musl build
         run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
           mkdir -p .cargo
-          echo '[target.x86_64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' >> .cargo/config.toml
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - name: Build release binary
         run: cargo build --release
-      - name: Build musl release binary (the shipped Linux artifact)
-        run: |
-          sudo apt-get install -y musl-tools
-          rustup target add x86_64-unknown-linux-musl
-          cargo build --release --target x86_64-unknown-linux-musl
       - name: Check gh-pages branch exists
         id: check-gh-pages
         run: |
@@ -244,9 +255,7 @@ jobs:
         if: steps.check-gh-pages.outputs.exists == 'true'
         run: |
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
-          python3 benches/memory_usage.py --binary target/release/phpantom_lsp > memory_glibc.json
-          python3 benches/memory_usage.py --binary target/x86_64-unknown-linux-musl/release/phpantom_lsp --suffix _musl > memory_musl.json
-          python3 -c "import json; print(json.dumps(json.load(open('memory_glibc.json')) + json.load(open('memory_musl.json')), indent=2))" | tee memory_output.json
+          python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json
       - name: Compare against baseline
         if: steps.check-gh-pages.outputs.exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1

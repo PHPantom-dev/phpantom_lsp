@@ -621,15 +621,6 @@ def main() -> None:
             "A temp dir is used if omitted."
         ),
     )
-    parser.add_argument(
-        "--suffix",
-        default="",
-        help=(
-            "Suffix appended to metric names (e.g. '_musl' to report "
-            "memory_hello_world_musl), for measuring several binaries "
-            "into one benchmark series."
-        ),
-    )
 
     args = parser.parse_args()
 
@@ -686,7 +677,7 @@ def main() -> None:
 
     # Output results as customSmallerIsBetter JSON.
     entries = [
-        {"name": name + args.suffix, "unit": "MiB", "value": round(kib / 1024, 1)}
+        {"name": name, "unit": "MiB", "value": round(kib / 1024, 1)}
         for name, kib in sorted(results.items())
     ]
     json.dump(entries, sys.stdout, indent=2)
