@@ -416,31 +416,33 @@ constructor.
 
 ---
 
-## Split the remaining oversized single-concern files
+## Decompose `extract_from_expression` by expression category
 
-**What to do.** After the test-block moves, these production bodies
-remain over the threshold and have documented seams. Split each along
-the seams (mechanical moves; do opportunistically, one per touch):
+**What to do.** `symbol_map/extraction.rs` has been split along its
+seams into `extraction/{statements,class_like,expressions,subject_text,laravel,keywords}.rs`.
+One documented seam remains internal: `expressions.rs`'s
+`extract_from_expression` is a single ~955-line `match` that keeps the
+file over the size threshold. Decompose it by expression category
+(one helper per group: calls, member access, assignment, closures/arrow
+functions, anonymous classes, language constructs, …) so the top-level
+`match` becomes a dispatcher and each category body lives in its own
+function. This is pure code motion, no behaviour change.
 
-| File | Prod lines | Split |
-| --- | --- | --- |
-| `symbol_map/extraction.rs` | 3,603 | `statements.rs`, `class_like.rs`, `expressions.rs` (the 955-line `extract_from_expression` also needs decomposing by expression category), `subject_text.rs`, `laravel.rs`, `keywords.rs` |
+A dedup note attached to this seam:
 
-A dedup note attached to this table:
-
-- `extraction.rs::expr_to_subject_text` (202 lines matching ~30
+- `expressions.rs::expr_to_subject_text` (~202 lines matching ~30
   expression variants) duplicates
   `subject_expr.rs::SubjectExpr::to_subject_text`. Unify: build a
-  `SubjectExpr` and render it, instead of a second serializer.
+  `SubjectExpr` from the AST and render it, instead of a second
+  serializer. Note this is a semantic change to the shared subject-text
+  pipeline (`SubjectExpr::parse` consumes these strings downstream), so
+  it needs before/after `analyze` comparison on the test projects to
+  guard against resolution regressions in array-element, null-safe, and
+  call-argument serialization.
 
-Separately, `inheritance.rs`'s factory heuristics
-(`is_has_factory_trait`, `is_factory_class`) are Laravel-specific
-logic living in a generic module; move them near
-`virtual_members/laravel/`.
-
-**Why it matters.** These are all files the size checklist flags every
-gate pass; recording the seams here makes each split a bounded task
-instead of a re-analysis.
+**Why it matters.** `expressions.rs` is flagged by the size checklist
+every gate pass; the seam is recorded here so the decomposition is a
+bounded task instead of a re-analysis.
 
 ---
 

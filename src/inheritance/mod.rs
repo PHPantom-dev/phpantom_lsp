@@ -128,7 +128,7 @@ impl MergeDedup {
     }
 }
 
-use crate::virtual_members::laravel::factory_to_model_fqn;
+use crate::virtual_members::laravel::{factory_to_model_fqn, is_factory_class};
 
 /// Resolve a class together with all inherited members from its parent
 /// chain.
@@ -241,7 +241,7 @@ pub(crate) fn resolve_class_with_inheritance(
         // → `App\Models\User`) and substitute `TModel` automatically.
         if level_subs.is_empty()
             && !parent.template_params.is_empty()
-            && traits::is_factory_class(parent_name)
+            && is_factory_class(parent_name)
         {
             let factory_fqn = current.fqn();
             if let Some(model_fqn) = factory_to_model_fqn(&factory_fqn)

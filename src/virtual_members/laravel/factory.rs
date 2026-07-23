@@ -24,6 +24,21 @@ use super::helpers::{snake_to_pascal, walks_parent_chain};
 
 use super::super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
 
+/// Check whether a trait name is the Laravel `HasFactory` trait.
+///
+/// Matches the FQN `Illuminate\Database\Eloquent\Factories\HasFactory`
+/// as well as the short name `HasFactory` (common in same-file tests).
+pub(crate) fn is_has_factory_trait(trait_name: &str) -> bool {
+    trait_name == "Illuminate\\Database\\Eloquent\\Factories\\HasFactory"
+        || trait_name == "HasFactory"
+}
+
+/// Check whether a parent class name is the Laravel
+/// `Illuminate\Database\Eloquent\Factories\Factory` base class.
+pub(crate) fn is_factory_class(class_name: &str) -> bool {
+    class_name == "Illuminate\\Database\\Eloquent\\Factories\\Factory" || class_name == "Factory"
+}
+
 /// The fully-qualified name of the `Factory` base class.
 const FACTORY_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
 

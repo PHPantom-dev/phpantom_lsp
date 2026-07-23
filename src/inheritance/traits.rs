@@ -11,7 +11,9 @@ use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_TRAIT_DEPTH, Visibility};
 use crate::util::short_name;
-use crate::virtual_members::laravel::{extends_eloquent_model, model_to_factory_fqn};
+use crate::virtual_members::laravel::{
+    extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
+};
 
 use super::generics::{
     apply_substitution_to_method, apply_substitution_to_property, right_align_offset,
@@ -309,21 +311,6 @@ pub(crate) fn merge_traits_into(
             merged.methods.push(Arc::new(aliased));
         }
     }
-}
-
-/// Check whether a trait name is the Laravel `HasFactory` trait.
-///
-/// Matches the FQN `Illuminate\Database\Eloquent\Factories\HasFactory`
-/// as well as the short name `HasFactory` (common in same-file tests).
-fn is_has_factory_trait(trait_name: &str) -> bool {
-    trait_name == "Illuminate\\Database\\Eloquent\\Factories\\HasFactory"
-        || trait_name == "HasFactory"
-}
-
-/// Check whether a parent class name is the Laravel
-/// `Illuminate\Database\Eloquent\Factories\Factory` base class.
-pub(crate) fn is_factory_class(class_name: &str) -> bool {
-    class_name == "Illuminate\\Database\\Eloquent\\Factories\\Factory" || class_name == "Factory"
 }
 
 /// Build a substitution map for a trait based on `@use` generics and the

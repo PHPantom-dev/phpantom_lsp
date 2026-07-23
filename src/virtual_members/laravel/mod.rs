@@ -159,7 +159,9 @@ use std::sync::Arc;
 use builder::build_builder_forwarded_methods;
 use casts::cast_type_to_php_type;
 pub use factory::LaravelFactoryProvider;
-pub(crate) use factory::{factory_to_model_fqn, model_to_factory_fqn};
+pub(crate) use factory::{
+    factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
+};
 
 use crate::php_type::PhpType;
 use crate::types::{
