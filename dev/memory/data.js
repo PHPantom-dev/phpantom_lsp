@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784826856330,
+  "lastUpdate": 1784829571622,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19525,6 +19525,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "01cbcab5e7cd577ed4656295bc73172a9f9d1a3a",
+          "message": "feat: support phpstan-ignore identifiers\n\nHighlight @phpstan-ignore tags and each listed PHPStan identifier in\nordinary comments and docblocks. Offer identifier completion from cached\nPHPStan diagnostics for the current file while avoiding per-code reason\ntext.",
+          "timestamp": "2026-07-23T12:43:40-05:00",
+          "tree_id": "f368fcdc3776971a745cbf873681c2b2ae7a8dd0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/01cbcab5e7cd577ed4656295bc73172a9f9d1a3a"
+        },
+        "date": 1784829568692,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 97.4,
             "unit": "MiB"
           }
         ]
