@@ -10,10 +10,14 @@ use std::collections::HashMap;
 ///
 /// Sub-modules:
 /// - [`classes`]: Class, interface, trait, and enum extraction
+/// - [`anonymous`]: Anonymous class (`new class { ... }`) extraction
+/// - [`attributes`]: Native PHP `#[Attribute]` target bitmask extraction
 /// - [`functions`]: Standalone function and `define()` constant extraction
 /// - [`use_statements`]: `use` statement and namespace extraction
 /// - [`ast_update`]: The `update_ast` orchestrator and name resolution
+mod anonymous;
 mod ast_update;
+mod attributes;
 mod classes;
 pub(crate) mod error_format;
 mod functions;

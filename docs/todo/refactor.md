@@ -425,18 +425,18 @@ the seams (mechanical moves; do opportunistically, one per touch):
 | File | Prod lines | Split |
 | --- | --- | --- |
 | `symbol_map/extraction.rs` | 3,603 | `statements.rs`, `class_like.rs`, `expressions.rs` (the 955-line `extract_from_expression` also needs decomposing by expression category), `subject_text.rs`, `laravel.rs`, `keywords.rs` |
-| `parser/classes.rs` | ~2,760 | `laravel_model.rs` (casts/attributes/dates/relationship extraction, ~700 lines), `attributes.rs`, `anonymous.rs` (the anonymous-class walker, ~1,000 lines) |
 
-Two dedup notes attached to this table:
+A dedup note attached to this table:
 
 - `extraction.rs::expr_to_subject_text` (202 lines matching ~30
   expression variants) duplicates
   `subject_expr.rs::SubjectExpr::to_subject_text`. Unify: build a
   `SubjectExpr` and render it, instead of a second serializer.
-- `parser/classes.rs`'s Laravel-model extraction and
-  `inheritance.rs`'s factory heuristics (`is_has_factory_trait`,
-  `is_factory_class`) are framework logic living in generic modules;
-  the splits should land them near `virtual_members/laravel/`.
+
+Separately, `inheritance.rs`'s factory heuristics
+(`is_has_factory_trait`, `is_factory_class`) are Laravel-specific
+logic living in a generic module; move them near
+`virtual_members/laravel/`.
 
 **Why it matters.** These are all files the size checklist flags every
 gate pass; recording the seams here makes each split a bounded task

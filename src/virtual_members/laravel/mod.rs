@@ -88,6 +88,7 @@ mod env_vars;
 mod factory;
 mod helpers;
 mod macros;
+mod model_extraction;
 pub(crate) mod patches;
 mod pivots;
 mod provider_resources;
@@ -113,6 +114,9 @@ pub(crate) use macros::{
     extract_mixin_registrations, inject_macros, macro_closure_this_target,
     parse_installed_providers, parse_provider_class_list, parse_provider_referenced_classes,
     synthesize_mixin_macros,
+};
+pub(crate) use model_extraction::{
+    extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
 };
 pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
 pub(crate) use route_names::enumerate_all_route_names;
