@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784825194497,
+  "lastUpdate": 1784826856330,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19491,6 +19491,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "f7030d4661707f75d3b4547f0dca534210d373e8",
+          "message": "fix: resolve facade static calls through concrete targets\n\nResolve missing static methods on Laravel-style facades through the\nconcrete class returned by getFacadeAccessor before falling back to the\nfacade magic __callStatic return type. Also try facade @mixin targets so\nannotated facades keep their concrete method return types.\n\nCloses #270",
+          "timestamp": "2026-07-23T11:58:11-05:00",
+          "tree_id": "2c1064bc20eea5fa9d5c188e37d2f6102ccc5ce4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f7030d4661707f75d3b4547f0dca534210d373e8"
+        },
+        "date": 1784826853839,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95.6,
             "unit": "MiB"
           }
         ]
