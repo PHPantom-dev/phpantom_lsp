@@ -235,6 +235,7 @@ impl Backend {
             SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
             SymbolKind::LaravelStringKey { .. }
+            | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
             | SymbolKind::Comment => None,
