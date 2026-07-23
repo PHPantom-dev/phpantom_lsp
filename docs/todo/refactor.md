@@ -430,7 +430,6 @@ the seams (mechanical moves; do opportunistically, one per touch):
 | `code_actions/phpstan/fix_return_type.rs` | ~2,080 | `inference.rs`, `edits.rs`, `message_parse.rs` |
 | `completion/phpdoc/generation.rs` | ~1,900 | `trigger.rs`, `parse_decl.rs`, `build.rs` |
 | `completion/handler.rs` | 1,877 | per-strategy: `member_access.rs`, `named_args.rs`, `class_constant.rs`, `phpdoc.rs`, `patching.rs` |
-| `classmap_scanner.rs` | ~1,850 | `lexer.rs` (the intentional SIMD byte-lexer fast path — isolate, don't remove), `discovery.rs` |
 
 Two dedup notes attached to this table:
 
