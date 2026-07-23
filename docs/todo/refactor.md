@@ -214,38 +214,6 @@ Each item must include:
 
 # Outstanding items
 
-## Split the other resolution-pipeline giants
-
-**What to do.** Same mechanical treatment for the three files that,
-together with `forward_walk.rs`, form the shared resolution pipeline:
-
-- **`src/completion/variable/rhs_resolution.rs` (4,456)** →
-  `rhs_resolution/{dispatch, instantiation, array_access, calls,
-  property_access}.rs`. `dispatch.rs` keeps
-  `resolve_rhs_expression_inner` and `resolve_var_types`;
-  `instantiation.rs` takes the `new`-expression/template-binding block
-  (~960 lines); `calls.rs` takes function/method/static call return
-  resolution (~1,300 lines); `property_access.rs` takes property access
-  plus the `find_*_this_property_assignment*` scanners.
-- **`src/completion/call_resolution.rs` (2,805)** — its three separate
-  `impl Backend` blocks already partition it →
-  `call_resolution/{target_cache, callable_target, return_types,
-  template_subs, arg_type_resolution}.rs`. The two giant functions
-  (`resolve_call_return_types_expr_with_hint` ~700 lines,
-  `build_method_template_subs` ~450 lines) should additionally be
-  decomposed by call kind while moving.
-- **`src/completion/resolver.rs` (1,805)** → extract
-  `resolver/context.rs` (the `Loaders`/`ResolutionCtx`/
-  `VarResolutionCtx` types that every sibling module imports) and
-  `resolver/property_narrowing.rs` (the `walk_property_narrowing_*`
-  family).
-
-**Why it matters.** These files implement the single shared type
-pipeline that the project's conventions require all consumers to use.
-Their size is the main obstacle to fixing bugs in it confidently.
-
----
-
 ## Deduplicate parallel helpers inside the resolution pipeline
 
 **What to do.** The resolution files contain several
@@ -254,35 +222,37 @@ implementation (do this after — or as part of — the splits above):
 
 1. **Call return-type wrappers.** `resolve_rhs_method_call_inner` /
    `resolve_rhs_static_call` / `resolve_rhs_function_call`
-   (`rhs_resolution.rs`) call into
+   (`rhs_resolution/calls.rs`) call into
    `Backend::resolve_method_return_types_with_args`
-   (`call_resolution.rs`) but each re-implements the surrounding
-   self/static substitution, union-owner expansion, and scalar
-   fallbacks. Consolidate the pre/post logic into one shared entry
-   point.
+   (`call_resolution/return_types.rs`) but each re-implements the
+   surrounding self/static substitution, union-owner expansion, and
+   scalar fallbacks. Consolidate the pre/post logic into one shared
+   entry point.
 2. **Callable-param inference.** The `*_fw`-suffixed family in
-   `forward_walk.rs` parallels the logic in
+   `forward_walk/` parallels the logic in
    `completion/variable/closure_resolution.rs`. The suffix itself marks
    a copy; unify them.
 3. **`$this`/`self`/`static` resolution.** ~32 call sites spread across
    `util.rs` (`is_self_or_static`, `resolve_class_keyword`),
-   `call_resolution.rs` (`resolve_class_name_keyword`), `resolver.rs`
-   (`resolve_static_owner_class`), and `forward_walk.rs` (`seed_this`),
-   plus hand-rolled `== "$this"` checks. Back them with one helper
-   module.
-4. **Subclass checks.** `is_subclass_of` (`forward_walk.rs`),
+   `call_resolution/callable_target.rs` (`resolve_class_name_keyword`),
+   `resolver/mod.rs` (`resolve_static_owner_class`), and `forward_walk/`
+   (`seed_this`), plus hand-rolled `== "$this"` checks. Back them with
+   one helper module.
+4. **Subclass checks.** `is_subclass_of` (`forward_walk/`),
    `is_type_subclass_of` and `is_valid_virtual_narrowing`
-   (`call_resolution.rs`), and `util::is_subtype_of*` overlap; route
-   through the `util`/`php_type` versions.
+   (`call_resolution/return_types.rs`), and `util::is_subtype_of*`
+   overlap; route through the `util`/`php_type` versions.
 5. **Property-assignment scanning.** The
-   `find_*_this_property_assignment*` family (`rhs_resolution.rs`) and
-   the `walk_property_narrowing_*` family (`resolver.rs`) walk class
-   members and statements with near-identical skeletons for different
-   outputs. Share the traversal.
+   `find_*_this_property_assignment*` family
+   (`rhs_resolution/property_access.rs`) and the
+   `walk_property_narrowing_*` family (`resolver/property_narrowing.rs`)
+   walk class members and statements with near-identical skeletons for
+   different outputs. Share the traversal.
 6. **Argument-text extraction.** `extract_argument_texts_fw` /
-   `extract_first_arg_string_fw` (`forward_walk.rs`) vs
-   `extract_first_arg_text` / `resolve_inline_arg_raw_type` /
-   `resolve_arg_text_to_type` (`call_resolution.rs`) vs
+   `extract_first_arg_string_fw` (`forward_walk/`) vs
+   `extract_first_arg_text` / `resolve_inline_arg_raw_type`
+   (`call_resolution/arg_type_resolution.rs`) vs
+   `resolve_arg_text_to_type` (`call_resolution/template_subs.rs`) vs
    `resolve_arg_raw_type` (`resolution.rs`).
 
 **Why it matters.** These duplications are exactly the "parallel type
