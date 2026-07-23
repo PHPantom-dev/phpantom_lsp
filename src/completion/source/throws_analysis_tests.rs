@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::catch::*;
 use super::*;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo, MethodInfo, Visibility};
+use tower_lsp::lsp_types::Position;
 
 // ── Low-level scanning tests ────────────────────────────────────────
 

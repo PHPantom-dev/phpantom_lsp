@@ -432,7 +432,6 @@ the seams (mechanical moves; do opportunistically, one per touch):
 | `completion/handler.rs` | 1,877 | per-strategy: `member_access.rs`, `named_args.rs`, `class_constant.rs`, `phpdoc.rs`, `patching.rs` |
 | `classmap_scanner.rs` | ~1,850 | `lexer.rs` (the intentional SIMD byte-lexer fast path — isolate, don't remove), `discovery.rs` |
 | `completion/context/class_completion.rs` | ~1,900 | `context_detect.rs`, `heuristics.rs`, `attributes.rs`, `ctor.rs` (416-line `ctor_params_for`) |
-| `completion/source/throws_analysis.rs` | ~1,740 | `scanning.rs`, `catch.rs`, `cross_file.rs` |
 
 Two dedup notes attached to this table:
 
