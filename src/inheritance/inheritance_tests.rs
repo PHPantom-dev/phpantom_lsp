@@ -1,7 +1,7 @@
 use super::*;
 use crate::atom::{AtomMap, atom};
 use crate::php_type::PhpType;
-use crate::types::ClassLikeKind;
+use crate::types::{ClassLikeKind, MethodInfo};
 
 /// Helper to build a `HashMap<String, PhpType>` from `(&str, &str)` pairs.
 fn make_subs(pairs: &[(&str, &str)]) -> HashMap<String, PhpType> {
