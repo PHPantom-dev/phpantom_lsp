@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784813878952,
+  "lastUpdate": 1784815097838,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19355,6 +19355,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 94.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4d34c85e0d56145ca2208fc5b5b78eb77e27954f",
+          "message": "L7. `$pivot` property on BelongsToMany related models (#266)",
+          "timestamp": "2026-07-23T15:43:20+02:00",
+          "tree_id": "05bb6e9528760a8c5661277c04a3ac48480a53af",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4d34c85e0d56145ca2208fc5b5b78eb77e27954f"
+        },
+        "date": 1784815095005,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 92.6,
             "unit": "MiB"
           }
         ]
