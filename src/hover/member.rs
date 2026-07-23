@@ -63,7 +63,7 @@ fn format_attribute_default_details(source: &AttributeDefaultSource) -> Vec<Stri
     ]
 }
 
-fn format_property_source(source: &PropertySource) -> Vec<String> {
+pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
     match source {
         PropertySource::DatabaseColumn {
             column,

@@ -780,14 +780,13 @@ pub enum PropertySource {
     RelationshipCount {
         relationship: String,
     },
-    /// The `$pivot` attribute synthesized on every Eloquent model.
+    /// The `$pivot` attribute synthesized on a many-to-many target model.
     ///
     /// Related models accessed through a `belongsToMany`/`morphToMany`
-    /// relationship gain a `$pivot` instance at runtime.  Because member
-    /// resolution is keyed only on class FQN, we cannot tell whether a
-    /// given instance was reached through such a relationship, so the
-    /// property is attached to every model as a lenient over-approximation
-    /// (mirroring how `*_count` is emitted unconditionally).
+    /// relationship gain a `$pivot` instance at runtime.  A project-wide
+    /// reverse index (related-model FQN → pivot type) records which models
+    /// are reached through such a relationship, so `$pivot` is attached to
+    /// exactly those models and typed from the relationship's pivot generic.
     Pivot,
 }
 
