@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784762582480,
+  "lastUpdate": 1784766621735,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19151,6 +19151,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "66f470d5d0d74fb78e12b8a88efe9c8150f3f110",
+          "message": "Split the other resolution-pipeline giants",
+          "timestamp": "2026-07-23T02:14:29+02:00",
+          "tree_id": "02dfb2fa690b6da5856d5ef8727fbb13e872f5bf",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/66f470d5d0d74fb78e12b8a88efe9c8150f3f110"
+        },
+        "date": 1784766619830,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.5,
             "unit": "MiB"
           }
         ]
