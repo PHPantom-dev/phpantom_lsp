@@ -954,6 +954,9 @@ fn contains_self_or_parent(ty: &PhpType) -> bool {
             matches!(low.as_str(), "self" | "static" | "$this" | "parent")
                 || args.iter().any(contains_self_or_parent)
         }
+        PhpType::ClassString(inner) | PhpType::InterfaceString(inner) => inner
+            .as_ref()
+            .is_some_and(|inner| contains_self_or_parent(inner)),
         _ => false,
     }
 }

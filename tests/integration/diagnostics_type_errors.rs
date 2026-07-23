@@ -1872,6 +1872,52 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_sibling_class_strings_passed_to_static_bound() {
+    let php = r#"<?php
+/**
+ * @phpstan-type Input array{
+ *     type: 'S1'|'S2'|'S3',
+ *     data: array<string, mixed>
+ * }
+ */
+abstract class AClass
+{
+    /**
+     * @param Input $data
+     * @return array<string, mixed>
+     */
+    public static function foo(array $data): array
+    {
+        return match ($data["type"]) {
+            "S1" => static::bar(SClass1::class, $data["data"]),
+            "S2" => static::bar(SClass2::class, $data["data"]),
+            "S3" => static::bar(SClass3::class, $data["data"]),
+        };
+    }
+
+    /**
+     * @param class-string<static> $class
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function bar(string $class, array $data): array
+    {
+        return $data;
+    }
+}
+
+final class SClass1 extends AClass {}
+final class SClass2 extends AClass {}
+final class SClass3 extends AClass {}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag sibling class-string constants passed to class-string<static>, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: iterable<...> accepts arrays
 // ═══════════════════════════════════════════════════════════════════════════

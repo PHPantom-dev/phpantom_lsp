@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`class-string<static>` parameters no longer reject sibling subclass constants.** Static helper calls from a shared base class that pass concrete `::class` constants for sibling subclasses no longer report false argument-type mismatches against `class-string<static>`. Contributed by @calebdw.
 - **Member name positions no longer suggest classes.** Typing a name after `function`, `const`, or enum `case` (for example `protected function getC`) no longer offers unrelated class names from the project. Property names were already safe because they start with `$`. Contributed by @calebdw.
 - **Null-initialized variables reassigned in an untyped foreach are not stuck as `null`.** When the iterable has no known element type (for example an untyped parameter), the loop value is now treated as `mixed`, so `$x = $value` after `$x = null` participates in post-loop merge and `is_null` early-return narrowing instead of leaving a false `null` type at later call sites. Contributed by @calebdw.
 - **By-reference method out-parameters no longer flag undefined variables.** Passing an undeclared variable into a by-ref parameter (e.g. `new A()->dosmth($y, $foo)` where `$foo` is `&$x`) is valid PHP and now defines the variable for later use, matching free functions like `preg_match(..., $matches)` and `$this->method($out)`. Contributed by @calebdw.
