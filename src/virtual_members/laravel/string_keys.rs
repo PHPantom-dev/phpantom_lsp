@@ -30,7 +30,22 @@ pub(crate) fn resolve_laravel_string_key(
         LaravelStringKind::View => view_names::resolve_view_definitions(backend, key),
         LaravelStringKind::Route => route_names::resolve_route_definitions(backend, key),
         LaravelStringKind::Trans => trans_keys::resolve_trans_definitions(backend, key),
+        LaravelStringKind::Command => resolve_command_definition(backend, key)
+            .into_iter()
+            .collect(),
     }
+}
+
+/// Resolve an Artisan command name to the declaration site inside its
+/// command class (the `$signature` / `$name` / `#[AsCommand]` literal).
+fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Location> {
+    use tower_lsp::lsp_types::Url;
+    let index = backend.laravel_commands.read();
+    let entry = index.get(name)?;
+    let uri = Url::parse(&entry.uri).ok()?;
+    let content = backend.get_file_content(&entry.uri)?;
+    let position = crate::util::offset_to_position(&content, entry.name_offset as usize);
+    Some(crate::definition::point_location(uri, position))
 }
 
 /// Unified find-references entry point for all Laravel string-key spans.
@@ -49,9 +64,10 @@ pub(crate) fn find_laravel_string_key_references(
         LaravelStringKind::Config => {
             find_all_config_references(backend, key, snapshot, include_declaration)
         }
-        LaravelStringKind::View | LaravelStringKind::Route | LaravelStringKind::Trans => {
-            find_string_key_usages(kind, key, backend, snapshot)
-        }
+        LaravelStringKind::View
+        | LaravelStringKind::Route
+        | LaravelStringKind::Trans
+        | LaravelStringKind::Command => find_string_key_usages(kind, key, backend, snapshot),
     };
 
     if include_declaration && kind != &LaravelStringKind::Config {
