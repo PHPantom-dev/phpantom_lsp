@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784817548533,
+  "lastUpdate": 1784818829946,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19423,6 +19423,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 96.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "4563f529cf272d51769a9b5841a2e1618b088460",
+          "message": "feat: parent member override completion\n\nSuggest public/protected methods, properties, and constants from parent\nclasses and interfaces when typing a member name in a class body\n(protected function get, protected $attr, public const ST).\n\nMethod snippets insert a full native signature (with $ params escaped\nfor LSP snippets) and an empty body. On PHP 8.3+ (composer.json /\nconfig.platform.php), also insert #[\\Override] above the declaration.\nProperty/const inserts include parent default values when present.\n\nPrivate members and ones already defined on the class are omitted.\nClass-name completion remains suppressed at these name positions.\n\nCloses #267",
+          "timestamp": "2026-07-23T09:44:37-05:00",
+          "tree_id": "ae43e0ca465d1963d205a79a6b56a986db9ca5db",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4563f529cf272d51769a9b5841a2e1618b088460"
+        },
+        "date": 1784818827315,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.3,
             "unit": "MiB"
           }
         ]
