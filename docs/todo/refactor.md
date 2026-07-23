@@ -426,7 +426,6 @@ the seams (mechanical moves; do opportunistically, one per touch):
 | --- | --- | --- |
 | `symbol_map/extraction.rs` | 3,603 | `statements.rs`, `class_like.rs`, `expressions.rs` (the 955-line `extract_from_expression` also needs decomposing by expression category), `subject_text.rs`, `laravel.rs`, `keywords.rs` |
 | `parser/classes.rs` | ~2,760 | `laravel_model.rs` (casts/attributes/dates/relationship extraction, ~700 lines), `attributes.rs`, `anonymous.rs` (the anonymous-class walker, ~1,000 lines) |
-| `code_actions/extract_function.rs` | ~2,496 | `context.rs`, `scope.rs`, `naming.rs`, `codegen.rs`, `returns.rs` (its own section banners) |
 | `diagnostics/undefined_variables.rs` | ~2,075 | `feature_guards.rs`, `offset_guards.rs` (or collapse via the shared walker item) |
 | `code_actions/phpstan/fix_return_type.rs` | ~2,080 | `inference.rs`, `edits.rs`, `message_parse.rs` |
 | `completion/phpdoc/generation.rs` | ~1,900 | `trigger.rs`, `parse_decl.rs`, `build.rs` |
