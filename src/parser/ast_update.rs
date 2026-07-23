@@ -136,6 +136,10 @@ impl Backend {
         // declare (or previously declared) a many-to-many relationship.
         self.refresh_laravel_pivots(uri, content);
 
+        // Keep the Artisan command index coherent with edits to command
+        // files.  Cheap no-op for files that are not (and were not) commands.
+        self.refresh_laravel_command_index(uri);
+
         match result {
             Some(changed) => changed,
             None => {

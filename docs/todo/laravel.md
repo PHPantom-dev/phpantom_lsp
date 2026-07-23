@@ -819,26 +819,6 @@ Each family gets the full string-kind treatment for free once wired
 as a `LaravelStringKey`: completion, go-to-definition (jump to the
 config entry), hover (L16), diagnostics (L14), and references.
 
-#### L33. Artisan command and signature strings
-
-**Impact: Low-Medium · Effort: Medium**
-
-Two related string surfaces, both statically recoverable:
-
-- **Command names.** `Artisan::call('app:sync')`, `Artisan::queue()`,
-  `$this->call()`/`callSilently()` in commands, and `Schedule::command()`
-  name a command declared by a `Command` subclass's `$signature` (or
-  `$name`) property, or an `#[AsCommand]` attribute. Scan project and
-  vendor command classes for literal signatures; complete, navigate to
-  the class, and flag unknown names.
-- **Own arguments and options.** Inside a command class,
-  `$this->argument('user')` / `$this->option('queue')` name segments of
-  that same class's `$signature`. Parse the signature grammar
-  (`{user}`, `{user?}`, `{--queue=}`, arrays, defaults, descriptions)
-  once and complete/validate against it; hover shows the segment's
-  description. The parsed parameter list also enables array-key
-  completion for `Artisan::call('app:sync', [...])` second arguments.
-
 #### L36. Container binding registrations from service providers
 
 **Impact: Medium · Effort: Medium**

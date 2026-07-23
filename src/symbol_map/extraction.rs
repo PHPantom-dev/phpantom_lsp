@@ -83,6 +83,11 @@ struct ExtractionCtx<'a> {
     /// Whether the file imports from `Illuminate\Container\Attributes\`
     /// (checked once lazily, cached for all attribute inspections).
     has_laravel_container_attrs: Option<bool>,
+    /// Whether the members currently being extracted belong to a class that
+    /// syntactically extends an Artisan console command (or is `#[AsCommand]`
+    /// decorated).  Gates recognition of `$this->call('cmd')` /
+    /// `$this->callSilently('cmd')` as command-name references.
+    in_console_command: bool,
 }
 
 // ─── Keyword helper ─────────────────────────────────────────────────────────
@@ -155,6 +160,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
+        in_console_command: false,
     };
 
     for stmt in program.statements.iter() {
@@ -880,10 +886,57 @@ fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionCtx<'a>) {
         }
     }
 
+    // Whether this class is (syntactically) an Artisan console command, so
+    // `$this->call(...)` / `$this->callSilently(...)` inside its members can
+    // be recognised as command-name references without false-positives in
+    // ordinary classes (where `->call()` is a very common method name).
+    // Detection is deliberately conservative: the direct `extends` clause
+    // must name a `Command`-suffixed class, or the class must carry an
+    // `#[AsCommand]` attribute.
+    let prev_in_console_command = ctx.in_console_command;
+    ctx.in_console_command = class_is_console_command(class);
+
     // Members.
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
+
+    ctx.in_console_command = prev_in_console_command;
+}
+
+/// Whether `class` is (syntactically) an Artisan console command: it
+/// `extends` a `Command`-suffixed class or carries an `#[AsCommand]`
+/// attribute.
+fn class_is_console_command(class: &Class<'_>) -> bool {
+    let has_as_command = class
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .any(|attr| {
+            let name = attr.name.value();
+            let short = match name.iter().rposition(|&b| b == b'\\') {
+                Some(idx) => &name[idx + 1..],
+                None => name,
+            };
+            short == b"AsCommand"
+        });
+    if has_as_command {
+        return true;
+    }
+    class
+        .extends
+        .as_ref()
+        .map(|ext| {
+            ext.types.iter().any(|ty| {
+                let v = ty.value();
+                let short = match v.iter().rposition(|&b| b == b'\\') {
+                    Some(idx) => &v[idx + 1..],
+                    None => v,
+                };
+                short.ends_with(b"Command")
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut ExtractionCtx<'a>) {
@@ -2051,6 +2104,42 @@ fn extract_from_expression<'a>(
                             &mut ctx.spans,
                         );
                     }
+                    // `$this->call('app:sync')` / `$this->callSilently('app:sync')`
+                    // inside a console command runs another Artisan command.
+                    // Gated on `in_console_command` because `->call()` is an
+                    // extremely common method name elsewhere (e.g.
+                    // `$this->call('GET', '/uri')` in HTTP tests).
+                    if ctx.in_console_command
+                        && matches!(method_call.object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this")
+                    {
+                        match member_name.to_ascii_lowercase().as_str() {
+                            "call" | "callsilently" => {
+                                try_emit_laravel_string_span(
+                                    crate::symbol_map::LaravelStringKind::Command,
+                                    &method_call.argument_list,
+                                    ctx.content,
+                                    &mut ctx.spans,
+                                );
+                            }
+                            "argument" | "hasargument" | "getargument" => {
+                                try_emit_command_own_param_span(
+                                    false,
+                                    &method_call.argument_list,
+                                    ctx.content,
+                                    &mut ctx.spans,
+                                );
+                            }
+                            "option" | "hasoption" | "getoption" => {
+                                try_emit_command_own_param_span(
+                                    true,
+                                    &method_call.argument_list,
+                                    ctx.content,
+                                    &mut ctx.spans,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
                     // Emit call site for method call: `$subject->method(...)`
                     emit_call_site(
                         format!("{}->{}", subject_text, member_name),
@@ -2192,6 +2281,16 @@ fn extract_from_expression<'a>(
                     {
                         try_emit_laravel_string_span(
                             crate::symbol_map::LaravelStringKind::Trans,
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
+                    // Artisan command names: `Artisan::call('app:sync')`,
+                    // `Artisan::queue('app:sync')`, `Schedule::command('app:sync')`.
+                    if is_artisan_command_static_call(clean_subject, &member_name) {
+                        try_emit_laravel_string_span(
+                            crate::symbol_map::LaravelStringKind::Command,
                             &static_call.argument_list,
                             ctx.content,
                             &mut ctx.spans,
@@ -3695,6 +3794,41 @@ fn try_emit_laravel_string_span_partial(
     });
 }
 
+/// If the first argument of `argument_list` is a plain, non-empty string
+/// literal, push a [`SymbolKind::CommandOwnParam`] span covering the string
+/// content.  Used for `$this->argument('user')` / `$this->option('queue')`
+/// inside a console command.
+fn try_emit_command_own_param_span(
+    is_option: bool,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let name = &content[inner_start as usize..inner_end as usize];
+    if name.is_empty() {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::CommandOwnParam {
+            name: name.to_string(),
+            is_option,
+        },
+    });
+}
+
 /// If `argument_list` starts with a plain, non-empty string literal, push a
 /// [`SymbolKind::LaravelMacroString`] span covering the string content.
 fn try_emit_laravel_macro_string_span(
@@ -3908,6 +4042,20 @@ fn is_config_repository_method(name: &str) -> bool {
             | "prepend"
             | "push"
     )
+}
+
+/// Returns `true` for a static call whose first argument is an Artisan
+/// command name: `Artisan::call(...)`, `Artisan::queue(...)`, or
+/// `Schedule::command(...)`.  Recognises both the short facade name and its
+/// `Illuminate\Support\Facades\` FQN.
+fn is_artisan_command_static_call(clean_subject: &str, member_name: &str) -> bool {
+    let is_artisan = clean_subject.eq_ignore_ascii_case("Artisan")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Artisan");
+    let is_schedule = clean_subject.eq_ignore_ascii_case("Schedule")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Schedule");
+    let member = member_name.to_ascii_lowercase();
+    (is_artisan && matches!(member.as_str(), "call" | "queue"))
+        || (is_schedule && member == "command")
 }
 
 /// Returns `true` if `object` is a `config()` (or `\config()`) helper call and

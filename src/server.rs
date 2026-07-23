@@ -538,6 +538,7 @@ impl LanguageServer for Backend {
             self.build_laravel_date_class();
             self.build_laravel_macro_index();
             self.build_provider_resources();
+            self.build_laravel_command_index();
         }
 
         // Mark initialization as complete so that diagnostic workers
@@ -2245,6 +2246,97 @@ impl Backend {
             imported_uris.len(),
             target_count,
         );
+    }
+
+    /// Scan project and vendor Artisan command classes and build the
+    /// [`laravel_commands`](Backend::laravel_commands) index.
+    ///
+    /// Candidate files are those declaring a class whose short name ends in
+    /// `Command` (the near-universal Laravel/Symfony convention) or which
+    /// live under a `Console/Commands/` directory (so project commands with
+    /// unconventional names are still found).  Each candidate is read once,
+    /// gated by a cheap byte pre-filter for a `signature`/`AsCommand`/`$name`
+    /// declaration before parsing, then scanned by
+    /// [`scan_command_file`](crate::virtual_members::laravel::scan_command_file).
+    pub(crate) fn build_laravel_command_index(&self) {
+        let mut candidate_uris: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        {
+            let idx = self.fqn_uri_index.read();
+            for (fqn, uri) in idx.iter() {
+                let short = fqn.rsplit('\\').next().unwrap_or(fqn);
+                if short.ends_with("Command") || uri.contains("/Console/Commands/") {
+                    candidate_uris.insert(uri.to_string());
+                }
+            }
+        }
+
+        let mut index = crate::virtual_members::laravel::LaravelCommandIndex::default();
+        for uri in &candidate_uris {
+            let Some(content) = self.get_file_content(uri) else {
+                continue;
+            };
+            let bytes = content.as_bytes();
+            let looks_like_command = memchr::memmem::find(bytes, b"signature").is_some()
+                || memchr::memmem::find(bytes, b"AsCommand").is_some()
+                || memchr::memmem::find(bytes, b"$name").is_some();
+            if !looks_like_command {
+                continue;
+            }
+            let entries = crate::virtual_members::laravel::scan_command_file(&content, uri);
+            index.set_file(uri.clone(), entries);
+        }
+        index.rebuild();
+
+        let has_commands = !index.is_empty();
+        let count = index.all_names().len();
+        *self.laravel_commands.write() = index;
+        self.laravel_has_commands
+            .store(has_commands, std::sync::atomic::Ordering::Relaxed);
+
+        tracing::info!(
+            "PHPantom: scanned {} Laravel command candidates, indexed {} commands",
+            candidate_uris.len(),
+            count,
+        );
+    }
+
+    /// Refresh the command index after a single file edit.
+    ///
+    /// Cheap: re-scans only the edited file when it is a command candidate
+    /// (or was contributing before), replacing just that file's entries.
+    pub(crate) fn refresh_laravel_command_index(&self, uri: &str) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
+        let was_contributor = self.laravel_commands.read().has_uri(uri);
+        let looks_like_command_file = uri.ends_with("Command.php") || uri.contains("/Console/");
+        if !was_contributor && !looks_like_command_file {
+            return;
+        }
+
+        let entries = self
+            .get_file_content(uri)
+            .filter(|content| {
+                let bytes = content.as_bytes();
+                memchr::memmem::find(bytes, b"signature").is_some()
+                    || memchr::memmem::find(bytes, b"AsCommand").is_some()
+                    || memchr::memmem::find(bytes, b"$name").is_some()
+            })
+            .map(|content| crate::virtual_members::laravel::scan_command_file(&content, uri))
+            .unwrap_or_default();
+
+        if !was_contributor && entries.is_empty() {
+            return;
+        }
+
+        let mut index = self.laravel_commands.write();
+        index.set_file(uri.to_string(), entries);
+        index.rebuild();
+        let has_commands = !index.is_empty();
+        drop(index);
+        self.laravel_has_commands
+            .store(has_commands, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Find the date class selected by project service providers. Laravel's

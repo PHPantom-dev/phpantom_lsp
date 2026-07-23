@@ -305,6 +305,69 @@ impl Backend {
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         if is_laravel {
             self.collect_invalid_laravel_string_key_diagnostics(uri_str, content, out);
+            self.collect_invalid_command_param_diagnostics(uri_str, content, out);
+        }
+    }
+
+    /// Emit a warning for each `$this->argument('x')` / `$this->option('x')`
+    /// whose name is not a parameter of the enclosing command's `$signature`.
+    fn collect_invalid_command_param_diagnostics(
+        &self,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        use crate::symbol_map::SymbolKind;
+
+        // (name, is_option, start, end) for each own-param span.
+        let spans: Vec<(String, bool, u32, u32)> = {
+            let maps = self.symbol_maps.read();
+            let Some(symbol_map) = maps.get(uri) else {
+                return;
+            };
+            symbol_map
+                .spans
+                .iter()
+                .filter_map(|span| {
+                    if let SymbolKind::CommandOwnParam { name, is_option } = &span.kind {
+                        Some((name.clone(), *is_option, span.start, span.end))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        if spans.is_empty() {
+            return;
+        }
+
+        for (name, is_option, start, end) in &spans {
+            // Resolve the enclosing command signature at the span offset.  If
+            // the class declares no `$signature` (e.g. a `$name`-only or
+            // dynamically-built command), skip — there is nothing to validate.
+            let Some(signature) = crate::virtual_members::laravel::command_signature_at_offset(
+                content,
+                *start as usize,
+            ) else {
+                continue;
+            };
+            let known = if *is_option {
+                signature.option(name).is_some()
+            } else {
+                signature.argument(name).is_some()
+            };
+            if !known
+                && let Some(range) =
+                    offset_range_to_lsp_range(content, *start as usize, *end as usize)
+            {
+                let label = if *is_option { "option" } else { "argument" };
+                out.push(helpers::make_diagnostic(
+                    range,
+                    DiagnosticSeverity::WARNING,
+                    "invalid_command_parameter",
+                    format!("Unknown command {}: '{}'", label, name),
+                ));
+            }
         }
     }
 
@@ -331,6 +394,7 @@ impl Backend {
         let mut has_config = false;
         let mut has_view = false;
         let mut has_trans = false;
+        let mut has_command = false;
         let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
             let maps = self.symbol_maps.read();
             let Some(symbol_map) = maps.get(uri) else {
@@ -346,6 +410,7 @@ impl Backend {
                             LaravelStringKind::Config => has_config = true,
                             LaravelStringKind::View => has_view = true,
                             LaravelStringKind::Trans => has_trans = true,
+                            LaravelStringKind::Command => has_command = true,
                         }
                         Some((kind.clone(), key.clone(), span.start, span.end))
                     } else {
@@ -356,7 +421,7 @@ impl Backend {
             // `maps` read lock is dropped here.
         };
 
-        if !has_route && !has_config && !has_view && !has_trans {
+        if !has_route && !has_config && !has_view && !has_trans && !has_command {
             return;
         }
 
@@ -380,6 +445,15 @@ impl Backend {
         };
         let trans_keys: HashSet<String> = if has_trans {
             self.cached_trans_keys().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        let command_names: HashSet<String> = if has_command {
+            self.laravel_commands
+                .read()
+                .all_names()
+                .into_iter()
+                .collect()
         } else {
             HashSet::new()
         };
@@ -414,6 +488,21 @@ impl Backend {
                             .iter()
                             .any(|k| k.starts_with(&format!("{}.", key)));
                     (valid, "translation key", "invalid_laravel_trans")
+                }
+                LaravelStringKind::Command => {
+                    // When no commands were indexed at all, skip command
+                    // diagnostics entirely.  The scan is heuristic (it relies
+                    // on the `*Command` naming convention), so an empty index
+                    // likely means discovery failed rather than that every
+                    // referenced command is invalid.
+                    if command_names.is_empty() {
+                        continue;
+                    }
+                    (
+                        command_names.contains(key),
+                        "command",
+                        "invalid_laravel_command",
+                    )
                 }
             };
             if !valid

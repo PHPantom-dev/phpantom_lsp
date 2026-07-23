@@ -81,6 +81,7 @@ mod auth;
 mod builder;
 mod builder_injection;
 mod casts;
+mod commands;
 mod config_keys;
 pub(crate) mod config_values;
 pub(crate) mod database_schema;
@@ -101,6 +102,7 @@ pub(crate) mod where_property;
 
 pub(crate) use aliases::{FacadeAccessor, LaravelAliases, parse_facade_accessor};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
+pub(crate) use commands::{LaravelCommandIndex, command_signature_at_offset, scan_command_file};
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
     collect_laravel_config_declarations, find_all_config_references,

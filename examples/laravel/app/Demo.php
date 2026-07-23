@@ -15,11 +15,13 @@ use App\Models\Review;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 
@@ -288,6 +290,44 @@ class Demo
         trans_choice('messages.notifications', 5);
         Lang::get('pagination.next');
         Lang::has('validation.required');
+    }
+
+
+    // ── Artisan Command Names & Signatures ─────────────────────────────────
+
+    /**
+     * Command names declared by a command class's `$signature` / `$name` /
+     * `#[AsCommand]` are recoverable statically, so referencing them as a
+     * string completes, navigates, and validates.
+     *
+     * Try:
+     *  1. Trigger completion inside `Artisan::call('|')` — offers `bakery:sync`
+     *     and `reports:generate` from app/Console/Commands.
+     *  2. Ctrl+Click "bakery:sync" to jump to SyncBakeryCommand.
+     *  3. Hover "bakery:sync" to see its arguments and options.
+     *  4. "does:not-exist" below is flagged as an unknown command.
+     *  5. Trigger completion inside the parameter array of the last call —
+     *     offers `bakery` and `--fresh` / `--since` from the target signature.
+     */
+    public function artisanCommands(): void
+    {
+        // Command-name string completion / navigation / hover.
+        Artisan::call('bakery:sync');
+        Artisan::queue('reports:generate');
+
+        // Scheduled commands name the same declarations.
+        Schedule::command('bakery:sync')->daily();
+
+        // Unknown command name → `invalid_laravel_command` diagnostic.
+        Artisan::call('does:not-exist');
+
+        // Second-argument array-key completion resolves against the target
+        // command's parsed signature: arguments by name, options as `--name`.
+        Artisan::call('bakery:sync', [
+            'bakery' => 1,
+            '--fresh' => true,
+            '--since' => '2024-01-01',
+        ]);
     }
 
 

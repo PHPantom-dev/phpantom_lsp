@@ -253,6 +253,19 @@ pub(crate) enum SymbolKind {
         /// Macro method name, e.g. `"sumPrices"`.
         name: String,
     },
+
+    /// The string-literal parameter name inside a console command's own
+    /// `$this->argument('user')` / `$this->option('queue')` call.
+    ///
+    /// The span covers the string content inside the quotes.  Hover and
+    /// diagnostics resolve it against the enclosing command class's parsed
+    /// `$signature` (looked up on demand via the span offset).
+    CommandOwnParam {
+        /// The parameter name, e.g. `"user"` or `"queue"`.
+        name: String,
+        /// `true` for `option()`, `false` for `argument()`.
+        is_option: bool,
+    },
 }
 
 /// Identifies the category of a [`SymbolKind::LaravelStringKey`] span.
@@ -271,6 +284,10 @@ pub(crate) enum LaravelStringKind {
     Route,
     /// A `__('key')`, `trans('key')`, or `Lang::get('key')` call.
     Trans,
+    /// An Artisan command name, e.g. `Artisan::call('app:sync')`,
+    /// `Schedule::command('app:sync')`, or `$this->call('app:sync')`
+    /// inside a console command.
+    Command,
 }
 
 // ─── Template parameter definition site structures ──────────────────────────

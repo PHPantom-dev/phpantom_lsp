@@ -207,11 +207,27 @@ fn detect_laravel_string_key_context(
             ("cache", "store") => (Some(LaravelStringKind::Config), Some("cache.stores.")),
             ("log", "channel") => (Some(LaravelStringKind::Config), Some("logging.channels.")),
             ("storage", "disk") => (Some(LaravelStringKind::Config), Some("filesystems.disks.")),
+            // Artisan command names.
+            ("artisan", "call" | "queue") => (Some(LaravelStringKind::Command), None),
+            ("schedule", "command") => (Some(LaravelStringKind::Command), None),
             _ => (None, None),
         }
     } else if is_instance_method {
+        // Whether the receiver is `$this` (used to scope command-running
+        // methods, whose names are too generic to match on any object).
+        let receiver_is_this = {
+            let recv = trimmed_before
+                .trim_end_matches("?->")
+                .trim_end_matches("->")
+                .trim_end();
+            recv.ends_with("$this")
+        };
         let k = match func_name.to_ascii_lowercase().as_str() {
             "route" => Some(LaravelStringKind::Route),
+            // `$this->call('cmd')` / `$this->callSilently('cmd')` inside a
+            // console command run another Artisan command.  Restricted to a
+            // `$this` receiver because `->call()` is a common method name.
+            "call" | "callsilently" if receiver_is_this => Some(LaravelStringKind::Command),
             _ => None,
         };
         (k, None)
@@ -560,6 +576,7 @@ impl Backend {
             LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
+            LaravelStringKind::Command => self.laravel_commands.read().all_names(),
         };
 
         // For config-backed attributes like #[Database('mysql')], filter
@@ -610,6 +627,7 @@ impl Backend {
                     LaravelStringKind::Config => CompletionItemKind::PROPERTY,
                     LaravelStringKind::View => CompletionItemKind::FILE,
                     LaravelStringKind::Trans => CompletionItemKind::TEXT,
+                    LaravelStringKind::Command => CompletionItemKind::VALUE,
                 };
                 CompletionItem {
                     label: name.clone(),
@@ -662,6 +680,42 @@ mod tests {
         let ctx = ctx.expect("should detect to_route() context");
         assert!(matches!(ctx.kind, LaravelStringKind::Route));
         assert_eq!(ctx.prefix, "ho");
+    }
+
+    #[test]
+    fn detects_artisan_call_command() {
+        let content = "<?php\nArtisan::call('app:');\n";
+        let line = 1;
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("app:").unwrap() as u32 + 4;
+        let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
+        let ctx = ctx.expect("should detect Artisan::call() context");
+        assert!(matches!(ctx.kind, LaravelStringKind::Command));
+    }
+
+    #[test]
+    fn detects_this_call_command() {
+        let content = "<?php\n$this->call('app:');\n";
+        let line = 1;
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("app:").unwrap() as u32 + 4;
+        let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
+        let ctx = ctx.expect("should detect $this->call() context");
+        assert!(matches!(ctx.kind, LaravelStringKind::Command));
+    }
+
+    #[test]
+    fn rejects_non_this_call() {
+        // `->call()` on an arbitrary object is not a command reference.
+        let content = "<?php\n$service->call('doSomething');\n";
+        let line = 1;
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("doSomething").unwrap() as u32 + 2;
+        let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
+        assert!(
+            ctx.is_none(),
+            "->call() on a non-$this receiver should not match"
+        );
     }
 
     #[test]

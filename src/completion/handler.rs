@@ -402,6 +402,20 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── Artisan command parameter completion ────────────────
+            // `$this->argument('|')` / `$this->option('|')` against the
+            // enclosing command's own signature, and array keys of
+            // `Artisan::call('cmd', ['|' => ...])`.
+            if is_laravel
+                && matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                )
+                && let Some(response) = self.try_command_param_completion(&content, position)
+            {
+                return Ok(Some(response));
+            }
+
             // ── Eloquent relation/column string completion ──────────
             // Like array shape completion, this triggers inside string
             // literals where the cursor is in a method argument position

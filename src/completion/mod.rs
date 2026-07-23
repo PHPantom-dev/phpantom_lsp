@@ -77,6 +77,7 @@ pub(crate) mod array_callable;
 pub mod array_shape;
 pub(crate) mod builder;
 pub(crate) mod call_resolution;
+pub(crate) mod command_params;
 pub(crate) mod eloquent_string;
 pub(crate) mod handler;
 pub(crate) mod laravel_route_controller;
