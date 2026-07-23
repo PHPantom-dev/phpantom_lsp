@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784818829946,
+  "lastUpdate": 1784825194497,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19457,6 +19457,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 93.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "db0583c555de98c55e68f364d6dbbf9c03d866b2",
+          "message": "fix: handle static inside class-string diagnostics\n\nRecognize self-references nested inside class-string and interface-string\ntypes when deciding whether argument diagnostics need late-static-binding\ncontext. This prevents sibling subclass ::class constants from being\nflagged against class-string<static> parameters.\n\nCloses #271",
+          "timestamp": "2026-07-23T11:31:08-05:00",
+          "tree_id": "36c2823cb1030393ca80b916c1d8b10bb2997564",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/db0583c555de98c55e68f364d6dbbf9c03d866b2"
+        },
+        "date": 1784825191569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95,
             "unit": "MiB"
           }
         ]
