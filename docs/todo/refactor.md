@@ -428,8 +428,6 @@ the seams (mechanical moves; do opportunistically, one per touch):
 | `parser/classes.rs` | ~2,760 | `laravel_model.rs` (casts/attributes/dates/relationship extraction, ~700 lines), `attributes.rs`, `anonymous.rs` (the anonymous-class walker, ~1,000 lines) |
 | `diagnostics/undefined_variables.rs` | ~2,075 | `feature_guards.rs`, `offset_guards.rs` (or collapse via the shared walker item) |
 | `code_actions/phpstan/fix_return_type.rs` | ~2,080 | `inference.rs`, `edits.rs`, `message_parse.rs` |
-| `completion/phpdoc/generation.rs` | ~1,900 | `trigger.rs`, `parse_decl.rs`, `build.rs` |
-| `completion/handler.rs` | 1,877 | per-strategy: `member_access.rs`, `named_args.rs`, `class_constant.rs`, `phpdoc.rs`, `patching.rs` |
 
 Two dedup notes attached to this table:
 
