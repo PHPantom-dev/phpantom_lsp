@@ -99,7 +99,7 @@ mod trans_keys;
 mod view_names;
 pub(crate) mod where_property;
 
-pub(crate) use aliases::LaravelAliases;
+pub(crate) use aliases::{FacadeAccessor, LaravelAliases, parse_facade_accessor};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{

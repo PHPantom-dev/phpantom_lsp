@@ -316,7 +316,7 @@ fn parse_config_facade_aliases(content: &str) -> HashMap<String, String> {
 }
 
 /// What a facade's `getFacadeAccessor()` returns.
-enum FacadeAccessor {
+pub(crate) enum FacadeAccessor {
     /// A container-binding string (`return 'view';`), looked up in the core
     /// container alias table to find the concrete class.
     Alias(String),
@@ -330,7 +330,7 @@ enum FacadeAccessor {
 /// Facades declare `protected static function getFacadeAccessor()` returning
 /// either a container-binding string or a `::class` reference. Returns `None`
 /// when the method is absent or returns anything else (e.g. a computed value).
-fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
+pub(crate) fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
     with_parsed(content, |program, resolved| {
         let return_value = find_facade_accessor_return(Node::Program(program))?;
         if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {

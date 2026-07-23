@@ -1963,6 +1963,24 @@ pub(super) fn resolve_rhs_static_call(
                     .map(|c| ClassInfo::clone(c))
             });
         if let Some(ref owner) = owner {
+            let concrete_owner = if !class_has_method(
+                owner,
+                &method_name,
+                ctx.class_loader,
+                ctx.resolved_class_cache,
+            ) {
+                facade_accessor_concrete_owner(
+                    owner,
+                    &method_name,
+                    ctx.content,
+                    ctx.class_loader,
+                    ctx.resolved_class_cache,
+                )
+            } else {
+                None
+            };
+            let owner = concrete_owner.as_ref().unwrap_or(owner);
+
             let arg_texts =
                 crate::completion::variable::raw_type_inference::extract_arg_texts_from_ast(
                     &static_call.argument_list,
@@ -2135,4 +2153,76 @@ pub(super) fn resolve_rhs_static_call(
         }
     }
     vec![]
+}
+
+fn class_has_method(
+    class_info: &ClassInfo,
+    method_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&crate::virtual_members::ResolvedClassCache>,
+) -> bool {
+    if class_info.get_method_ci(method_name).is_some() {
+        return true;
+    }
+    let merged =
+        crate::virtual_members::resolve_class_fully_maybe_cached(class_info, class_loader, cache);
+    merged.get_method_ci(method_name).is_some()
+}
+
+fn facade_accessor_concrete_owner(
+    facade: &ClassInfo,
+    method_name: &str,
+    content: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&crate::virtual_members::ResolvedClassCache>,
+) -> Option<ClassInfo> {
+    let merged =
+        crate::virtual_members::resolve_class_fully_maybe_cached(facade, class_loader, cache);
+
+    if let Some(concrete) = crate::virtual_members::laravel::parse_facade_accessor(content)
+        .and_then(facade_accessor_to_class_name)
+        .and_then(|name| class_loader(&name))
+        .filter(|class| class_has_method(class, method_name, class_loader, cache))
+    {
+        return Some(Arc::unwrap_or_clone(concrete));
+    }
+
+    if let Some(accessor) = facade
+        .get_method_ci("getFacadeAccessor")
+        .or_else(|| merged.get_method_ci("getFacadeAccessor"))
+        && let Some(inferred) =
+            crate::completion::call_resolution::try_infer_body_return_type(&facade.fqn(), accessor)
+        && let Some(concrete_name) = facade_accessor_class_name(&inferred)
+        && let Some(concrete) = class_loader(&concrete_name)
+        && class_has_method(&concrete, method_name, class_loader, cache)
+    {
+        return Some(Arc::unwrap_or_clone(concrete));
+    }
+
+    facade
+        .mixins
+        .iter()
+        .chain(merged.mixins.iter())
+        .find_map(|mixin| {
+            let class = class_loader(mixin.as_str())?;
+            class_has_method(&class, method_name, class_loader, cache)
+                .then(|| Arc::unwrap_or_clone(class))
+        })
+}
+
+fn facade_accessor_class_name(ty: &PhpType) -> Option<String> {
+    match ty {
+        PhpType::ClassString(Some(inner)) => inner.base_name().map(ToString::to_string),
+        PhpType::Named(name) => Some(name.to_string()),
+        _ => None,
+    }
+}
+
+fn facade_accessor_to_class_name(
+    accessor: crate::virtual_members::laravel::FacadeAccessor,
+) -> Option<String> {
+    match accessor {
+        crate::virtual_members::laravel::FacadeAccessor::Class(name) => Some(name),
+        crate::virtual_members::laravel::FacadeAccessor::Alias(_) => None,
+    }
 }

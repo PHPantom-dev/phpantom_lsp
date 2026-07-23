@@ -7075,6 +7075,72 @@ class Repo {
 }
 
 #[test]
+fn hover_variable_assigned_from_facade_concrete_method_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+
+namespace Illuminate\Support\Facades {
+    abstract class Facade
+    {
+        public static function __callStatic(string $method, array $args): array|string|float|int|bool
+        {
+            return false;
+        }
+    }
+}
+
+namespace {
+    use Illuminate\Support\Facades\Facade;
+
+    final class Foo
+    {
+        public function bar(): void {}
+    }
+
+    final class DriverDetails
+    {
+        public function foo(): Foo
+        {
+            return new Foo();
+        }
+    }
+
+    final class DriverProvider
+    {
+        public function details(string $driver): DriverDetails
+        {
+            return new DriverDetails();
+        }
+    }
+
+    final class Driver extends Facade
+    {
+        protected static function getFacadeAccessor(): string
+        {
+            return DriverProvider::class;
+        }
+    }
+
+    $name = "reverb";
+    $driver = Driver::details($name);
+    $driver;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 46, 6).expect("hover on $driver should resolve");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("DriverDetails"),
+        "facade static call should resolve through getFacadeAccessor() concrete return, got: {text}"
+    );
+    assert!(
+        !text.contains("array|string|float|int|bool"),
+        "facade __callStatic fallback should not win over concrete method return, got: {text}"
+    );
+}
+
+#[test]
 fn hover_foreach_over_variable_assigned_via_elvis_with_static_call() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
