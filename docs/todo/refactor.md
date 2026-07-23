@@ -433,7 +433,6 @@ the seams (mechanical moves; do opportunistically, one per touch):
 | `classmap_scanner.rs` | ~1,850 | `lexer.rs` (the intentional SIMD byte-lexer fast path — isolate, don't remove), `discovery.rs` |
 | `completion/context/class_completion.rs` | ~1,900 | `context_detect.rs`, `heuristics.rs`, `attributes.rs`, `ctor.rs` (416-line `ctor_params_for`) |
 | `completion/source/throws_analysis.rs` | ~1,740 | `scanning.rs`, `catch.rs`, `cross_file.rs` |
-| `completion/types/narrowing.rs` | 1,720 | `resolve.rs` (452-line `resolve_extraction_to_fqn`), `instanceof.rs`, `assertions.rs`, `guards.rs` |
 | `inheritance.rs` | ~1,550 | `enrichment.rs`, `traits.rs`, `generics.rs` |
 
 Two dedup notes attached to this table:
