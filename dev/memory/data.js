@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784766621735,
+  "lastUpdate": 1784767694976,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19185,6 +19185,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 93.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a1225acb3e85b630fef93dff9236fb86c7ba9d7a",
+          "message": "Split extract function into multiple files",
+          "timestamp": "2026-07-23T02:32:15+02:00",
+          "tree_id": "4e02e828b7529a5af78161411d16d4de5bb36c7c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a1225acb3e85b630fef93dff9236fb86c7ba9d7a"
+        },
+        "date": 1784767692269,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 96.2,
             "unit": "MiB"
           }
         ]
