@@ -712,7 +712,10 @@ mod tests {
         let line_text = content.lines().nth(1).unwrap();
         let col = line_text.find("doSomething").unwrap() as u32 + 2;
         let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
-        assert!(ctx.is_none(), "->call() on a non-$this receiver should not match");
+        assert!(
+            ctx.is_none(),
+            "->call() on a non-$this receiver should not match"
+        );
     }
 
     #[test]
