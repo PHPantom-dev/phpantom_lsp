@@ -354,7 +354,10 @@ impl Backend {
                 self.find_laravel_macro_references(uri, span_start, name, include_declaration)
             }
 
-            SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => Vec::new(),
+            SymbolKind::CommandOwnParam { .. }
+            | SymbolKind::Keyword
+            | SymbolKind::CastType
+            | SymbolKind::Comment => Vec::new(),
         }
     }
 }
