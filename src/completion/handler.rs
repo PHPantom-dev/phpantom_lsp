@@ -25,7 +25,7 @@
 /// Helper methods `patch_content_at_cursor` and `resolve_named_arg_params`
 /// are also housed here because they are exclusively used by the
 /// completion handler.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use super::resolver::ResolutionCtx;
@@ -298,6 +298,14 @@ impl Backend {
             let cursor_offset = crate::util::position_to_offset(&content, position);
             let ctx = self.file_context_at(&uri, cursor_offset);
 
+            if (crate::completion::comment_position::is_inside_non_doc_comment(&content, position)
+                || crate::completion::comment_position::is_inside_docblock(&content, position))
+                && let Some(prefix) =
+                    crate::phpstan_ignore::phpstan_ignore_code_prefix(&content, position)
+            {
+                return Ok(Some(self.complete_phpstan_ignore_code(&uri, &prefix)));
+            }
+
             // ── Suppress completion inside non-doc comments ─────────
             if crate::completion::comment_position::is_inside_non_doc_comment(&content, position) {
                 return Ok(None);
@@ -538,6 +546,40 @@ impl Backend {
 
         // Nothing matched — return no completions.
         Ok(None)
+    }
+
+    fn complete_phpstan_ignore_code(&self, uri: &str, prefix: &str) -> CompletionResponse {
+        let prefix_lower = prefix.to_ascii_lowercase();
+        let mut identifiers: BTreeSet<String> = BTreeSet::new();
+
+        let cache = self.phpstan_tool.last_diags.lock();
+        if let Some(diags) = cache.get(uri) {
+            for diag in diags {
+                let Some(NumberOrString::String(code)) = &diag.code else {
+                    continue;
+                };
+                if code.is_empty() || code == "phpstan" || code.starts_with("ignore.unmatched") {
+                    continue;
+                }
+                identifiers.insert(code.clone());
+            }
+        }
+
+        let items = identifiers
+            .into_iter()
+            .filter(|id| id.to_ascii_lowercase().starts_with(&prefix_lower))
+            .enumerate()
+            .map(|(idx, id)| CompletionItem {
+                label: id.clone(),
+                kind: Some(CompletionItemKind::VALUE),
+                detail: Some("PHPStan error identifier".to_string()),
+                insert_text: Some(id),
+                sort_text: Some(format!("0_{idx:03}")),
+                ..CompletionItem::default()
+            })
+            .collect();
+
+        CompletionResponse::Array(items)
     }
 
     // ─── Strategy: PHPDoc tag completion ─────────────────────────────────

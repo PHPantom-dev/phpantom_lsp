@@ -114,6 +114,28 @@ class Foo {
 }
 
 #[test]
+fn phpstan_ignore_codes_are_semantic_tokens() {
+    let php = r#"<?php
+// @phpstan-ignore return.type (intentional), paramOut.type
+function foo(): void {}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+
+    let tag = find_decoded(&decoded, 1, 3).expect("expected token for @phpstan-ignore");
+    assert_eq!(tag.token_type, TT_KEYWORD);
+    assert_eq!(tag.length, 15);
+
+    let return_type = find_decoded(&decoded, 1, 19).expect("expected token for return.type");
+    assert_eq!(return_type.token_type, TT_ENUM_MEMBER);
+    assert_eq!(return_type.length, 11);
+
+    let param_out = find_decoded(&decoded, 1, 46).expect("expected token for paramOut.type");
+    assert_eq!(param_out.token_type, TT_ENUM_MEMBER);
+    assert_eq!(param_out.length, 13);
+}
+
+#[test]
 fn interface_declaration_token() {
     let php = r#"<?php
 interface Baz {

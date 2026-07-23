@@ -235,6 +235,7 @@ pub(crate) mod phar;
 pub mod php_type;
 mod phpcs;
 mod phpstan;
+pub(crate) mod phpstan_ignore;
 pub mod progress;
 mod reference_index;
 mod references;

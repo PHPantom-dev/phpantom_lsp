@@ -412,6 +412,52 @@ impl Backend {
         // and @var keywords inside docblocks).  Without this, a single
         // comment token covering `/** @var \App\Foo $x */` would hide
         // the more specific inner tokens.
+        for span in crate::phpstan_ignore::phpstan_ignore_tag_spans(content) {
+            let length = span.end.saturating_sub(span.start) as u32;
+            if length == 0 {
+                continue;
+            }
+            let position = line_index.position(span.start);
+            if !crate::completion::comment_position::is_inside_non_doc_comment(content, position)
+                && !crate::completion::comment_position::is_inside_docblock(content, position)
+            {
+                continue;
+            }
+            if let Some(abs) = offset_to_absolute(
+                content,
+                &line_index,
+                span.start as u32,
+                length,
+                TT_KEYWORD,
+                0,
+            ) {
+                tokens.push(abs);
+            }
+        }
+
+        for span in crate::phpstan_ignore::phpstan_ignore_code_spans(content) {
+            let length = span.end.saturating_sub(span.start) as u32;
+            if length == 0 {
+                continue;
+            }
+            let position = line_index.position(span.start);
+            if !crate::completion::comment_position::is_inside_non_doc_comment(content, position)
+                && !crate::completion::comment_position::is_inside_docblock(content, position)
+            {
+                continue;
+            }
+            if let Some(abs) = offset_to_absolute(
+                content,
+                &line_index,
+                span.start as u32,
+                length,
+                TT_ENUM_MEMBER,
+                0,
+            ) {
+                tokens.push(abs);
+            }
+        }
+
         split_comments_around_inner(&mut tokens);
 
         tokens

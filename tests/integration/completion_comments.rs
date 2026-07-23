@@ -4,7 +4,7 @@
 //! inside a `//` line comment or a `/* … */` block comment, while still
 //! returning completions inside `/** … */` docblocks and normal code.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, inject_phpstan_diag};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -79,6 +79,44 @@ async fn no_completion_inside_line_comment_partial_word() {
         result.is_none(),
         "Should return no completions for class names inside // comment, got: {:?}",
         result
+    );
+}
+
+#[tokio::test]
+async fn completion_inside_phpstan_ignore_identifier_list() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpstan_ignore_completion.php").unwrap();
+    let text = concat!("<?php\n", "// @phpstan-ignore ret\n");
+    inject_phpstan_diag(
+        &backend,
+        uri.as_str(),
+        1,
+        "Function should return string but returns int.",
+        "return.type",
+    );
+
+    let result = complete_at_raw(&backend, &uri, text, 1, 22).await;
+    let items = result.expect("expected phpstan-ignore completions");
+    assert!(
+        items.iter().any(|item| item.label == "return.type"),
+        "expected return.type completion, got: {:?}",
+        items.iter().map(|item| &item.label).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn no_completion_inside_phpstan_ignore_code_comment() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpstan_ignore_reason_completion.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "// @phpstan-ignore return.type (accepts broader input)\n",
+    );
+
+    let result = complete_at_raw(&backend, &uri, text, 1, 53).await;
+    assert!(
+        result.is_none(),
+        "should not complete inside a per-code phpstan-ignore reason"
     );
 }
 
