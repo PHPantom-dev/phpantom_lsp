@@ -474,6 +474,10 @@ impl Backend {
 
             SymbolKind::LaravelStringKey { kind, key } => self.hover_laravel_string_key(kind, key),
 
+            SymbolKind::CommandOwnParam { name, is_option } => {
+                hover_command_own_param(content, cursor_offset as usize, name, *is_option)
+            }
+
             SymbolKind::LaravelMacroString { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
@@ -562,6 +566,37 @@ impl Backend {
                     "Translation key".to_string()
                 };
                 ("Trans", detail)
+            }
+            LaravelStringKind::Command => {
+                let index = self.laravel_commands.read();
+                let detail = if let Some(entry) = index.get(key) {
+                    let mut parts = Vec::new();
+                    if let Some(fqn) = &entry.fqn {
+                        parts.push(format!("Defined by `{}`", fqn));
+                    }
+                    let sig = &entry.signature;
+                    if !sig.arguments.is_empty() {
+                        let args: Vec<String> =
+                            sig.arguments.iter().map(|a| a.name.clone()).collect();
+                        parts.push(format!("Arguments: `{}`", args.join("`, `")));
+                    }
+                    if !sig.options.is_empty() {
+                        let opts: Vec<String> = sig
+                            .options
+                            .iter()
+                            .map(|o| format!("--{}", o.name))
+                            .collect();
+                        parts.push(format!("Options: `{}`", opts.join("`, `")));
+                    }
+                    if parts.is_empty() {
+                        "Artisan command".to_string()
+                    } else {
+                        parts.join("\n\n")
+                    }
+                } else {
+                    "Artisan command".to_string()
+                };
+                ("Command", detail)
             }
         };
 
@@ -667,6 +702,56 @@ impl Backend {
 
         Some(self.hover_for_property(property, &resolved_model, &class_loader))
     }
+}
+
+/// Hover for `$this->argument('user')` / `$this->option('queue')`: resolve
+/// the parameter against the enclosing command's parsed `$signature` and show
+/// its description and shape.
+fn hover_command_own_param(
+    content: &str,
+    offset: usize,
+    name: &str,
+    is_option: bool,
+) -> Option<Hover> {
+    let signature = crate::virtual_members::laravel::command_signature_at_offset(content, offset)?;
+    let param = if is_option {
+        signature.option(name)
+    } else {
+        signature.argument(name)
+    }?;
+
+    let kind = if is_option { "Option" } else { "Argument" };
+    let display = if is_option {
+        format!("--{}", param.name)
+    } else {
+        param.name.clone()
+    };
+
+    let mut lines = vec![format!("**{} `{}`**", kind, display)];
+    if let Some(desc) = &param.description {
+        lines.push(desc.clone());
+    }
+    let mut traits: Vec<String> = Vec::new();
+    if param.is_array {
+        traits.push("array".to_string());
+    }
+    if !is_option && param.optional {
+        traits.push("optional".to_string());
+    }
+    if is_option && param.takes_value {
+        traits.push("takes a value".to_string());
+    }
+    if let Some(shortcut) = &param.shortcut {
+        traits.push(format!("shortcut -{}", shortcut));
+    }
+    if let Some(default) = &param.default {
+        traits.push(format!("default `{}`", default));
+    }
+    if !traits.is_empty() {
+        lines.push(format!("_{}_", traits.join(", ")));
+    }
+
+    Some(make_hover(lines.join("\n\n")))
 }
 
 /// Extract a model name from a `model-property<Model>` type, including
