@@ -132,6 +132,10 @@ impl Backend {
         // register macros.  Cheap no-op for files without a `macro(` call.
         self.refresh_laravel_macros(uri, content);
 
+        // Keep the reverse pivot index coherent with edits to files that
+        // declare (or previously declared) a many-to-many relationship.
+        self.refresh_laravel_pivots(uri, content);
+
         match result {
             Some(changed) => changed,
             None => {
@@ -215,6 +219,22 @@ impl Backend {
             for (uri, errors) in failures {
                 parse_errors.insert(uri, errors);
             }
+        }
+
+        // Invalidate the reverse pivot index when a background-indexed file
+        // declares a many-to-many relationship, so its target models pick up
+        // `$pivot` on the next class load.
+        if !self
+            .laravel_pivots_dirty
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && updates.iter().any(|u| {
+                u.classes
+                    .iter()
+                    .any(crate::virtual_members::laravel::class_declares_pivot_relationship)
+            })
+        {
+            self.laravel_pivots_dirty
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.apply_ast_index_updates_batch(updates)
@@ -1110,6 +1130,20 @@ impl Backend {
                 class.laravel_mut().custom_builder = Some(builder.resolve_names(&resolver));
             }
 
+            // Resolve custom pivot class names (`->using(X::class)`) to FQNs so
+            // that hover shows the fully-qualified pivot class and it is
+            // loadable cross-file.
+            if class
+                .laravel()
+                .is_some_and(|l| l.belongs_to_many_pivots.iter().any(|p| p.using.is_some()))
+            {
+                for pivot in class.laravel_mut().belongs_to_many_pivots.iter_mut() {
+                    if let Some(using) = &pivot.using {
+                        pivot.using = Some(Self::resolve_name(using, use_map, namespace));
+                    }
+                }
+            }
+
             // Resolve cast class names to FQN so that custom cast
             // classes like `DecimalCast` (imported via `use`) are
             // loadable cross-file when `cast_type_to_php_type` calls
@@ -1688,6 +1722,44 @@ mod tests {
             changed,
             "Class method return type change must still be detected"
         );
+    }
+
+    /// A `belongsToMany` body with `->using(...)` and `->withPivot(...)`
+    /// must populate `belongs_to_many_pivots`, with the pivot class resolved
+    /// to an FQN.
+    #[test]
+    fn parses_pivot_using_and_columns_from_relationship_body() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Models/User.php";
+        let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(): BelongsToMany {
+        return $this->belongsToMany(Role::class)->using(RoleUser::class)->withPivot('expires_at', 'active');
+    }
+}
+";
+        backend.update_ast(uri, content);
+        let classes = backend.uri_classes_index.read();
+        let user = classes
+            .get(uri)
+            .and_then(|c| c.iter().find(|c| c.name == "User"))
+            .expect("User class should be indexed");
+        let pivots = &user
+            .laravel()
+            .expect("User should have Laravel metadata")
+            .belongs_to_many_pivots;
+        assert_eq!(pivots.len(), 1, "one pivot relation, got: {pivots:?}");
+        assert_eq!(pivots[0].method, "roles");
+        assert_eq!(
+            pivots[0].using.as_deref(),
+            Some("App\\Models\\RoleUser"),
+            "using() class should be resolved to an FQN"
+        );
+        assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
     }
 
     /// A background/workspace parse batch must not clobber the state of a

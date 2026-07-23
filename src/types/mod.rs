@@ -770,10 +770,24 @@ pub enum PropertySource {
     Relationship {
         method: String,
         kind: String,
+        /// Custom pivot class from `->using(X::class)` on a many-to-many
+        /// relationship (FQN), if any.  Surfaced in hover.
+        pivot_using: Option<String>,
+        /// Extra pivot columns from `->withPivot(...)` on a many-to-many
+        /// relationship.  Surfaced in hover.
+        pivot_columns: Vec<String>,
     },
     RelationshipCount {
         relationship: String,
     },
+    /// The `$pivot` attribute synthesized on a many-to-many target model.
+    ///
+    /// Related models accessed through a `belongsToMany`/`morphToMany`
+    /// relationship gain a `$pivot` instance at runtime.  A project-wide
+    /// reverse index (related-model FQN → pivot type) records which models
+    /// are reached through such a relationship, so `$pivot` is attached to
+    /// exactly those models and typed from the relationship's pivot generic.
+    Pivot,
 }
 
 impl PropertyInfo {
@@ -1497,6 +1511,33 @@ pub struct LaravelMetadata {
     /// the standard `Illuminate\Database\Eloquent\Builder` for
     /// builder-as-static forwarding and `query()` resolution.
     pub custom_builder: Option<PhpType>,
+    /// Pivot configuration recovered from `belongsToMany`/`morphToMany`
+    /// relationship method bodies.
+    ///
+    /// One entry per many-to-many relationship method that declares a
+    /// `->using(CustomPivot::class)` and/or `->withPivot('col', …)` chain.
+    /// Populated from the method body during parsing; the `using` class is
+    /// resolved to an FQN in the name-resolution pass.  Used to surface the
+    /// custom pivot class and extra pivot columns in hover.
+    pub belongs_to_many_pivots: Vec<PivotRelation>,
+}
+
+/// Pivot metadata recovered from a single many-to-many relationship method.
+///
+/// Corresponds to a `belongsToMany`/`morphToMany` method whose body chains
+/// `->using(...)` and/or `->withPivot(...)`.  Keyed back to the relationship
+/// by `method` so the provider can attach it to the synthesized property.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PivotRelation {
+    /// The relationship method name (e.g. `roles`).
+    pub method: String,
+    /// The custom pivot class from `->using(X::class)`, if declared.
+    ///
+    /// Stored as the short name during parsing and resolved to an FQN in
+    /// the name-resolution pass.
+    pub using: Option<String>,
+    /// Extra pivot columns declared via `->withPivot('a', 'b', …)`.
+    pub columns: Vec<String>,
 }
 
 /// Stores extracted class information from a parsed PHP file.
@@ -2122,6 +2163,13 @@ impl FileContext {
 /// Used by the `LaravelModelProvider` to detect and replace collection
 /// return types when a model declares a custom collection class.
 pub const ELOQUENT_COLLECTION_FQN: &str = "Illuminate\\Database\\Eloquent\\Collection";
+
+/// The fully-qualified name of the Eloquent `Pivot` class.
+///
+/// Used by the `LaravelModelProvider` to type the synthesized `$pivot`
+/// attribute that appears on models reached through a many-to-many
+/// (`belongsToMany` / `morphToMany`) relationship.
+pub const ELOQUENT_PIVOT_FQN: &str = "Illuminate\\Database\\Eloquent\\Relations\\Pivot";
 
 // ─── Recursion Depth Limits ─────────────────────────────────────────────────
 //

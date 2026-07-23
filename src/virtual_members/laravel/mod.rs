@@ -89,6 +89,7 @@ mod factory;
 mod helpers;
 mod macros;
 pub(crate) mod patches;
+mod pivots;
 mod provider_resources;
 mod relationships;
 mod route_names;
@@ -131,6 +132,7 @@ use accessors::{
 };
 pub(crate) use where_property::where_property_method_to_column;
 
+pub(crate) use pivots::{LaravelPivotIndex, build_pivot_index, inject_pivot};
 pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
@@ -138,6 +140,9 @@ pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
+};
+pub(crate) use relationships::{
+    class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
 };
 
 pub use scopes::build_scope_methods_for_builder;
@@ -688,10 +693,24 @@ impl VirtualMemberProvider for LaravelModelProvider {
             let type_hint = build_property_type(kind, related_type, custom_collection.as_deref());
 
             if let Some(ref th) = type_hint {
+                // Attach any pivot configuration recovered from the
+                // relationship body (`->using(...)` / `->withPivot(...)`) so
+                // hover can surface the custom pivot class and extra columns.
+                let (pivot_using, pivot_columns) = class
+                    .laravel()
+                    .and_then(|l| {
+                        l.belongs_to_many_pivots
+                            .iter()
+                            .find(|p| p.method == method.name.as_str())
+                    })
+                    .map(|p| (p.using.clone(), p.columns.clone()))
+                    .unwrap_or_default();
                 properties.push(PropertyInfo {
                     source: Some(PropertySource::Relationship {
                         method: method.name.to_string(),
                         kind: relationship_kind_name(kind).to_string(),
+                        pivot_using,
+                        pivot_columns,
                     }),
                     ..PropertyInfo::virtual_property_typed(&method.name, Some(th))
                 });

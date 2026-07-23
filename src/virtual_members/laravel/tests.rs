@@ -422,6 +422,41 @@ fn synthesizes_belongs_to_many_property() {
 }
 
 #[test]
+fn relationship_property_carries_pivot_config() {
+    use crate::types::PivotRelation;
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().belongs_to_many_pivots = vec![PivotRelation {
+        method: "roles".to_string(),
+        using: Some("App\\Models\\RoleUser".to_string()),
+        columns: vec!["expires_at".to_string(), "active".to_string()],
+    }];
+    user.methods.push(Arc::new(make_method(
+        "roles",
+        Some("BelongsToMany<Role, $this>"),
+    )));
+
+    let result = provider.provide(&user, &no_loader, None);
+    let roles = result
+        .properties
+        .iter()
+        .find(|p| p.name == "roles")
+        .unwrap();
+    match roles.source.as_ref().unwrap() {
+        PropertySource::Relationship {
+            pivot_using,
+            pivot_columns,
+            ..
+        } => {
+            assert_eq!(pivot_using.as_deref(), Some("App\\Models\\RoleUser"));
+            assert_eq!(pivot_columns, &["expires_at", "active"]);
+        }
+        other => panic!("expected Relationship source, got {other:?}"),
+    }
+}
+
+#[test]
 fn synthesizes_multiple_relationship_properties() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");

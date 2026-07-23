@@ -202,6 +202,8 @@ impl Backend {
         // Add any Laravel macros registered on this class.  Gated on a cheap
         // atomic so the hot loader path is untouched when no macros exist.
         loaded = self.inject_laravel_macros(loaded);
+        // Add the `$pivot` attribute when this class is a many-to-many target.
+        loaded = self.inject_laravel_pivot(loaded);
         Some(loaded)
     }
 
@@ -219,6 +221,64 @@ impl Backend {
         }
         let index = self.laravel_macros.read();
         crate::virtual_members::laravel::inject_macros(&index, class)
+    }
+
+    /// Add the Eloquent `$pivot` attribute to `class` when it is the target of
+    /// a many-to-many relationship somewhere in the project.
+    ///
+    /// The reverse index is rebuilt lazily when a pivot-bearing file has
+    /// changed (`laravel_pivots_dirty`), then a cheap atomic gates the lock so
+    /// the hot loader path is untouched when the project has no such relations.
+    fn inject_laravel_pivot(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        use std::sync::atomic::Ordering;
+        if self.laravel_pivots_dirty.swap(false, Ordering::Relaxed) {
+            self.rebuild_laravel_pivot_index();
+        }
+        if !self.laravel_has_pivots.load(Ordering::Relaxed) {
+            return class;
+        }
+        let index = self.laravel_pivots.read();
+        crate::virtual_members::laravel::inject_pivot(&index, class)
+    }
+
+    /// Mark the reverse pivot index stale when `content` (at `uri`) affects
+    /// many-to-many relationships — either it now contains a `belongsToMany`/
+    /// `morphToMany` call, or it previously contributed one (an edit may have
+    /// removed the last such relation). A no-op for unrelated edits.
+    pub(crate) fn refresh_laravel_pivots(&self, uri: &str, content: &str) {
+        use std::sync::atomic::Ordering;
+        if self.laravel_pivots_dirty.load(Ordering::Relaxed) {
+            return;
+        }
+        let has_m2m = memchr::memmem::find(content.as_bytes(), b"belongsToMany").is_some()
+            || memchr::memmem::find(content.as_bytes(), b"morphToMany").is_some();
+        if has_m2m || self.laravel_pivots.read().contributes(uri) {
+            self.laravel_pivots_dirty.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Rebuild the reverse pivot index from every parsed class.
+    ///
+    /// Collects an `(uri, class)` snapshot, releases the index lock, then
+    /// resolves related/pivot class names via the normal loader. A no-op-shaped
+    /// empty index is stored for non-Laravel projects so the gate stays off.
+    pub(crate) fn rebuild_laravel_pivot_index(&self) {
+        let index = if self.resolved_class_cache.read().is_laravel() {
+            let classes: Vec<(String, Arc<ClassInfo>)> = {
+                let idx = self.uri_classes_index.read();
+                idx.iter()
+                    .flat_map(|(uri, list)| list.iter().map(move |c| (uri.clone(), Arc::clone(c))))
+                    .collect()
+            };
+            let loader = |name: &str| self.find_or_load_class(name);
+            crate::virtual_members::laravel::build_pivot_index(&classes, &loader)
+        } else {
+            crate::virtual_members::laravel::LaravelPivotIndex::default()
+        };
+        let non_empty = !index.is_empty();
+        *self.laravel_pivots.write() = index;
+        self.laravel_has_pivots
+            .store(non_empty, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Shared implementation used by [`find_or_load_class`].

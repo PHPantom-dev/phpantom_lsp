@@ -1,4 +1,5 @@
 use super::constants::extract_constant_value_from_source;
+use super::member::format_property_source;
 use super::variable::build_variable_hover_body;
 use super::*;
 use crate::php_type::PhpType;
@@ -463,4 +464,36 @@ fn html_to_markdown_span_stripped() {
 fn html_to_markdown_no_html() {
     let plain = "No HTML here.";
     assert_eq!(formatting::html_to_markdown(plain), plain);
+}
+
+#[test]
+fn format_property_source_relationship_plain() {
+    let source = PropertySource::Relationship {
+        method: "roles".to_string(),
+        kind: "collection".to_string(),
+        pivot_using: None,
+        pivot_columns: Vec::new(),
+    };
+    assert_eq!(
+        format_property_source(&source),
+        vec!["source: relationship `roles` (collection)".to_string()]
+    );
+}
+
+#[test]
+fn format_property_source_relationship_with_pivot() {
+    let source = PropertySource::Relationship {
+        method: "roles".to_string(),
+        kind: "collection".to_string(),
+        pivot_using: Some("App\\Models\\RoleUser".to_string()),
+        pivot_columns: vec!["expires_at".to_string(), "active".to_string()],
+    };
+    assert_eq!(
+        format_property_source(&source),
+        vec![
+            "source: relationship `roles` (collection)".to_string(),
+            "pivot: `App\\Models\\RoleUser`".to_string(),
+            "pivot columns: expires_at, active".to_string(),
+        ]
+    );
 }

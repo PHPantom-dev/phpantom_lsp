@@ -63,7 +63,7 @@ fn format_attribute_default_details(source: &AttributeDefaultSource) -> Vec<Stri
     ]
 }
 
-fn format_property_source(source: &PropertySource) -> Vec<String> {
+pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
     match source {
         PropertySource::DatabaseColumn {
             column,
@@ -134,11 +134,26 @@ fn format_property_source(source: &PropertySource) -> Vec<String> {
         } else {
             "source: computed property".to_string()
         }],
-        PropertySource::Relationship { method, kind } => {
-            vec![format!("source: relationship `{}` ({})", method, kind)]
+        PropertySource::Relationship {
+            method,
+            kind,
+            pivot_using,
+            pivot_columns,
+        } => {
+            let mut lines = vec![format!("source: relationship `{}` ({})", method, kind)];
+            if let Some(using) = pivot_using {
+                lines.push(format!("pivot: `{}`", using));
+            }
+            if !pivot_columns.is_empty() {
+                lines.push(format!("pivot columns: {}", pivot_columns.join(", ")));
+            }
+            lines
         }
         PropertySource::RelationshipCount { relationship } => {
             vec![format!("source: relationship count `{}`", relationship)]
+        }
+        PropertySource::Pivot => {
+            vec!["source: pivot (many-to-many relationship)".to_string()]
         }
     }
 }

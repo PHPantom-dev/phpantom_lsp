@@ -81,6 +81,16 @@ namespace Illuminate\\Database\\Eloquent\\Relations;
 class MorphTo {}
 ";
 
+const PIVOT_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Relations;
+use Illuminate\\Database\\Eloquent\\Model;
+class Pivot extends Model {
+    /** @return array<string, mixed> */
+    public function getAttributes(): array { return []; }
+}
+";
+
 const MORPH_ONE_PHP: &str = "\
 <?php
 namespace Illuminate\\Database\\Eloquent\\Relations;
@@ -396,6 +406,7 @@ fn framework_stubs() -> Vec<(&'static str, &'static str)> {
             "vendor/illuminate/Eloquent/Relations/MorphTo.php",
             MORPH_TO_PHP,
         ),
+        ("vendor/illuminate/Eloquent/Relations/Pivot.php", PIVOT_PHP),
         (
             "vendor/illuminate/Eloquent/Relations/MorphOne.php",
             MORPH_ONE_PHP,
@@ -778,6 +789,105 @@ class UserService {
     assert!(
         !props.contains(&"posts"),
         "'posts' should NOT be synthesized on non-Model class, got: {:?}",
+        props
+    );
+    assert!(
+        !props.contains(&"pivot"),
+        "'pivot' should NOT be synthesized on non-Model class, got: {:?}",
+        props
+    );
+}
+
+// ─── $pivot is attached only to many-to-many targets, typed from TPivot ──────
+
+const ROLE_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Role extends Model {}
+";
+
+const ROLE_USER_PIVOT_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Relations\\Pivot;
+class RoleUser extends Pivot {
+    public function getAssignedAt(): string { return ''; }
+}
+";
+
+#[tokio::test]
+async fn test_pivot_attached_to_belongs_to_many_target_typed_from_generic() {
+    // `User::roles()` targets Role with a custom `RoleUser` pivot (third
+    // generic), so a Role instance gains `$pivot` typed as `RoleUser`.
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this, RoleUser> */
+    public function roles(): BelongsToMany { return $this->belongsToMany(Role::class)->using(RoleUser::class); }
+    public function test() {
+        $role = new Role();
+        $role->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/RoleUser.php", ROLE_USER_PIVOT_PHP),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    // A Role instance (Role is a belongsToMany target) exposes `pivot`.
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
+    let props = property_names(&items);
+    assert!(
+        props.contains(&"pivot"),
+        "a belongsToMany target should expose 'pivot', got: {:?}",
+        props
+    );
+
+    // `$role->pivot->` resolves to the custom `RoleUser` pivot class.
+    let chained = user_php.replace("$role->\n", "$role->pivot->\n");
+    let items = complete_at(&backend, &dir, "src/Models/User.php", &chained, 9, 22).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getAssignedAt"),
+        "'$role->pivot' should resolve to RoleUser (third generic), got methods: {:?}",
+        methods
+    );
+}
+
+#[tokio::test]
+async fn test_pivot_not_attached_to_non_target_model() {
+    // User is never the target of a many-to-many relationship, so it gets
+    // no `$pivot` attribute.
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(): BelongsToMany { return $this->belongsToMany(Role::class); }
+    public function test() {
+        $user = new User();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
+    let props = property_names(&items);
+    assert!(
+        !props.contains(&"pivot"),
+        "a non-target model must not expose 'pivot', got: {:?}",
         props
     );
 }

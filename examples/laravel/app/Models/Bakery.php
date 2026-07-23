@@ -53,7 +53,7 @@ class Bakery extends Model
     public function headBaker(): mixed { return $this->hasOne(Baker::class); }
 
     /** @return BelongsToMany<BakeryRecipe, $this> */
-    public function masterRecipe(): mixed { return $this->belongsToMany(BakeryRecipe::class); }
+    public function masterRecipe(): mixed { return $this->belongsToMany(BakeryRecipe::class)->using(RecipeIngredient::class)->withPivot('quantity', 'unit'); }
 
     public function vendor() { return $this->morphTo(); }
 
