@@ -37,7 +37,7 @@ pub(crate) fn infer_callable_params_from_function_fw(
     let var_ctx = ctx.var_ctx_for_with_scope("$__infer", ctx.cursor_offset, &scope_resolver);
     let rctx = var_ctx.as_resolution_ctx();
     let func_info = if let Some(fl) = rctx.function_loader {
-        fl(func_name)
+        fl(func_name, 0)
     } else {
         None
     };

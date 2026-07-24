@@ -72,7 +72,11 @@ impl Backend {
             .unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
+        let function_loader = self.function_loader_with(
+            file_resolved_names.as_deref(),
+            &file_use_map,
+            &file_namespace,
+        );
         let cache = &self.resolved_class_cache;
 
         // ── Walk every symbol span ──────────────────────────────────────
@@ -384,7 +388,7 @@ fn resolve_subject_to_class_name(
     // class names.  We pass a dummy function loader (not needed for
     // non-variable subjects) and a dummy class loader.
     let dummy_class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
-    let dummy_function_loader = |_: &str| -> Option<crate::types::FunctionInfo> { None };
+    let dummy_function_loader = |_: &str, _: u32| -> Option<crate::types::FunctionInfo> { None };
     let ctx = crate::subject_resolution::SubjectResolutionCtx {
         local_classes,
         use_map: file_use_map,

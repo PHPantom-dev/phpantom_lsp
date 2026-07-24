@@ -251,6 +251,8 @@ impl Backend {
 
         let file_namespace: Option<String> = self.first_file_namespace(uri);
 
+        let file_resolved_names = self.resolved_names.read().get(uri).cloned();
+
         let local_classes: Vec<Arc<ClassInfo>> = self
             .uri_classes_index
             .read()
@@ -259,7 +261,11 @@ impl Backend {
             .unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
+        let function_loader = self.function_loader_with(
+            file_resolved_names.as_deref(),
+            &file_use_map,
+            &file_namespace,
+        );
         let resolved_cache = &self.resolved_class_cache;
 
         // ── Compute existence guards ────────────────────────────────────

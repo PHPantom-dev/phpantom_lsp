@@ -1079,14 +1079,45 @@ impl Backend {
 
     /// Resolve a function name using use-map and namespace context.
     ///
-    /// Builds a list of candidate names (exact name, use-map resolved,
-    /// namespace-qualified) and tries each via `find_or_load_function`.
-    ///
-    /// This is the single canonical implementation of the "function_loader"
-    /// logic used by both the completion handler and definition resolver.
+    /// Equivalent to [`resolve_function_name_at`](Self::resolve_function_name_at)
+    /// with no per-offset name resolution.  Prefer the offset-aware
+    /// variant whenever the call expression's byte offset is available,
+    /// so functions declared in a different `namespace` block of the same
+    /// file resolve correctly.
     pub(crate) fn resolve_function_name(
         &self,
         name: &str,
+        file_use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<FunctionInfo> {
+        self.resolve_function_name_at(name, None, 0, file_use_map, file_namespace)
+    }
+
+    /// Resolve a function name, consulting mago-names' per-offset
+    /// resolution for the authoritative fully-qualified name.
+    ///
+    /// A file may declare more than one `namespace` block.  The single
+    /// `file_namespace` describes only one of them, so a call to a
+    /// function declared in a *different* block would never build the
+    /// right candidate from the use-map / namespace guess alone.
+    /// `resolved_names` understands which block `offset` falls in and
+    /// qualifies the name accordingly (e.g. `foo()` inside `namespace A`
+    /// resolves to `A\foo`), so the FQN under which the function is
+    /// already stored in `global_functions` becomes a candidate.
+    ///
+    /// `offset` is the starting byte offset of the function-name
+    /// identifier in the source file.  Pass `0` (and/or `None`
+    /// `resolved_names`) when no offset is available; resolution then
+    /// behaves exactly like the plain use-map + namespace candidate list.
+    ///
+    /// Candidate order mirrors PHP's unqualified-call resolution: the
+    /// namespace-local name wins, with the bare name as the global
+    /// fallback, then the use-map alias and the single-namespace guess.
+    pub(crate) fn resolve_function_name_at(
+        &self,
+        name: &str,
+        resolved_names: Option<&crate::names::OwnedResolvedNames>,
+        offset: u32,
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
@@ -1099,18 +1130,30 @@ impl Backend {
             return self.find_or_load_function(&[absolute]);
         }
 
-        // Build candidate names to try: exact name, use-map
-        // resolved name, and namespace-qualified name.
-        let mut candidates: Vec<&str> = vec![name];
+        // Offset-aware, multi-namespace-correct candidate from mago-names.
+        // `offset == 0` is the "no offset available" sentinel (no PHP
+        // function-call identifier ever starts at byte 0, before `<?php`).
+        let offset_resolved: Option<String> = if offset != 0 {
+            resolved_names
+                .and_then(|rn| rn.get(offset))
+                .map(str::to_owned)
+        } else {
+            None
+        };
 
         let use_resolved: Option<String> = file_use_map.get(name).cloned();
-        if let Some(ref fqn) = use_resolved {
-            candidates.push(fqn.as_str());
-        }
-
         let ns_qualified: Option<String> = file_namespace
             .as_ref()
             .map(|ns| format!("{}\\{}", ns, name));
+
+        let mut candidates: Vec<&str> = Vec::with_capacity(4);
+        if let Some(ref r) = offset_resolved {
+            candidates.push(r.as_str());
+        }
+        candidates.push(name);
+        if let Some(ref fqn) = use_resolved {
+            candidates.push(fqn.as_str());
+        }
         if let Some(ref nq) = ns_qualified {
             candidates.push(nq.as_str());
         }
@@ -1219,21 +1262,29 @@ impl Backend {
     pub(crate) fn function_loader<'a>(
         &'a self,
         ctx: &'a FileContext,
-    ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
-        self.function_loader_with(&ctx.use_map, &ctx.namespace)
+    ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
+        self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
     }
 
     /// Return a function-loader closure from individual file-context
     /// components.
     ///
     /// Useful when the caller does not have a full `FileContext` or
-    /// needs to use a different use-map / namespace.
+    /// needs to use a different use-map / namespace.  The closure's
+    /// second argument is the byte offset of the function-name
+    /// identifier; pass `0` when no offset is available.  Callers that
+    /// have per-offset name resolution should supply `resolved_names` so
+    /// functions declared in a different `namespace` block of the same
+    /// file resolve correctly.
     pub(crate) fn function_loader_with<'a>(
         &'a self,
+        resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
         use_map: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
-    ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
-        move |name: &str| self.resolve_function_name(name, use_map, namespace)
+    ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
+        move |name: &str, offset: u32| {
+            self.resolve_function_name_at(name, resolved_names, offset, use_map, namespace)
+        }
     }
 
     /// Check whether `cursor_offset` is inside a closure whose

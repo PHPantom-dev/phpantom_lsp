@@ -615,7 +615,7 @@ impl Backend {
 
                 // Regular function lookup.
                 if let Some(fl) = ctx.function_loader
-                    && let Some(func_info) = fl(func_name)
+                    && let Some(func_info) = fl(func_name, 0)
                 {
                     if let Some(ref cond) = func_info.conditional_return {
                         let var_resolver = build_var_resolver(ctx);

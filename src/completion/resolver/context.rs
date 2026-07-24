@@ -71,7 +71,7 @@ pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
 
 /// Type alias for the optional function-loader closure passed through
 /// the resolution chain.  Reduces clippy `type_complexity` warnings.
-pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
+pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str, u32) -> Option<FunctionInfo>>;
 
 /// Type alias for the optional constant-value-loader closure passed
 /// through the resolution chain.  Given a constant name, returns

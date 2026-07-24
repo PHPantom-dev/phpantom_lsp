@@ -55,7 +55,7 @@ pub type ClassLoaderFn<'a> = &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>;
 ///
 /// Used by [`SmartContext`] for cross-file `@throws` propagation from
 /// standalone function calls.
-pub type FunctionLoaderFn<'a> = &'a dyn Fn(&str) -> Option<crate::types::FunctionInfo>;
+pub type FunctionLoaderFn<'a> = &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>;
 
 // Re-export comment-position helpers so existing consumers (tests,
 // handler, catch_completion) that import from `phpdoc::` keep working.

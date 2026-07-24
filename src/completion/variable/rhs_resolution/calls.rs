@@ -715,9 +715,10 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 // `strlen(...)()` — resolve the inner function name.
                 if let Expression::Identifier(ident) = fa.function {
                     let name = bytes_to_str(ident.value()).to_string();
+                    let name_offset = ident.span().start.offset;
                     let function_loader = ctx.function_loader();
                     if let Some(fl) = function_loader
-                        && let Some(func_info) = fl(&name)
+                        && let Some(func_info) = fl(&name, name_offset)
                         && let Some(ref ret) = func_info.return_type
                     {
                         let resolved =
@@ -746,6 +747,11 @@ pub(super) fn resolve_rhs_function_call<'b>(
         Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
         _ => None,
     };
+    // Byte offset of the function-name identifier, so the loader can
+    // consult mago-names' per-offset resolution.  This is what lets a
+    // call resolve to a function declared in a *different* `namespace`
+    // block of the same file (the file-level namespace guess would miss).
+    let func_name_offset = func_call.function.span().start.offset;
 
     // ── Laravel container string binding ────────────────
     // `$var = app('blade.compiler')` / `$var = resolve('cache')` bind a
@@ -850,7 +856,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
 
     if let Some(ref name) = func_name
         && let Some(fl) = function_loader
-        && let Some(func_info) = fl(name)
+        && let Some(func_info) = fl(name, func_name_offset)
     {
         // Try conditional return type first
         if let Some(ref cond) = func_info.conditional_return {
@@ -951,40 +957,6 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 class_loader,
             )];
         }
-    }
-
-    // ── Source-scanning fallback for named function calls ────
-    // When the function_loader is unavailable or could not resolve the
-    // function (e.g. multi-namespace files where the file-level namespace
-    // differs from the function's namespace), scan the source text for
-    // the function's docblock @return annotation.
-    let loader_found = func_name
-        .as_ref()
-        .and_then(|name| function_loader.and_then(|fl| fl(name)))
-        .is_some();
-    if let Some(ref name) = func_name
-        && !loader_found
-        && let Some(ret) =
-            crate::completion::source::helpers::extract_function_return_from_source(name, content)
-    {
-        let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
-            &ret,
-            current_class_name,
-            all_classes,
-            class_loader,
-        );
-        if !resolved.is_empty() {
-            return ResolvedType::from_classes_with_hint(resolved, ret);
-        }
-        if ret == PhpType::void() {
-            return vec![ResolvedType::from_type_string(PhpType::null())];
-        }
-        return vec![resolved_type_with_lookup(
-            ret,
-            current_class_name,
-            all_classes,
-            class_loader,
-        )];
     }
 
     // ── Variable invocation: $fn() ──────────────────

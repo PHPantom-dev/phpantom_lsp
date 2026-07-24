@@ -46,7 +46,7 @@ pub type MethodStore = Arc<parking_lot::RwLock<HashMap<MethodStoreKey, Arc<Metho
 ///
 /// Used by docblock generation and throws analysis to look up cross-file
 /// function metadata.
-pub type FunctionLoader<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
+pub type FunctionLoader<'a> = Option<&'a dyn Fn(&str, u32) -> Option<FunctionInfo>>;
 
 // ─── PHP Version ────────────────────────────────────────────────────────────
 

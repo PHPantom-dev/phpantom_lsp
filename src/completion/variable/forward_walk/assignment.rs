@@ -2259,11 +2259,12 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 _ => return,
             };
+            let func_name_offset = func_call.function.span().start.offset;
             let fl = match ctx.loaders.function_loader {
                 Some(fl) => fl,
                 None => return,
             };
-            let func_info = match fl(&func_name) {
+            let func_info = match fl(&func_name, func_name_offset) {
                 Some(fi) => fi,
                 None => return,
             };

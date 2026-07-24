@@ -893,8 +893,9 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 _ => return,
             };
+            let func_name_offset = func_call.function.span().start.offset;
             let func_info = match ctx.loaders.function_loader {
-                Some(fl) => match fl(&func_name) {
+                Some(fl) => match fl(&func_name, func_name_offset) {
                     Some(fi) => fi,
                     None => return,
                 },

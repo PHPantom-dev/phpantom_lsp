@@ -7,8 +7,6 @@
 ///
 /// - **`extract_new_expression_class`** — parse `new ClassName(…)` from
 ///   a text fragment.
-/// - **`extract_function_return_from_source`** — find a function's
-///   `@return` type by scanning backward for its docblock.
 /// - **`extract_closure_return_type_from_text`** — find a
 ///   closure/arrow-function's native return type hint from its own
 ///   source text.
@@ -24,7 +22,6 @@
 /// are called via their canonical module paths.
 use std::sync::Arc;
 
-use crate::docblock;
 use crate::php_type::PhpType;
 use crate::types::{BracketSegment, ClassInfo};
 
@@ -33,28 +30,6 @@ use crate::completion::resolver::ResolutionCtx;
 // ─── Source-text helpers ────────────────────────────────────────────────────
 
 pub(in crate::completion) use crate::subject_expr::parse_new_expression_class as extract_new_expression_class;
-
-/// Search backward in `content` for a function definition matching
-/// `func_name` and extract its `@return` type from the docblock.
-pub(in crate::completion) fn extract_function_return_from_source(
-    func_name: &str,
-    content: &str,
-) -> Option<PhpType> {
-    // Look for `function funcName(` in the source.
-    let pattern = format!("function {}(", func_name);
-    let func_pos = content.find(&pattern)?;
-
-    // Search backward from the function definition for a docblock.
-    let before = content.get(..func_pos)?;
-    let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    let open_pos = trimmed.rfind("/**")?;
-    let docblock = &trimmed[open_pos..];
-
-    docblock::extract_return_type(docblock)
-}
 
 /// Extract the return type annotation from a closure or arrow-function
 /// literal, given its own source text (e.g. the closure's span text, or
@@ -765,7 +740,7 @@ pub(in crate::completion) fn resolve_first_class_callable_return_type(
         }
         crate::subject_expr::SubjectExpr::FunctionCall(func_name) => {
             let function_loader = rctx.function_loader?;
-            let func_info = function_loader(func_name)?;
+            let func_info = function_loader(func_name, 0)?;
             func_info.return_type.clone()
         }
         // Variable callables ($fn = $otherFn(...)) are not handled

@@ -30,7 +30,7 @@ pub(crate) fn resolve_var_type(
     let constant_loader = backend.constant_loader();
     let loaders = Loaders {
         function_loader: Some(
-            &function_loader as &dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
+            &function_loader as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
         ),
         constant_loader: Some(&constant_loader),
     };

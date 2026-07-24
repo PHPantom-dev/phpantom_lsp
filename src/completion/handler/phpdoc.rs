@@ -45,7 +45,10 @@ impl Backend {
                     position,
                     &ctx.classes,
                     &class_loader,
-                    Some(&function_loader as &dyn Fn(&str) -> Option<crate::types::FunctionInfo>),
+                    Some(
+                        &function_loader
+                            as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+                    ),
                 )
             } else {
                 None

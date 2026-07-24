@@ -771,7 +771,7 @@ fn resolve_call_raw_return_type(
         }
         SubjectExpr::FunctionCall(fn_name) => {
             if let Some(fl) = ctx.function_loader
-                && let Some(func_info) = fl(fn_name)
+                && let Some(func_info) = fl(fn_name, 0)
             {
                 return func_info.return_type.clone();
             }
@@ -899,7 +899,7 @@ pub(crate) fn resolve_subject_outcome(
         // Try unresolvable class detection for function calls.
         if let SubjectExpr::FunctionCall(fn_name) = callee.as_ref()
             && let Some(fl) = ctx.function_loader
-            && let Some(func_info) = fl(fn_name.as_str())
+            && let Some(func_info) = fl(fn_name.as_str(), 0)
             && let Some(ref raw_type) = func_info.return_type
             && let Some(unresolved) = check_unresolvable_class_name(raw_type, ctx.class_loader)
         {
@@ -976,7 +976,7 @@ fn resolve_call_scalar_return(
         // Standalone function call: getInt()
         SubjectExpr::FunctionCall(fn_name) => {
             if let Some(fl) = ctx.function_loader
-                && let Some(func_info) = fl(fn_name)
+                && let Some(func_info) = fl(fn_name, 0)
                 && let Some(ref hint) = func_info.return_type
                 && hint.all_members_primitive_scalar()
             {

@@ -723,8 +723,9 @@ fn resolve_rhs_pipe(pipe: &Pipe<'_>, ctx: &VarResolutionCtx<'_>) -> Vec<Resolved
                 Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 _ => return vec![],
             };
+            let func_name_offset = fpa.function.span().start.offset;
             if let Some(fl) = ctx.function_loader()
-                && let Some(func_info) = fl(&func_name)
+                && let Some(func_info) = fl(&func_name, func_name_offset)
                 && let Some(ref ret) = func_info.return_type
             {
                 return ResolvedType::from_classes_with_hint(

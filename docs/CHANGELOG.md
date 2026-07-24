@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade files with raw `<?php ... ?>` tags no longer report false syntax errors.** PHP code embedded directly in a Blade template (outside `@php`/`@endphp`) is now recognized and passed through unmodified, so string literals that happen to start with `@` (e.g. a JSON-LD `'@context'` array key) are no longer misread as Blade directives.
 - **`@switch`/`@case` with a class-constant case value no longer reports a syntax error.** `@case (Some\Namespaced\Enum::VALUE)` now translates to a valid `case` arm instead of silently corrupting the rest of the file.
 - **Generated `@return` types infer the same rich type from multi-line array literals.** A function returning an array literal written across several lines now infers the precise type (for example `list<string>`) in its generated docblock, matching the single-line form. Previously breaking the literal onto multiple lines degraded the inferred type to `array<mixed>`.
+- **Calls to functions declared in another `namespace` block of the same file resolve their return type.** In a file that declares more than one `namespace`, a call to a function from a later block used to leave the returned value untyped unless the function carried an `@return` docblock. The call and its return type now resolve regardless, so completion, hover, and diagnostics see the value's type.
 
 ## [0.9.0] - 2026-07-20
 

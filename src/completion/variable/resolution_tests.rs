@@ -944,7 +944,7 @@ function test() {
     // Provide a function loader that returns FunctionInfo with the
     // stub return type (int|float), matching what the real backend
     // produces from phpstorm-stubs.
-    let func_loader = |name: &str| -> Option<crate::types::FunctionInfo> {
+    let func_loader = |name: &str, _offset: u32| -> Option<crate::types::FunctionInfo> {
         if name.eq_ignore_ascii_case("array_sum") || name.eq_ignore_ascii_case("array_product") {
             Some(stub_function_info(
                 name,
@@ -987,7 +987,7 @@ function test() {
 "#;
     let cursor_offset = content.find("echo $result").unwrap() as u32;
 
-    let func_loader = |name: &str| -> Option<crate::types::FunctionInfo> {
+    let func_loader = |name: &str, _offset: u32| -> Option<crate::types::FunctionInfo> {
         if name.eq_ignore_ascii_case("array_sum") || name.eq_ignore_ascii_case("array_product") {
             Some(stub_function_info(
                 name,
@@ -1397,7 +1397,7 @@ function test() {
     // Provide a function loader that returns array_reduce with
     // @template TCarry, @param TCarry $initial, @return TCarry
     // (matching what the real backend parses from the upstream stubs).
-    let func_loader = |name: &str| -> Option<crate::types::FunctionInfo> {
+    let func_loader = |name: &str, _offset: u32| -> Option<crate::types::FunctionInfo> {
         if name.eq_ignore_ascii_case("array_reduce") {
             let mut fi = stub_function_info(name, Some(PhpType::Named("TCarry".to_string())));
             fi.parameters = vec![

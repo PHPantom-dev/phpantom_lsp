@@ -62,7 +62,7 @@ struct PropertyCheckCtx<'a> {
     content: &'a str,
     file_ctx: &'a crate::types::FileContext,
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &'a dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
+    function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &'a dyn Fn(&str) -> Option<Option<String>>,
     backend: &'a Backend,
     out: &'a mut Vec<ResolvedPropertyAssignment>,

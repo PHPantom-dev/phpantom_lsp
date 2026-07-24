@@ -71,7 +71,7 @@ impl Backend {
         let function_loader = self.function_loader(ctx);
         let constant_loader = self.constant_loader();
         let loaders = crate::completion::resolver::Loaders {
-            function_loader: Some(&function_loader as &dyn Fn(&str) -> Option<FunctionInfo>),
+            function_loader: Some(&function_loader as &dyn Fn(&str, u32) -> Option<FunctionInfo>),
             constant_loader: Some(&constant_loader),
         };
 

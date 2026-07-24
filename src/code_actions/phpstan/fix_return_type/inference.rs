@@ -69,7 +69,7 @@ impl Backend {
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
         let file_namespace: Option<String> = self.first_file_namespace(uri);
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
+        let function_loader = self.function_loader_with(None, &file_use_map, &file_namespace);
 
         infer_return_type(
             content,

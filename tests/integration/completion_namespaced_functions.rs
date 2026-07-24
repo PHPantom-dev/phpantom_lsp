@@ -1039,3 +1039,48 @@ async fn test_inline_different_namespace_gets_auto_import() {
         edits[0].new_text
     );
 }
+
+/// A file may declare more than one `namespace` block.  When a function is
+/// declared in a *later* block and called from within that same block, the
+/// single file-level namespace (which describes the *first* block) is the
+/// wrong prefix for the call.  The return type of the call must still be
+/// resolved by consulting the per-offset name resolution, which knows which
+/// block the call sits in.
+#[tokio::test]
+async fn test_call_resolves_function_in_later_namespace_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///multi_ns.php").unwrap();
+
+    // `makeWidget()` is declared in `namespace Second` and called from the
+    // same block.  The file-level namespace is `First`, so a `First\makeWidget`
+    // guess would miss the `Second\makeWidget` entry in `global_functions`.
+    let text = "<?php\n\
+namespace First;\n\
+\n\
+class Unrelated {}\n\
+\n\
+namespace Second;\n\
+\n\
+class Widget {\n\
+    public function sprocket(): void {}\n\
+}\n\
+\n\
+function makeWidget(): \\Second\\Widget {\n\
+    return new Widget();\n\
+}\n\
+\n\
+function caller() {\n\
+    $w = makeWidget();\n\
+    $w->\n\
+}\n";
+
+    // Cursor right after `$w->` on the `    $w->` line (0-indexed line 17).
+    let items = complete_at(&backend, &uri, text, 17, 8).await;
+
+    assert!(
+        labels(&items).iter().any(|l| l.starts_with("sprocket")),
+        "Call to a function declared in a later namespace block should resolve \
+         its return type. Got: {:?}",
+        labels(&items)
+    );
+}

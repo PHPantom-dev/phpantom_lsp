@@ -1183,7 +1183,7 @@ fn test_find_cross_file_propagated_throws_function_call() {
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-    let function_loader = move |name: &str| -> Option<FunctionInfo> {
+    let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
         if name == "riskyFunction" {
             Some(func_info.clone())
         } else {
@@ -1316,7 +1316,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         overloads: vec![],
     };
 
-    let function_loader = move |name: &str| -> Option<FunctionInfo> {
+    let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
         if name == "helperFunction" {
             Some(func_info.clone())
         } else {

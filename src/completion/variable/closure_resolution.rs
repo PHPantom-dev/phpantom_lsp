@@ -329,9 +329,12 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
                 Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                 _ => None,
             };
+            let func_name_offset = fc.function.span().start.offset;
             let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
                 let name = func_name.as_deref()?;
-                let fi = ctx.function_loader.and_then(|fl| fl(name))?;
+                let fi = ctx
+                    .function_loader
+                    .and_then(|fl| fl(name, func_name_offset))?;
                 closure_this_from_function_params(&fi, arg_idx, ctx)
             });
             if result.is_some() {

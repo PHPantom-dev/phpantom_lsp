@@ -1375,9 +1375,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                     _ => None,
                 };
+                let func_name_offset = func_call.function.span().start.offset;
                 func_name.and_then(|name| {
                     ctx.function_loader()
-                        .and_then(|fl| fl(&name))
+                        .and_then(|fl| fl(&name, func_name_offset))
                         .and_then(|fi| fi.return_type.clone())
                 })
             }
@@ -1903,11 +1904,12 @@ pub(super) fn try_apply_pass_by_reference_type(
                 Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
                 _ => return,
             };
+            let func_name_offset = func_call.function.span().start.offset;
             let fl = match ctx.function_loader() {
                 Some(fl) => fl,
                 None => return,
             };
-            let func_info = match fl(&func_name) {
+            let func_info = match fl(&func_name, func_name_offset) {
                 Some(fi) => fi,
                 None => return,
             };

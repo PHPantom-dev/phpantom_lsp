@@ -263,7 +263,7 @@ impl Backend {
         content: &str,
     ) {
         let function_loader = self.function_loader(ctx);
-        if let Some(func) = function_loader(&data.member_name) {
+        if let Some(func) = function_loader(&data.member_name, 0) {
             let resolved_see = self.resolve_see_refs(&func.see_refs, &data.uri, content);
             let provenance = self.provenance_line_for_function(&data.member_name);
             let hover = hover_for_function(&func, Some(&resolved_see), provenance, false);

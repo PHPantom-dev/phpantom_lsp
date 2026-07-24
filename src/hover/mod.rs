@@ -399,7 +399,7 @@ impl Backend {
             }
 
             SymbolKind::FunctionCall { name, .. } => {
-                self.hover_function_call(name, uri, content, &ctx, &function_loader)
+                self.hover_function_call(name, uri, content, &ctx, &function_loader, symbol.start)
             }
 
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -575,9 +575,10 @@ impl Backend {
         uri: &str,
         content: &str,
         _ctx: &FileContext,
-        function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
+        function_loader: &dyn Fn(&str, u32) -> Option<FunctionInfo>,
+        offset: u32,
     ) -> Option<Hover> {
-        if let Some(mut func) = function_loader(name) {
+        if let Some(mut func) = function_loader(name, offset) {
             let is_configured_date_helper = matches!(
                 name.trim_start_matches('\\').rsplit('\\').next(),
                 Some("now" | "today")

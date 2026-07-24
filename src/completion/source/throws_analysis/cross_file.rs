@@ -681,7 +681,7 @@ pub(crate) fn find_cross_file_propagated_throws(
                         // find_propagated_throws for $this->/self::/static::).
                         // For standalone functions, use the function loader.
                         if let Some(func_loader) = ctx.function_loader
-                            && let Some(func_info) = func_loader(clean_name)
+                            && let Some(func_info) = func_loader(clean_name, 0)
                         {
                             for exc_type in &func_info.throws {
                                 results.push(ThrowInfo {

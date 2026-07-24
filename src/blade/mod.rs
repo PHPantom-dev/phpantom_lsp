@@ -195,8 +195,8 @@ impl crate::Backend {
     fn blade_e_hover(&self, start: Position, len: u32) -> Hover {
         // Try to resolve the actual `e()` function from the project/stubs.
         let empty_use_map = std::collections::HashMap::new();
-        let loader = self.function_loader_with(&empty_use_map, &None);
-        let content = if let Some(func) = loader("e") {
+        let loader = self.function_loader_with(None, &empty_use_map, &None);
+        let content = if let Some(func) = loader("e", 0) {
             crate::hover::hover_for_function(&func, None, None, false).contents
         } else {
             HoverContents::Markup(MarkupContent {

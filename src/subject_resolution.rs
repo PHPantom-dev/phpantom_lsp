@@ -28,7 +28,7 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     /// Class loader.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Function loader (for variable resolution via the forward walker).
-    pub function_loader: &'a dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
+    pub function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
 }
 
 /// Resolve a subject string to a [`PhpType`].
