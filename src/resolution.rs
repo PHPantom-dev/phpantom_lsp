@@ -321,6 +321,26 @@ impl Backend {
             return Some(cls);
         }
 
+        // ── Phase 0.5: built-in names resolve to the embedded stubs ──
+        // A global-namespace class name that exists in the embedded
+        // stub index is a PHP built-in (core or bundled extension).
+        // Vendor code can only redeclare such a name inside a
+        // conditional block: a polyfill mirroring the built-in for
+        // older runtimes.  symfony/polyfill-php84, for example, ships
+        // two `RoundingMode` declarations — an enum and a pre-enum
+        // class whose "cases" are plain int constants.  Resolving the
+        // name through the classmap (Phase 1) would pick whichever
+        // polyfill file happened to be indexed first, which is
+        // nondeterministic when several files declare the name and
+        // wrong whenever a legacy variant wins (enum cases would
+        // resolve to int constants).  The stub is the authoritative
+        // definition of a built-in, so it wins over classmap entries.
+        if expected_ns.is_none()
+            && let Some(cls) = self.load_stub_class(last_segment)
+        {
+            return Some(cls);
+        }
+
         // ── Phase 1: Try the fqn_uri_index (FQN → URI) ───────────
         // The fqn_uri_index is populated by `scan_autoload_files` (Composer
         // `autoload_files.php` entries and their `require_once` chains),

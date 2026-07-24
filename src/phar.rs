@@ -23,6 +23,13 @@ pub(crate) struct PharArchive {
     data: Vec<u8>,
     /// Map of internal file path → (offset into `data`, uncompressed size).
     files: HashMap<String, (usize, usize)>,
+    /// Internal file paths in manifest order.  Iteration must be
+    /// deterministic: consumers register discovered classes
+    /// first-wins, so a randomized `HashMap` order would make it
+    /// nondeterministic which file resolves a class name that is
+    /// declared in several files of the archive (e.g. the enum and
+    /// legacy-class variants of a symfony polyfill).
+    paths: Vec<String>,
 }
 
 impl PharArchive {
@@ -115,6 +122,7 @@ impl PharArchive {
         let data_area_start = manifest_end;
 
         let mut files = HashMap::with_capacity(file_count);
+        let mut paths = Vec::with_capacity(file_count);
         let mut offset = data_area_start;
 
         for entry in &entries {
@@ -123,12 +131,17 @@ impl PharArchive {
                 if offset + entry.compressed_size > data.len() {
                     return None;
                 }
-                files.insert(entry.filename.clone(), (offset, entry.uncompressed_size));
+                if files
+                    .insert(entry.filename.clone(), (offset, entry.uncompressed_size))
+                    .is_none()
+                {
+                    paths.push(entry.filename.clone());
+                }
             }
             offset += entry.compressed_size;
         }
 
-        Some(Self { data, files })
+        Some(Self { data, files, paths })
     }
 
     /// Extract the content of a file inside the phar.
@@ -137,9 +150,9 @@ impl PharArchive {
         self.data.get(offset..offset + size)
     }
 
-    /// Iterate over all file paths in the archive.
+    /// Iterate over all file paths in the archive, in manifest order.
     pub fn file_paths(&self) -> impl Iterator<Item = &str> {
-        self.files.keys().map(String::as_str)
+        self.paths.iter().map(String::as_str)
     }
 }
 
@@ -293,6 +306,20 @@ mod tests {
         paths.sort();
 
         assert_eq!(paths, vec!["a.php", "b.php", "c.php"]);
+    }
+
+    #[test]
+    fn file_paths_preserves_manifest_order() {
+        let phar_bytes = build_test_phar(&[
+            ("zeta.php", b"<?php // z"),
+            ("alpha.php", b"<?php // a"),
+            ("mid.php", b"<?php // m"),
+        ]);
+
+        let archive = PharArchive::parse(phar_bytes).expect("should parse");
+
+        let paths: Vec<&str> = archive.file_paths().collect();
+        assert_eq!(paths, vec!["zeta.php", "alpha.php", "mid.php"]);
     }
 
     #[test]
