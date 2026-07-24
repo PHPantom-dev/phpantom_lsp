@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784857004479,
+  "lastUpdate": 1784860516483,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19865,6 +19865,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "596a795f681080d78115936931c8cd8dc1b4bed1",
+          "message": "Fix self / static from within macros",
+          "timestamp": "2026-07-24T03:40:23+02:00",
+          "tree_id": "215428b57090870d21ab0bf450541f57c0b173b3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/596a795f681080d78115936931c8cd8dc1b4bed1"
+        },
+        "date": 1784860514265,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 92.8,
             "unit": "MiB"
           }
         ]
