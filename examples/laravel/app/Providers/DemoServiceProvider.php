@@ -24,10 +24,11 @@ class DemoServiceProvider extends ServiceProvider
         Collection::mixin(new CollectionMixin());
 
         // Carbon supports the same `macro()` pattern as Laravel's Macroable.
-        // `$this` inside the closure is the CarbonImmutable instance the
-        // macro is called on:
+        // The closure is bound with the target as scope, so `self::`/`static::`
+        // refer to CarbonImmutable and protected helpers like `self::this()`
+        // (the instance the macro is called on) resolve:
         CarbonImmutable::macro('diffFromYear', function (int $year, bool $absolute = false): string {
-            return $this->diffForHumans(
+            return self::this()->diffForHumans(
                 CarbonImmutable::create($year, 1, 1),
                 ['syntax' => \Carbon\CarbonInterface::DIFF_ABSOLUTE]
             );

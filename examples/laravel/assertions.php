@@ -320,6 +320,24 @@ check(
     \App\Models\BlogPost::factory()->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
 );
 
+// ─── Carbon macro closure scope binding ──────────────────────────────────────
+
+// Carbon binds macro closures with the target class as scope, so `self::`
+// inside the closure refers to CarbonImmutable (not the class that lexically
+// encloses the registration) and the protected `Mixin::this()` helper — the
+// instance the macro is called on — is accessible.
+\Carbon\CarbonImmutable::macro('phpantomScopeProbe', function (): string {
+    return self::this()->format('Y');
+});
+check(
+    'self::this() inside a Carbon macro returns the bound instance',
+    \Carbon\CarbonImmutable::create(2020, 1, 1)->phpantomScopeProbe() === '2020'
+);
+check(
+    'Mixin::this() is protected static (only reachable via rebound scope)',
+    (new ReflectionMethod(\Carbon\CarbonImmutable::class, 'this'))->isProtected()
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

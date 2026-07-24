@@ -40,32 +40,3 @@ Fixing this requires either threading the call expression's byte
 offset through to `resolve_function_name` or adding an offset-aware
 variant of the loader closure. Size the fix accordingly — this is not
 a one-line change.
-
-## B2. `self::`/`static::` inside macro closures resolve to the enclosing class, not the macro target
-
-Inside a closure passed to `Target::macro(...)` (Laravel `Macroable`
-or Carbon), `$this` correctly resolves to the macro target class via
-`laravel_macro_this_resolver` (`closure_this_from_static_receiver` in
-`src/completion/variable/closure_resolution.rs`). But `self::` and
-`static::` inside the same closure still resolve to the class that
-lexically encloses the registration (e.g. the service provider), so
-Carbon's static macro idiom
-
-```php
-CarbonImmutable::macro('diffFromYear', function (int $year): string {
-    return self::this()->diffForHumans(...);
-});
-```
-
-reports a false `Method 'this' not found on class
-'App\Providers\DemoServiceProvider'` (`unknown_member`). At runtime
-both `Macroable::__call`/`__callStatic` and Carbon bind the closure
-with the target as scope, so `self`/`static` refer to the target and
-protected members like `Carbon\Traits\Mixin::this()` are accessible.
-
-Subject resolution for `Self_`/`Static` needs the same "am I inside a
-macro registration closure?" awareness that `$this` resolution already
-has. The `self::this()` demo in
-`examples/laravel/app/Providers/DemoServiceProvider.php` was switched
-to the supported `$this->` form when this was discovered; restore the
-static idiom there once fixed.

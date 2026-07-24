@@ -11688,3 +11688,77 @@ function test(Node $n): void {
         diags_wrong
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// self:: / static:: inside macro registration closures
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Inside a closure passed to a `macro()` registration (Laravel
+/// `Macroable`, Carbon), the runtime binds the closure with the macro
+/// target as its scope, so `self::` and `static::` refer to the target
+/// class. Protected members like Carbon's `Mixin::this()` are therefore
+/// accessible and must not be flagged.
+#[tokio::test]
+async fn self_and_static_in_macro_closure_resolve_to_macro_target() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "class DateBase {\n",
+        "    protected static function this(): static { return new static(); }\n",
+        "    public function diffForHumans(): string { return ''; }\n",
+        "    /**\n",
+        "     * @param-closure-this static $macro\n",
+        "     */\n",
+        "    public static function macro(string $name, callable $macro): void {}\n",
+        "}\n",
+        "class Provider {\n",
+        "    public function boot(): void {\n",
+        "        DateBase::macro('diffFromYear', function (int $year): string {\n",
+        "            return self::this()->diffForHumans()\n",
+        "                . static::this()->diffForHumans();\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, "file:///test/macro_self.php", text);
+    assert!(
+        diags.is_empty(),
+        "self::/static:: inside a macro closure should resolve to the macro target, got: {:?}",
+        diags
+    );
+}
+
+/// `self::` outside the macro closure still resolves to the lexically
+/// enclosing class, so a method that only exists on the macro target is
+/// flagged there.
+#[tokio::test]
+async fn self_outside_macro_closure_stays_lexical() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "class DateBase {\n",
+        "    protected static function this(): static { return new static(); }\n",
+        "    /**\n",
+        "     * @param-closure-this static $macro\n",
+        "     */\n",
+        "    public static function macro(string $name, callable $macro): void {}\n",
+        "}\n",
+        "class Provider {\n",
+        "    public function boot(): void {\n",
+        "        DateBase::macro('noop', function (): void {\n",
+        "        });\n",
+        "        self::this();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, "file:///test/macro_self_leak.php", text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("this") && d.message.contains("Provider")),
+        "self::this() outside the closure should be flagged on Provider, got: {:?}",
+        diags
+    );
+}

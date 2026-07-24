@@ -315,6 +315,124 @@ async fn test_param_closure_this_property_access() {
     );
 }
 
+// ─── self:: / static:: inside a rebound closure ─────────────────────────────
+
+/// Inside a closure rebound via `@param-closure-this` (e.g. a macro
+/// registration), the runtime binds the target class as the closure's
+/// scope, so `self::` refers to the macro target, not the class that
+/// lexically encloses the registration.
+#[tokio::test]
+async fn test_param_closure_this_self_keyword() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_self_kw.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Macroable {\n",
+        "    public static function make(): static { return new static(); }\n",
+        "    /**\n",
+        "     * @param string $name\n",
+        "     * @param callable $macro\n",
+        "     * @param-closure-this static $macro\n",
+        "     */\n",
+        "    public static function macro(string $name, callable $macro): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        Macroable::macro('test', function () {\n",
+        "            self::\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 13: `            self::` — cursor after `::`
+    let items = complete_at(&backend, &uri, src, 13, 18).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"make"),
+        "Expected 'make' from the macro target (Macroable) via self::, got: {:?}",
+        names,
+    );
+}
+
+/// Same as above for the `static::` keyword.
+#[tokio::test]
+async fn test_param_closure_this_static_keyword() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_static_kw.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Macroable {\n",
+        "    public static function make(): static { return new static(); }\n",
+        "    /**\n",
+        "     * @param string $name\n",
+        "     * @param callable $macro\n",
+        "     * @param-closure-this static $macro\n",
+        "     */\n",
+        "    public static function macro(string $name, callable $macro): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        Macroable::macro('test', function () {\n",
+        "            static::\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 13: `            static::` — cursor after `::`
+    let items = complete_at(&backend, &uri, src, 13, 20).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"make"),
+        "Expected 'make' from the macro target (Macroable) via static::, got: {:?}",
+        names,
+    );
+}
+
+/// `self::` outside the closure must still resolve to the lexically
+/// enclosing class, not the @param-closure-this type.
+#[tokio::test]
+async fn test_param_closure_this_self_keyword_does_not_leak() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_self_kw_no_leak.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Macroable {\n",
+        "    public static function make(): static { return new static(); }\n",
+        "    /**\n",
+        "     * @param-closure-this static $macro\n",
+        "     */\n",
+        "    public static function macro(string $name, callable $macro): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public static function ownHelper(): string { return ''; }\n",
+        "    public function run(): void {\n",
+        "        Macroable::macro('test', function () {\n",
+        "        });\n",
+        "        self::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 13: `        self::` — cursor OUTSIDE the closure
+    let items = complete_at(&backend, &uri, src, 13, 14).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"ownHelper"),
+        "Expected 'ownHelper' from lexical class App, got: {:?}",
+        names,
+    );
+    assert!(
+        !names.contains(&"make"),
+        "Should NOT see Macroable::make outside the closure, got: {:?}",
+        names,
+    );
+}
+
 // ─── @param-closure-this with FQN type ──────────────────────────────────────
 
 /// `@param-closure-this \App\Route $callback` with a leading backslash

@@ -3579,6 +3579,14 @@ class ParamClosureThisDemo
         $router->extend('redis', function () {
             $this->getDefaultDriver();    // resolves Router::getDefaultDriver()
         });
+
+        // Macro-style registration: the closure is bound with the target
+        // class as its scope, so self:: and static:: inside it refer to
+        // ScaffoldingMacroTarget, not ParamClosureThisDemo.
+        ScaffoldingMacroTarget::macro('renderTwice', function (): string {
+            return self::make()->render()      // resolves MacroTarget::make()
+                . static::make()->render();    // static:: works the same way
+        });
     }
 }
 
@@ -5013,6 +5021,38 @@ class ScaffoldingClosureThisRouter
      * @return $this
      */
     public function extend(string $driver, \Closure $callback): self { return $this; }
+}
+
+// ScaffoldingMacroTarget — a minimal Macroable-style class used by
+// ParamClosureThisDemo. `macro()` stores the closure and `__call` binds it
+// with this class as scope (like Laravel's Macroable / Carbon), so
+// `self::`/`static::` inside a registered closure refer to this class.
+class ScaffoldingMacroTarget
+{
+    /** @var array<string, callable> */
+    private static array $macros = [];
+
+    public static function make(): static { return new static(); }
+
+    public function render(): string { return 'rendered'; }
+
+    /**
+     * @param-closure-this static $macro
+     */
+    public static function macro(string $name, callable $macro): void
+    {
+        static::$macros[$name] = $macro;
+    }
+
+    /** @param array<int, mixed> $args */
+    public function __call(string $name, array $args): mixed
+    {
+        $macro = static::$macros[$name];
+        if ($macro instanceof \Closure) {
+            $macro = $macro->bindTo($this, static::class);
+        }
+        return $macro(...$args);
+    }
 }
 
 class ScaffoldingFirstClassCallable
@@ -7255,6 +7295,14 @@ function runDemoAssertions(): void
     assert(is_string($ctRouter->getDefaultDriver()), 'Router::getDefaultDriver() must return string');
     $ctExt = $ctRouter->extend('redis', function () {});
     assert($ctExt instanceof ScaffoldingClosureThisRouter, 'Router::extend() must return self');
+
+    // Macro-style scope binding: self::/static:: inside a registered
+    // closure refer to the macro target class at runtime.
+    ScaffoldingMacroTarget::macro('renderTwice', function (): string {
+        return self::make()->render() . static::make()->render();
+    });
+    $macroTarget = new ScaffoldingMacroTarget();
+    assert($macroTarget->renderTwice() === 'renderedrendered', 'self::/static:: inside a macro closure must bind to ScaffoldingMacroTarget');
 
     // ── @mixin generic substitution scaffolding ─────────────────────────
     $mixinBuilder = new ScaffoldingMixinBuilder();

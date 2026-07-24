@@ -264,8 +264,8 @@ fn resolve_target_classes_expr_inner_impl(
 
             this_types
         }
-        SubjectExpr::SelfKw | SubjectExpr::StaticKw => current_class
-            .map(|cc| ResolvedType::from_class(cc.clone()))
+        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_class(ctx)
+            .map(ResolvedType::from_class)
             .into_iter()
             .collect(),
 
@@ -308,8 +308,8 @@ fn resolve_target_classes_expr_inner_impl(
             // class names, so find_class_by_name / class_loader won't
             // find them.
             let owner_classes: Vec<Arc<ClassInfo>> = if is_self_or_static(class) {
-                current_class
-                    .map(|cc| Arc::new(cc.clone()))
+                resolve_self_static_class(ctx)
+                    .map(Arc::new)
                     .into_iter()
                     .collect()
             } else if let Some(parent_name) = resolve_class_keyword(class, current_class) {
@@ -1304,6 +1304,20 @@ fn resolve_variable_fallback(
 
 // ── Static owner class resolution ───────────────────────────────────
 
+/// Resolve the class that a bare `self`/`static` keyword refers to at
+/// the cursor position.
+///
+/// Normally this is the lexically enclosing class, but inside a
+/// closure whose enclosing call site declares `@param-closure-this`
+/// (e.g. a Laravel `Macroable` or Carbon `macro()` registration), the
+/// runtime binds the closure with the target class as its scope
+/// (`Closure::bind`), so `self::` and `static::` refer to the bound
+/// target rather than the class that lexically encloses the closure.
+fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+    super::variable::closure_resolution::find_closure_this_override(ctx)
+        .or_else(|| ctx.current_class.cloned())
+}
+
 /// Resolve a static class reference (`self`, `static`, `parent`, or a
 /// class name) to its `ClassInfo`.
 ///
@@ -1314,7 +1328,7 @@ pub(in crate::completion) fn resolve_static_owner_class(
     rctx: &ResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
     if is_self_or_static(class) {
-        rctx.current_class.map(|cc| Arc::new(cc.clone()))
+        resolve_self_static_class(rctx).map(Arc::new)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.class_loader)(&resolved_name)
