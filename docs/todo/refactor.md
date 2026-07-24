@@ -416,33 +416,21 @@ constructor.
 
 ---
 
-## Decompose `extract_from_expression` by expression category
+## Unify `expr_to_subject_text` with `SubjectExpr::to_subject_text`
 
-**What to do.** `symbol_map/extraction.rs` has been split along its
-seams into `extraction/{statements,class_like,expressions,subject_text,laravel,keywords}.rs`.
-One documented seam remains internal: `expressions.rs`'s
-`extract_from_expression` is a single ~955-line `match` that keeps the
-file over the size threshold. Decompose it by expression category
-(one helper per group: calls, member access, assignment, closures/arrow
-functions, anonymous classes, language constructs, …) so the top-level
-`match` becomes a dispatcher and each category body lives in its own
-function. This is pure code motion, no behaviour change.
+**What to do.** `extraction/subject_text.rs`'s `expr_to_subject_text`
+(~202 lines matching ~30 expression variants) duplicates
+`subject_expr.rs::SubjectExpr::to_subject_text`. Unify: build a
+`SubjectExpr` from the AST and render it, instead of a second
+serializer. This is a semantic change to the shared subject-text
+pipeline (`SubjectExpr::parse` consumes these strings downstream), so
+it needs before/after `analyze` comparison on the test projects to
+guard against resolution regressions in array-element, null-safe, and
+call-argument serialization.
 
-A dedup note attached to this seam:
-
-- `expressions.rs::expr_to_subject_text` (~202 lines matching ~30
-  expression variants) duplicates
-  `subject_expr.rs::SubjectExpr::to_subject_text`. Unify: build a
-  `SubjectExpr` from the AST and render it, instead of a second
-  serializer. Note this is a semantic change to the shared subject-text
-  pipeline (`SubjectExpr::parse` consumes these strings downstream), so
-  it needs before/after `analyze` comparison on the test projects to
-  guard against resolution regressions in array-element, null-safe, and
-  call-argument serialization.
-
-**Why it matters.** `expressions.rs` is flagged by the size checklist
-every gate pass; the seam is recorded here so the decomposition is a
-bounded task instead of a re-analysis.
+**Why it matters.** Two serializers for the same subject-text concept
+drift independently; a fix applied to one (e.g. a missing expression
+variant) silently leaves the other broken.
 
 ---
 
