@@ -13,7 +13,7 @@
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
 use crate::text_scan::{
-    find_matching_delimiter_forward, skip_block_comment, skip_line_comment, skip_string_forward,
+    find_matching_forward, skip_block_comment, skip_line_comment, skip_string_forward,
 };
 use tower_lsp::lsp_types::Position;
 
@@ -346,8 +346,7 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
         // Check the native return type: find matching `)` then `: Type`
         let after = &file_content[after_pos..];
         if let Some(paren_start) = after.find('(')
-            && let Some(close_offset) =
-                find_matching_delimiter_forward(after, paren_start, b'(', b')')
+            && let Some(close_offset) = find_matching_forward(after, paren_start, b'(', b')')
         {
             let after_close = after[close_offset + 1..].trim_start();
             if let Some(rest) = after_close.strip_prefix(':') {

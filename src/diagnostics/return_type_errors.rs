@@ -11,7 +11,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 
@@ -23,6 +22,7 @@ use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::PhpType;
+use crate::return_collection::collect_returns;
 use crate::types::ClassInfo;
 
 use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
@@ -149,172 +149,6 @@ fn switch_body_contains_yield(
 
 fn expr_contains_yield(expr: &Expression<'_>) -> bool {
     matches!(expr, Expression::Yield(_))
-}
-
-/// Collect return expressions from a function/method body.
-///
-/// Recurses into control flow blocks (if/else, for, while, try/catch,
-/// etc.) but does NOT recurse into closures, arrow functions, or nested
-/// function declarations — those have their own return types.
-fn collect_returns_from_body<'a>(
-    stmts: &mago_syntax::cst::sequence::Sequence<'a, Statement<'a>>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
-) {
-    for stmt in stmts.iter() {
-        collect_returns_from_stmt(stmt, returns);
-    }
-}
-
-fn collect_returns_from_stmt<'a>(
-    stmt: &Statement<'a>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
-) {
-    match stmt {
-        Statement::Return(ret) => {
-            if let Some(val) = ret.value {
-                let span = val.span();
-                returns.push((
-                    Some(val),
-                    span.start.offset as usize,
-                    span.end.offset as usize,
-                ));
-            } else {
-                // Bare `return;` — use the `return` keyword span.
-                let kw_span = ret.r#return.span;
-                returns.push((
-                    None,
-                    kw_span.start.offset as usize,
-                    kw_span.end.offset as usize,
-                ));
-            }
-        }
-        Statement::Namespace(ns) => {
-            for inner in ns.statements().iter() {
-                collect_returns_from_stmt(inner, returns);
-            }
-        }
-        Statement::If(if_stmt) => {
-            collect_returns_from_if_body(&if_stmt.body, returns);
-        }
-        Statement::While(w) => {
-            for s in w.body.statements() {
-                collect_returns_from_stmt(s, returns);
-            }
-        }
-        Statement::DoWhile(dw) => {
-            collect_returns_from_stmt(dw.statement, returns);
-        }
-        Statement::For(f) => {
-            for s in f.body.statements() {
-                collect_returns_from_stmt(s, returns);
-            }
-        }
-        Statement::Foreach(fe) => {
-            for s in fe.body.statements() {
-                collect_returns_from_stmt(s, returns);
-            }
-        }
-        Statement::Switch(sw) => {
-            collect_returns_from_switch_body(&sw.body, returns);
-        }
-        Statement::Try(t) => {
-            for s in t.block.statements.iter() {
-                collect_returns_from_stmt(s, returns);
-            }
-            for catch in t.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    collect_returns_from_stmt(s, returns);
-                }
-            }
-            if let Some(ref finally) = t.finally_clause {
-                for s in finally.block.statements.iter() {
-                    collect_returns_from_stmt(s, returns);
-                }
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                collect_returns_from_stmt(s, returns);
-            }
-        }
-        Statement::Declare(declare) => {
-            use mago_syntax::cst::declare::DeclareBody;
-            match &declare.body {
-                DeclareBody::Statement(inner) => {
-                    collect_returns_from_stmt(inner, returns);
-                }
-                DeclareBody::ColonDelimited(body) => {
-                    for s in body.statements.iter() {
-                        collect_returns_from_stmt(s, returns);
-                    }
-                }
-            }
-        }
-        // Do NOT recurse into closures, arrow functions, or nested
-        // functions — they have their own return types.
-        Statement::Function(_) => {}
-        Statement::Class(_)
-        | Statement::Interface(_)
-        | Statement::Trait(_)
-        | Statement::Enum(_) => {}
-        _ => {}
-    }
-}
-
-fn collect_returns_from_if_body<'a>(
-    body: &mago_syntax::cst::control_flow::r#if::IfBody<'a>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
-) {
-    use mago_syntax::cst::control_flow::r#if::IfBody;
-    match body {
-        IfBody::Statement(inner) => {
-            collect_returns_from_stmt(inner.statement, returns);
-            for c in inner.else_if_clauses.iter() {
-                collect_returns_from_stmt(c.statement, returns);
-            }
-            if let Some(ref c) = inner.else_clause {
-                collect_returns_from_stmt(c.statement, returns);
-            }
-        }
-        IfBody::ColonDelimited(body) => {
-            for s in body.statements.iter() {
-                collect_returns_from_stmt(s, returns);
-            }
-            for c in body.else_if_clauses.iter() {
-                for s in c.statements.iter() {
-                    collect_returns_from_stmt(s, returns);
-                }
-            }
-            if let Some(ref c) = body.else_clause {
-                for s in c.statements.iter() {
-                    collect_returns_from_stmt(s, returns);
-                }
-            }
-        }
-    }
-}
-
-fn collect_returns_from_switch_body<'a>(
-    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'a>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
-) {
-    use mago_syntax::cst::control_flow::switch::SwitchBody;
-    match body {
-        SwitchBody::BraceDelimited(b) => {
-            for case in b.cases.iter() {
-                for s in case.statements().iter() {
-                    collect_returns_from_stmt(s, returns);
-                }
-            }
-        }
-        SwitchBody::ColonDelimited(b) => {
-            for case in b.cases.iter() {
-                for s in case.statements().iter() {
-                    collect_returns_from_stmt(s, returns);
-                }
-            }
-        }
-    }
 }
 
 // ── Main diagnostic collection ──────────────────────────────────────────────
@@ -633,7 +467,7 @@ fn process_top_level_statement(
 
             // Collect return statements (both bare and with values).
             let mut returns: Vec<(Option<&Expression<'_>>, usize, usize)> = Vec::new();
-            collect_returns_from_body(&func.body.statements, &mut returns);
+            collect_returns(func.body.statements.iter(), &mut returns);
 
             if returns.is_empty() {
                 return;
@@ -754,7 +588,7 @@ fn process_class_member(
 
     // Collect return statements (both bare and with values).
     let mut returns: Vec<(Option<&Expression<'_>>, usize, usize)> = Vec::new();
-    collect_returns_from_body(body, &mut returns);
+    collect_returns(body.iter(), &mut returns);
 
     if returns.is_empty() {
         return;

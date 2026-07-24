@@ -47,54 +47,6 @@ pub(crate) fn skip_block_comment(bytes: &[u8], pos: usize) -> usize {
     i
 }
 
-/// Find the matching closing delimiter for an opening delimiter at
-/// `open_pos`, respecting string literal nesting (but not comments).
-///
-/// `open` and `close` are the delimiter bytes (e.g. `b'('` / `b')'` or
-/// `b'{'` / `b'}'`).
-pub(crate) fn find_matching_delimiter_forward(
-    text: &str,
-    open_pos: usize,
-    open: u8,
-    close: u8,
-) -> Option<usize> {
-    let bytes = text.as_bytes();
-    if open_pos >= bytes.len() || bytes[open_pos] != open {
-        return None;
-    }
-
-    let mut depth = 1i32;
-    let mut pos = open_pos + 1;
-
-    while pos < bytes.len() && depth > 0 {
-        match bytes[pos] {
-            b if b == open => depth += 1,
-            b if b == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(pos);
-                }
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[pos];
-                pos += 1;
-                while pos < bytes.len() {
-                    if bytes[pos] == b'\\' {
-                        pos += 1;
-                    } else if bytes[pos] == quote {
-                        break;
-                    }
-                    pos += 1;
-                }
-            }
-            _ => {}
-        }
-        pos += 1;
-    }
-
-    None
-}
-
 /// Skip backward past a string literal ending at position `end` (which
 /// points to the closing quote character `q`). Returns the position of
 /// the opening quote, or 0 if not found.
@@ -188,9 +140,6 @@ pub(crate) fn find_semicolon_balanced(s: &str) -> Option<usize> {
 /// literals (`'…'` and `"…"` with backslash escaping) and both styles
 /// of PHP comment (`// …` and `/* … */`), so delimiters inside strings
 /// or comments are not counted.
-///
-/// This differs from [`find_matching_delimiter_forward`] by also
-/// skipping over comments (the latter only skips string literals).
 pub(crate) fn find_matching_forward(
     text: &str,
     open_pos: usize,

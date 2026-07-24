@@ -244,6 +244,7 @@ mod reference_index;
 mod references;
 mod rename;
 mod resolution;
+pub(crate) mod return_collection;
 pub(crate) mod scope_collector;
 mod selection_range;
 pub mod self_update;
