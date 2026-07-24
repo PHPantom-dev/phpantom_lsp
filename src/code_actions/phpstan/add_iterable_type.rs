@@ -32,7 +32,7 @@ use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
 use crate::php_type::PhpType;
-use crate::util::ranges_overlap;
+use crate::text_position::ranges_overlap;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 

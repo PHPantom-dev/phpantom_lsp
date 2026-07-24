@@ -29,7 +29,7 @@ use crate::atom::bytes_to_str;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{AccessKind, ScopeMap};
-use crate::util::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
 

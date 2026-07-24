@@ -296,7 +296,7 @@ fn find_try_block_body(_content: &str, before_catch: &str) -> Option<String> {
     //
     // Walk backward to find the matching `{`.
     let block_open =
-        crate::util::find_matching_backward(before_catch, close_brace_offset, b'{', b'}')?;
+        crate::text_scan::find_matching_backward(before_catch, close_brace_offset, b'{', b'}')?;
 
     // Now check what keyword precedes this block.
     let before_block = before_catch[..block_open].trim_end();
@@ -306,7 +306,7 @@ fn find_try_block_body(_content: &str, before_catch: &str) -> Option<String> {
         // Skip the catch clause parentheses
         let close_paren = before_block.len() - 1;
         let open_paren =
-            crate::util::find_matching_backward(before_block, close_paren, b'(', b')')?;
+            crate::text_scan::find_matching_backward(before_block, close_paren, b'(', b')')?;
         let before_paren = before_block[..open_paren].trim_end();
 
         // Should be `catch`

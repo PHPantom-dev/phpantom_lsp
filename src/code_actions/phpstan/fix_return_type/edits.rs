@@ -9,7 +9,7 @@ use crate::code_actions::phpstan::add_iterable_type::{
 };
 use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
-use crate::util::find_semicolon_balanced;
+use crate::text_scan::find_semicolon_balanced;
 
 use super::inference::InferredReturnType;
 

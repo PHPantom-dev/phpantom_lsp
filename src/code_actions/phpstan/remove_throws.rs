@@ -23,7 +23,8 @@ use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
 use crate::php_type::PhpType;
-use crate::util::{offset_to_position, ranges_overlap, short_name};
+use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::util::short_name;
 
 /// PHPStan identifiers we match on.
 const UNUSED_TYPE_ID: &str = "throws.unusedType";

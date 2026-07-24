@@ -16,15 +16,17 @@ use tower_lsp::lsp_types::{
     InsertTextFormat, Position, Range, TextEdit,
 };
 
+use crate::class_lookup::find_class_at_offset;
 use crate::code_actions::implement_methods::{
     detect_class_indent, format_params, format_return_type,
 };
 use crate::php_type::PhpType;
+use crate::text_position::position_to_offset;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, PhpVersion, PropertyInfo, PropertySource,
     Visibility,
 };
-use crate::util::{find_class_at_offset, position_to_offset, short_name};
+use crate::util::short_name;
 
 const METHOD_OVERRIDE_ATTR_MIN: PhpVersion = PhpVersion::new(8, 3);
 const PROPERTY_OVERRIDE_ATTR_MIN: PhpVersion = PhpVersion::new(8, 5);

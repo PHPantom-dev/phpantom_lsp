@@ -7,7 +7,7 @@
 //!
 //! All functions operate on a `&[char]` slice representing a single
 //! (already-collapsed) line and work backwards from a given position.
-//! Multi-line chain collapsing lives in [`crate::util::collapse_continuation_lines`].
+//! Multi-line chain collapsing lives in [`crate::text_scan::collapse_continuation_lines`].
 //!
 //! The main entry point is [`detect_access_operator`], which locates
 //! `->`, `?->`, or `::` near the cursor and extracts the subject to its

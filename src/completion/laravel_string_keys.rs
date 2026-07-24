@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::LaravelStringKind;
-use crate::util::position_to_offset;
+use crate::text_position::position_to_offset;
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -587,7 +587,7 @@ impl Backend {
         // (right after the opening quote) to the current cursor position.
         // This replaces the entire typed prefix with the selected name,
         // so dots in the name don't break the editor's word-based filter.
-        let start_pos = crate::util::offset_to_position(content, ctx.content_start_offset);
+        let start_pos = crate::text_position::offset_to_position(content, ctx.content_start_offset);
         let edit_range = Range {
             start: start_pos,
             end: position,

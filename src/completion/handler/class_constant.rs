@@ -8,11 +8,12 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::class_completion::{
     ClassCompletionParams, ClassNameContext, detect_class_name_context, is_class_declaration_name,
 };
+use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
-use crate::util::{find_class_at_offset, position_to_offset};
 
 /// Filter out completion items for classes defined in the current file.
 ///

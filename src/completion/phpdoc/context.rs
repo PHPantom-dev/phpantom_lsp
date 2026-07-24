@@ -154,7 +154,7 @@ pub fn detect_docblock_typing_position(
     }
 
     let line = lines[line_idx];
-    let col = crate::util::utf16_col_to_byte_offset(line, position.character);
+    let col = crate::text_position::utf16_col_to_byte_offset(line, position.character);
     let before_cursor = &line[..col];
 
     // Find the `@tag` on this line.

@@ -20,12 +20,13 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
+use crate::code_actions::find_identical_occurrences;
 use crate::code_actions::naming::string_to_screaming_snake;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::PhpVersion;
 use crate::util::infer_type_from_literal;
-use crate::util::{find_identical_occurrences, offset_to_position, position_to_byte_offset};
 
 // ─── Literal detection ──────────────────────────────────────────────────────
 

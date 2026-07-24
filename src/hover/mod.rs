@@ -27,11 +27,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::ResolutionCtx;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
 use crate::types::*;
-use crate::util::find_class_at_offset;
 
 use formatting::*;
 use member::HoverMemberHit;
@@ -86,7 +86,7 @@ impl Backend {
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
         let _body_infer_guard = self.activate_body_return_inferrer();
         let _auth_user_guard = self.activate_auth_user_resolver();
-        let offset = crate::util::position_to_offset(content, position);
+        let offset = crate::text_position::position_to_offset(content, position);
 
         // Try the exact cursor offset first.
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)

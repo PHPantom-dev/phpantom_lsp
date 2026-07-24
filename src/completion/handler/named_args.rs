@@ -13,8 +13,8 @@ use crate::Backend;
 use crate::completion::named_args::{
     NamedArgContext, cursor_inside_nested_bracket, parse_existing_args,
 };
+use crate::text_position::position_to_offset;
 use crate::types::FileContext;
-use crate::util::position_to_offset;
 
 impl Backend {
     /// Collect `name:` argument completion items inside function/method

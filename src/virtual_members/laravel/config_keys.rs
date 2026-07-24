@@ -7,8 +7,9 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::references::push_unique_location;
 use crate::symbol_map::{SymbolKind, SymbolMap};
-use crate::util::{offset_to_position, push_unique_location};
+use crate::text_position::offset_to_position;
 
 #[derive(Debug)]
 pub(crate) struct ConfigKeyMatch {
@@ -188,7 +189,7 @@ pub(crate) fn find_config_references(
         // Fallback: cursor is on a declaration key inside config/*.php.
         // This re-parses the current (single) config file — acceptable.
         let prefix = laravel_config_prefix_from_uri(uri)?;
-        let cursor_offset = crate::util::position_to_offset(content, position) as usize;
+        let cursor_offset = crate::text_position::position_to_offset(content, position) as usize;
         collect_laravel_config_declarations(content, &prefix)
             .into_iter()
             .find(|d| cursor_offset >= d.start && cursor_offset <= d.end)
@@ -229,7 +230,7 @@ pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Op
             let stem = file_parts.join(".");
             let declarations = collect_laravel_config_declarations(&target_content, &stem);
             if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::util::offset_to_position(&target_content, decl.start);
+                let pos = crate::text_position::offset_to_position(&target_content, decl.start);
                 return Some(crate::definition::point_location(target_uri, pos));
             }
 
@@ -247,7 +248,7 @@ pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Op
             let target_content = std::fs::read_to_string(&res.path).ok()?;
             let declarations = collect_laravel_config_declarations(&target_content, &res.namespace);
             if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::util::offset_to_position(&target_content, decl.start);
+                let pos = crate::text_position::offset_to_position(&target_content, decl.start);
                 return Some(crate::definition::point_location(target_uri, pos));
             }
             return Some(crate::definition::point_location(
@@ -340,14 +341,14 @@ pub(crate) fn resolve_config_key_definition_fallback(
     position: Position,
 ) -> Option<Location> {
     let prefix = laravel_config_prefix_from_uri(uri)?;
-    let cursor_offset = crate::util::position_to_offset(content, position) as usize;
+    let cursor_offset = crate::text_position::position_to_offset(content, position) as usize;
     let decls = collect_laravel_config_declarations(content, &prefix);
     let match_ = decls
         .into_iter()
         .find(|d| cursor_offset >= d.start && cursor_offset <= d.end)?;
 
     let target_uri = Url::parse(uri).ok()?;
-    let pos = crate::util::offset_to_position(content, match_.start);
+    let pos = crate::text_position::offset_to_position(content, match_.start);
     Some(crate::definition::point_location(target_uri, pos))
 }
 

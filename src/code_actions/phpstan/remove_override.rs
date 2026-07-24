@@ -23,8 +23,10 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::contains_php_attribute;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{contains_php_attribute, offset_to_position, ranges_overlap, strip_fqn_prefix};
+use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::util::strip_fqn_prefix;
 
 /// PHPStan identifiers we match on.
 const METHOD_OVERRIDE_ID: &str = "method.override";

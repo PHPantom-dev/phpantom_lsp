@@ -35,7 +35,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{SymbolKind, SymbolMap, VarDefKind, VarDefSite};
-use crate::util::byte_range_to_lsp_range;
+use crate::text_position::byte_range_to_lsp_range;
 
 impl Backend {
     /// Compute linked editing ranges for the symbol under the cursor.

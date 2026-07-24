@@ -722,7 +722,7 @@ pub(crate) fn seed_closure_params(
                     let inferred_is_subtype = !inferred_resolved.is_empty()
                         && inferred_resolved.iter().all(|inferred_cls| {
                             resolved.iter().any(|explicit_cls| {
-                                crate::util::is_subtype_of_names(
+                                crate::class_lookup::is_subtype_of_names(
                                     &inferred_cls.fqn(),
                                     &explicit_cls.fqn(),
                                     ctx.class_loader,
@@ -731,7 +731,7 @@ pub(crate) fn seed_closure_params(
                         });
                     let inferred_covers_declared = resolved.iter().all(|explicit_cls| {
                         inferred_resolved.iter().any(|inferred_cls| {
-                            crate::util::is_subtype_of_names(
+                            crate::class_lookup::is_subtype_of_names(
                                 &inferred_cls.fqn(),
                                 &explicit_cls.fqn(),
                                 ctx.class_loader,

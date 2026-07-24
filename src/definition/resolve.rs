@@ -21,10 +21,12 @@ use tower_lsp::lsp_types::*;
 use super::member::{MemberAccessHint, MemberDefinitionCtx};
 use super::point_location;
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo};
-use crate::util::{find_class_at_offset, position_to_offset, short_name};
+use crate::util::short_name;
 use crate::virtual_members::laravel;
 
 impl Backend {
@@ -86,7 +88,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<crate::symbol_map::SymbolSpan> {
-        let offset = crate::util::position_to_offset(content, position);
+        let offset = crate::text_position::position_to_offset(content, position);
         self.lookup_symbol_map(uri, offset).or_else(|| {
             if offset > 0 {
                 self.lookup_symbol_map(uri, offset - 1)
@@ -189,8 +191,10 @@ impl Backend {
                         // site.  Return the symbol's own location so
                         // editors can fall back to Find References.
                         let parsed_uri = Url::parse(uri).ok()?;
-                        let start =
-                            crate::util::offset_to_position(content, cursor_offset as usize);
+                        let start = crate::text_position::offset_to_position(
+                            content,
+                            cursor_offset as usize,
+                        );
                         let end_offset = match kind {
                             SymbolKind::Variable { .. } => cursor_offset as usize + 1 + name.len(),
                             SymbolKind::CompactVariable { .. } => {
@@ -198,7 +202,7 @@ impl Backend {
                             }
                             _ => unreachable!(),
                         };
-                        let end = crate::util::offset_to_position(content, end_offset);
+                        let end = crate::text_position::offset_to_position(content, end_offset);
                         return Some(vec![Location {
                             uri: parsed_uri,
                             range: Range { start, end },
@@ -211,8 +215,9 @@ impl Backend {
                     let token_end = var_def.offset + 1 + var_def.name.len() as u32;
                     let target_uri = Url::parse(uri).ok()?;
                     let start_pos =
-                        crate::util::offset_to_position(content, var_def.offset as usize);
-                    let end_pos = crate::util::offset_to_position(content, token_end as usize);
+                        crate::text_position::offset_to_position(content, var_def.offset as usize);
+                    let end_pos =
+                        crate::text_position::offset_to_position(content, token_end as usize);
                     return Some(vec![Location {
                         uri: target_uri,
                         range: Range {
@@ -286,9 +291,12 @@ impl Backend {
                 // location so clients that rely on the self-location
                 // signal (VS Code) still trigger their reference fallback.
                 let parsed_uri = Url::parse(uri).ok()?;
-                let start = crate::util::offset_to_position(content, cursor_offset as usize);
-                let end =
-                    crate::util::offset_to_position(content, cursor_offset as usize + name.len());
+                let start =
+                    crate::text_position::offset_to_position(content, cursor_offset as usize);
+                let end = crate::text_position::offset_to_position(
+                    content,
+                    cursor_offset as usize + name.len(),
+                );
                 Some(vec![Location {
                     uri: parsed_uri,
                     range: Range { start, end },
@@ -333,7 +341,7 @@ impl Backend {
 
             SymbolKind::LaravelMacroString { .. } => Some(vec![point_location(
                 Url::parse(uri).ok()?,
-                crate::util::offset_to_position(content, cursor_offset as usize),
+                crate::text_position::offset_to_position(content, cursor_offset as usize),
             )]),
 
             SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => None,
@@ -416,8 +424,9 @@ impl Backend {
         // enclosing class or method docblock.
         if let Some(tpl_def) = self.lookup_template_def(uri, name, cursor_offset) {
             let target_uri = Url::parse(uri).ok()?;
-            let start_pos = crate::util::offset_to_position(content, tpl_def.name_offset as usize);
-            let end_pos = crate::util::offset_to_position(
+            let start_pos =
+                crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
+            let end_pos = crate::text_position::offset_to_position(
                 content,
                 (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
             );
@@ -553,7 +562,8 @@ impl Backend {
         if name_offset == 0 {
             return None;
         }
-        let position = crate::util::offset_to_position(&file_content, name_offset as usize);
+        let position =
+            crate::text_position::offset_to_position(&file_content, name_offset as usize);
         let parsed_uri = Url::parse(&file_uri).ok()?;
 
         Some(point_location(parsed_uri, position))
@@ -628,7 +638,7 @@ impl Backend {
             return None;
         }
         let position =
-            crate::util::offset_to_position(&file_content, func_info.name_offset as usize);
+            crate::text_position::offset_to_position(&file_content, func_info.name_offset as usize);
         let parsed_uri = Url::parse(&file_uri).ok()?;
 
         Some(point_location(parsed_uri, position))
@@ -719,7 +729,7 @@ impl Backend {
             return None;
         }
         let position =
-            crate::util::offset_to_position(&content, class_info.keyword_offset as usize);
+            crate::text_position::offset_to_position(&content, class_info.keyword_offset as usize);
 
         Some(point_location(parsed_uri, position))
     }
@@ -753,7 +763,8 @@ impl Backend {
         if class_info.keyword_offset == 0 {
             return None;
         }
-        let position = crate::util::offset_to_position(content, class_info.keyword_offset as usize);
+        let position =
+            crate::text_position::offset_to_position(content, class_info.keyword_offset as usize);
 
         // Build a file URI from the current URI string.
         let parsed_uri = Url::parse(uri).ok()?;
@@ -821,8 +832,10 @@ impl Backend {
             if current_class.keyword_offset == 0 {
                 return None;
             }
-            let target_position =
-                crate::util::offset_to_position(content, current_class.keyword_offset as usize);
+            let target_position = crate::text_position::offset_to_position(
+                content,
+                current_class.keyword_offset as usize,
+            );
             let parsed_uri = Url::parse(uri).ok()?;
             return Some(point_location(parsed_uri, target_position));
         }
@@ -834,9 +847,9 @@ impl Backend {
         // Use keyword_offset when available (the parent class is in the
         // same file's uri_classes_index entry).
         let parent_in_file = classes.iter().find(|c| c.name == *parent_name);
-        let parent_pos = parent_in_file
-            .filter(|pc| pc.keyword_offset > 0)
-            .map(|pc| crate::util::offset_to_position(content, pc.keyword_offset as usize));
+        let parent_pos = parent_in_file.filter(|pc| pc.keyword_offset > 0).map(|pc| {
+            crate::text_position::offset_to_position(content, pc.keyword_offset as usize)
+        });
         if let Some(pos) = parent_pos {
             let parsed_uri = Url::parse(uri).ok()?;
             return Some(point_location(parsed_uri, pos));
@@ -855,8 +868,10 @@ impl Backend {
                 && cc.keyword_offset > 0
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
             {
-                let pos =
-                    crate::util::offset_to_position(&class_content, cc.keyword_offset as usize);
+                let pos = crate::text_position::offset_to_position(
+                    &class_content,
+                    cc.keyword_offset as usize,
+                );
                 return Some(point_location(parsed_uri, pos));
             }
         }

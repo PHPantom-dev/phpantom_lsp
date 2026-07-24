@@ -28,7 +28,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{offset_to_position, ranges_overlap};
+use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
 const NEW_STATIC_ID: &str = "new.static";

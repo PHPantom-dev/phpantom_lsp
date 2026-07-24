@@ -6,13 +6,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::find_class_by_name;
+use crate::class_lookup::{is_self_or_static, resolve_class_keyword};
 use crate::completion::variable::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 use crate::php_type::PhpType;
 use crate::subject_expr::SubjectExpr;
 use crate::types::ClassLikeKind;
 use crate::types::*;
-use crate::util::find_class_by_name;
-use crate::util::{is_self_or_static, resolve_class_keyword};
 
 use crate::completion::conditional_resolution::{
     TemplateContext, VarClassStringResolver, resolve_conditional_with_text_args,
@@ -110,11 +110,11 @@ fn resolve_auth_user_at_call(
     // other class with a `user()` method must resolve normally.
     let is_auth_receiver = owners.iter().any(|rt| {
         rt.class_info.as_ref().is_some_and(|ci| {
-            crate::util::is_subtype_of(
+            crate::class_lookup::is_subtype_of(
                 ci,
                 crate::virtual_members::laravel::GUARD_FQN,
                 ctx.class_loader,
-            ) || crate::util::is_subtype_of(
+            ) || crate::class_lookup::is_subtype_of(
                 ci,
                 crate::virtual_members::laravel::REQUEST_FQN,
                 ctx.class_loader,
@@ -185,7 +185,7 @@ fn auth_guard_name(base: &SubjectExpr, user_args: &str) -> Option<String> {
 /// not a single-quoted or double-quoted string literal.
 fn first_string_literal_arg(args_text: &str) -> Option<String> {
     let first = split_text_args(args_text).into_iter().next()?;
-    crate::util::unquote_php_string(first.trim()).map(str::to_string)
+    crate::text_scan::unquote_php_string(first.trim()).map(str::to_string)
 }
 
 fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option<PhpType> {
@@ -1431,7 +1431,7 @@ fn is_type_subclass_of(
         return true;
     }
 
-    crate::util::is_subtype_of_named(candidate_type, ancestor_name, &combined_loader)
+    crate::class_lookup::is_subtype_of_named(candidate_type, ancestor_name, &combined_loader)
 }
 
 /// Resolve an arbitrary expression to a [`PhpType`].

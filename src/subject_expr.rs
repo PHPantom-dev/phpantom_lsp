@@ -138,7 +138,7 @@ pub enum BracketSegment {
 /// literals become [`BracketSegment::IntKey`]; everything else (variables,
 /// expressions, empty `[]`) becomes [`BracketSegment::ElementAccess`].
 fn classify_bracket_inner(inner: &str) -> BracketSegment {
-    if let Some(key) = crate::util::unquote_php_string(inner) {
+    if let Some(key) = crate::text_scan::unquote_php_string(inner) {
         BracketSegment::StringKey(key.to_string())
     } else if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) {
         BracketSegment::IntKey(inner.to_string())

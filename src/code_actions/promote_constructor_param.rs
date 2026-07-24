@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::*;
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         let candidate = crate::parser::with_parsed_program(
             content,

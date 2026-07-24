@@ -40,13 +40,13 @@ pub(crate) use property_narrowing::apply_property_narrowing;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::{find_class_by_name, is_self_or_static, resolve_class_keyword};
 use crate::docblock;
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::PhpType;
 use crate::subject_expr::BracketSegment;
 use crate::subject_expr::SubjectExpr;
 use crate::types::*;
-use crate::util::{find_class_by_name, is_self_or_static, resolve_class_keyword};
 use crate::virtual_members::resolve_class_fully_maybe_cached;
 
 use context::{CHAIN_CACHE, resolved_to_arcs};

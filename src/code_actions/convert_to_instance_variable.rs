@@ -30,7 +30,7 @@ use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cur
 use crate::code_actions::{CodeActionData, detect_indent_from_members, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::collect_function_scope;
-use crate::util::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
 

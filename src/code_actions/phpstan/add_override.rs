@@ -23,9 +23,10 @@ use tower_lsp::lsp_types::*;
 
 use super::{InsertionPoint, find_method_insertion_point};
 use crate::Backend;
+use crate::code_actions::phpstan::contains_php_attribute;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
-use crate::util::{contains_php_attribute, offset_to_position, ranges_overlap};
+use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
 const MISSING_OVERRIDE_ID: &str = "method.missingOverride";

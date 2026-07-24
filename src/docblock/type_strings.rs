@@ -275,6 +275,28 @@ fn consume_union_intersection_suffix(s: &str, pos: usize) -> usize {
     end
 }
 
+/// Check whether a type string has unclosed delimiters (`<>`, `()`, `{}`).
+///
+/// Returns `true` when at least one delimiter pair is left open,
+/// indicating that the string is a fragment of a longer type.
+pub(crate) fn has_unclosed_delimiters(s: &str) -> bool {
+    let mut angle = 0i32;
+    let mut paren = 0i32;
+    let mut brace = 0i32;
+    for b in s.bytes() {
+        match b {
+            b'<' => angle += 1,
+            b'>' => angle -= 1,
+            b'(' => paren += 1,
+            b')' => paren -= 1,
+            b'{' => brace += 1,
+            b'}' => brace -= 1,
+            _ => {}
+        }
+    }
+    angle > 0 || paren > 0 || brace > 0
+}
+
 #[cfg(test)]
 #[path = "type_strings_tests.rs"]
 mod tests;

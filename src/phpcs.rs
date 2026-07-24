@@ -172,8 +172,13 @@ pub(crate) fn run_phpcs(
     // The buffer content is fed to PHPCS's stdin by the shared helper,
     // which drains stdout/stderr concurrently so a large JSON report
     // cannot deadlock against a full pipe buffer.
-    let result =
-        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPCS", Some(content));
+    let result = crate::process::run_command_with_timeout(
+        &mut cmd,
+        timeout,
+        cancelled,
+        "PHPCS",
+        Some(content),
+    );
 
     match result {
         Ok(output) => {
@@ -250,7 +255,7 @@ pub(crate) fn run_phpcs_workspace(
         cmd.arg(format!("--standard={}", standard));
     }
 
-    let output = crate::util::run_command_with_timeout(
+    let output = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,

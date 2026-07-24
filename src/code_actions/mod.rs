@@ -535,3 +535,45 @@ pub(crate) fn make_code_action_data(
     })
     .unwrap_or_default()
 }
+
+/// Find all occurrences of `needle` in `content` within the byte range
+/// `[scope_start, scope_end)` that are textually identical to the selected
+/// expression, excluding the original selection `[sel_start, sel_end)`.
+///
+/// Returns `(start, end)` byte offset pairs. Word boundaries are checked
+/// so that substrings of longer identifiers are not matched.
+pub(crate) fn find_identical_occurrences(
+    content: &str,
+    needle: &str,
+    sel_start: usize,
+    sel_end: usize,
+    scope_start: usize,
+    scope_end: usize,
+) -> Vec<(usize, usize)> {
+    if needle.is_empty() || scope_start >= scope_end || scope_end > content.len() {
+        return Vec::new();
+    }
+    let haystack = &content[scope_start..scope_end];
+    let mut results = Vec::new();
+    let mut search_from = 0;
+    while let Some(pos) = haystack[search_from..].find(needle) {
+        let abs_start = scope_start + search_from + pos;
+        let abs_end = abs_start + needle.len();
+        // Skip the original selection.
+        if abs_start != sel_start || abs_end != sel_end {
+            // Check word boundaries to avoid matching substrings.
+            let before_ok = abs_start == 0
+                || !content.as_bytes()[abs_start - 1].is_ascii_alphanumeric()
+                    && content.as_bytes()[abs_start - 1] != b'_'
+                    && content.as_bytes()[abs_start - 1] != b'$';
+            let after_ok = abs_end >= content.len()
+                || !content.as_bytes()[abs_end].is_ascii_alphanumeric()
+                    && content.as_bytes()[abs_end] != b'_';
+            if before_ok && after_ok {
+                results.push((abs_start, abs_end));
+            }
+        }
+        search_from = search_from + pos + 1;
+    }
+    results
+}

@@ -2,7 +2,7 @@
 //!
 //! Anonymous classes are given synthetic names of the form
 //! `__anonymous@<offset>` so that
-//! [`find_class_at_offset`](crate::util::find_class_at_offset) can resolve
+//! [`find_class_at_offset`](crate::class_lookup::find_class_at_offset) can resolve
 //! `$this` inside their bodies. This module walks statement and expression
 //! trees looking for `Expression::AnonymousClass` nodes, recursing into
 //! method bodies (including nested anonymous classes) along the way.

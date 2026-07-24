@@ -33,10 +33,8 @@ use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::parser::with_parsed_program;
-use crate::util::{
-    byte_range_to_lsp_range, offset_to_position, ranges_overlap, strip_fqn_prefix,
-    strip_trailing_modifiers,
-};
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position, ranges_overlap};
+use crate::util::{strip_fqn_prefix, strip_trailing_modifiers};
 
 /// The PHPStan identifier we match on.
 const CHECKED_EXCEPTION_ID: &str = "missingType.checkedException";

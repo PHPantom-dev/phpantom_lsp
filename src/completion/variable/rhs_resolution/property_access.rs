@@ -291,7 +291,7 @@ pub(super) fn resolve_rhs_property_access(
                                 && let Some(cls) = (class_loader)(narrowed_base)
                                 && let Some(declared_base) = declared.base_name()
                             {
-                                return crate::util::is_subtype_of(
+                                return crate::class_lookup::is_subtype_of(
                                     &cls,
                                     declared_base,
                                     class_loader,
@@ -309,7 +309,7 @@ pub(super) fn resolve_rhs_property_access(
                                         && let Some(cls) = (class_loader)(base)
                                         && let Some(declared_base) = declared.base_name()
                                     {
-                                        return crate::util::is_subtype_of(
+                                        return crate::class_lookup::is_subtype_of(
                                             &cls,
                                             declared_base,
                                             class_loader,

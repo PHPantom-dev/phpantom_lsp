@@ -160,7 +160,7 @@ impl LiteralValue {
         let LiteralValue::String(raw) = self else {
             return None;
         };
-        crate::util::unquote_php_string(raw).or(Some(raw.as_str()))
+        crate::text_scan::unquote_php_string(raw).or(Some(raw.as_str()))
     }
 
     pub fn parse_i64(&self) -> Option<i64> {

@@ -14,9 +14,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
-use crate::util::{
-    build_fqn, line_start_byte_offset, offset_to_position, ranges_overlap, strip_fqn_prefix,
-};
+use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
+use crate::util::{build_fqn, strip_fqn_prefix};
 
 impl Backend {
     /// Resolve the fully-qualified class name for a class rename.
@@ -250,8 +249,9 @@ impl Backend {
 
             for loc in file_locations {
                 let start_off =
-                    crate::util::position_to_byte_offset(&file_content, loc.range.start);
-                let end_off = crate::util::position_to_byte_offset(&file_content, loc.range.end);
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.start);
+                let end_off =
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.end);
                 let source_text = file_content
                     .get(start_off..end_off)
                     .unwrap_or("")
@@ -463,8 +463,9 @@ impl Backend {
 
             for loc in file_locations {
                 let start_off =
-                    crate::util::position_to_byte_offset(&file_content, loc.range.start);
-                let end_off = crate::util::position_to_byte_offset(&file_content, loc.range.end);
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.start);
+                let end_off =
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.end);
                 let source_text = file_content
                     .get(start_off..end_off)
                     .unwrap_or("")

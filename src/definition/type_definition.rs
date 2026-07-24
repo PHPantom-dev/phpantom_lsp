@@ -16,11 +16,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::{Loaders, ResolutionCtx};
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::*;
-use crate::util::find_class_at_offset;
 
 impl Backend {
     /// Handle a "go to type definition" request.

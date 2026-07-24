@@ -179,9 +179,9 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
         let already_subtypes: Vec<ClassInfo> = results
             .iter()
             .filter(|r| {
-                narrowed
-                    .iter()
-                    .any(|n| crate::util::is_subtype_of_names(&r.fqn(), &n.fqn(), ctx.class_loader))
+                narrowed.iter().any(|n| {
+                    crate::class_lookup::is_subtype_of_names(&r.fqn(), &n.fqn(), ctx.class_loader)
+                })
             })
             .cloned()
             .collect();
@@ -200,9 +200,9 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
     // results = [Animal] narrowed to Dog (Dog extends Animal) → [Dog].
     if !exact {
         let narrowed_is_more_specific = narrowed.iter().any(|n| {
-            results
-                .iter()
-                .any(|r| crate::util::is_subtype_of_names(&n.fqn(), &r.fqn(), ctx.class_loader))
+            results.iter().any(|r| {
+                crate::class_lookup::is_subtype_of_names(&n.fqn(), &r.fqn(), ctx.class_loader)
+            })
         });
 
         if !narrowed_is_more_specific && results.len() == 1 {
@@ -438,7 +438,7 @@ pub(in crate::completion) fn string_literal_value(expr: &Expression<'_>) -> Opti
                     .map(|v| bytes_to_str(v).to_string())
                     .unwrap_or_else(|| {
                         let raw_str = bytes_to_str(s.raw);
-                        crate::util::unquote_php_string(raw_str)
+                        crate::text_scan::unquote_php_string(raw_str)
                             .unwrap_or(raw_str)
                             .to_string()
                     }),

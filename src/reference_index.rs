@@ -13,8 +13,9 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
-use crate::util::{build_fqn, find_class_at_offset, short_name, strip_fqn_prefix};
+use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ReferenceIndexKey {

@@ -236,7 +236,7 @@ impl Backend {
         // Precompute line starts once: converting each span's byte offset to a
         // line/column independently would rescan the file from the start every
         // time, which is O(n²) on large files (the demo file alone takes ~17s).
-        let line_index = crate::util::LineIndex::new(content);
+        let line_index = crate::text_position::LineIndex::new(content);
 
         let is_blade = self.is_blade_file(uri);
 
@@ -1064,7 +1064,7 @@ fn utf16_col_at(chars: &[char], pos: usize) -> u32 {
 /// Returns `None` if the offset is beyond the content length.
 fn offset_to_absolute(
     content: &str,
-    line_index: &crate::util::LineIndex,
+    line_index: &crate::text_position::LineIndex,
     start_offset: u32,
     byte_length: u32,
     token_type: u32,

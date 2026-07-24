@@ -15,7 +15,8 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolSpan};
-use crate::util::{offset_to_position, position_to_byte_offset, short_name};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::util::short_name;
 
 /// Build a replacement `TextEdit` for a single FQN span, including the
 /// leading `\` if present in source.
@@ -254,7 +255,7 @@ mod tests {
         let uri = "file:///test.php";
         backend.update_ast(uri, content);
 
-        let pos = crate::util::offset_to_position(content, cursor_offset);
+        let pos = crate::text_position::offset_to_position(content, cursor_offset);
         let params = CodeActionParams {
             text_document: TextDocumentIdentifier {
                 uri: uri.parse().unwrap(),

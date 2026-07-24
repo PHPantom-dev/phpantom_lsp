@@ -11,11 +11,13 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
+use crate::code_actions::phpstan::find_brace_match_line;
 use crate::completion::resolver::Loaders;
 use crate::completion::variable::resolution::resolve_variable_types;
 use crate::php_type::PhpType;
+use crate::text_position::line_start_byte_offset;
+use crate::text_scan::find_semicolon_balanced;
 use crate::types::{ClassInfo, FunctionLoader, ResolvedType};
-use crate::util::{find_brace_match_line, find_semicolon_balanced, line_start_byte_offset};
 
 use super::edits::find_open_brace_from_declaration;
 

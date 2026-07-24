@@ -40,12 +40,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::SymbolMap;
-use crate::util::{collect_php_files_gitignore, strip_fqn_prefix};
+use crate::util::strip_fqn_prefix;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReferenceSearchMode {
@@ -782,6 +782,85 @@ fn largest_first_work_order(weights: &[u64]) -> Vec<usize> {
 
 fn index_progress_weight_for_path(path: &Path) -> u64 {
     path.metadata().map(|meta| meta.len()).unwrap_or(1).max(1)
+}
+
+/// Recursively collect all `.php` files under a workspace root,
+/// respecting `.gitignore` rules (including nested and global
+/// gitignore files).
+///
+/// Used by Find References which walks the entire workspace root.
+/// Unlike `classmap_scanner`'s PSR-4 walkers, this uses the `ignore`
+/// crate's [`ignore::WalkBuilder`] so that generated/cached directories
+/// listed in `.gitignore` (e.g. `storage/framework/views/`,
+/// `var/cache/`, `node_modules/`) are automatically skipped.
+///
+/// All known vendor directories are always skipped regardless of
+/// `.gitignore` content, since some projects commit their vendor
+/// directory.  `vendor_dir_paths` contains absolute paths of all
+/// known vendor directories (one per subproject in monorepo mode).
+///
+/// Hidden files and directories are skipped by default (handled by
+/// the `ignore` crate).
+pub(crate) fn collect_php_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+) -> Vec<PathBuf> {
+    use ignore::WalkBuilder;
+
+    let mut result = Vec::new();
+    let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
+
+    let walker = WalkBuilder::new(root)
+        // Respect .gitignore, .git/info/exclude, global gitignore
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        // Skip hidden files/dirs (.git, .idea, etc.)
+        .hidden(true)
+        // Read parent .gitignore files
+        .parents(true)
+        // Also respect .ignore files (ripgrep convention)
+        .ignore(true)
+        // Always skip vendor directories, even if not gitignored
+        .filter_entry(move |entry| {
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                let path = entry.path();
+                if vendor_paths_owned.iter().any(|vp| vp == path) {
+                    return false;
+                }
+            }
+            true
+        })
+        .build();
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
+            result.push(path.to_path_buf());
+        }
+    }
+
+    result
+}
+
+/// Push a location only if it is not already present (deduplication).
+pub(crate) fn push_unique_location(
+    locations: &mut Vec<Location>,
+    uri: &Url,
+    start: Position,
+    end: Position,
+) {
+    let already_present = locations.iter().any(|l| {
+        l.uri == *uri
+            && l.range.start.line == start.line
+            && l.range.start.character == start.character
+    });
+    if !already_present {
+        locations.push(Location {
+            uri: uri.clone(),
+            range: Range { start, end },
+        });
+    }
 }
 
 #[cfg(test)]

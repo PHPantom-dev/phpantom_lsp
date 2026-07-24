@@ -765,7 +765,7 @@ pub(crate) fn infer_inline_variable_type(
         .map(|off| trigger_offset + off + 1)
         .unwrap_or(trigger_offset + 1) as u32;
 
-    let current_class = crate::util::find_class_at_offset(all_classes, cursor_offset);
+    let current_class = crate::class_lookup::find_class_at_offset(all_classes, cursor_offset);
 
     crate::completion::variable::resolution::resolve_variable_php_type(
         var_name,

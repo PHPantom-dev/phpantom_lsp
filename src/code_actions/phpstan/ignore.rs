@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::ranges_overlap;
+use crate::text_position::ranges_overlap;
 
 /// PHPStan identifier prefix for unmatched ignore errors.
 ///
@@ -270,7 +270,7 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
         // offset is in bytes; LSP positions are UTF-16 code units, so convert
         // before emitting the edit.
         let insert_byte = ids_start + ids_offset + ids_end;
-        let insert_col = crate::util::byte_offset_to_utf16_col(line_text, insert_byte);
+        let insert_col = crate::text_position::byte_offset_to_utf16_col(line_text, insert_byte);
 
         // Check if we need a comma separator.
         let separator = if existing_ids.is_empty() { "" } else { ", " };
@@ -298,7 +298,7 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
 fn build_eol_comment(_content: &str, line: u32, line_text: &str, identifier: &str) -> TextEdit {
     // LSP positions are UTF-16 code units, not bytes: convert the end-of-line
     // byte offset so the comment lands correctly on multibyte lines.
-    let end_col = crate::util::byte_offset_to_utf16_col(line_text, line_text.len());
+    let end_col = crate::text_position::byte_offset_to_utf16_col(line_text, line_text.len());
     TextEdit {
         range: Range {
             start: Position {

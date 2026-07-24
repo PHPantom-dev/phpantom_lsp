@@ -14,8 +14,8 @@ use super::implement_methods::{detect_class_indent, shorten_single_type};
 use super::make_code_action_data;
 use crate::Backend;
 use crate::atom::atom;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
-use crate::util::offset_to_position;
 
 impl Backend {
     /// Collect "Extract interface" code actions.
@@ -29,7 +29,7 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Only offer on concrete class declarations.
         let in_class_context =
@@ -107,7 +107,7 @@ impl Backend {
         content: &str,
     ) -> Option<WorkspaceEdit> {
         let uri = &data.uri;
-        let cursor_offset = crate::util::position_to_offset(content, data.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, data.range.start);
 
         let file_ctx = self.file_context(uri);
 

@@ -5,7 +5,7 @@
 use tower_lsp::lsp_types::{Position, Range};
 
 use crate::completion::source::comment_position::position_to_byte_offset;
-use crate::util::{byte_offset_to_utf16_col, utf16_col_to_byte_offset};
+use crate::text_position::{byte_offset_to_utf16_col, utf16_col_to_byte_offset};
 
 /// Check if the cursor is immediately after `/**` with only whitespace
 /// before it on the line, and that there is no existing docblock (i.e.

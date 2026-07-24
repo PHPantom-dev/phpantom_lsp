@@ -264,8 +264,10 @@ impl Backend {
             let resolved = call_cache
                 .entry(expr.clone())
                 .or_insert_with(|| {
-                    let position =
-                        crate::util::offset_to_position(content, call_site.args_start as usize);
+                    let position = crate::text_position::offset_to_position(
+                        content,
+                        call_site.args_start as usize,
+                    );
                     self.resolve_callable_target(expr, content, position, &file_ctx)
                 })
                 .clone();

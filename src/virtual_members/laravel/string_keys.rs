@@ -56,7 +56,7 @@ pub(crate) fn find_laravel_string_key_references(
 
     if include_declaration && kind != &LaravelStringKind::Config {
         for decl in resolve_laravel_string_key(backend, kind, key) {
-            crate::util::push_unique_location(
+            crate::references::push_unique_location(
                 &mut locations,
                 &decl.uri,
                 decl.range.start,
@@ -76,8 +76,9 @@ fn find_string_key_usages(
     backend: &crate::Backend,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
 ) -> Vec<Location> {
+    use crate::references::push_unique_location;
     use crate::symbol_map::SymbolKind;
-    use crate::util::{offset_to_position, push_unique_location};
+    use crate::text_position::offset_to_position;
     use tower_lsp::lsp_types::Url;
 
     let mut locations = Vec::new();

@@ -34,8 +34,9 @@ use crate::docblock::parser::{DocblockInfo, parse_docblock_for_tags};
 use crate::docblock::type_strings::split_type_token;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, FunctionLoader};
-use crate::util::{offset_to_position, short_name};
+use crate::util::short_name;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the function/method (and its docblock) under the cursor.
         // The returned info is owned, so the borrowed AST does not escape.

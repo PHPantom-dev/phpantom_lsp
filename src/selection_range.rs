@@ -16,7 +16,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
 use crate::Backend;
-use crate::util::{offset_to_position, position_to_offset};
+use crate::text_position::{offset_to_position, position_to_offset};
 
 // ─── Public entry point ─────────────────────────────────────────────────────
 

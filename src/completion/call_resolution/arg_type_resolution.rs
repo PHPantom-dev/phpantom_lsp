@@ -6,12 +6,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::find_class_by_name;
+use crate::class_lookup::resolve_class_keyword;
 use crate::docblock;
 use crate::php_type::PhpType;
 use crate::subject_expr::SubjectExpr;
 use crate::types::*;
-use crate::util::find_class_by_name;
-use crate::util::resolve_class_keyword;
 
 use crate::completion::conditional_resolution::split_call_subject;
 use crate::completion::resolver::{Loaders, ResolutionCtx};

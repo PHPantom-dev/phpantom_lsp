@@ -311,8 +311,8 @@ fn extract_variable_not_offered_for_trait_name_selection() {
 
     let start = content.find("ExampleFeatureTrait").unwrap() as u32;
     let end = start + "ExampleFeatureTrait".len() as u32;
-    let start_pos = crate::util::offset_to_position(content, start as usize);
-    let end_pos = crate::util::offset_to_position(content, end as usize);
+    let start_pos = crate::text_position::offset_to_position(content, start as usize);
+    let end_pos = crate::text_position::offset_to_position(content, end as usize);
 
     let params = CodeActionParams {
         text_document: TextDocumentIdentifier {

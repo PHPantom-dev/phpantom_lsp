@@ -203,7 +203,7 @@ pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr>
                 Expression::Literal(Literal::String(s)) => {
                     // `s.raw` includes surrounding quotes (e.g. `'key'`).
                     let raw_str = bytes_to_str(s.raw);
-                    let inner = crate::util::unquote_php_string(raw_str).unwrap_or(raw_str);
+                    let inner = crate::text_scan::unquote_php_string(raw_str).unwrap_or(raw_str);
                     BracketSegment::StringKey(inner.to_string())
                 }
                 Expression::Literal(Literal::Integer(i)) => {

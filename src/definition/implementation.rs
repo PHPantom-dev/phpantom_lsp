@@ -38,11 +38,13 @@ use tower_lsp::lsp_types::*;
 use super::member::MemberKind;
 use super::point_location;
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::ResolutionCtx;
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
-use crate::util::{collect_php_files, find_class_at_offset, position_to_offset, short_name};
+use crate::util::{collect_php_files, short_name};
 
 impl Backend {
     /// Entry point for `textDocument/implementation`.
@@ -1235,7 +1237,8 @@ impl Backend {
         if cls.keyword_offset == 0 {
             return None;
         }
-        let position = crate::util::offset_to_position(&class_content, cls.keyword_offset as usize);
+        let position =
+            crate::text_position::offset_to_position(&class_content, cls.keyword_offset as usize);
         let parsed_uri = Url::parse(&class_uri).ok()?;
 
         Some(point_location(parsed_uri, position))

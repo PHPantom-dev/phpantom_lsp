@@ -29,8 +29,8 @@ use std::collections::HashSet;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassLikeKind, DefineInfo, FunctionInfo};
-use crate::util::offset_to_position;
 
 /// Maximum number of symbols returned for a single workspace/symbol request.
 ///

@@ -119,7 +119,7 @@ pub(in crate::completion) fn array_access_key_as_string(
                 .map(|v| bytes_to_str(v).to_string())
                 .unwrap_or_else(|| {
                     let raw_str = bytes_to_str(s.raw);
-                    crate::util::unquote_php_string(raw_str)
+                    crate::text_scan::unquote_php_string(raw_str)
                         .unwrap_or(raw_str)
                         .to_string()
                 });

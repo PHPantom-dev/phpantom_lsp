@@ -33,8 +33,9 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::find_brace_match_line;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{find_brace_match_line, ranges_overlap};
+use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ pub(crate) fn is_remove_unreachable_stale(content: &str, diag_line: usize) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::find_semicolon_balanced;
+    use crate::text_scan::find_semicolon_balanced;
 
     /// Build a [`TextEdit`] that removes a single semicolon-terminated
     /// statement starting on the given line.  Currently only used by

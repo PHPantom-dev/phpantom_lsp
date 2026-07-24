@@ -23,8 +23,8 @@ use crate::completion::named_args::{
 use crate::php_type::PhpType;
 
 use crate::symbol_map::SymbolMap;
+use crate::text_position::position_to_offset;
 use crate::types::*;
-use crate::util::position_to_offset;
 
 /// Information about a signature help call site, extracted from the source
 /// text around the cursor.
@@ -683,7 +683,7 @@ impl Backend {
         // Convert the LSP position (UTF-16 column) to an absolute byte
         // offset, preserving the original line terminators (including
         // CRLF), then splice `);` in at that point.
-        let byte_offset = crate::util::position_to_byte_offset(content, position);
+        let byte_offset = crate::text_position::position_to_byte_offset(content, position);
         let mut result = String::with_capacity(content.len() + 2);
         result.push_str(&content[..byte_offset]);
         result.push_str(");");

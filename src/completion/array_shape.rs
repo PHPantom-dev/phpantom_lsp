@@ -32,11 +32,12 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::Loaders;
 use crate::docblock;
 use crate::php_type::PhpType;
+use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext, ResolvedType};
-use crate::util::{find_class_at_offset, position_to_offset};
 
 /// Well-known keys for the `$_SERVER` superglobal.
 ///

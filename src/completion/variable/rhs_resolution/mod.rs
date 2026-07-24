@@ -218,7 +218,7 @@ fn resolved_type_with_lookup(
         // Don't try to look up scalars/pseudo-types
         if !crate::php_type::is_keyword_type(base) {
             // Try in-file classes first
-            let cls = crate::util::find_class_by_name(all_classes, base)
+            let cls = crate::class_lookup::find_class_by_name(all_classes, base)
                 .map(|arc| arc.as_ref().clone())
                 .or_else(|| class_loader(base).map(Arc::unwrap_or_clone));
             if let Some(class) = cls {

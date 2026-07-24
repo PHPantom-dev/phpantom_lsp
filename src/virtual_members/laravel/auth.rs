@@ -210,7 +210,7 @@ fn resolve_model_fqn(
 ) -> Option<String> {
     let normalized = name.trim_start_matches('\\');
     let class_info = class_loader(normalized)?;
-    if crate::util::is_subtype_of(&class_info, AUTHENTICATABLE_FQN, class_loader) {
+    if crate::class_lookup::is_subtype_of(&class_info, AUTHENTICATABLE_FQN, class_loader) {
         Some(class_info.fqn().to_string())
     } else {
         None

@@ -31,7 +31,7 @@ use super::cursor_context::{
 use super::detect_indent_from_members;
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -209,7 +209,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the cursor context and extract the (owned) data needed to
         // build the hook edits.  The borrowed AST does not escape the

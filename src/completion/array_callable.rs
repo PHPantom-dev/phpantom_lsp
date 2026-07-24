@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo, FileContext};
-use crate::util::position_to_offset;
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -227,7 +227,8 @@ impl Backend {
         } else {
             // Variable — resolve its type.
             let cursor_offset = position_to_offset(content, position);
-            let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset);
+            let current_class =
+                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
 
             if ac_ctx.subject == "$this" {
                 // `$this` — use the current class.
@@ -271,7 +272,7 @@ impl Backend {
         // case (controller actions, `$this`/`$obj` handlers).
         let candidates = vec![class_info];
         let cursor_offset = position_to_offset(content, position);
-        let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset);
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
         let mut items = super::builder::build_union_completion_items(
             &candidates,
             AccessKind::Arrow,

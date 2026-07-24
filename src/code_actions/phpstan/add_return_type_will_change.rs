@@ -24,8 +24,9 @@ use tower_lsp::lsp_types::*;
 
 use super::{InsertionPoint, find_method_insertion_point};
 use crate::Backend;
+use crate::code_actions::phpstan::contains_php_attribute;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{contains_php_attribute, offset_to_position, ranges_overlap};
+use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
 const TENTATIVE_RETURN_TYPE_ID: &str = "method.tentativeReturnType";

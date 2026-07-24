@@ -10,9 +10,11 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind as MapSymbolKind};
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind};
-use crate::util::{find_class_at_offset, offset_to_position, position_to_offset, short_name};
+use crate::util::short_name;
 
 impl Backend {
     /// Prepare the type hierarchy for the symbol under the cursor.

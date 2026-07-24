@@ -19,9 +19,10 @@ use crate::Backend;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
 
+use crate::class_lookup::is_class_keyword;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::ClassLikeKind;
-use crate::util::{is_class_keyword, short_name};
+use crate::util::short_name;
 
 use super::make_code_action_data;
 
@@ -61,8 +62,9 @@ impl Backend {
             .unwrap_or_default();
 
         // Convert LSP range to byte offsets for comparison with symbol spans.
-        let request_start = crate::util::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::util::position_to_byte_offset(content, params.range.end);
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
         // ── Find ClassReference spans overlapping the request range ─────
         let affinity_table = crate::completion::class_completion::build_affinity_table(
@@ -570,8 +572,9 @@ impl Backend {
             })
             .unwrap_or_default();
 
-        let request_start = crate::util::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::util::position_to_byte_offset(content, params.range.end);
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
         for span in &symbol_map.spans {
             if span.start as usize >= request_end || span.end as usize <= request_start {

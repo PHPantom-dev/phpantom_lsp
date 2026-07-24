@@ -1611,7 +1611,7 @@ pub fn get_docblock_info_for_node(
 /// Returns `None` when the string is completely unrecoverable (e.g.
 /// `"<garbage"` with no base type).
 pub fn sanitise_and_parse_docblock_type(raw: &str) -> Option<PhpType> {
-    if crate::util::has_unclosed_delimiters(raw) {
+    if crate::docblock::type_strings::has_unclosed_delimiters(raw) {
         let base = recover_base_type(raw);
         if base.is_empty() {
             None

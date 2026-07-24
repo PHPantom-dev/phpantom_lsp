@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::ClassInfo;
-use crate::util::{offset_to_position, position_to_offset};
 
 impl Backend {
     /// Find all references to a variable within its enclosing scope.
@@ -363,7 +363,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
             None => return locations,

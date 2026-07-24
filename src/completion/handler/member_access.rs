@@ -9,10 +9,11 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::{ResolutionCtx, resolve_target_classes};
 use crate::symbol_map::SymbolKind;
+use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, CompletionTarget, FileContext, ResolvedType};
-use crate::util::{find_class_at_offset, position_to_offset};
 
 impl Backend {
     // ─── Strategy: member access completion ──────────────────────────────

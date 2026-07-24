@@ -4,7 +4,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::Backend;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 use super::helpers::extract_string_literal;
 

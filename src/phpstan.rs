@@ -195,7 +195,7 @@ pub(crate) fn run_phpstan(
     cmd.arg(file_path).current_dir(workspace_root);
 
     let result =
-        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPStan", None);
+        crate::process::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPStan", None);
 
     // NamedTempFile auto-deletes on drop — but we keep `tmp` alive
     // until after we've consumed the command output.
@@ -273,7 +273,7 @@ pub(crate) fn run_phpstan_workspace(
         .arg(format!("--memory-limit={}", memory_limit))
         .current_dir(workspace_root);
 
-    let output = crate::util::run_command_with_timeout(
+    let output = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,

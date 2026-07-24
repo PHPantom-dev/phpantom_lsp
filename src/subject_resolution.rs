@@ -10,10 +10,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::Loaders;
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
-use crate::util::find_class_at_offset;
 
 /// Context for resolving a subject expression to its type.
 pub(crate) struct SubjectResolutionCtx<'a> {

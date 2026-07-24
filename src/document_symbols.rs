@@ -20,10 +20,11 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::LineIndex;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, FunctionInfo, MethodInfo, PropertyInfo, Visibility,
 };
-use crate::util::{LineIndex, short_name};
+use crate::util::short_name;
 
 impl Backend {
     /// Build the `DocumentSymbol` tree for a single file.
@@ -216,7 +217,8 @@ fn callable_declaration_end(content: &str, name_offset: usize, name_len: usize) 
         return fallback;
     };
     let paren_open = name_offset + rel_paren;
-    let Some(paren_close) = crate::util::find_matching_forward(content, paren_open, b'(', b')')
+    let Some(paren_close) =
+        crate::text_scan::find_matching_forward(content, paren_open, b'(', b')')
     else {
         return fallback;
     };
@@ -226,7 +228,7 @@ fn callable_declaration_end(content: &str, name_offset: usize, name_len: usize) 
         match ch {
             '{' => {
                 let brace_open = paren_close + 1 + i;
-                return crate::util::find_matching_forward(content, brace_open, b'{', b'}')
+                return crate::text_scan::find_matching_forward(content, brace_open, b'{', b'}')
                     .map(|c| c + 1)
                     .unwrap_or(fallback);
             }
@@ -241,7 +243,7 @@ fn callable_declaration_end(content: &str, name_offset: usize, name_len: usize) 
 /// ends at its terminating `;`.
 fn statement_declaration_end(content: &str, name_offset: usize, name_len: usize) -> usize {
     let fallback = name_offset + name_len;
-    crate::util::find_semicolon_balanced(&content[name_offset..])
+    crate::text_scan::find_semicolon_balanced(&content[name_offset..])
         .map(|p| name_offset + p + 1)
         .unwrap_or(fallback)
 }

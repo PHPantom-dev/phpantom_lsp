@@ -22,8 +22,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
-use crate::util::position_to_offset;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, classify_relationship_typed, extends_eloquent_model,
     resolve_relation_chain,
@@ -385,7 +385,8 @@ impl Backend {
         } else if subject == "$this" || subject == "static" || subject == "self" {
             // Inside the model class itself.
             let cursor_offset = position_to_offset(content, position);
-            let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset)?;
+            let current_class =
+                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset)?;
             Some(Arc::new(current_class.clone()))
         } else if subject.starts_with('$') {
             // Variable — resolve its type. Use a simplified approach:
@@ -393,8 +394,9 @@ impl Backend {
             // For now, try to resolve via the forward walker.
             let cursor_offset = position_to_offset(content, position);
             let default_class = ClassInfo::default();
-            let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset)
-                .unwrap_or(&default_class);
+            let current_class =
+                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset)
+                    .unwrap_or(&default_class);
             let results = crate::completion::variable::resolution::resolve_variable_types(
                 subject,
                 current_class,

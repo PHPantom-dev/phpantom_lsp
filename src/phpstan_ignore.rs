@@ -13,7 +13,7 @@ pub(crate) struct IgnoreTagSpan {
 }
 
 pub(crate) fn phpstan_ignore_code_prefix(content: &str, position: Position) -> Option<String> {
-    let offset = crate::util::position_to_offset(content, position) as usize;
+    let offset = crate::text_position::position_to_offset(content, position) as usize;
     let offset = offset.min(content.len());
     let line_start = content[..offset]
         .rfind('\n')

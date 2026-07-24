@@ -55,7 +55,7 @@ use crate::code_actions::phpstan::add_iterable_type::{
 };
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
-use crate::util::ranges_overlap;
+use crate::text_position::ranges_overlap;
 
 use edits::{
     build_change_return_type_edits_to, build_strip_return_expr_edit,

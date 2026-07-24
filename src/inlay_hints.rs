@@ -18,8 +18,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{CallSite, UntypedClosureSite};
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::FileContext;
-use crate::util::{offset_to_position, position_to_offset};
 
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.

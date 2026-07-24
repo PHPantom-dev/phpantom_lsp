@@ -24,12 +24,12 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::is_subtype_of_typed;
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{LiteralValue, PhpType, int_literal_is_within_range, is_array_like_name};
 use crate::types::{ClassInfo, ResolvedCallableTarget};
-use crate::util::is_subtype_of_typed;
 
 use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
 
@@ -183,7 +183,9 @@ pub(super) fn is_type_compatible(
             || arg_type
                 .base_name()
                 .and_then(class_loader)
-                .is_some_and(|cls| crate::util::is_subtype_of(&cls, "Traversable", class_loader)))
+                .is_some_and(|cls| {
+                    crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
+                }))
     {
         return true;
     }
@@ -333,7 +335,7 @@ pub(super) fn is_type_compatible(
             if let Some(cls) = class_loader(class_name) {
                 let merged = crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
                 let implements_stringable =
-                    crate::util::is_subtype_of(&cls, "Stringable", class_loader);
+                    crate::class_lookup::is_subtype_of(&cls, "Stringable", class_loader);
                 let has_to_string = merged.get_method_ci("__toString").is_some();
                 if implements_stringable || has_to_string {
                     return true;
@@ -464,8 +466,9 @@ pub(super) fn is_type_compatible(
     // phase.  Stay silent (MAYBE) when the base types are compatible.
     if let PhpType::Generic(name, _) = param_type
         && (name.eq_ignore_ascii_case("iterable")
-            || class_loader(name)
-                .is_some_and(|cls| crate::util::is_subtype_of(&cls, "Traversable", class_loader)))
+            || class_loader(name).is_some_and(|cls| {
+                crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
+            }))
     {
         // Array-like args always satisfy iterable/Traversable generics.
         if arg_type.is_array_like()
@@ -478,7 +481,7 @@ pub(super) fn is_type_compatible(
         // Can't load → stay permissive; bare `object` → stay permissive.
         if let Some(class_name) = arg_type.base_name() {
             if let Some(cls) = class_loader(class_name) {
-                if crate::util::is_subtype_of(&cls, "Traversable", class_loader) {
+                if crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader) {
                     return true;
                 }
             } else {
@@ -673,7 +676,7 @@ pub(super) fn is_type_compatible(
             }
             // Also try loading param and walking up to arg.
             if let Some(param_cls) = class_loader(param_base)
-                && crate::util::is_subtype_of(&param_cls, arg_base, class_loader)
+                && crate::class_lookup::is_subtype_of(&param_cls, arg_base, class_loader)
             {
                 return true;
             }
@@ -691,8 +694,9 @@ pub(super) fn is_type_compatible(
         if let Some(class_name) = arg_type.base_name()
             && let Some(cls) = class_loader(class_name)
         {
-            let is_array_like = crate::util::is_subtype_of(&cls, "ArrayAccess", class_loader)
-                || crate::util::is_subtype_of(&cls, "Arrayable", class_loader);
+            let is_array_like =
+                crate::class_lookup::is_subtype_of(&cls, "ArrayAccess", class_loader)
+                    || crate::class_lookup::is_subtype_of(&cls, "Arrayable", class_loader);
             if is_array_like {
                 return true;
             }
@@ -710,8 +714,15 @@ pub(super) fn is_type_compatible(
                 }
                 if let Some(name) = m.base_name() {
                     if let Some(cls) = class_loader(name) {
-                        return crate::util::is_subtype_of(&cls, "ArrayAccess", class_loader)
-                            || crate::util::is_subtype_of(&cls, "Arrayable", class_loader);
+                        return crate::class_lookup::is_subtype_of(
+                            &cls,
+                            "ArrayAccess",
+                            class_loader,
+                        ) || crate::class_lookup::is_subtype_of(
+                            &cls,
+                            "Arrayable",
+                            class_loader,
+                        );
                     }
                     // Can't load class — stay permissive (the short
                     // name likely comes from a docblock whose imports
@@ -880,7 +891,7 @@ fn extract_array_string_literals(expr: &Expression<'_>) -> Vec<(String, usize, u
 
     let mut literals = Vec::new();
     let mut push_string = |s: &mago_syntax::cst::literal::LiteralString| {
-        if let Some(content) = crate::util::unquote_php_string(bytes_to_str(s.raw)) {
+        if let Some(content) = crate::text_scan::unquote_php_string(bytes_to_str(s.raw)) {
             let start = s.span.start.offset as usize;
             let end = s.span.end.offset as usize;
             literals.push((content.to_string(), start, end));
@@ -1870,8 +1881,10 @@ impl Backend {
             // (method-level template subs depend on per-site args);
             // only zero-arg calls can be cached.
             let resolved = if is_variable_call || call_args_text.is_some() {
-                let position =
-                    crate::util::offset_to_position(content, call_site.args_start as usize);
+                let position = crate::text_position::offset_to_position(
+                    content,
+                    call_site.args_start as usize,
+                );
                 self.resolve_callable_target_with_args(
                     expr,
                     content,
@@ -1883,8 +1896,10 @@ impl Backend {
                 call_cache
                     .entry(expr.clone())
                     .or_insert_with(|| {
-                        let position =
-                            crate::util::offset_to_position(content, call_site.args_start as usize);
+                        let position = crate::text_position::offset_to_position(
+                            content,
+                            call_site.args_start as usize,
+                        );
                         self.resolve_callable_target(expr, content, position, &file_ctx)
                     })
                     .clone()

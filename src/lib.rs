@@ -206,9 +206,11 @@ pub fn configure_allocator() {
 
 pub mod analyse;
 pub mod atom;
+mod backend;
 pub mod blade;
 pub(crate) mod call_args;
 pub mod ci_map;
+pub(crate) mod class_lookup;
 pub mod classmap_scanner;
 mod code_actions;
 mod code_lens;
@@ -236,6 +238,7 @@ pub mod php_type;
 mod phpcs;
 mod phpstan;
 pub(crate) mod phpstan_ignore;
+pub(crate) mod process;
 pub mod progress;
 mod reference_index;
 mod references;
@@ -253,6 +256,7 @@ pub mod subject_expr;
 pub(crate) mod subject_extraction;
 pub(crate) mod subject_resolution;
 pub(crate) mod symbol_map;
+pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
 mod type_hierarchy;

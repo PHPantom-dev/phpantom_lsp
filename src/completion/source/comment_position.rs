@@ -14,7 +14,7 @@ use tower_lsp::lsp_types::Position;
 // Re-export the canonical position-to-byte-offset helper so that existing
 // `use super::comment_position::position_to_byte_offset` imports continue
 // to work without modification.
-pub(crate) use crate::util::position_to_byte_offset;
+pub(crate) use crate::text_position::position_to_byte_offset;
 
 /// Returns `true` if the given position is inside a `/** … */` docblock.
 ///

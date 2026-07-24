@@ -38,8 +38,8 @@ use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, Visibility};
-use crate::util::offset_to_position;
 
 /// The action kind used for the deferred resolve dispatch.
 const ACTION_KIND: &str = "refactor.changeVisibility";
@@ -99,7 +99,7 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the cursor context once and extract the owned data the
         // rest of this function needs (the AST does not escape the closure).
@@ -269,7 +269,7 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
 
-        let enclosing = crate::util::find_class_at_offset(&local_classes, cursor_offset)?;
+        let enclosing = crate::class_lookup::find_class_at_offset(&local_classes, cursor_offset)?;
 
         // Collect all ancestors: parent class chain + interfaces + traits.
         let mut best_level: Option<u8> = None;

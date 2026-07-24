@@ -2,7 +2,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::class_name_mismatch::class_name_mismatch_diagnostic;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 impl Backend {
     pub(crate) fn collect_fix_class_name_actions(

@@ -12,8 +12,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
-use crate::util::offset_to_position;
 
 impl Backend {
     /// Collect "Implement missing methods" code actions for the cursor position.
@@ -32,7 +32,7 @@ impl Backend {
         let ctx = self.file_context(uri);
 
         // Convert LSP cursor position to byte offset.
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Find the class the cursor is inside.  Use keyword_offset as the
         // lower bound so the action also triggers when the cursor is on

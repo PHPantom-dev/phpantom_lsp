@@ -45,8 +45,9 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let request_start = crate::util::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::util::position_to_byte_offset(content, params.range.end);
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
         let symbol_map = {
             let maps = self.symbol_maps.read();

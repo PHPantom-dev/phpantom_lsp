@@ -334,39 +334,6 @@ unrelated scheduling and filtering code.
 
 ---
 
-## `util.rs` mixes eleven unrelated concerns
-
-**What to do.** Break `src/util.rs` (2,613 lines, 87 functions) into
-cohesive modules, and move single-consumer helpers to their only
-consumer:
-
-- `text_position.rs` — the most reused cluster: `LineIndex`,
-  `offset_to_position`, `position_to_byte_offset`,
-  `byte_range_to_lsp_range`, UTF-16 column conversion.
-- `php_text.rs` — string scanning (`unquote_php_string`,
-  `find_matching_forward`/`_backward`, `find_semicolon_balanced`,
-  `collapse_continuation_lines`).
-- `class_lookup.rs` — `find_class_by_name`, `find_class_at_offset`,
-  `is_subtype_of*`, `is_self_or_static`, `resolve_class_keyword`
-  (~360 lines).
-- `process.rs` — `CommandOutput`, `run_command_with_timeout`.
-- Move to their sole consumers: `log` + `progress_*` (only
-  `server.rs`), `has_unclosed_delimiters` (docblock area),
-  `find_identical_occurrences` (`code_actions`),
-  `contains_php_attribute` + `find_brace_match_line`
-  (`code_actions/phpstan`), `collect_php_files_gitignore` (workspace
-  indexing).
-- The `impl Backend` file-content/context accessors (`get_file_content`,
-  `file_context*`, `namespace_at_offset`, `clear_file_maps`, …) are
-  Backend behaviour, not utilities — move next to `lib.rs` (e.g.
-  `backend/file_access.rs`).
-
-**Why it matters.** "Put it in util" is how grab-bags grow; the
-position-conversion cluster in particular is used by every feature and
-deserves a findable home.
-
----
-
 ## `server.rs` carries a ~950-line workspace-init block
 
 **What to do.** `src/server.rs` (2,821 lines) contains an
@@ -484,6 +451,25 @@ infer_iterable_element_type` for the same pattern while there.
 **Why it matters.** Direct violation of the single-pipeline rule:
 every inference improvement (shapes, generics, literals) silently
 misses this code action, and its answers can contradict hover.
+
+---
+
+## Duplicate forward-delimiter scanners in `text_scan.rs`
+
+**What to do.** `src/text_scan.rs` now hosts two near-identical
+forward delimiter-matching scanners side by side:
+`find_matching_delimiter_forward` (skips string literals only; single
+consumer, `completion/source/throws_analysis/scanning.rs`) and
+`find_matching_forward` (skips string literals *and* both PHP comment
+styles; many consumers). Determine whether the
+`throws_analysis/scanning.rs` call site can safely move to the
+comment-aware `find_matching_forward` (check whether it is a
+performance-sensitive hot path first, since the comment-unaware
+version is cheaper), and delete whichever scanner becomes redundant.
+
+**Why it matters.** Two scanners answering "find the matching closing
+delimiter" invite a fix (e.g. a heredoc-awareness bug) to land in one
+copy and not the other.
 
 ---
 

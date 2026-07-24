@@ -9,8 +9,9 @@ use super::*;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
-use crate::util::{offset_to_position, push_unique_location};
+use crate::text_position::offset_to_position;
 
 impl Backend {
     /// Find all references to a function across all files.

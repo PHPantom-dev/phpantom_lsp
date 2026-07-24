@@ -19,8 +19,8 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::PhpVersion;
-use crate::util::{offset_to_position, position_to_byte_offset};
 
 // ─── Detection types ────────────────────────────────────────────────────────
 

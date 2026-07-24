@@ -5,10 +5,10 @@ use std::collections::HashMap;
 
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::is_self_or_static;
 use crate::completion::variable::rhs_resolution::{TemplateBindingMode, classify_template_binding};
 use crate::php_type::PhpType;
 use crate::types::*;
-use crate::util::is_self_or_static;
 
 use crate::completion::resolver::{Loaders, ResolutionCtx};
 

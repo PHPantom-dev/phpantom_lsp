@@ -12,8 +12,8 @@
 //! call) or a property/promoted-parameter declaration.
 
 use crate::completion::named_args::{find_enclosing_open_paren, position_to_char_offset};
+use crate::text_position::position_to_offset;
 use crate::text_scan::skip_string_backward;
-use crate::util::position_to_offset;
 use tower_lsp::lsp_types::Position;
 
 /// PHP native types valid in type-hint positions (PHP 8.x).

@@ -12,8 +12,8 @@
 use tower_lsp::lsp_types::*;
 
 use crate::subject_extraction::detect_access_operator;
+use crate::text_scan::collapse_continuation_lines;
 use crate::types::*;
-use crate::util::collapse_continuation_lines;
 
 /// Detect the access operator before the cursor position and extract
 /// both the `AccessKind` and the textual subject to its left.

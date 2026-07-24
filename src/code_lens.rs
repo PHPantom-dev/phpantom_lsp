@@ -8,8 +8,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::definition::member::MemberKind;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH};
-use crate::util::offset_to_position;
 
 /// Information about a prototype (ancestor) method that a local method
 /// overrides or implements.

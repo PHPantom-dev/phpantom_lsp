@@ -1573,7 +1573,7 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
             .value
             .map(|v| bytes_to_str(v).to_string())
             .unwrap_or_else(|| {
-                crate::util::unquote_php_string(bytes_to_str(s.raw))
+                crate::text_scan::unquote_php_string(bytes_to_str(s.raw))
                     .unwrap_or(bytes_to_str(s.raw))
                     .to_string()
             });

@@ -12,7 +12,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
-use crate::util::{build_fqn, offset_to_position};
+use crate::text_position::offset_to_position;
+use crate::util::build_fqn;
 
 use super::namespace::find_namespace_segment_at_offset;
 
@@ -101,7 +102,7 @@ impl Backend {
             if new_name.contains('\\') {
                 return self.build_namespace_prefix_rename_edit(name, new_name);
             }
-            let cursor_byte = crate::util::position_to_byte_offset(content, position);
+            let cursor_byte = crate::text_position::position_to_byte_offset(content, position);
             let (segment, _seg_start, _seg_end) =
                 find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)?;
             let segment_idx = name.split('\\').position(|s| s == segment)?;
@@ -172,7 +173,8 @@ impl Backend {
                 // Properties: the reference may or may not include `$`.
                 // Check the actual source text at the location to decide.
                 let has_dollar = loc_content.as_ref().is_some_and(|c| {
-                    let start_off = crate::util::position_to_byte_offset(c, location.range.start);
+                    let start_off =
+                        crate::text_position::position_to_byte_offset(c, location.range.start);
                     c.as_bytes().get(start_off) == Some(&b'$')
                 });
                 let bare_name = new_name.strip_prefix('$').unwrap_or(new_name);

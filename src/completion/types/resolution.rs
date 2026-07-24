@@ -20,10 +20,11 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::find_class_by_name;
 use crate::inheritance::{apply_generic_args, build_generic_subs};
 use crate::php_type::PhpType;
 use crate::types::*;
-use crate::util::{find_class_by_name, short_name};
+use crate::util::short_name;
 use crate::virtual_members::{self, laravel};
 
 /// Look up a property's type hint and resolve all candidate classes.

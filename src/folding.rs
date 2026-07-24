@@ -26,7 +26,7 @@ impl Backend {
         // Precompute line starts once. Each folding range converts two byte
         // offsets to positions, and a large file has many nested blocks, so
         // converting each offset by rescanning from the start would be O(n²).
-        let idx = crate::util::LineIndex::new(content);
+        let idx = crate::text_position::LineIndex::new(content);
 
         let mut ranges: Vec<FoldingRange> = Vec::new();
 
@@ -55,7 +55,7 @@ impl Backend {
 /// Build a `FoldingRange` from byte-offset start/end (of the opening/closing
 /// delimiters).  `kind` is `None` for code regions.
 fn range_from_offsets(
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     start_offset: u32,
     end_offset: u32,
     kind: Option<FoldingRangeKind>,
@@ -73,7 +73,11 @@ fn range_from_offsets(
 }
 
 /// Emit a folding range for a `Block` (left-brace … right-brace).
-fn emit_block(block: &Block<'_>, idx: &crate::util::LineIndex<'_>, ranges: &mut Vec<FoldingRange>) {
+fn emit_block(
+    block: &Block<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
+    ranges: &mut Vec<FoldingRange>,
+) {
     ranges.push(range_from_offsets(
         idx,
         block.left_brace.start.offset,
@@ -87,7 +91,7 @@ fn emit_block(block: &Block<'_>, idx: &crate::util::LineIndex<'_>, ranges: &mut 
 fn emit_brace_pair(
     left: mago_span::Span,
     right: mago_span::Span,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     ranges.push(range_from_offsets(
@@ -103,7 +107,7 @@ fn emit_brace_pair(
 fn emit_paren_pair(
     left: mago_span::Span,
     right: mago_span::Span,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     let start_pos = idx.position(left.start.offset as usize);
@@ -124,7 +128,7 @@ fn emit_paren_pair(
 
 fn collect_from_statement(
     stmt: &Statement<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     match stmt {
@@ -344,7 +348,7 @@ fn collect_from_statement(
 /// If the statement is a `Block`, emit it and recurse; otherwise just recurse.
 fn collect_from_block_statement(
     stmt: &Statement<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     if let Statement::Block(block) = stmt {
@@ -361,7 +365,7 @@ fn collect_from_block_statement(
 
 fn collect_from_if(
     if_stmt: &If<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     collect_from_expression(if_stmt.condition, idx, ranges);
@@ -399,7 +403,7 @@ fn collect_from_if(
 
 fn collect_from_class_member(
     member: &class_like::member::ClassLikeMember<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     match member {
@@ -437,7 +441,7 @@ fn collect_from_class_member(
 /// Collect folding ranges from property hooks if present.
 fn collect_from_property_hooks(
     prop: &class_like::property::Property<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     let hook_list = match prop {
@@ -461,7 +465,7 @@ fn collect_from_property_hooks(
 
 fn collect_from_expression(
     expr: &Expression<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     match expr {
@@ -671,7 +675,7 @@ fn collect_from_expression(
 /// lists.
 fn collect_from_call(
     call: &Call<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     match call {
@@ -728,7 +732,7 @@ fn collect_from_call(
 
 fn collect_from_array_element(
     elem: &array::ArrayElement<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     match elem {
@@ -748,7 +752,7 @@ fn collect_from_array_element(
 
 fn collect_from_construct(
     construct: &construct::Construct<'_>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     match construct {
@@ -801,7 +805,7 @@ fn collect_from_construct(
 /// comments, emitting `FoldingRange` entries with `FoldingRangeKind::Comment`.
 fn collect_comment_ranges(
     trivia: &sequence::Sequence<'_, Trivia<'_>>,
-    idx: &crate::util::LineIndex<'_>,
+    idx: &crate::text_position::LineIndex<'_>,
     ranges: &mut Vec<FoldingRange>,
 ) {
     // ── Doc-block and multi-line comments ──

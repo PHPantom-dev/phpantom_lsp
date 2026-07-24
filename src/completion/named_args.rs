@@ -154,7 +154,7 @@ pub fn detect_named_arg_context(content: &str, position: Position) -> Option<Nam
 
 // Re-exported from `crate::util` for backward compatibility with
 // existing import paths.
-pub use crate::util::position_to_char_offset;
+pub use crate::text_position::position_to_char_offset;
 
 /// Walk backward from `start` (exclusive) to find the unmatched `(` that
 /// encloses the cursor.

@@ -11,11 +11,12 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
+use crate::code_actions::find_identical_occurrences;
 use crate::code_actions::naming::{snake_to_camel, to_camel_case};
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::ScopeMap;
-use crate::util::{find_identical_occurrences, offset_to_position, position_to_byte_offset};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 // ─── Name generation ────────────────────────────────────────────────────────
 

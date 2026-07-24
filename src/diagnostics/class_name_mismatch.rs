@@ -3,8 +3,8 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::composer;
 use crate::diagnostics::namespace_mismatch::is_structural_single_classlike_file;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind};
-use crate::util::offset_to_position;
 
 impl Backend {
     pub fn collect_class_name_mismatch_diagnostics(

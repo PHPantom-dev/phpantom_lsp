@@ -1301,8 +1301,8 @@ impl Backend {
         content: &str,
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
+        use crate::class_lookup::find_class_at_offset;
         use crate::completion::resolver::ResolutionCtx;
-        use crate::util::find_class_at_offset;
 
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =

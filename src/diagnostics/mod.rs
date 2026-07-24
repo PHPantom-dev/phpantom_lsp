@@ -205,7 +205,7 @@ use crate::Backend;
 use crate::mago;
 use crate::phpcs;
 use crate::phpstan;
-use crate::util::ranges_overlap;
+use crate::text_position::ranges_overlap;
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -2284,7 +2284,8 @@ impl Backend {
                 return None;
             }
 
-            let mut range = crate::util::byte_range_to_lsp_range(virtual_php, start_byte, end_byte);
+            let mut range =
+                crate::text_position::byte_range_to_lsp_range(virtual_php, start_byte, end_byte);
 
             if range.start.line < crate::blade::PROLOGUE_LINES {
                 // Diagnostic originates from the prologue (injected headers).
@@ -2303,7 +2304,7 @@ impl Backend {
             return None;
         }
 
-        Some(crate::util::byte_range_to_lsp_range(
+        Some(crate::text_position::byte_range_to_lsp_range(
             content, start_byte, end_byte,
         ))
     }
@@ -2312,7 +2313,7 @@ impl Backend {
 /// Build a diagnostic range from byte offsets, returning `None` if either
 /// offset is past the end of `content`.
 ///
-/// This thin wrapper around [`crate::util::byte_range_to_lsp_range`] adds
+/// This thin wrapper around [`crate::text_position::byte_range_to_lsp_range`] adds
 /// a bounds check so that stale byte offsets (e.g. from a previous AST
 /// after an edit) are rejected instead of silently clamped to EOF.
 pub(crate) fn offset_range_to_lsp_range(
@@ -2323,7 +2324,7 @@ pub(crate) fn offset_range_to_lsp_range(
     if start_byte > content.len() || end_byte > content.len() {
         return None;
     }
-    Some(crate::util::byte_range_to_lsp_range(
+    Some(crate::text_position::byte_range_to_lsp_range(
         content, start_byte, end_byte,
     ))
 }

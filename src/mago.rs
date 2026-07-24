@@ -179,7 +179,7 @@ pub(crate) fn run_mago_lint(
         .current_dir(workspace_root);
 
     let file_path_str = file_path.to_string_lossy();
-    let result = crate::util::run_command_with_timeout(
+    let result = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,
@@ -244,7 +244,7 @@ pub(crate) fn run_mago_analyze(
         .current_dir(workspace_root);
 
     let file_path_str = file_path.to_string_lossy();
-    let result = crate::util::run_command_with_timeout(
+    let result = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,
@@ -336,7 +336,7 @@ fn run_mago_workspace(
 
     let tool_name = format!("Mago {} (workspace)", subcommand);
     let result =
-        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
+        crate::process::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
 
     match result.code {
         0 => {

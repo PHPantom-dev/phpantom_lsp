@@ -652,8 +652,9 @@ impl LanguageServer for Backend {
 
             for change in &params.content_changes {
                 if let Some(range) = change.range {
-                    let start = crate::util::position_to_byte_offset(&current, range.start);
-                    let end = crate::util::position_to_byte_offset(&current, range.end);
+                    let start =
+                        crate::text_position::position_to_byte_offset(&current, range.start);
+                    let end = crate::text_position::position_to_byte_offset(&current, range.end);
                     current.replace_range(start..end, &change.text);
                 } else {
                     // Full content replacement (fallback)

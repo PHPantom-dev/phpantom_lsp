@@ -26,8 +26,8 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, FileContext};
-use crate::util::position_to_offset;
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -306,7 +306,7 @@ impl Backend {
         // Build completion items using the standard builder.
         let candidates = vec![class_info];
         let cursor_offset = position_to_offset(content, position);
-        let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset);
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
         let mut items = super::builder::build_union_completion_items(
             &candidates,
             AccessKind::Arrow,

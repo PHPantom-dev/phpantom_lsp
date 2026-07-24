@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::VarDefKind;
-use crate::util::position_to_byte_offset;
+use crate::text_position::position_to_byte_offset;
 
 impl Backend {
     /// PHP superglobal variable names (always available in any scope).

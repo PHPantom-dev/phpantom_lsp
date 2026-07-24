@@ -261,9 +261,11 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 let satisfies_bound = |resolved_name: &str| -> bool {
                     match concrete_class_string_bound {
                         None => true,
-                        Some(ref bound) => {
-                            crate::util::is_subtype_of_names(resolved_name, bound, class_loader)
-                        }
+                        Some(ref bound) => crate::class_lookup::is_subtype_of_names(
+                            resolved_name,
+                            bound,
+                            class_loader,
+                        ),
                     }
                 };
 
@@ -1232,9 +1234,11 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 let satisfies_bound = |resolved_name: &str| -> bool {
                     match concrete_class_string_bound {
                         None => true,
-                        Some(ref bound) => {
-                            crate::util::is_subtype_of_names(resolved_name, bound, class_loader)
-                        }
+                        Some(ref bound) => crate::class_lookup::is_subtype_of_names(
+                            resolved_name,
+                            bound,
+                            class_loader,
+                        ),
                     }
                 };
 
@@ -1372,7 +1376,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                             .value
                             .map(|v| crate::atom::bytes_to_str(v).to_string())
                             .unwrap_or_else(|| {
-                                crate::util::unquote_php_string(crate::atom::bytes_to_str(
+                                crate::text_scan::unquote_php_string(crate::atom::bytes_to_str(
                                     lit_str.raw,
                                 ))
                                 .unwrap_or(crate::atom::bytes_to_str(lit_str.raw))

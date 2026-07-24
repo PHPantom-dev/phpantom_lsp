@@ -38,8 +38,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::class_completion::{ClassCompletionParams, ClassNameContext};
+use crate::text_position::position_to_byte_offset;
 use crate::types::FileContext;
-use crate::util::position_to_byte_offset;
 
 mod class_constant;
 mod member_access;
@@ -171,7 +171,7 @@ impl Backend {
             // call instead of three separate lock-and-unwrap blocks.
             // Use the cursor offset for position-aware namespace resolution
             // so that multi-namespace files resolve to the correct namespace.
-            let cursor_offset = crate::util::position_to_offset(&content, position);
+            let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let ctx = self.file_context_at(&uri, cursor_offset);
 
             if (crate::completion::comment_position::is_inside_non_doc_comment(&content, position)

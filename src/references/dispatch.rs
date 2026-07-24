@@ -8,8 +8,10 @@ use super::*;
 
 use tower_lsp::lsp_types::{Location, Position};
 
+use crate::references::push_unique_location;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::util::{build_fqn, offset_to_position, push_unique_location};
+use crate::text_position::offset_to_position;
+use crate::util::build_fqn;
 use crate::virtual_members::laravel;
 
 impl Backend {
@@ -280,7 +282,7 @@ impl Backend {
                 if is_constructor_name(name) {
                     let ctx = self.file_context(uri);
                     let seeds: Vec<String> =
-                        crate::util::find_class_at_offset(&ctx.classes, span_start)
+                        crate::class_lookup::find_class_at_offset(&ctx.classes, span_start)
                             .map(|cc| vec![build_fqn(&cc.name, ctx.namespace.as_deref())])
                             .unwrap_or_default();
                     return self.find_constructor_references(&seeds, include_declaration);
@@ -312,7 +314,8 @@ impl Backend {
 
                 // For real self/static/parent keywords, resolve to the class FQN.
                 let ctx = self.file_context(uri);
-                let current_class = crate::util::find_class_at_offset(&ctx.classes, span_start);
+                let current_class =
+                    crate::class_lookup::find_class_at_offset(&ctx.classes, span_start);
                 let fqn = match ssp_kind {
                     SelfStaticParentKind::Parent => {
                         current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))

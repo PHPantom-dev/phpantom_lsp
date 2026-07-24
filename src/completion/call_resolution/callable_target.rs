@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::{find_class_at_offset, resolve_class_keyword};
 use crate::php_type::PhpType;
 use crate::subject_expr::SubjectExpr;
 use crate::types::*;
-use crate::util::{find_class_at_offset, resolve_class_keyword};
 
 use crate::completion::conditional_resolution::TemplateContext;
 use crate::completion::resolver::ResolutionCtx;
-use crate::util::position_to_offset;
+use crate::text_position::position_to_offset;
 
 use tower_lsp::lsp_types::Position;
 

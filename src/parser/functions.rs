@@ -64,7 +64,7 @@ fn try_extract_function_exists_guard<'a>(condition: &'a Expression<'a>) -> Optio
         let name = lit_str
             .value
             .map(bytes_to_str)
-            .or_else(|| crate::util::unquote_php_string(bytes_to_str(lit_str.raw)))?;
+            .or_else(|| crate::text_scan::unquote_php_string(bytes_to_str(lit_str.raw)))?;
         if !name.is_empty() {
             return Some(name);
         }

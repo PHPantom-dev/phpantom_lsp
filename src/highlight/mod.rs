@@ -21,7 +21,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
-use crate::util::{build_fqn, byte_range_to_lsp_range};
+use crate::text_position::byte_range_to_lsp_range;
+use crate::util::build_fqn;
 
 impl Backend {
     /// Collect document highlights for the symbol under the cursor.
@@ -174,7 +175,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
             None => (0, u32::MAX),
@@ -358,7 +359,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
             None => (0, u32::MAX),

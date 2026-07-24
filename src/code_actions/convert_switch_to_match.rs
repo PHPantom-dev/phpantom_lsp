@@ -16,7 +16,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::util::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 impl Backend {
     /// Collect "Convert to match expression" code actions for switch

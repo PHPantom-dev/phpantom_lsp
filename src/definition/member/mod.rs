@@ -34,11 +34,12 @@ use tower_lsp::lsp_types::*;
 
 use super::point_location;
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::resolver::ResolutionCtx;
 use crate::docblock;
+use crate::text_position::position_to_offset;
 use crate::types::ResolvedType;
 use crate::types::*;
-use crate::util::{find_class_at_offset, position_to_offset};
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, accessor_method_candidates, count_property_to_relationship_method,
     extends_eloquent_model, is_accessor_or_mutator_method, where_property_method_to_column,
@@ -675,7 +676,7 @@ impl Backend {
             (uri.to_string(), offset)
         };
         let content = self.get_file_content(&uri)?;
-        let position = crate::util::offset_to_position(&content, offset as usize + 1);
+        let position = crate::text_position::offset_to_position(&content, offset as usize + 1);
         let parsed_uri = Url::parse(&uri).ok()?;
         Some(point_location(parsed_uri, position))
     }

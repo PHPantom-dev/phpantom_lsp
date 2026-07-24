@@ -19,6 +19,7 @@ pub(crate) use tower_lsp::lsp_types::*;
 
 pub(crate) use crate::Backend;
 pub(crate) use crate::atom::bytes_to_str;
+pub(crate) use crate::class_lookup::find_class_at_offset;
 pub(crate) use crate::code_actions::cursor_context::{
     CursorContext, MemberContext, find_cursor_context,
 };
@@ -28,8 +29,8 @@ pub(crate) use crate::completion::phpdoc::generation::enrichment_plain;
 pub(crate) use crate::completion::resolver::Loaders;
 pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 pub(crate) use crate::types::ClassInfo;
-pub(crate) use crate::util::{find_class_at_offset, offset_to_position, position_to_byte_offset};
 
 mod codegen;
 mod context;

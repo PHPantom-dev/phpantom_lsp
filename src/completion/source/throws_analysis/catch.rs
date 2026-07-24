@@ -168,7 +168,7 @@ pub(crate) fn find_catch_blocks(body: &str) -> Vec<CatchInfo> {
                     let try_body_start = pos + 3 + brace_offset;
                     // Find the matching closing brace
                     if let Some(try_body_end) =
-                        crate::util::find_matching_forward(body, try_body_start, b'{', b'}')
+                        crate::text_scan::find_matching_forward(body, try_body_start, b'{', b'}')
                     {
                         // Now look for `catch` after the try block's `}`
                         let mut catch_search = try_body_end + 1;
@@ -201,9 +201,11 @@ pub(crate) fn find_catch_blocks(body: &str) -> Vec<CatchInfo> {
                                             remaining_start + paren_content_start + close_p + 1;
                                         if let Some(cb) = body[after_close_paren..].find('{') {
                                             let cb_start = after_close_paren + cb;
-                                            if let Some(cb_end) = crate::util::find_matching_forward(
-                                                body, cb_start, b'{', b'}',
-                                            ) {
+                                            if let Some(cb_end) =
+                                                crate::text_scan::find_matching_forward(
+                                                    body, cb_start, b'{', b'}',
+                                                )
+                                            {
                                                 if !type_names.is_empty() {
                                                     results.push(CatchInfo {
                                                         type_names,

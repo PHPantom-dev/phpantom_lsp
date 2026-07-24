@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::ranges_overlap;
+use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 

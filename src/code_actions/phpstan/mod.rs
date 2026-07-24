@@ -260,6 +260,155 @@ pub(super) fn line_byte_offset(content: &str, line: usize) -> usize {
     content.len()
 }
 
+/// Check if a `#[...]` line contains a specific PHP attribute name.
+///
+/// Matches patterns like `#[Override]`, `#[\Override]`,
+/// `#[Override, SomethingElse]`, `#[SomethingElse, \Override]`, etc.
+/// The attribute name is matched as a standalone token: preceded by
+/// `[`, `\`, `,`, or whitespace and followed by `]`, `,`, `(`, or
+/// whitespace.
+pub(crate) fn contains_php_attribute(line: &str, attr_name: &[u8]) -> bool {
+    let bytes = line.as_bytes();
+    let target_len = attr_name.len();
+
+    let mut i = 0;
+    while i + target_len <= bytes.len() {
+        if &bytes[i..i + target_len] == attr_name {
+            let ok_before = if i == 0 {
+                false
+            } else {
+                let prev = bytes[i - 1];
+                prev == b'[' || prev == b'\\' || prev == b',' || prev == b' ' || prev == b'\t'
+            };
+            let ok_after = if i + target_len >= bytes.len() {
+                true
+            } else {
+                let next = bytes[i + target_len];
+                next == b']' || next == b',' || next == b'(' || next == b' ' || next == b'\t'
+            };
+            if ok_before && ok_after {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Scan forward through `lines` starting at `start_line`, tracking brace
+/// depth while respecting string literals (`'…'`, `"…"`) and comments
+/// (`// …`, `/* … */`).
+///
+/// Calls `pred(depth)` after every `}` decrement.  Returns the line
+/// index of the first `}` where `pred` returns `true`.
+///
+/// # Examples
+///
+/// Find the closing `}` that matches the `{` on `brace_line` (depth
+/// starts at 0, first `{` pushes to 1, match when depth returns to 0):
+///
+/// ```ignore
+/// find_brace_match_line(&lines, brace_line, |d| d == 0);
+/// ```
+///
+/// Find the enclosing block's `}` from inside a body (depth starts at
+/// 0, first unmatched `}` brings depth to −1):
+///
+/// ```ignore
+/// find_brace_match_line(&lines, start_line, |d| d < 0);
+/// ```
+pub(crate) fn find_brace_match_line(
+    lines: &[&str],
+    start_line: usize,
+    pred: impl Fn(i32) -> bool,
+) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_block_comment = false;
+
+    for (line_idx, line) in lines.iter().enumerate().skip(start_line) {
+        let bytes = line.as_bytes();
+        let len = bytes.len();
+        let mut in_line_comment = false;
+        let mut i = 0;
+
+        while i < len {
+            let b = bytes[i];
+
+            if in_single_quote {
+                if b == b'\\' && i + 1 < len {
+                    i += 2; // skip escaped character
+                    continue;
+                }
+                if b == b'\'' {
+                    in_single_quote = false;
+                }
+                i += 1;
+                continue;
+            }
+
+            if in_double_quote {
+                if b == b'\\' && i + 1 < len {
+                    i += 2; // skip escaped character
+                    continue;
+                }
+                if b == b'"' {
+                    in_double_quote = false;
+                }
+                i += 1;
+                continue;
+            }
+
+            if in_block_comment {
+                if b == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
+                    in_block_comment = false;
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+
+            if in_line_comment {
+                i += 1;
+                continue;
+            }
+
+            // Normal code
+            if b == b'/' && i + 1 < len {
+                if bytes[i + 1] == b'/' {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if bytes[i + 1] == b'*' {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+
+            match b {
+                b'\'' => in_single_quote = true,
+                b'"' => in_double_quote = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if pred(depth) {
+                        return Some(line_idx);
+                    }
+                }
+                _ => {}
+            }
+
+            i += 1;
+        }
+    }
+
+    None
+}
+
 /// Split a PHPStan diagnostic message into the primary message and optional tip.
 ///
 /// `parse_phpstan_message()` in `phpstan.rs` appends the tip after a `\n`

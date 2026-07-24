@@ -13,9 +13,11 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::class_lookup::find_class_at_offset;
+use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
+use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
-use crate::util::{find_class_at_offset, offset_to_position, push_unique_location};
 
 impl Backend {
     pub(super) fn find_laravel_macro_references(

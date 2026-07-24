@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{DocumentLink, Range, Url};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 /// A resolved include/require path with its source range in the document.
 struct IncludeLink {

@@ -34,7 +34,7 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<ClassInfo> {
         let fqn = candidate.fqn();
-        crate::util::find_class_by_name(all_classes, &fqn)
+        crate::class_lookup::find_class_by_name(all_classes, &fqn)
             .map(|arc| ClassInfo::clone(arc))
             .or_else(|| class_loader(&fqn).map(Arc::unwrap_or_clone))
     }
@@ -174,7 +174,7 @@ impl Backend {
             && off > 0
             && (off as usize) <= content.len()
         {
-            let mut pos = crate::util::offset_to_position(content, off as usize);
+            let mut pos = crate::text_position::offset_to_position(content, off as usize);
             // For properties, place the cursor on the first letter
             // after `$` so that a second go-to-definition triggers
             // type-hint resolution (matches the text-search behavior).
@@ -215,7 +215,10 @@ impl Backend {
                         // columns, so convert the position after the `$`.
                         return Some(Position {
                             line: line_idx as u32,
-                            character: crate::util::byte_offset_to_utf16_col(line, col + 1),
+                            character: crate::text_position::byte_offset_to_utf16_col(
+                                line,
+                                col + 1,
+                            ),
                         });
                     }
                 }

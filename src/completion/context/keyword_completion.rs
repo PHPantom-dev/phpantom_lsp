@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
+use crate::class_lookup::find_class_at_offset;
 use crate::completion::class_completion::ClassNameContext;
 use crate::symbol_map::SymbolMap;
 use crate::types::{ClassInfo, ClassLikeKind};
-use crate::util::find_class_at_offset;
 
 /// Cursor context used to gate context-sensitive PHP keywords.
 #[derive(Debug, Clone, Copy)]
@@ -146,7 +146,7 @@ fn collect_ascii_words(chars: &[char], start: usize, end: usize) -> Vec<String> 
 /// header (before the opening `{`).
 fn declaration_header_kind(content: &str, position: Position) -> Option<DeclarationHeaderKind> {
     let chars: Vec<char> = content.chars().collect();
-    let offset = crate::util::position_to_char_offset(&chars, position)?;
+    let offset = crate::text_position::position_to_char_offset(&chars, position)?;
 
     let start = statement_segment_start(&chars, offset);
     let words = collect_ascii_words(&chars, start, offset);
@@ -203,7 +203,7 @@ fn declaration_header_kind(content: &str, position: Position) -> Option<Declarat
 /// an incomplete member declaration where only modifiers have been typed.
 fn is_after_member_modifier_chain(content: &str, position: Position) -> bool {
     let chars: Vec<char> = content.chars().collect();
-    let Some(offset) = crate::util::position_to_char_offset(&chars, position) else {
+    let Some(offset) = crate::text_position::position_to_char_offset(&chars, position) else {
         return false;
     };
     if offset == 0 || !chars[offset - 1].is_ascii_whitespace() {
@@ -296,7 +296,7 @@ pub(crate) fn build_keyword_context(
 /// right after the `:` backing-type separator, `None` otherwise.
 pub(crate) fn enum_backing_type_partial(content: &str, position: Position) -> Option<String> {
     let chars: Vec<char> = content.chars().collect();
-    let offset = crate::util::position_to_char_offset(&chars, position)?;
+    let offset = crate::text_position::position_to_char_offset(&chars, position)?;
 
     // Walk backward through the currently typed token.
     let mut partial_start = offset;

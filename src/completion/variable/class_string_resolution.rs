@@ -13,9 +13,10 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::resolve_class_keyword;
 use crate::parser::with_parsed_program;
 use crate::types::ClassInfo;
-use crate::util::{resolve_class_keyword, short_name};
+use crate::util::short_name;
 
 use crate::completion::conditional_resolution::extract_class_string_from_expr;
 use crate::completion::resolver::{Loaders, VarResolutionCtx};

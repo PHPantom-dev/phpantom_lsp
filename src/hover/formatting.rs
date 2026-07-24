@@ -9,8 +9,8 @@ use tower_lsp::lsp_types::*;
 use crate::docblock::parser::{DocblockInfo, parse_docblock_for_tags};
 use crate::php_type::PhpType;
 use crate::symbol_map::SymbolSpan;
+use crate::text_position::offset_to_position;
 use crate::types::*;
-use crate::util::offset_to_position;
 
 /// Convert a `SymbolSpan`'s byte offsets to an LSP `Range`.
 pub(super) fn symbol_span_to_range(content: &str, symbol: &SymbolSpan) -> Range {

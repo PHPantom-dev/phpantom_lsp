@@ -501,7 +501,7 @@ fn join_multiline_type(docblock: &str, start_in_docblock: usize) -> (String, Vec
     joined.push_str(first_chunk);
 
     // Check whether the first chunk has unclosed `<`, `(`, or `{`.
-    if !crate::util::has_unclosed_delimiters(&joined) {
+    if !crate::docblock::type_strings::has_unclosed_delimiters(&joined) {
         // Push one-past-end sentinel.
         offset_map.push(start_in_docblock + first_chunk.len());
         return (joined, offset_map);
@@ -555,7 +555,7 @@ fn join_multiline_type(docblock: &str, start_in_docblock: usize) -> (String, Vec
 
         pos = line_end;
 
-        if !crate::util::has_unclosed_delimiters(&joined) {
+        if !crate::docblock::type_strings::has_unclosed_delimiters(&joined) {
             break;
         }
     }

@@ -10,9 +10,11 @@ use super::*;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::references::push_unique_location;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind};
+use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
-use crate::util::{build_fqn, offset_to_position, push_unique_location};
+use crate::util::build_fqn;
 
 impl Backend {
     /// Find all references to a class/interface/trait/enum across all files.
@@ -395,7 +397,7 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
 
-        let current_class = crate::util::find_class_at_offset(&classes, offset)?;
+        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset)?;
 
         match ssp_kind {
             SelfStaticParentKind::Parent => current_class.parent_class.map(|a| a.to_string()),

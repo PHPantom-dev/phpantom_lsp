@@ -12,7 +12,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
-use crate::util::{line_start_byte_offset, offset_to_position, ranges_overlap, strip_fqn_prefix};
+use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
+use crate::util::strip_fqn_prefix;
 
 impl Backend {
     /// Build a `WorkspaceEdit` for renaming a namespace segment.
@@ -89,7 +90,8 @@ impl Backend {
             }
 
             if let Some(root) = workspace_root {
-                for path in crate::util::collect_php_files_gitignore(&root, &vendor_dir_paths) {
+                for path in crate::references::collect_php_files_gitignore(&root, &vendor_dir_paths)
+                {
                     if let Ok(uri) = Url::from_file_path(&path) {
                         uris.insert(uri.to_string());
                     }

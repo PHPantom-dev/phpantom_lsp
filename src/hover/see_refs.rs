@@ -93,7 +93,7 @@ impl Backend {
                 })
                 .filter(|&off| off > 0)?;
 
-            let pos = crate::util::offset_to_position(&class_content, offset as usize);
+            let pos = crate::text_position::offset_to_position(&class_content, offset as usize);
             let parsed_uri = Url::parse(&class_uri).ok()?;
             Some(format!("{}#L{}", parsed_uri, pos.line + 1))
         } else {
@@ -105,7 +105,10 @@ impl Backend {
             if cls.keyword_offset == 0 {
                 return None;
             }
-            let pos = crate::util::offset_to_position(&class_content, cls.keyword_offset as usize);
+            let pos = crate::text_position::offset_to_position(
+                &class_content,
+                cls.keyword_offset as usize,
+            );
             let parsed_uri = Url::parse(&class_uri).ok()?;
             Some(format!("{}#L{}", parsed_uri, pos.line + 1))
         }

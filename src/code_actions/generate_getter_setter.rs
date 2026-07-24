@@ -35,7 +35,7 @@ use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the cursor context and gather the (owned) accessor data.
         // The borrowed AST does not escape the closure.
