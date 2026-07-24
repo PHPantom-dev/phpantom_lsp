@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784854420826,
+  "lastUpdate": 1784857004479,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19831,6 +19831,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 93.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "15a051458df9e5fefdd97455cd1412ce64d55b5c",
+          "message": "Fix flaky resolve on shadowed classes",
+          "timestamp": "2026-07-24T03:21:08+02:00",
+          "tree_id": "a3d83a2de101a8d4bd10de08ee1208ee345080cd",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/15a051458df9e5fefdd97455cd1412ce64d55b5c"
+        },
+        "date": 1784857002483,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 48.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95.1,
             "unit": "MiB"
           }
         ]
