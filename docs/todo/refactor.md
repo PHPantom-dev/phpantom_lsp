@@ -220,35 +220,27 @@ Each item must include:
 copies-for-another-code-path that should collapse onto one
 implementation (do this after — or as part of — the splits above):
 
-1. **Call return-type wrappers.** `resolve_rhs_method_call_inner` /
-   `resolve_rhs_static_call` / `resolve_rhs_function_call`
-   (`rhs_resolution/calls.rs`) call into
-   `Backend::resolve_method_return_types_with_args`
-   (`call_resolution/return_types.rs`) but each re-implements the
-   surrounding self/static substitution, union-owner expansion, and
-   scalar fallbacks. Consolidate the pre/post logic into one shared
-   entry point.
-2. **Callable-param inference.** The `*_fw`-suffixed family in
+1. **Callable-param inference.** The `*_fw`-suffixed family in
    `forward_walk/` parallels the logic in
    `completion/variable/closure_resolution.rs`. The suffix itself marks
    a copy; unify them.
-3. **`$this`/`self`/`static` resolution.** ~32 call sites spread across
+2. **`$this`/`self`/`static` resolution.** ~32 call sites spread across
    `util.rs` (`is_self_or_static`, `resolve_class_keyword`),
    `call_resolution/callable_target.rs` (`resolve_class_name_keyword`),
    `resolver/mod.rs` (`resolve_static_owner_class`), and `forward_walk/`
    (`seed_this`), plus hand-rolled `== "$this"` checks. Back them with
    one helper module.
-4. **Subclass checks.** `is_subclass_of` (`forward_walk/`),
+3. **Subclass checks.** `is_subclass_of` (`forward_walk/`),
    `is_type_subclass_of` and `is_valid_virtual_narrowing`
    (`call_resolution/return_types.rs`), and `util::is_subtype_of*`
    overlap; route through the `util`/`php_type` versions.
-5. **Property-assignment scanning.** The
+4. **Property-assignment scanning.** The
    `find_*_this_property_assignment*` family
    (`rhs_resolution/property_access.rs`) and the
    `walk_property_narrowing_*` family (`resolver/property_narrowing.rs`)
    walk class members and statements with near-identical skeletons for
    different outputs. Share the traversal.
-6. **Argument-text extraction.** `extract_argument_texts_fw` /
+5. **Argument-text extraction.** `extract_argument_texts_fw` /
    `extract_first_arg_string_fw` (`forward_walk/`) vs
    `extract_first_arg_text` / `resolve_inline_arg_raw_type`
    (`call_resolution/arg_type_resolution.rs`) vs

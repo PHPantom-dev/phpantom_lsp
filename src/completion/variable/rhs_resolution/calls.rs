@@ -1173,9 +1173,7 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
         ctx.content,
     );
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-    let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
-    let var_resolver = build_var_resolver_from_ctx(ctx);
 
     // ── Expand union generic receivers ──────────────────────────
     // When the receiver is a union type like `C<A>|C<B>`, the variable
@@ -1251,266 +1249,32 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
         let mut template_subs = class_level_subs;
         template_subs.extend(method_template_subs);
         template_subs.extend(if_this_is_subs);
-        let mr_ctx = MethodReturnCtx {
-            all_classes: ctx.all_classes,
-            class_loader: ctx.class_loader,
-            template_subs: &template_subs,
-            var_resolver: Some(&var_resolver),
-            cache: ctx.resolved_class_cache,
-            calling_class_name: Some(&ctx.current_class.name),
-            is_static: false,
-        };
-        // Recover the effective return type string from the method.
-        // Look up the method on the (possibly merged) owner and apply
-        // the same template substitution that
-        // `resolve_method_return_types_with_args` used internally,
-        // then replace `static`/`self`/`$this` with the owner class
-        // name (or the receiver's full generic type when available)
-        // so that e.g. `static[]` becomes `Country[]` and a bare
-        // `static` on `Builder<Article>` becomes `Builder<Article>`.
-        // Try the owner directly first — it may already be fully resolved
-        // with generic substitutions applied.  The cache is keyed by bare
-        // FQN and returns the un-substituted base class, so prefer the
-        // owner's own method to preserve template substitutions.
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            owner,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        if let Some((date_class, date_return_type)) =
-            Backend::configured_laravel_date_return(&merged, &method_name, ctx.class_loader)
-        {
-            let owner_results =
-                ResolvedType::from_classes_with_hint(vec![date_class], date_return_type);
-            if !is_union {
-                return owner_results;
-            }
-            ResolvedType::extend_unique(&mut union_results, owner_results);
-            continue;
-        }
-        let owner_method = owner.get_method_ci(&method_name);
-        let merged_method = merged.get_method_ci(&method_name);
-        // Prefer the merged method's return type when the owner's method
-        // has no docblock override (return_type == native_return_type).
-        // The merged method carries inherited types from interfaces/parents
-        // with template substitutions already applied (e.g. `V|null` →
-        // `User|null` from `@implements Collection<string, User>`).
-        let method_ref = match (owner_method, merged_method) {
-            (Some(om), Some(mm))
-                if om.return_type == om.native_return_type
-                    && mm.return_type != mm.native_return_type =>
-            {
-                Some(mm)
-            }
-            (Some(om), _) => Some(om),
-            (None, Some(mm)) => Some(mm),
-            (None, None) => {
-                // Method not found — fall back to __call's return type.
-                merged.get_method_ci("__call")
-            }
-        };
-        let native_ret_type_string = method_ref.and_then(|m| m.return_type.as_ref()).map(|ret| {
-            let substituted = if !template_subs.is_empty() {
-                ret.substitute(&template_subs).simplified()
-            } else {
-                ret.clone()
+
+        // When the return type contains `static`/`self`/`$this` and the
+        // receiver was resolved with generic parameters, use the
+        // receiver's full type (e.g. `Builder<Article>`) for
+        // substitution so the generics are preserved; otherwise fall
+        // back to a plain FQN swap.
+        let owner_key = owner.fqn();
+        let self_replace =
+            |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
+                Some(rt) => ty.replace_self_with_type(&rt),
+                None => ty.replace_self(&owner_key),
             };
-            // Resolve `parent` to the concrete parent class name before
-            // any self/static replacement so that downstream consumers
-            // see a real FQN instead of the keyword.
-            let substituted = if substituted.is_parent_ref() {
-                owner
-                    .parent_class
-                    .as_ref()
-                    .map(|p| PhpType::Named(p.to_string()))
-                    .unwrap_or(substituted)
-            } else {
-                substituted
-            };
-            // When the return type contains `static`/`self`/`$this`
-            // and the receiver was resolved with generic parameters,
-            // use the receiver's full type (e.g. `Builder<Article>`)
-            // for substitution so the generics are preserved.
-            let owner_key = owner.fqn();
-            let receiver_type = if substituted.contains_self_ref() {
-                receiver_type_for_owner(&receiver_resolved, &owner_key)
-            } else {
-                None
-            };
-            match receiver_type {
-                Some(rt) => substituted.replace_self_with_type(&rt),
-                None => substituted.replace_self(&owner_key),
-            }
-        });
 
-        // Resolver from an argument's source text to its type, used to
-        // evaluate `is <Type>` conditions whose argument is an expression
-        // (a method-call chain, property access, …) rather than a literal.
-        let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
-
-        // Resolve the PHPStan conditional return type against the call-site
-        // arguments, if the method declares one.  When it yields an
-        // informative type it is *authoritative*: the branch it selects
-        // (e.g. `list<\stdClass>` from `PDOStatement::fetchAll`, or
-        // `array<TKey, static>` for a literal-array argument) supersedes the
-        // method's broad native union return type.  Resolving classes from
-        // the native union instead would both ignore the call-site narrowing
-        // and silently drop scalar or `array` members the union carries.
-        let conditional_ret = resolve_conditional_return_for_call(
-            method_ref,
-            &text_args,
-            Some(&var_resolver),
-            &ctx.current_class.name,
-            ctx.class_loader,
-            &template_subs,
-            Some(&arg_ty_resolver),
-            |ty| {
-                let owner_key = owner.fqn();
-                match receiver_type_for_owner(&receiver_resolved, &owner_key) {
-                    Some(rt) => ty.replace_self_with_type(&rt),
-                    None => ty.replace_self(&owner_key),
-                }
-            },
-        );
-
-        // Collapse any conditionals nested inside the (template-substituted)
-        // native return type against the call arguments, so a generic
-        // wrapper like `Collection<($groupBy is array|string ? array-key :
-        // …), …>` yields a concrete key type instead of carrying a raw
-        // conditional that later gets compared against — and printed in — an
-        // argument-type diagnostic.
-        let native_ret_type_string = native_ret_type_string.map(|ty| {
-            if ty.contains_conditional() {
-                let params = method_ref.map(|m| m.parameters.as_slice()).unwrap_or(&[]);
-                let tpl = crate::completion::conditional_resolution::TemplateContext {
-                    defaults: Some(&template_subs),
-                    params: method_ref
-                        .map(|m| m.template_params.as_slice())
-                        .unwrap_or(&[]),
-                    arg_type_resolver: Some(&arg_ty_resolver),
-                };
-                crate::completion::conditional_resolution::evaluate_nested_conditionals_text(
-                    &ty,
-                    params,
-                    &text_args,
-                    Some(&var_resolver),
-                    Some(&ctx.current_class.name),
-                    ctx.class_loader,
-                    &tpl,
-                )
-            } else {
-                ty
-            }
-        });
-
-        // When the conditional resolved to a definite, informative type, it
-        // wins — resolve the result classes from it directly.
-        if let Some(cond_ty) = conditional_ret {
-            let owner_results = resolve_from_authoritative_type(
-                cond_ty,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            if !is_union {
-                return owner_results;
-            }
-            ResolvedType::extend_unique(&mut union_results, owner_results);
-            continue;
-        }
-
-        let ret_type_string = native_ret_type_string;
-
-        let results = Backend::resolve_method_return_types_with_args(
+        let owner_results = resolve_owner_method_call(
             owner,
             &method_name,
-            &text_args,
-            &mr_ctx,
+            argument_list,
+            ctx,
+            false,
+            &template_subs,
+            &self_replace,
         );
-        if !results.is_empty() {
-            let classes: Vec<Arc<ClassInfo>> = results;
-            let owner_results = match ret_type_string {
-                Some(hint) => ResolvedType::from_classes_with_hint(classes, hint),
-                None => ResolvedType::from_classes(classes),
-            };
-            if !is_union {
-                return owner_results;
-            }
-            ResolvedType::extend_unique(&mut union_results, owner_results);
-            continue;
+        if !is_union {
+            return owner_results;
         }
-
-        // The method has a return type string but `type_hint_to_classes_typed`
-        // found no matching class (e.g. `list<Widget>`, `int`,
-        // `array{name: string}`).  Return a type-string-only entry so
-        // that consumers reading `.type_string` (hover, foreach
-        // resolution, null-coalesce stripping) still get the information.
-        //
-        // Return the type string even for non-informative types like
-        // `array` or `mixed` — a correct-but-vague type is better
-        // than keeping the previous (wrong) type after reassignment.
-        // Skip only `void` (void methods don't produce a value).
-        // Also expand type aliases before returning so that
-        // `@phpstan-type UserList array<int, User>` with
-        // `@return UserList` is expanded to its concrete type.
-        if let Some(ref hint) = ret_type_string {
-            let expanded = crate::completion::type_resolution::resolve_type_alias_typed(
-                hint,
-                &owner.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            let parsed_effective = match expanded {
-                Some(e) => e,
-                None => hint.clone(),
-            };
-            if parsed_effective == PhpType::void() {
-                let owner_results = vec![ResolvedType::from_type_string(PhpType::null())];
-                if !is_union {
-                    return owner_results;
-                }
-                ResolvedType::extend_unique(&mut union_results, owner_results);
-                continue;
-            }
-            let owner_results = vec![resolved_type_with_lookup(
-                parsed_effective,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )];
-            if !is_union {
-                return owner_results;
-            }
-            ResolvedType::extend_unique(&mut union_results, owner_results);
-            continue;
-        }
-
-        // Body return type inference fallback: when the method has no
-        // declared return type and no @return docblock, try to infer
-        // the return type from the method body.  This handles non-class
-        // types (list<Foo>, int, array shapes) that
-        // resolve_method_return_types_with_args cannot represent.
-        if method_ref
-            .is_some_and(|m| m.return_type.is_none() && m.name_offset != 0 && !m.is_virtual)
-            && let Some(inferred) = crate::completion::call_resolution::try_infer_body_return_type(
-                &owner.fqn(),
-                method_ref.unwrap(),
-            )
-            && !inferred.is_void()
-            && !inferred.is_mixed()
-        {
-            let owner_results = vec![resolved_type_with_lookup(
-                inferred,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )];
-            if !is_union {
-                return owner_results;
-            }
-            ResolvedType::extend_unique(&mut union_results, owner_results);
-            continue;
-        }
+        ResolvedType::extend_unique(&mut union_results, owner_results);
     }
 
     // For intersection types, filter out `mixed` when concrete types exist.
@@ -1757,6 +1521,237 @@ pub(super) fn resolve_from_authoritative_type(
     )]
 }
 
+/// Resolve a method call's return type against a single, fully determined
+/// owner class: template substitution, `@psalm-if-this-is` narrowing (via
+/// the caller-supplied `template_subs`), PHPStan conditional return types,
+/// and body-return-type inference, in that order.
+///
+/// Shared by instance method calls (called once per union-receiver branch)
+/// and static method calls (a single owner, no receiver-derived generics).
+/// `self_replace` maps `static`/`self`/`$this` in a resolved return type to
+/// the owner's concrete type: generic-aware (via [`receiver_type_for_owner`])
+/// for instance calls, a plain FQN swap for static calls, which have no
+/// receiver expression to carry generics.
+pub(super) fn resolve_owner_method_call(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+    is_static: bool,
+    template_subs: &HashMap<String, PhpType>,
+    self_replace: &dyn Fn(&PhpType) -> PhpType,
+) -> Vec<ResolvedType> {
+    let current_class_name: &str = &ctx.current_class.name;
+    let arg_texts = crate::completion::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        ctx.content,
+    );
+    let text_args = arg_texts.join(", ");
+    let rctx = ctx.as_resolution_ctx();
+    let var_resolver = build_var_resolver_from_ctx(ctx);
+    let mr_ctx = MethodReturnCtx {
+        all_classes: ctx.all_classes,
+        class_loader: ctx.class_loader,
+        template_subs,
+        var_resolver: Some(&var_resolver),
+        cache: ctx.resolved_class_cache,
+        calling_class_name: Some(&ctx.current_class.name),
+        is_static,
+    };
+
+    // Try the owner directly first — it may already be fully resolved with
+    // generic substitutions applied.  The cache is keyed by bare FQN and
+    // returns the un-substituted base class, so prefer the owner's own
+    // method to preserve template substitutions.
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        owner,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    if let Some((date_class, date_return_type)) =
+        Backend::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
+    {
+        return ResolvedType::from_classes_with_hint(vec![date_class], date_return_type);
+    }
+
+    let owner_method = owner.get_method_ci(method_name);
+    let merged_method = merged.get_method_ci(method_name);
+    // Prefer the merged method's return type when the owner's method has no
+    // docblock override (return_type == native_return_type).  The merged
+    // method carries inherited types from interfaces/parents with template
+    // substitutions already applied (e.g. `V|null` → `User|null` from
+    // `@implements Collection<string, User>`).
+    let method_ref = match (owner_method, merged_method) {
+        (Some(om), Some(mm))
+            if om.return_type == om.native_return_type
+                && mm.return_type != mm.native_return_type =>
+        {
+            Some(mm)
+        }
+        (Some(om), _) => Some(om),
+        (None, Some(mm)) => Some(mm),
+        // Method not found — fall back to the magic method's return type.
+        (None, None) => merged.get_method_ci(if is_static { "__callStatic" } else { "__call" }),
+    };
+    // Recover the effective return type string from the method and replace
+    // `static`/`self`/`$this` with the owner's concrete type so that e.g.
+    // `static[]` becomes `Country[]`.
+    let native_ret_type_string = method_ref.and_then(|m| m.return_type.as_ref()).map(|ret| {
+        let substituted = if !template_subs.is_empty() {
+            ret.substitute(template_subs).simplified()
+        } else {
+            ret.clone()
+        };
+        // Resolve `parent` to the concrete parent class name before any
+        // self/static replacement so that downstream consumers see a real
+        // FQN instead of the keyword.
+        let substituted = if substituted.is_parent_ref() {
+            owner
+                .parent_class
+                .as_ref()
+                .map(|p| PhpType::Named(p.to_string()))
+                .unwrap_or(substituted)
+        } else {
+            substituted
+        };
+        if substituted.contains_self_ref() {
+            self_replace(&substituted)
+        } else {
+            substituted
+        }
+    });
+
+    // Resolver from an argument's source text to its type, used to evaluate
+    // `is <Type>` conditions whose argument is an expression (a method-call
+    // chain, property access, …) rather than a literal.
+    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
+
+    // Resolve the PHPStan conditional return type against the call-site
+    // arguments, if the method declares one.  When it yields an informative
+    // type it is *authoritative*: the branch it selects (e.g.
+    // `list<\stdClass>` from `PDOStatement::fetchAll`, or `array<TKey,
+    // static>` for a literal-array argument) supersedes the method's broad
+    // native union return type.  Resolving classes from the native union
+    // instead would both ignore the call-site narrowing and silently drop
+    // scalar or `array` members the union carries.
+    let conditional_ret = resolve_conditional_return_for_call(
+        method_ref,
+        &text_args,
+        Some(&var_resolver),
+        current_class_name,
+        ctx.class_loader,
+        template_subs,
+        Some(&arg_ty_resolver),
+        self_replace,
+    );
+
+    // Collapse any conditionals nested inside the (template-substituted)
+    // native return type against the call arguments, so a generic wrapper
+    // like `Collection<($groupBy is array|string ? array-key : …), …>`
+    // yields a concrete key type instead of carrying a raw conditional that
+    // later gets compared against — and printed in — an argument-type
+    // diagnostic.
+    let native_ret_type_string = native_ret_type_string.map(|ty| {
+        if ty.contains_conditional() {
+            let params = method_ref.map(|m| m.parameters.as_slice()).unwrap_or(&[]);
+            let tpl = crate::completion::conditional_resolution::TemplateContext {
+                defaults: Some(template_subs),
+                params: method_ref
+                    .map(|m| m.template_params.as_slice())
+                    .unwrap_or(&[]),
+                arg_type_resolver: Some(&arg_ty_resolver),
+            };
+            crate::completion::conditional_resolution::evaluate_nested_conditionals_text(
+                &ty,
+                params,
+                &text_args,
+                Some(&var_resolver),
+                Some(current_class_name),
+                ctx.class_loader,
+                &tpl,
+            )
+        } else {
+            ty
+        }
+    });
+
+    // When the conditional resolved to a definite, informative type, it
+    // wins — resolve the result classes from it directly.
+    if let Some(cond_ty) = conditional_ret {
+        return resolve_from_authoritative_type(
+            cond_ty,
+            current_class_name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+    }
+
+    let ret_type_string = native_ret_type_string;
+
+    let results =
+        Backend::resolve_method_return_types_with_args(owner, method_name, &text_args, &mr_ctx);
+    if !results.is_empty() {
+        return match ret_type_string {
+            Some(hint) => ResolvedType::from_classes_with_hint(results, hint),
+            None => ResolvedType::from_classes(results),
+        };
+    }
+
+    // The method has a return type string but `type_hint_to_classes_typed`
+    // found no matching class (e.g. `list<Widget>`, `int`, `array{name:
+    // string}`).  Return a type-string-only entry so that consumers reading
+    // `.type_string` (hover, foreach resolution, null-coalesce stripping)
+    // still get the information.
+    //
+    // Return the type string even for non-informative types like `array` or
+    // `mixed` — a correct-but-vague type is better than keeping the
+    // previous (wrong) type after reassignment.  Skip only `void` (void
+    // methods don't produce a value).  Also expand type aliases before
+    // returning so that `@phpstan-type UserList array<int, User>` with
+    // `@return UserList` is expanded to its concrete type.
+    if let Some(hint) = ret_type_string {
+        let expanded = crate::completion::type_resolution::resolve_type_alias_typed(
+            &hint,
+            &owner.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        let parsed_effective = expanded.unwrap_or(hint);
+        if parsed_effective == PhpType::void() {
+            return vec![ResolvedType::from_type_string(PhpType::null())];
+        }
+        return vec![resolved_type_with_lookup(
+            parsed_effective,
+            current_class_name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )];
+    }
+
+    // Body return type inference fallback: when the method has no declared
+    // return type and no @return docblock, try to infer the return type
+    // from the method body.  This handles non-class types (list<Foo>, int,
+    // array shapes) that resolve_method_return_types_with_args cannot
+    // represent.
+    if method_ref.is_some_and(|m| m.return_type.is_none() && m.name_offset != 0 && !m.is_virtual)
+        && let Some(inferred) = crate::completion::call_resolution::try_infer_body_return_type(
+            &owner.fqn(),
+            method_ref.unwrap(),
+        )
+        && !inferred.is_void()
+        && !inferred.is_mixed()
+    {
+        return vec![resolved_type_with_lookup(
+            inferred,
+            current_class_name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )];
+    }
+
+    vec![]
+}
+
 /// Resolve a static method call: `ClassName::method()`, `self::method()`,
 /// `static::method()`.
 pub(super) fn resolve_rhs_static_call(
@@ -1959,169 +1954,21 @@ pub(super) fn resolve_rhs_static_call(
                     ctx.content,
                 );
             let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-            let text_args = arg_texts.join(", ");
             let rctx = ctx.as_resolution_ctx();
             let template_subs =
                 Backend::build_method_template_subs(owner, &method_name, &arg_refs, &rctx);
-            let var_resolver = build_var_resolver_from_ctx(ctx);
-            let mr_ctx = MethodReturnCtx {
-                all_classes: ctx.all_classes,
-                class_loader: ctx.class_loader,
-                template_subs: &template_subs,
-                var_resolver: Some(&var_resolver),
-                cache: ctx.resolved_class_cache,
-                calling_class_name: Some(&ctx.current_class.name),
-                is_static: true,
-            };
-            // Recover the effective return type string from the method.
-            // Look up the method on the (possibly merged) owner and apply
-            // the same template substitution that
-            // `resolve_method_return_types_with_args` used internally,
-            // then replace `static`/`self`/`$this` with the owner class
-            // name so that e.g. `static[]` becomes `Country[]`.
-            // Try the owner directly first — it may already be fully resolved
-            // with generic substitutions applied.  The cache is keyed by bare
-            // FQN and returns the un-substituted base class, so prefer the
-            // owner's own method to preserve template substitutions.
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                owner,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            let method_ref = owner
-                .get_method_ci(&method_name)
-                .or_else(|| merged.get_method_ci(&method_name));
-            if let Some((date_class, date_return_type)) =
-                Backend::configured_laravel_date_return(&merged, &method_name, ctx.class_loader)
-            {
-                return ResolvedType::from_classes_with_hint(vec![date_class], date_return_type);
-            }
-            let native_ret_type_string =
-                method_ref.and_then(|m| m.return_type.as_ref()).map(|ret| {
-                    let substituted = if !template_subs.is_empty() {
-                        ret.substitute(&template_subs)
-                    } else {
-                        ret.clone()
-                    };
-                    substituted.replace_self(&owner.fqn())
-                });
+            let owner_key = owner.fqn();
+            let self_replace = |ty: &PhpType| ty.replace_self(&owner_key);
 
-            // Resolver from an argument's source text to its type, used to
-            // evaluate `is <Type>` conditions whose argument is an expression
-            // (e.g. `Str::replace(..., $obj->toHtml())`) rather than a
-            // literal, so the correct branch is chosen.
-            let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
-
-            // Resolve the PHPStan conditional return type against the
-            // call-site arguments, if the method declares one.  When this
-            // yields an informative type it is *authoritative*: the branch
-            // it selects (e.g. `array<TKey, static>` for a literal-array
-            // argument) supersedes the method's broad native union return
-            // type.  Resolving classes from the native union instead would
-            // both ignore the call-site narrowing and silently drop scalar
-            // or `array` members that the union carries.
-            let conditional_ret = resolve_conditional_return_for_call(
-                method_ref,
-                &text_args,
-                Some(&var_resolver),
-                &ctx.current_class.name,
-                ctx.class_loader,
-                &template_subs,
-                Some(&arg_ty_resolver),
-                |ty| ty.replace_self(&owner.fqn()),
-            );
-
-            // Collapse conditionals nested inside the native return type
-            // (e.g. a static factory returning `Collection<($k is
-            // array|string ? array-key : …), …>`) against the call
-            // arguments.  Only applies when there is no top-level
-            // conditional (that path is handled above).
-            let native_ret_type_string = native_ret_type_string.map(|ty| {
-                if ty.contains_conditional() {
-                    let params = method_ref.map(|m| m.parameters.as_slice()).unwrap_or(&[]);
-                    let tpl = crate::completion::conditional_resolution::TemplateContext {
-                        defaults: Some(&template_subs),
-                        params: method_ref
-                            .map(|m| m.template_params.as_slice())
-                            .unwrap_or(&[]),
-                        arg_type_resolver: Some(&arg_ty_resolver),
-                    };
-                    crate::completion::conditional_resolution::evaluate_nested_conditionals_text(
-                        &ty,
-                        params,
-                        &text_args,
-                        Some(&var_resolver),
-                        Some(&ctx.current_class.name),
-                        ctx.class_loader,
-                        &tpl,
-                    )
-                } else {
-                    ty
-                }
-            });
-
-            // When the conditional resolved to a definite, informative type,
-            // it wins — resolve the result classes from it directly.
-            if let Some(cond_ty) = conditional_ret {
-                return resolve_from_authoritative_type(
-                    cond_ty,
-                    current_class_name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-            }
-
-            let ret_type_string = native_ret_type_string;
-
-            let results = Backend::resolve_method_return_types_with_args(
+            return resolve_owner_method_call(
                 owner,
                 &method_name,
-                &text_args,
-                &mr_ctx,
+                &static_call.argument_list,
+                ctx,
+                true,
+                &template_subs,
+                &self_replace,
             );
-            if !results.is_empty() {
-                let classes: Vec<Arc<ClassInfo>> = results;
-                return match ret_type_string {
-                    Some(hint) => ResolvedType::from_classes_with_hint(classes, hint),
-                    None => ResolvedType::from_classes(classes),
-                };
-            }
-
-            // The method has a return type string but `type_hint_to_classes_typed`
-            // found no matching class (e.g. `list<Widget>`, `int`,
-            // `array{name: string}`).  Return a type-string-only entry so
-            // that consumers reading `.type_string` (hover, raw-type
-            // pipeline, null-coalesce stripping) still get the information.
-            if let Some(ref hint) = ret_type_string {
-                if *hint == PhpType::void() {
-                    return vec![ResolvedType::from_type_string(PhpType::null())];
-                }
-                return vec![resolved_type_with_lookup(
-                    hint.clone(),
-                    current_class_name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                )];
-            }
-
-            // Body return type inference fallback (static calls).
-            if method_ref
-                .is_some_and(|m| m.return_type.is_none() && m.name_offset != 0 && !m.is_virtual)
-                && let Some(inferred) =
-                    crate::completion::call_resolution::try_infer_body_return_type(
-                        &owner.fqn(),
-                        method_ref.unwrap(),
-                    )
-                && !inferred.is_void()
-                && !inferred.is_mixed()
-            {
-                return vec![resolved_type_with_lookup(
-                    inferred,
-                    current_class_name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                )];
-            }
         }
     }
     vec![]
