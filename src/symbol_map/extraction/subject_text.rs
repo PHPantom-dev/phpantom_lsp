@@ -2,106 +2,123 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use super::*;
+use crate::subject_expr::{BracketSegment, SubjectExpr};
 
 // ─── Expression to subject text ─────────────────────────────────────────────
 
 /// Convert an AST expression to the subject text string that
 /// `resolve_target_classes` expects.
+///
+/// This is a thin renderer over [`expr_to_subject_expr`]: the AST is first
+/// lowered into a structured [`SubjectExpr`], which is then serialised by
+/// [`SubjectExpr::to_subject_text`].  Keeping a single serialiser (the one on
+/// `SubjectExpr`) prevents this AST path and the string-parse path
+/// (`SubjectExpr::parse`) from drifting apart.  Expressions with no subject
+/// representation (dynamic member names on nested chains, unsupported forms)
+/// lower to `None` and render as the empty string.
 pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
-    match expr {
-        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
-        Expression::Self_(_) => "self".to_string(),
-        Expression::Static(_) => "static".to_string(),
-        Expression::Parent(_) => "parent".to_string(),
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
+    expr_to_subject_expr(expr)
+        .map(|se| se.to_subject_text())
+        .unwrap_or_default()
+}
 
-        Expression::Access(Access::Property(pa)) => {
-            let obj = expr_to_subject_text(pa.object);
-            if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                format!("{}->{}", obj, bytes_to_str(ident.value))
-            } else {
-                obj
-            }
+/// Lower an AST expression into a structured [`SubjectExpr`].
+///
+/// Returns `None` when the expression has no subject-text representation
+/// (e.g. it is a form the type engine cannot resolve).  Call arguments are
+/// serialised eagerly via [`format_all_call_args`] and stored as the raw
+/// `args_text` of the resulting [`SubjectExpr::CallExpr`].
+///
+/// Note on null-safe access: `SubjectExpr` does not distinguish `?->` from
+/// `->` (`SubjectExpr::parse` strips the `?` and the resolver normalises the
+/// two), so null-safe property and method access lower to the same
+/// `PropertyChain` / `MethodCall` shapes as their plain counterparts.
+pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr> {
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => {
+            Some(SubjectExpr::Variable(bytes_to_str(dv.name).to_string()))
         }
-        Expression::Access(Access::NullSafeProperty(pa)) => {
-            let obj = expr_to_subject_text(pa.object);
-            if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                format!("{}?->{}", obj, bytes_to_str(ident.value))
-            } else {
-                obj
-            }
-        }
+        Expression::Self_(_) => Some(SubjectExpr::SelfKw),
+        Expression::Static(_) => Some(SubjectExpr::StaticKw),
+        Expression::Parent(_) => Some(SubjectExpr::Parent),
+        Expression::Identifier(ident) => Some(SubjectExpr::ClassName(
+            bytes_to_str(ident.value()).to_string(),
+        )),
+
+        // Property access (plain `->` and null-safe `?->` share a shape).
+        Expression::Access(Access::Property(pa)) => lower_property(pa.object, &pa.property),
+        Expression::Access(Access::NullSafeProperty(pa)) => lower_property(pa.object, &pa.property),
         Expression::Access(Access::StaticProperty(spa)) => {
-            let class_text = expr_to_subject_text(spa.class);
+            let class = expr_to_subject_expr(spa.class)?;
             if let Variable::Direct(dv) = &spa.property {
-                format!("{}::{}", class_text, bytes_to_str(dv.name))
+                Some(SubjectExpr::StaticAccess {
+                    class: class.to_subject_text(),
+                    member: bytes_to_str(dv.name).to_string(),
+                })
             } else {
-                class_text
+                Some(class)
             }
         }
         Expression::Access(Access::ClassConstant(cca)) => {
-            let class_text = expr_to_subject_text(cca.class);
+            let class = expr_to_subject_expr(cca.class)?;
             match &cca.constant {
-                ClassLikeConstantSelector::Identifier(ident) => {
-                    format!("{}::{}", class_text, bytes_to_str(ident.value))
-                }
-                _ => class_text,
+                ClassLikeConstantSelector::Identifier(ident) => Some(SubjectExpr::StaticAccess {
+                    class: class.to_subject_text(),
+                    member: bytes_to_str(ident.value).to_string(),
+                }),
+                _ => Some(class),
             }
         }
 
+        // Instance method call (plain `->` and null-safe `?->` share a
+        // shape).  A dynamic method name (`$obj->$name()`) has no identifier,
+        // so the method lowers to `?` — the type engine cannot resolve it
+        // either way.
         Expression::Call(Call::Method(mc)) => {
-            let obj = expr_to_subject_text(mc.object);
-            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let args_text = format_all_call_args(&mc.argument_list.arguments);
-                format!("{}->{}({})", obj, bytes_to_str(ident.value), args_text)
-            } else {
-                format!("{}->?()", obj)
-            }
+            lower_method_call(mc.object, &mc.method, &mc.argument_list.arguments)
         }
         Expression::Call(Call::NullSafeMethod(mc)) => {
-            let obj = expr_to_subject_text(mc.object);
-            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let args_text = format_all_call_args(&mc.argument_list.arguments);
-                format!("{}?->{}({})", obj, bytes_to_str(ident.value), args_text)
-            } else {
-                format!("{}?->?()", obj)
-            }
+            lower_method_call(mc.object, &mc.method, &mc.argument_list.arguments)
         }
         Expression::Call(Call::StaticMethod(sc)) => {
-            let class_text = expr_to_subject_text(sc.class);
-            if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
-                let args_text = format_all_call_args(&sc.argument_list.arguments);
-                format!(
-                    "{}::{}({})",
-                    class_text,
-                    bytes_to_str(ident.value),
-                    args_text
-                )
-            } else {
-                format!("{}::?()", class_text)
-            }
+            let class = expr_to_subject_expr(sc.class)?;
+            let (method, args_text) = match &sc.method {
+                ClassLikeMemberSelector::Identifier(ident) => (
+                    bytes_to_str(ident.value).to_string(),
+                    format_all_call_args(&sc.argument_list.arguments),
+                ),
+                _ => ("?".to_string(), String::new()),
+            };
+            Some(SubjectExpr::CallExpr {
+                callee: Box::new(SubjectExpr::StaticMethodCall {
+                    class: class.to_subject_text(),
+                    method,
+                }),
+                args_text,
+            })
         }
         Expression::Call(Call::Function(fc)) => {
-            let func_text = expr_to_subject_text(fc.function);
+            let callee = expr_to_subject_expr(fc.function)?;
             let args_text = format_all_call_args(&fc.argument_list.arguments);
-            // When the callee is a parenthesized expression (e.g.
-            // `($this->formatter)()`), wrap the inner text back in
-            // parens so that `SubjectExpr::parse` sees
-            // `($this->formatter)()` rather than `$this->formatter()`
-            // (which would be parsed as a method call).
-            if matches!(fc.function, Expression::Parenthesized(_)) {
-                format!("({})({})", func_text, args_text)
-            } else {
-                format!("{}({})", func_text, args_text)
-            }
+            // `SubjectExpr::to_subject_text` wraps callees that are not
+            // callable-by-name (property chains, array access, nested calls)
+            // in parentheses, so `($this->formatter)()` round-trips through
+            // `SubjectExpr::parse` as an invoke rather than a method call.
+            Some(SubjectExpr::CallExpr {
+                callee: Box::new(callee),
+                args_text,
+            })
         }
 
-        Expression::Instantiation(inst) => expr_to_subject_text(inst.class),
+        // `new Foo(...)` as a subject lowers to just the class name, matching
+        // the historical behaviour where the constructed instance resolves
+        // through its class.
+        Expression::Instantiation(inst) => expr_to_subject_expr(inst.class),
 
-        Expression::Parenthesized(paren) => expr_to_subject_text(paren.expression),
+        Expression::Parenthesized(paren) => expr_to_subject_expr(paren.expression),
 
         // `clone $expr` preserves the type of the operand.
-        Expression::Clone(clone) => expr_to_subject_text(clone.object),
+        Expression::Clone(clone) => expr_to_subject_expr(clone.object),
 
         // Array literals: `[Foo::class, 'bar']` → `[Foo::class, 'bar']`.
         // We format elements we can represent and elide the rest so that
@@ -111,7 +128,7 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
             let mut parts = Vec::new();
             for element in array.elements.iter() {
                 match element {
-                    mago_syntax::cst::ArrayElement::KeyValue(kv) => {
+                    ArrayElement::KeyValue(kv) => {
                         let val = expr_to_subject_text(kv.value);
                         if !val.is_empty() {
                             let key = expr_to_subject_text(kv.key);
@@ -124,7 +141,7 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push("...".to_string());
                         }
                     }
-                    mago_syntax::cst::ArrayElement::Value(v) => {
+                    ArrayElement::Value(v) => {
                         let val = expr_to_subject_text(v.value);
                         if val.is_empty() {
                             parts.push("...".to_string());
@@ -132,7 +149,7 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push(val);
                         }
                     }
-                    mago_syntax::cst::ArrayElement::Variadic(v) => {
+                    ArrayElement::Variadic(v) => {
                         let val = expr_to_subject_text(v.value);
                         if val.is_empty() {
                             parts.push("...".to_string());
@@ -140,12 +157,15 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
                             parts.push(format!("...{}", val));
                         }
                     }
-                    mago_syntax::cst::ArrayElement::Missing(_) => {
+                    ArrayElement::Missing(_) => {
                         parts.push("...".to_string());
                     }
                 }
             }
-            format!("[{}]", parts.join(", "))
+            Some(SubjectExpr::InlineArray {
+                elements: parts,
+                index_segments: Vec::new(),
+            })
         }
 
         // Ternary `$a ? $b : $c` and short ternary `$a ?: $b`.
@@ -155,57 +175,97 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
         // something to resolve rather than an empty string.
         Expression::Conditional(cond) => {
             let preferred = cond.then.unwrap_or(cond.condition);
-            let text = expr_to_subject_text(preferred);
-            if !text.is_empty() {
-                return text;
+            match expr_to_subject_expr(preferred) {
+                Some(se) if !se.to_subject_text().is_empty() => Some(se),
+                // Fall back to the else branch.
+                _ => expr_to_subject_expr(cond.r#else),
             }
-            // Fall back to the else branch.
-            expr_to_subject_text(cond.r#else)
         }
 
         // Null coalesce `$a ?? $b` — LHS is the preferred non-null value.
         Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
-            let text = expr_to_subject_text(binary.lhs);
-            if !text.is_empty() {
-                return text;
+            match expr_to_subject_expr(binary.lhs) {
+                Some(se) if !se.to_subject_text().is_empty() => Some(se),
+                _ => expr_to_subject_expr(binary.rhs),
             }
-            expr_to_subject_text(binary.rhs)
         }
 
         Expression::ArrayAccess(access) => {
-            let base = expr_to_subject_text(access.array);
-            if base.is_empty() {
-                return String::new();
+            let base = expr_to_subject_expr(access.array)?;
+            if base.to_subject_text().is_empty() {
+                return None;
             }
-            // Preserve string keys for array-shape resolution;
-            // collapse everything else to `[]` (generic element access),
-            // matching the convention used by `extract_arrow_subject`.
-            let bracket = match access.index {
+            // Preserve string keys for array-shape resolution and integer
+            // indices for positional narrowing; collapse everything else to
+            // generic element access (`[]`), matching the convention used by
+            // `extract_arrow_subject`.
+            let segment = match access.index {
                 Expression::Literal(Literal::String(s)) => {
                     // `s.raw` includes surrounding quotes (e.g. `'key'`).
-                    // Strip them to get the bare key, then re-wrap in
-                    // single quotes for the subject format.
                     let raw_str = bytes_to_str(s.raw);
                     let inner = crate::util::unquote_php_string(raw_str).unwrap_or(raw_str);
-                    format!("['{}']", inner)
+                    BracketSegment::StringKey(inner.to_string())
                 }
-                // Preserve integer-literal indices so downstream
-                // narrowing can address a specific element (e.g.
-                // `$stmts[0]` after `if (! $stmts[0] instanceof Foo)`).
                 Expression::Literal(Literal::Integer(i)) => {
                     let n = i
                         .value
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| bytes_to_str(i.raw).to_string());
-                    format!("[{}]", n)
+                    BracketSegment::IntKey(n)
                 }
-                _ => "[]".to_string(),
+                _ => BracketSegment::ElementAccess,
             };
-            format!("{}{}", base, bracket)
+            Some(SubjectExpr::ArrayAccess {
+                base: Box::new(base),
+                segments: vec![segment],
+            })
         }
 
-        _ => String::new(),
+        _ => None,
     }
+}
+
+/// Lower a property access (`object->property` or `object?->property`) into a
+/// [`SubjectExpr`].  A non-identifier selector (dynamic property name) drops
+/// to the base expression, matching the original serialiser.
+fn lower_property(
+    object: &Expression<'_>,
+    property: &ClassLikeMemberSelector<'_>,
+) -> Option<SubjectExpr> {
+    let base = expr_to_subject_expr(object)?;
+    if let ClassLikeMemberSelector::Identifier(ident) = property {
+        Some(SubjectExpr::PropertyChain {
+            base: Box::new(base),
+            property: bytes_to_str(ident.value).to_string(),
+        })
+    } else {
+        Some(base)
+    }
+}
+
+/// Lower an instance method call (`object->method(args)` or the null-safe
+/// form) into a [`SubjectExpr::CallExpr`].  A dynamic method name lowers to a
+/// `?` method with no arguments.
+fn lower_method_call(
+    object: &Expression<'_>,
+    method: &ClassLikeMemberSelector<'_>,
+    args: &TokenSeparatedSequence<'_, Argument<'_>>,
+) -> Option<SubjectExpr> {
+    let base = expr_to_subject_expr(object)?;
+    let (method, args_text) = match method {
+        ClassLikeMemberSelector::Identifier(ident) => (
+            bytes_to_str(ident.value).to_string(),
+            format_all_call_args(args),
+        ),
+        _ => ("?".to_string(), String::new()),
+    };
+    Some(SubjectExpr::CallExpr {
+        callee: Box::new(SubjectExpr::MethodCall {
+            base: Box::new(base),
+            method,
+        }),
+        args_text,
+    })
 }
 
 /// Format all arguments of a call expression as a comma-separated string.

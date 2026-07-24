@@ -416,24 +416,6 @@ constructor.
 
 ---
 
-## Unify `expr_to_subject_text` with `SubjectExpr::to_subject_text`
-
-**What to do.** `extraction/subject_text.rs`'s `expr_to_subject_text`
-(~202 lines matching ~30 expression variants) duplicates
-`subject_expr.rs::SubjectExpr::to_subject_text`. Unify: build a
-`SubjectExpr` from the AST and render it, instead of a second
-serializer. This is a semantic change to the shared subject-text
-pipeline (`SubjectExpr::parse` consumes these strings downstream), so
-it needs before/after `analyze` comparison on the test projects to
-guard against resolution regressions in array-element, null-safe, and
-call-argument serialization.
-
-**Why it matters.** Two serializers for the same subject-text concept
-drift independently; a fix applied to one (e.g. a missing expression
-variant) silently leaves the other broken.
-
----
-
 ## Code actions: shared edit-building helpers
 
 **What to do.** Complementary to (and independent of) A34 in the
