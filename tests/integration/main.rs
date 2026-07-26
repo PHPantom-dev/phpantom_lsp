@@ -100,6 +100,7 @@ mod diag_timing;
 mod diagnostics_argument_count;
 mod diagnostics_compound_narrowing;
 mod diagnostics_deprecated;
+mod diagnostics_enum_errors;
 mod diagnostics_implementation_errors;
 mod diagnostics_invalid_class_kind;
 mod diagnostics_property_type_errors;

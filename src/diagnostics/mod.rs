@@ -178,6 +178,7 @@ mod argument_count;
 pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
 mod deprecated;
+mod enum_errors;
 mod external;
 pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
@@ -324,6 +325,7 @@ impl Backend {
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
         if let Some(ctx) = &file_ctx {
             self.collect_invalid_class_kind_diagnostics_with_context(ctx, uri_str, content, out);
+            self.collect_enum_error_diagnostics_with_context(ctx, uri_str, content, out);
         }
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         if is_laravel {
