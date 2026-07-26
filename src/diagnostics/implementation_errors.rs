@@ -79,9 +79,10 @@ impl Backend {
                 continue;
             }
 
-            // Skip classes with no interfaces and no parent class — they
-            // cannot have missing method implementations.
-            if class_info.interfaces.is_empty() && class_info.parent_class.is_none() {
+            if class_info.interfaces.is_empty()
+                && class_info.parent_class.is_none()
+                && class_info.used_traits.is_empty()
+            {
                 continue;
             }
 
@@ -192,7 +193,20 @@ fn method_source_description(
         return format!("class '{}'", parent_name);
     }
 
-    // Fallback — shouldn't happen if collect_missing_methods found it.
+    // Check used traits for abstract methods.
+    for trait_name in &class.used_traits {
+        if let Some(trait_info) = class_loader(trait_name)
+            && has_abstract_method_in_chain(
+                &trait_info,
+                method_name,
+                class_loader,
+                &mut HashSet::new(),
+            )
+        {
+            return format!("trait '{}'", trait_name);
+        }
+    }
+
     "its hierarchy".to_string()
 }
 

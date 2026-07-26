@@ -491,4 +491,121 @@ enum Color: string implements Labelable {
             "Diagnostic should mention the missing 'label' method"
         );
     }
+
+    #[test]
+    fn diagnostic_for_unimplemented_trait_abstract_method() {
+        let php = r#"<?php
+trait Foo {
+    abstract protected function foo(): void;
+}
+
+class Bar {
+    use Foo;
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
+        assert!(diags[0].message.contains("foo()"));
+        assert!(diags[0].message.contains("trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn no_diagnostic_when_trait_abstract_method_implemented() {
+        let php = r#"<?php
+trait Foo {
+    abstract protected function foo(): void;
+}
+
+class Bar {
+    use Foo;
+    protected function foo(): void {}
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Implemented trait abstract method should not be flagged, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_abstract_class_with_trait_abstract() {
+        let php = r#"<?php
+trait Foo {
+    abstract protected function foo(): void;
+}
+
+abstract class Bar {
+    use Foo;
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Abstract class should not flag trait abstract methods, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostic_for_multiple_trait_abstract_methods() {
+        let php = r#"<?php
+trait HasName {
+    abstract public function name(): string;
+}
+
+trait HasAge {
+    abstract public function age(): int;
+}
+
+class Person {
+    use HasName;
+    use HasAge;
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
+        assert!(diags[0].message.contains("name()"));
+        assert!(diags[0].message.contains("age()"));
+    }
+
+    #[test]
+    fn concrete_trait_method_satisfies_own_abstract() {
+        let php = r#"<?php
+trait Foo {
+    abstract protected function bar(): void;
+    protected function baz(): void {}
+}
+
+class Qux {
+    use Foo;
+    protected function bar(): void {}
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "All methods are implemented, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn nested_trait_abstract_method_detected() {
+        let php = r#"<?php
+trait Inner {
+    abstract public function innerMethod(): void;
+}
+
+trait Outer {
+    use Inner;
+}
+
+class Concrete {
+    use Outer;
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
+        assert!(diags[0].message.contains("innerMethod()"));
+    }
 }
