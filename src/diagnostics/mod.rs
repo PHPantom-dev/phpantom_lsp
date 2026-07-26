@@ -183,6 +183,7 @@ mod external;
 pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
 mod implementation_errors;
+mod incompatible_override;
 mod invalid_class_kind;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
@@ -326,6 +327,7 @@ impl Backend {
         if let Some(ctx) = &file_ctx {
             self.collect_invalid_class_kind_diagnostics_with_context(ctx, uri_str, content, out);
             self.collect_enum_error_diagnostics_with_context(ctx, uri_str, content, out);
+            self.collect_incompatible_override_diagnostics_with_context(ctx, uri_str, content, out);
         }
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         if is_laravel {
