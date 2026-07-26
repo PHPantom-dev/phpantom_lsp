@@ -185,6 +185,7 @@ pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
+mod match_type_errors;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
@@ -324,6 +325,7 @@ impl Backend {
             self.collect_deprecated_diagnostics_with_context(ctx, uri_str, content, out);
         }
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
+        self.collect_match_type_diagnostics(uri_str, content, out);
         if let Some(ctx) = &file_ctx {
             self.collect_invalid_class_kind_diagnostics_with_context(ctx, uri_str, content, out);
             self.collect_enum_error_diagnostics_with_context(ctx, uri_str, content, out);
