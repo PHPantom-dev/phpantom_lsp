@@ -1609,19 +1609,16 @@ impl Backend {
         path: &Path,
     ) -> (ClassCompletionOrigin, Option<String>) {
         let vendor_paths = self.workspace.vendor_dir_paths.lock();
-        let is_under_vendor = vendor_paths.iter().any(|vp| path.starts_with(vp));
-        drop(vendor_paths);
-
         let roots = self.workspace.vendor_package_origin_roots.read();
 
-        if is_under_vendor {
-            for (root, origin, pkg_name) in roots.iter() {
-                if path.starts_with(root) {
-                    return (*origin, Some(pkg_name.clone()));
-                }
-            }
-            return (ClassCompletionOrigin::VendorTransitive, None);
+        if vendor_paths.iter().any(|vp| path.starts_with(vp)) {
+            return match crate::indexing::vendor_package_root_for_path(path, &vendor_paths, &roots)
+            {
+                Some((_, origin, pkg_name)) => (*origin, Some(pkg_name.clone())),
+                None => (ClassCompletionOrigin::VendorTransitive, None),
+            };
         }
+        drop(vendor_paths);
 
         // Path is outside vendor/.  This is usually project code, but
         // it can also be a symlinked path-repository package whose
