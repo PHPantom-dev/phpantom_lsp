@@ -185,6 +185,32 @@ pub(crate) fn collect_missing_methods(
         0,
     );
 
+    // ── Used traits (abstract methods) ──────────────────────────────────
+    // For enums, filter out the implicit BackedEnum/UnitEnum traits
+    // whose abstract methods (from(), tryFrom(), cases()) are provided
+    // by PHP at runtime.
+    let trait_names: Vec<_> = if class.kind == crate::types::ClassLikeKind::Enum {
+        class
+            .used_traits
+            .iter()
+            .filter(|t| {
+                let stripped = t.strip_prefix('\\').unwrap_or(t);
+                stripped != "BackedEnum" && stripped != "UnitEnum"
+            })
+            .cloned()
+            .collect()
+    } else {
+        class.used_traits.to_vec()
+    };
+    collect_abstract_from_used_traits(
+        &trait_names,
+        class_loader,
+        &implemented_names,
+        &mut missing,
+        &mut seen,
+        0,
+    );
+
     missing
 }
 
@@ -391,6 +417,51 @@ fn collect_from_parent_chain_atom(
         seen,
         depth + 1,
     );
+}
+
+/// Walk used traits and collect their abstract methods that need
+/// implementation.  Recurses into sub-traits.
+fn collect_abstract_from_used_traits(
+    trait_names: &[crate::atom::Atom],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    own_methods: &[String],
+    missing: &mut Vec<MethodInfo>,
+    seen: &mut Vec<String>,
+    depth: usize,
+) {
+    if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
+        return;
+    }
+
+    for trait_name in trait_names {
+        let trait_info = match class_loader(trait_name) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        for method in &trait_info.methods {
+            if !method.is_abstract {
+                continue;
+            }
+            let lower = method.name.to_lowercase();
+            if own_methods.contains(&lower) || seen.contains(&lower) {
+                continue;
+            }
+            seen.push(lower);
+            missing.push((**method).clone());
+        }
+
+        if !trait_info.used_traits.is_empty() {
+            collect_abstract_from_used_traits(
+                &trait_info.used_traits,
+                class_loader,
+                own_methods,
+                missing,
+                seen,
+                depth + 1,
+            );
+        }
+    }
 }
 
 /// Build the source text for all missing method stubs.
