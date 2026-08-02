@@ -399,44 +399,6 @@ Alternatively, if the stubs for these traits include `@property`
 tags or a typed `$id` override, the PHPDoc provider may handle it
 automatically once the traits are loaded.
 
-#### L13. Factory count-conditional return types
-
-**Impact: Medium · Effort: Medium-High**
-
-`User::factory()->create()` returns `User`, but
-`User::factory(3)->create()` and
-`User::factory()->count(3)->create()` return
-`Collection<int, User>`. Larastan resolves this via conditional
-return type extensions that inspect whether `count()` or the
-`$count` constructor argument was called with a non-null value.
-
-Currently PHPantom always resolves `create()` and `make()` to the
-single model type. This is correct for the common case but wrong
-when `count()` or `times()` has been called, or when the factory
-constructor receives an integer argument.
-
-Larastan's `model-factories.php` has 64 assertions covering these
-patterns, including `count(null)` resetting back to single-model
-return.
-
-**Where to change:** This requires tracking call-chain state
-(whether `count()`/`times()` was called) through the resolution
-pipeline, which is non-trivial. Possible approaches:
-
-1. **Conservative:** Always return `User|Collection<int, User>`
-   union when count state is ambiguous. Simple but noisy.
-2. **Chain-aware:** Track whether `count()`/`times()` appears in
-   the chain before `create()`/`make()`. If yes, return
-   `Collection<int, User>`. If no, return `User`. Requires
-   the resolver to inspect preceding calls in the chain.
-3. **Argument-aware:** Also check `User::factory($count)` for a
-   literal integer argument. Most complex but most accurate.
-
-Approach 2 is likely the best balance. The factory virtual member
-provider already knows the model type; it would need to emit
-different return types for `create()`/`make()` based on whether
-the chain includes a count-setting call.
-
 #### L41. Morph aliases in `*_type` column comparisons
 
 **Impact: Low-Medium · Effort: Medium**

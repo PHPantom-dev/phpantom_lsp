@@ -185,7 +185,6 @@ unlikely to move the needle for most users.
 | L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
 | L6  | Factory `has*`/`for*` relationship methods                                                                                                                                  | Low-Medium  | Medium      |
 | L7  | `$pivot` property on BelongsToMany                                                                                                                                          | Medium      | Medium-High |
-| L13 | [Factory count-conditional return types](todo/laravel.md#l13-factory-count-conditional-return-types)                                                                       | Medium      | Medium-High |
 | L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | Medium-High |
 | L45 | [`*_count` properties are offered on every relationship](todo/laravel.md#l45-_count-properties-are-offered-on-every-relationship)                                           | Low-Medium  | Medium-High |
 | L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Low         |

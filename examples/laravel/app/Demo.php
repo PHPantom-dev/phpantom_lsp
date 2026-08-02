@@ -14,6 +14,7 @@ use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
 use App\Models\ReviewCollection;
+use Database\Factories\BlogAuthorFactory;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
@@ -170,8 +171,8 @@ class Demo
         BlogAuthor::factory()->hasProfile();        // HasOne profile  → factory
 
         // The chain stays on the factory, so create() still returns the model.
+        // hasPosts(3) counts *related* models, not the ones being built.
         BlogAuthor::factory()->hasPosts(3)->create();            // → BlogAuthor
-        BlogAuthor::factory()->count(2)->hasPosts(3)->create();  // → BlogAuthor
 
         // for{Relationship}() — for the inverse (BelongsTo) side.
         BlogPost::factory()->forAuthor(['name' => 'Ada']);   // BelongsTo author → factory
@@ -180,6 +181,34 @@ class Demo
         // trashed() is synthesized only because BlogPost uses SoftDeletes.
         BlogPost::factory()->trashed();                        // → factory
         BlogPost::factory()->forAuthor()->trashed()->create(); // → BlogPost
+    }
+
+
+    // ── Factory count state ─────────────────────────────────────────────────
+    // create()/make() build one model, or a Collection of them once the
+    // chain sets a count — through count(), times(), or an integer argument
+    // to factory(). count(null) clears it again.
+
+    public function factoryCounts(): void
+    {
+        // No count → a single model.
+        BlogAuthor::factory()->create()->displayName;         // → BlogAuthor
+        BlogAuthor::factory(['name' => 'Ada'])->make();       // array is state → BlogAuthor
+
+        // Count set → a collection of them.  BlogAuthor declares
+        // #[CollectedBy(AuthorCollection::class)], so that is what comes back.
+        BlogAuthor::factory(3)->create()->first();            // → BlogAuthor|null
+        BlogAuthor::factory()->count(2)->create()->emails();  // → array<string>
+        BlogAuthor::factory()->times(2)->make()->byName();    // → AuthorCollection
+        BlogAuthorFactory::times(2)->create()->active();      // → AuthorCollection
+
+        // The count carries past intervening calls, and count(null) clears it.
+        BlogAuthor::factory()->count(2)->hasPosts(3)->create()->first(); // → BlogAuthor|null
+        BlogAuthor::factory(3)->count(null)->create()->displayName;      // → BlogAuthor
+
+        foreach (BlogAuthor::factory(3)->create() as $author) {
+            $author->displayName;                             // → BlogAuthor
+        }
     }
 
 

@@ -320,6 +320,23 @@ impl Backend {
                     return classes;
                 }
 
+                // Laravel factory count state: `create()`/`make()` build
+                // a single model, or a collection of them when the chain
+                // set a count (`factory(3)`, `count(3)`, `times(3)`).
+                if let Some((classes, hint)) =
+                    crate::virtual_members::laravel::resolve_factory_count_return(
+                        base,
+                        method_name,
+                        &lhs_resolved,
+                        ctx,
+                    )
+                {
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(hint);
+                    }
+                    return classes;
+                }
+
                 // Laravel validated input: `validated()`, `validate([…])`
                 // and `safe()->only([…])` return the array shape the
                 // validation rules in scope describe.  An array shape has
