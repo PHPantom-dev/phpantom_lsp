@@ -320,6 +320,40 @@ check(
     \App\Models\BlogPost::factory()->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
 );
 
+// ─── Factory count-conditional return types ──────────────────────────────────
+
+// create()/make() hand back a single model until the chain sets a count, at
+// which point they hand back a collection — the one the model itself builds,
+// so BlogAuthor's #[CollectedBy(AuthorCollection::class)] applies here too.
+check(
+    'BlogAuthor::factory()->make() builds one model',
+    \App\Models\BlogAuthor::factory()->make() instanceof \App\Models\BlogAuthor
+);
+check(
+    'an array argument to factory() is state, not a count',
+    \App\Models\BlogAuthor::factory(['name' => 'Ada'])->make() instanceof \App\Models\BlogAuthor
+);
+check(
+    'BlogAuthor::factory(3)->make() builds the model collection',
+    \App\Models\BlogAuthor::factory(3)->make() instanceof \App\Models\AuthorCollection
+);
+check(
+    'BlogAuthor::factory()->count(2)->make() builds two models',
+    \App\Models\BlogAuthor::factory()->count(2)->make()->count() === 2
+);
+check(
+    'BlogAuthorFactory::times(2)->make() builds the model collection',
+    \Database\Factories\BlogAuthorFactory::times(2)->make() instanceof \App\Models\AuthorCollection
+);
+check(
+    'count(null) clears a count set through factory($count)',
+    \App\Models\BlogAuthor::factory(3)->count(null)->make() instanceof \App\Models\BlogAuthor
+);
+check(
+    'hasPosts() counts related models, not the ones being built',
+    \App\Models\BlogAuthor::factory()->hasPosts(3)->make() instanceof \App\Models\BlogAuthor
+);
+
 // ─── Carbon macro closure scope binding ──────────────────────────────────────
 
 // Carbon binds macro closures with the target class as scope, so `self::`

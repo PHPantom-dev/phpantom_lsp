@@ -368,7 +368,7 @@ namespace Illuminate\\Database\\Eloquent\\Factories;
  */
 trait HasFactory {
     /** @return TFactory */
-    public static function factory() {}
+    public static function factory($count = null, $state = []) {}
 }
 ";
 
@@ -379,12 +379,16 @@ namespace Illuminate\\Database\\Eloquent\\Factories;
  * @template TModel of \\Illuminate\\Database\\Eloquent\\Model
  */
 class Factory {
-    /** @return TModel */
+    /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */
     public function create(array $attributes = []) {}
-    /** @return TModel */
+    /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */
     public function make(array $attributes = []) {}
     /** @return static */
-    public function count(int $count): static { return $this; }
+    public static function new(array $attributes = []): static {}
+    /** @return static */
+    public static function times(int $count): static {}
+    /** @return static */
+    public function count(?int $count): static { return $this; }
     /** @return static */
     public function state(array $state): static { return $this; }
 }
@@ -8217,9 +8221,11 @@ class UserFactory extends Factory {
     );
 }
 
-#[tokio::test]
-async fn test_factory_convention_based_chain_count_then_create() {
-    let user_php = "\
+// ─── Factory count-conditional return types ─────────────────────────────────
+
+/// A model + convention-based factory pair, shared by the
+/// count-conditional tests below.
+const COUNT_USER_PHP: &str = "\
 <?php
 namespace App\\Models;
 use Illuminate\\Database\\Eloquent\\Model;
@@ -8230,7 +8236,7 @@ class User extends Model {
 }
 ";
 
-    let factory_php = "\
+const COUNT_USER_FACTORY_PHP: &str = "\
 <?php
 namespace Database\\Factories;
 use Illuminate\\Database\\Eloquent\\Factories\\Factory;
@@ -8239,12 +8245,326 @@ class UserFactory extends Factory {
 }
 ";
 
+/// Complete after `<expr>->` in a scratch file that already imports
+/// `App\Models\User`, against the shared model/factory pair.
+async fn complete_after_factory_chain(expr: &str) -> Vec<String> {
     let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
+        ("database/factories/UserFactory.php", COUNT_USER_FACTORY_PHP),
+    ]);
+
+    let line = format!("{expr}->");
+    let content =
+        format!("<?php\nuse App\\Models\\User;\nuse Database\\Factories\\UserFactory;\n{line}\n");
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        &content,
+        3,
+        line.chars().count() as u32,
+    )
+    .await;
+
+    method_names(&items)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Assert that a factory chain builds a single model: the model's own
+/// methods are offered and the collection's are not.
+async fn assert_builds_one(expr: &str) {
+    let methods = complete_after_factory_chain(expr).await;
+    assert!(
+        methods.iter().any(|m| m == "greet"),
+        "`{expr}` should build a single User, got methods: {methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m == "all"),
+        "`{expr}` should not build a Collection, got methods: {methods:?}"
+    );
+}
+
+/// Assert that a factory chain builds a collection of models.
+async fn assert_builds_many(expr: &str) {
+    let methods = complete_after_factory_chain(expr).await;
+    assert!(
+        methods.iter().any(|m| m == "all") && methods.iter().any(|m| m == "first"),
+        "`{expr}` should build a Collection, got methods: {methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m == "greet"),
+        "`{expr}` should not build a single User, got methods: {methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_factory_count_then_create_returns_collection() {
+    assert_builds_many("User::factory()->count(3)->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_count_then_make_returns_collection() {
+    assert_builds_many("User::factory()->count(3)->make()").await;
+}
+
+#[tokio::test]
+async fn test_factory_integer_argument_returns_collection() {
+    assert_builds_many("User::factory(3)->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_instance_times_returns_collection() {
+    assert_builds_many("User::factory()->times(3)->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_static_times_returns_collection() {
+    assert_builds_many("UserFactory::times(3)->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_count_survives_intervening_state_calls() {
+    assert_builds_many("User::factory()->count(3)->state([])->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_count_null_resets_to_single_model() {
+    assert_builds_one("User::factory()->count(null)->create()").await;
+    assert_builds_one("User::factory(3)->count(null)->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_state_argument_is_not_a_count() {
+    assert_builds_one("User::factory(['name' => 'Ada'])->create()").await;
+}
+
+#[tokio::test]
+async fn test_factory_new_without_count_builds_single_model() {
+    assert_builds_one("UserFactory::new()->create()").await;
+}
+
+/// `hasPosts(3)` counts related models, not the models the factory
+/// itself builds, so it must not flip the return type to a collection.
+#[tokio::test]
+async fn test_factory_relationship_count_is_not_a_factory_count() {
+    let post_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class Post extends Model {}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class User extends Model {
+    use HasFactory;
+    public function greet(): string { return ''; }
+    /** @return HasMany<Post, $this> */
+    public function posts(): HasMany { return $this->hasMany(Post::class); }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Post.php", post_php),
         ("src/Models/User.php", user_php),
+        ("database/factories/UserFactory.php", COUNT_USER_FACTORY_PHP),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\User;\nUser::factory()->hasPosts(3)->create()->\n",
+        2,
+        41,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"greet"),
+        "hasPosts(3) should not turn create() into a collection, got: {:?}",
+        methods
+    );
+}
+
+/// The count state reaches the assigned variable, and indexing back
+/// through the collection recovers the model.
+#[tokio::test]
+async fn test_factory_collection_assignment_and_first() {
+    let methods =
+        complete_after_factory_chain("User::factory()->count(3)->create()->first()").await;
+    assert!(
+        methods.iter().any(|m| m == "greet"),
+        "first() on the created collection should yield a User, got: {methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_factory_collection_survives_variable_assignment() {
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
+        ("database/factories/UserFactory.php", COUNT_USER_FACTORY_PHP),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\User;\n$users = User::factory()->count(3)->create();\n$users->\n",
+        3,
+        8,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"all"),
+        "the assigned variable should hold a Collection, got: {:?}",
+        methods
+    );
+}
+
+/// A factory written with Laravel's own `@extends Factory<Model>`
+/// annotation resolves the same way as a convention-based one — and the
+/// ambiguous `Collection<int, TModel>|TModel` union is narrowed to the
+/// branch the chain actually produces.
+#[tokio::test]
+async fn test_factory_extends_generic_narrows_ambiguous_union() {
+    let annotated_factory_php = "\
+<?php
+namespace Database\\Factories;
+use App\\Models\\User;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+/**
+ * @extends Factory<User>
+ */
+class UserFactory extends Factory {
+    public function definition(): array { return []; }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
+        ("database/factories/UserFactory.php", annotated_factory_php),
+    ]);
+
+    let single = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\User;\nUser::factory()->create()->\n",
+        2,
+        28,
+    )
+    .await;
+    let single = method_names(&single);
+    assert!(
+        single.contains(&"greet") && !single.contains(&"all"),
+        "an annotated factory without a count should build one User, got: {:?}",
+        single
+    );
+
+    let many = complete_at(
+        &backend,
+        &dir,
+        "src/test2.php",
+        "<?php\nuse App\\Models\\User;\nUser::factory()->count(2)->create()->\n",
+        2,
+        38,
+    )
+    .await;
+    let many = method_names(&many);
+    assert!(
+        many.contains(&"all") && !many.contains(&"greet"),
+        "an annotated factory with a count should build a Collection, got: {:?}",
+        many
+    );
+}
+
+/// A model with a custom Eloquent collection gets that collection back,
+/// not the base `Illuminate\Database\Eloquent\Collection`.
+#[tokio::test]
+async fn test_factory_count_returns_custom_collection() {
+    let collection_php = "\
+<?php
+namespace App\\Collections;
+use Illuminate\\Database\\Eloquent\\Collection;
+/**
+ * @template TKey of array-key
+ * @template TModel
+ * @extends Collection<TKey, TModel>
+ */
+class UserCollection extends Collection {
+    /** @return array<TKey, TModel> */
+    public function verified(): array { return []; }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use App\\Collections\\UserCollection;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Attributes\\CollectedBy;
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+#[CollectedBy(UserCollection::class)]
+class User extends Model {
+    use HasFactory;
+    public function greet(): string { return ''; }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Collections/UserCollection.php", collection_php),
+        ("src/Models/User.php", user_php),
+        ("database/factories/UserFactory.php", COUNT_USER_FACTORY_PHP),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\User;\nUser::factory()->count(3)->create()->\n",
+        2,
+        38,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"verified"),
+        "the model's custom collection should be used, got: {:?}",
+        methods
+    );
+}
+
+/// A factory that overrides `create()` itself keeps the type it declares,
+/// count state or not.
+#[tokio::test]
+async fn test_factory_own_create_override_wins() {
+    let factory_php = "\
+<?php
+namespace Database\\Factories;
+use App\\Models\\User;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+class UserFactory extends Factory {
+    public function definition(): array { return []; }
+    /** @return User */
+    public function create(array $attributes = []) {}
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
         ("database/factories/UserFactory.php", factory_php),
     ]);
 
-    // User::factory()->count(3)->create() should still resolve to User
     let items = complete_at(
         &backend,
         &dir,
@@ -8258,7 +8578,234 @@ class UserFactory extends Factory {
     let methods = method_names(&items);
     assert!(
         methods.contains(&"greet"),
-        "count()->create() chain should resolve back to User, got methods: {:?}",
+        "an overridden create() should keep its declared return type, got: {:?}",
+        methods
+    );
+}
+
+/// A `Factory` subclass with no matching model must not have its
+/// `create()` reinterpreted — there is no model type to build from.
+#[tokio::test]
+async fn test_factory_without_a_model_is_left_alone() {
+    let factory_php = "\
+<?php
+namespace Database\\Factories;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+class WidgetFactory extends Factory {
+    public function definition(): array { return []; }
+    public function describe(): string { return ''; }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
+        ("database/factories/WidgetFactory.php", factory_php),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse Database\\Factories\\WidgetFactory;\nWidgetFactory::new()->count(3)->\n",
+        2,
+        32,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"describe"),
+        "a model-less factory should still chain on itself, got: {:?}",
+        methods
+    );
+
+    // And a counted create() on it must not borrow some other model.
+    let created = complete_at(
+        &backend,
+        &dir,
+        "src/test2.php",
+        "<?php\nuse Database\\Factories\\WidgetFactory;\nWidgetFactory::new()->count(3)->create()->\n",
+        2,
+        42,
+    )
+    .await;
+
+    let created = method_names(&created);
+    assert!(
+        !created.contains(&"greet"),
+        "a model-less factory must not resolve create() to another model, got: {:?}",
+        created
+    );
+}
+
+/// `create()` on a class that has nothing to do with Eloquent factories
+/// resolves from its own declaration, count-looking chain or not.
+#[tokio::test]
+async fn test_non_factory_create_is_untouched() {
+    let thing_php = "\
+<?php
+namespace App\\Models;
+class Thing { public function label(): string { return ''; } }
+";
+    let builder_php = "\
+<?php
+namespace App\\Models;
+class ThingBuilder {
+    public function count(int $count): static { return $this; }
+    public function create(): Thing { return new Thing(); }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Thing.php", thing_php),
+        ("src/Models/ThingBuilder.php", builder_php),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\ThingBuilder;\n$b = new ThingBuilder();\n$b->count(3)->create()->\n",
+        3,
+        24,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"label"),
+        "a non-factory create() should keep its declared return type, got: {:?}",
+        methods
+    );
+}
+
+/// Without a `Factory` base class that declares `create()` there is no
+/// call to type, so a count in the chain must not conjure a return type.
+#[tokio::test]
+async fn test_factory_without_an_inherited_create_resolves_nothing() {
+    let bare_factory_base_php = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Factories;
+/**
+ * @template TModel
+ */
+class Factory {
+    /** @return static */
+    public function count(?int $count): static { return $this; }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+class User { public function greet(): string { return ''; } }
+";
+    let factory_php = "\
+<?php
+namespace Database\\Factories;
+use App\\Models\\User;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+/**
+ * @extends Factory<User>
+ */
+class UserFactory extends Factory {
+    public function definition(): array { return []; }
+}
+";
+
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            (
+                "vendor/illuminate/Eloquent/Factories/Factory.php",
+                bare_factory_base_php,
+            ),
+            ("src/Models/User.php", user_php),
+            ("database/factories/UserFactory.php", factory_php),
+        ],
+    );
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse Database\\Factories\\UserFactory;\n$f = new UserFactory();\n$f->count(3)->create()->\n",
+        3,
+        24,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        !methods.contains(&"greet"),
+        "a create() that does not exist should resolve to nothing, got: {:?}",
+        methods
+    );
+}
+
+/// Without an Eloquent `Collection` class to resolve to, a counted chain
+/// falls back to the single-model type rather than resolving to nothing.
+#[tokio::test]
+async fn test_factory_count_without_a_collection_class_falls_back() {
+    let model_php = "\
+<?php
+namespace Illuminate\\Database\\Eloquent;
+class Model {}
+";
+    let factory_base_php = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Factories;
+/**
+ * @template TModel
+ */
+class Factory {
+    /** @return TModel */
+    public function create(array $attributes = []) {}
+    /** @return static */
+    public function count(?int $count): static { return $this; }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model { public function greet(): string { return ''; } }
+";
+    let factory_php = "\
+<?php
+namespace Database\\Factories;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+class UserFactory extends Factory {
+    public function definition(): array { return []; }
+}
+";
+
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("vendor/illuminate/Eloquent/Model.php", model_php),
+            (
+                "vendor/illuminate/Eloquent/Factories/Factory.php",
+                factory_base_php,
+            ),
+            ("src/Models/User.php", user_php),
+            ("database/factories/UserFactory.php", factory_php),
+        ],
+    );
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse Database\\Factories\\UserFactory;\n$f = new UserFactory();\n$f->count(3)->create()->\n",
+        3,
+        24,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"greet"),
+        "a missing Collection class should leave the model type in place, got: {:?}",
         methods
     );
 }

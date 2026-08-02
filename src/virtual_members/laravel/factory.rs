@@ -119,7 +119,7 @@ fn is_eloquent_factory(class_name: &str) -> bool {
 /// `Illuminate\Database\Eloquent\Factories\Factory`.
 ///
 /// Returns `true` if the class itself is `Factory` or any ancestor is.
-fn extends_eloquent_factory(
+pub(crate) fn extends_eloquent_factory(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
@@ -135,6 +135,30 @@ fn has_factory_extends_generic(class: &ClassInfo) -> bool {
     })
 }
 
+/// The model type a factory class builds.
+///
+/// Prefers the explicit `@extends Factory<App\Models\User>` annotation
+/// that Laravel's own factory stub carries, and falls back to the naming
+/// convention (e.g. `Database\Factories\UserFactory` → `App\Models\User`)
+/// for factories written without it.  The convention branch only answers
+/// when the model class actually exists, so a `Factory` subclass that
+/// happens to be named `SomethingFactory` without a matching model does
+/// not invent one.
+pub(crate) fn factory_model_type(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if let Some(model) = class.extends_generics.iter().find_map(|(name, args)| {
+        let short = name.rsplit('\\').next().unwrap_or(name);
+        (short == "Factory").then(|| args.last()).flatten()
+    }) {
+        return Some(model.clone());
+    }
+
+    let model_fqn = factory_to_model_fqn(&class.name)?;
+    class_loader(&model_fqn).map(|_| PhpType::named(atom(model_fqn.as_ref())))
+}
+
 /// Build virtual `create()` and `make()` methods for a factory class
 /// that does not have `@extends Factory<Model>`.
 ///
@@ -144,17 +168,10 @@ fn build_factory_model_methods(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<MethodInfo> {
-    let model_fqn = match factory_to_model_fqn(&class.name) {
-        Some(fqn) => fqn,
+    let model_type = match factory_model_type(class, class_loader) {
+        Some(ty) => ty,
         None => return Vec::new(),
     };
-
-    // Verify the model class actually exists.
-    if class_loader(&model_fqn).is_none() {
-        return Vec::new();
-    }
-
-    let model_type = PhpType::named(atom(model_fqn.as_ref()));
 
     vec![
         MethodInfo::virtual_method_typed("create", Some(&model_type)),
