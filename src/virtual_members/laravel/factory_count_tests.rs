@@ -174,6 +174,40 @@ fn a_new_expression_head_without_a_count_builds_one() {
     assert_eq!(count_of("new UserFactory()->state([])"), FactoryCount::One);
 }
 
+/// The chain head can be something other than a static call — the legacy
+/// global `factory()` helper, or an invoked callable.  Neither says
+/// anything about the count, whatever it was handed.
+#[test]
+fn a_non_static_chain_head_builds_one() {
+    assert_eq!(count_of("factory(3)"), FactoryCount::One);
+    assert_eq!(count_of("$makeFactory()"), FactoryCount::One);
+    assert_eq!(count_of("$makeFactory()->state([])"), FactoryCount::One);
+}
+
+/// A chain long enough to hit the walk's depth bound gives up rather
+/// than scanning forever, even though a count is set further down.
+#[test]
+fn a_pathological_chain_gives_up_on_the_count() {
+    let counted = |links: usize| {
+        let mut expr = String::from("User::factory()->count(3)");
+        for _ in 0..links {
+            expr.push_str("->state([])");
+        }
+        count_of(&expr)
+    };
+
+    assert_eq!(
+        counted(10),
+        FactoryCount::Many,
+        "an ordinary chain still finds the count"
+    );
+    assert_eq!(
+        counted(200),
+        FactoryCount::One,
+        "past the bound the walk stops looking"
+    );
+}
+
 // ── factory_model_type ──────────────────────────────────────────────
 
 #[test]

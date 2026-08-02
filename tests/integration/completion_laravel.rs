@@ -8618,6 +8618,24 @@ class WidgetFactory extends Factory {
         "a model-less factory should still chain on itself, got: {:?}",
         methods
     );
+
+    // And a counted create() on it must not borrow some other model.
+    let created = complete_at(
+        &backend,
+        &dir,
+        "src/test2.php",
+        "<?php\nuse Database\\Factories\\WidgetFactory;\nWidgetFactory::new()->count(3)->create()->\n",
+        2,
+        42,
+    )
+    .await;
+
+    let created = method_names(&created);
+    assert!(
+        !created.contains(&"greet"),
+        "a model-less factory must not resolve create() to another model, got: {:?}",
+        created
+    );
 }
 
 /// `create()` on a class that has nothing to do with Eloquent factories
