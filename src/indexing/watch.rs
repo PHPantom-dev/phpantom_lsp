@@ -39,6 +39,7 @@ impl Backend {
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
+        let is_laravel = self.resolved_class_cache.read().is_laravel();
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
@@ -49,7 +50,8 @@ impl Backend {
                     composer_changed = true;
                     continue;
                 }
-                if let Ok(file_path) = change.uri.to_file_path()
+                if is_laravel
+                    && let Ok(file_path) = change.uri.to_file_path()
                     && crate::virtual_members::laravel::database_schema::SchemaIndex::watched_path_affects_schema(
                         root,
                         &laravel_config,
@@ -139,5 +141,29 @@ impl Backend {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_laravel_projects_ignore_schema_watch_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema = dir.path().join("database/schema/default-schema.sql");
+        std::fs::create_dir_all(schema.parent().unwrap()).unwrap();
+        std::fs::write(&schema, "CREATE TABLE users (id bigint);").unwrap();
+
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(false);
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&schema).unwrap(),
+                typ: FileChangeType::CREATED,
+            }],
+        };
+
+        assert!(!backend.apply_watched_file_changes(&params, dir.path()));
     }
 }

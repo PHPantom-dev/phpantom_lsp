@@ -295,30 +295,6 @@ impl LanguageServer for Backend {
                 }
             }
 
-            let laravel_config = self.config().laravel;
-            if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
-                let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
-                match crate::virtual_members::laravel::database_schema::load_schema_index(
-                    &root,
-                    &laravel_config,
-                    &bp_macros,
-                ) {
-                    Ok(index) => {
-                        self.resolved_class_cache
-                            .write()
-                            .set_schema_index(index.clone());
-                        *self.schema_index.write() = index;
-                    }
-                    Err(e) => {
-                        self.log(
-                            MessageType::WARNING,
-                            format!("Failed to load Laravel schema dumps: {}", e),
-                        )
-                        .await;
-                    }
-                }
-            }
-
             // Parse composer.json once up front.  The result is used for
             // PHP version detection and passed into init_single_project
             // so the file is never re-read during startup.
@@ -373,9 +349,36 @@ impl LanguageServer for Backend {
                 }
             }
 
+            let is_laravel = self.resolved_class_cache.read().is_laravel();
+            if is_laravel {
+                let laravel_config = self.config().laravel;
+                if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
+                    let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
+                    match crate::virtual_members::laravel::database_schema::load_schema_index(
+                        &root,
+                        &laravel_config,
+                        &bp_macros,
+                    ) {
+                        Ok(index) => {
+                            self.resolved_class_cache
+                                .write()
+                                .set_schema_index(index.clone());
+                            *self.schema_index.write() = index;
+                        }
+                        Err(e) => {
+                            self.log(
+                                MessageType::WARNING,
+                                format!("Failed to load Laravel schema dumps: {}", e),
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+
             // Warm the Eloquent Builder resolution cache only for Laravel
             // projects; a non-Laravel workspace has nothing to warm.
-            if self.resolved_class_cache.read().is_laravel() {
+            if is_laravel {
                 progress.set_percentage(90, "Warming Laravel completions");
                 let warmed = self.warm_laravel_completion_cache();
                 if warmed > 0 {
@@ -460,39 +463,43 @@ impl LanguageServer for Backend {
         // Register file watchers for staleness detection.  The client
         // will notify us when PHP files or composer files change on disk
         // (even outside the editor), so we can refresh our indices.
+        let mut watchers = vec![
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.php".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/composer.json".to_string()),
+                kind: Some(WatchKind::Change),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
+                kind: Some(WatchKind::Change),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+        ];
+        if self.resolved_class_cache.read().is_laravel() {
+            watchers.extend([
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.sql".to_string()),
+                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                },
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
+                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                },
+            ]);
+        }
+
         registrations.push(Registration {
             id: "workspace/didChangeWatchedFiles".to_string(),
             method: "workspace/didChangeWatchedFiles".to_string(),
             register_options: Some(
-                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                    watchers: vec![
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/*.php".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/composer.json".to_string()),
-                            kind: Some(WatchKind::Change),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
-                            kind: Some(WatchKind::Change),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/*.sql".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                    ],
-                })
-                .unwrap(),
+                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers })
+                    .unwrap(),
             ),
         });
 
@@ -2679,6 +2686,10 @@ impl Backend {
     }
 
     pub(crate) fn reload_laravel_schema_index(&self, root: &std::path::Path) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
+
         if let Ok(cfg) = crate::config::load_config(root) {
             *self.workspace.config.lock() = cfg;
         }
@@ -2710,6 +2721,10 @@ impl Backend {
     }
 
     pub(crate) fn update_laravel_migrations(&self, changes: &[(PathBuf, FileChangeType)]) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
+
         let mut index = self.schema_index.write();
         let mut any_changed = false;
         for (path, change_type) in changes {
