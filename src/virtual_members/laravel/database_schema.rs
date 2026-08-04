@@ -402,7 +402,7 @@ fn discover_migration_files(
 ) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if config.paths.is_empty() {
-        collect_default_migration_files(workspace_root, workspace_root, &mut files)?;
+        collect_default_migration_files(workspace_root, &mut files)?;
     } else {
         for configured in &config.paths {
             collect_configured_migration_files(
@@ -489,20 +489,36 @@ fn collect_configured_migration_files(
 
 fn collect_default_migration_files(
     workspace_root: &Path,
-    path: &Path,
     files: &mut Vec<PathBuf>,
 ) -> std::io::Result<()> {
-    if !path.is_dir() || is_vendor_path(workspace_root, path) {
-        return Ok(());
-    }
-    if is_database_migrations_dir(path) {
-        return collect_configured_migration_files(path, files);
-    }
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
+    let root = workspace_root.to_path_buf();
+    let walker = ignore::WalkBuilder::new(workspace_root)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .hidden(true)
+        .parents(true)
+        .ignore(true)
+        .follow_links(false)
+        .filter_entry(move |entry| {
+            let path = entry.path();
+            if is_vendor_path(&root, path) {
+                return false;
+            }
+
+            !entry.file_type().is_some_and(|kind| kind.is_dir())
+                || !path.parent().is_some_and(is_database_migrations_dir)
+        })
+        .build();
+
+    for entry in walker {
+        let entry = entry.map_err(std::io::Error::other)?;
         let path = entry.path();
-        if path.is_dir() {
-            collect_default_migration_files(workspace_root, &path, files)?;
+        if entry.file_type().is_some_and(|kind| kind.is_file())
+            && path.parent().is_some_and(is_database_migrations_dir)
+            && path.extension().and_then(|extension| extension.to_str()) == Some("php")
+        {
+            files.push(path.to_path_buf());
         }
     }
     Ok(())
@@ -2048,6 +2064,29 @@ mod tests {
                 .column_source("default", "vendor_rows", "id")
                 .is_none()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_migration_discovery_skips_ignored_and_symlinked_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let migration = root.join("database/migrations/2024_01_01_000000_create_posts.php");
+        std::fs::create_dir_all(migration.parent().unwrap()).unwrap();
+        std::fs::write(&migration, "<?php").unwrap();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), "/ignored/\n").unwrap();
+        std::fs::create_dir_all(root.join("ignored/database/migrations")).unwrap();
+        std::fs::write(
+            root.join("ignored/database/migrations/2024_01_02_000000_ignored.php"),
+            "<?php",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(root, root.join("workspace-loop")).unwrap();
+
+        let files = discover_migration_files(root, &LaravelMigrationsConfig::default()).unwrap();
+
+        assert_eq!(files, vec![migration]);
     }
 
     #[test]
