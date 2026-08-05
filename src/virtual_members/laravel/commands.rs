@@ -577,10 +577,7 @@ fn as_command_name(class: &Class<'_>, content: &str) -> Option<(String, u32)> {
 /// The string value of the first `#[Signature('...')]` attribute — the
 /// Laravel 11+ attribute form of `$signature` — plus the inner byte offset of
 /// the literal.
-fn signature_attribute_value<'c>(
-    class: &Class<'_>,
-    content: &'c str,
-) -> Option<(&'c str, u32)> {
+fn signature_attribute_value<'c>(class: &Class<'_>, content: &'c str) -> Option<(&'c str, u32)> {
     for list in class.attribute_lists.iter() {
         for attr in list.attributes.iter() {
             if last_segment(attr.name.value()) != b"Signature" {
@@ -641,9 +638,7 @@ fn command_aliases(class: &Class<'_>) -> Vec<String> {
                             }
                             PartialArgument::Positional(_) => {
                                 if positional == positional_index && found.is_none() {
-                                    found = arg
-                                        .value()
-                                        .and_then(|expr| string_array_literal(expr));
+                                    found = arg.value().and_then(|expr| string_array_literal(expr));
                                 }
                                 positional += 1;
                             }
