@@ -2,8 +2,9 @@
 //!
 //! Laravel encodes console commands as classes extending
 //! `Illuminate\Console\Command`.  Each command declares a name through one
-//! of three surfaces, all statically recoverable from source:
+//! of four surfaces, all statically recoverable from source:
 //!
+//! - `#[Signature('app:sync {user} {--queue}')]` (Laravel 11+ attribute form)
 //! - `protected $signature = 'app:sync {user} {--queue}';`
 //! - `protected $name = 'app:sync';`
 //! - `#[AsCommand(name: 'app:sync')]`
@@ -476,7 +477,23 @@ fn command_from_class(
         });
     }
 
-    // 2. $signature = '...'.
+    // 2. #[Signature('name {--opt}')] — the Laravel 11+ attribute form of
+    //    `$signature`.
+    if let Some((sig, offset)) = signature_attribute_value(class, content) {
+        let signature = parse_signature(sig);
+        if signature.name.is_empty() {
+            return None;
+        }
+        return Some(CommandEntry {
+            name: signature.name.clone(),
+            fqn,
+            uri: uri.to_string(),
+            name_offset: offset,
+            signature,
+        });
+    }
+
+    // 3. $signature = '...'.
     if let Some((sig, offset)) = signature_property_value(class, content) {
         let signature = parse_signature(sig);
         if signature.name.is_empty() {
@@ -491,7 +508,7 @@ fn command_from_class(
         });
     }
 
-    // 3. $name = '...'.
+    // 4. $name = '...'.
     if let Some((name, offset)) = string_property_value(class, "name", content) {
         if name.is_empty() {
             return None;
@@ -530,6 +547,35 @@ fn as_command_name(class: &Class<'_>, content: &str) -> Option<(String, u32)> {
             };
             if let Some((value, start, _)) = extract_string_literal(expr, content) {
                 return Some((value.to_string(), start as u32));
+            }
+        }
+    }
+    None
+}
+
+/// The string value of the first `#[Signature('...')]` attribute — the
+/// Laravel 11+ attribute form of `$signature` — plus the inner byte offset of
+/// the literal.
+fn signature_attribute_value<'c>(
+    class: &Class<'_>,
+    content: &'c str,
+) -> Option<(&'c str, u32)> {
+    for list in class.attribute_lists.iter() {
+        for attr in list.attributes.iter() {
+            if last_segment(attr.name.value()) != b"Signature" {
+                continue;
+            }
+            let Some(arg_list) = attr.argument_list.as_ref() else {
+                continue;
+            };
+            let Some(first) = arg_list.arguments.first() else {
+                continue;
+            };
+            let Some(expr) = first.value() else {
+                continue;
+            };
+            if let Some((value, start, _)) = extract_string_literal(expr, content) {
+                return Some((value, start as u32));
             }
         }
     }
@@ -619,6 +665,7 @@ fn find_signature_at_offset(
             if offset >= start
                 && offset <= end
                 && let Some((sig, _)) = signature_property_value(class, content)
+                    .or_else(|| signature_attribute_value(class, content))
             {
                 *out = Some(parse_signature(sig));
             }

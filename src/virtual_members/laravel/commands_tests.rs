@@ -179,6 +179,62 @@ class User
 }
 
 #[test]
+fn scans_signature_attribute_command_class() {
+    let content = r#"<?php
+namespace App\Actions\Sync;
+
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+
+#[Signature('sync:forma-projects {--force : Drop all and re-fetch}')]
+class SyncFormaProjects extends Command
+{
+    public function handle(): int
+    {
+        return self::SUCCESS;
+    }
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Actions/Sync/SyncFormaProjects.php");
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry.name, "sync:forma-projects");
+    assert_eq!(
+        entry.fqn.as_deref(),
+        Some("App\\Actions\\Sync\\SyncFormaProjects")
+    );
+    assert_eq!(opt_names(&entry.signature), vec!["force"]);
+    // Offset points inside the string literal (at `sync:forma-projects`).
+    let at = &content[entry.name_offset as usize..];
+    assert!(at.starts_with("sync:forma-projects"));
+}
+
+#[test]
+fn resolves_enclosing_signature_from_attribute() {
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+
+#[Signature('sync:all {--force} {--months=}')]
+class SyncAll extends Command
+{
+    public function handle(): int
+    {
+        $this->option('force');
+        return self::SUCCESS;
+    }
+}
+"#;
+    let offset = content.find("option").expect("option call present");
+    let sig = command_signature_at_offset(content, offset).expect("enclosing signature");
+    assert_eq!(sig.name, "sync:all");
+    assert!(sig.option("force").is_some());
+    assert!(sig.option("months").is_some());
+}
+
+#[test]
 fn index_dedupes_and_looks_up() {
     let mut index = LaravelCommandIndex::default();
     index.set_file(
