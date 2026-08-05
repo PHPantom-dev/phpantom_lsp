@@ -235,6 +235,73 @@ class SyncAll extends Command
 }
 
 #[test]
+fn indexes_standalone_aliases_attribute() {
+    let content = r#"<?php
+namespace App\Actions\Sync;
+
+use Illuminate\Console\Attributes\Aliases;
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+
+#[Signature('sync:projects {--force}')]
+#[Aliases(['sync:p'])]
+class SyncProjects extends Command
+{
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Actions/Sync/SyncProjects.php");
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry.name, "sync:projects");
+    assert_eq!(entry.aliases, vec!["sync:p"]);
+}
+
+#[test]
+fn indexes_signature_and_as_command_aliases() {
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+use Symfony\Component\Console\Attribute\AsCommand;
+
+#[Signature('mail:send', aliases: ['mail:go'])]
+class MailSend extends Command
+{
+}
+
+#[AsCommand(name: 'cache:clear', aliases: ['cache:clean'])]
+class CacheClear extends Command
+{
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/AliasesCheck.php");
+    assert_eq!(entries.len(), 2);
+    let by_name = |n: &str| entries.iter().find(|e| e.name == n).unwrap();
+    assert_eq!(by_name("mail:send").aliases, vec!["mail:go"]);
+    assert_eq!(by_name("cache:clear").aliases, vec!["cache:clean"]);
+}
+
+#[test]
+fn index_resolves_alias_names() {
+    let mut index = LaravelCommandIndex::default();
+    index.set_file(
+        "file:///a.php".to_string(),
+        scan_command_file(
+            "<?php #[Signature('a:run', aliases: ['a:go', 'a:fly'])] class ARun extends Command { }",
+            "file:///a.php",
+        ),
+    );
+    index.rebuild();
+
+    assert!(index.get("a:run").is_some());
+    assert!(index.get("a:go").is_some());
+    assert!(index.get("a:fly").is_some());
+    assert!(index.get("a:nope").is_none());
+    assert_eq!(index.all_names(), vec!["a:fly", "a:go", "a:run"]);
+}
+
+#[test]
 fn index_dedupes_and_looks_up() {
     let mut index = LaravelCommandIndex::default();
     index.set_file(

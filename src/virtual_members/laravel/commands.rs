@@ -9,6 +9,10 @@
 //! - `protected $name = 'app:sync';`
 //! - `#[AsCommand(name: 'app:sync')]`
 //!
+//! Command aliases (extra names a command answers to) are recovered from
+//! `#[Aliases([...])]` and the `aliases:` argument of `#[Signature]` /
+//! `#[AsCommand]`, and are indexed alongside the primary name.
+//!
 //! This module scans project and vendor command classes for those literals
 //! (see [`scan_command_file`]), parses the `$signature` grammar into
 //! arguments and options ([`parse_signature`]), and stores everything in a
@@ -80,6 +84,9 @@ impl CommandSignature {
 pub(crate) struct CommandEntry {
     /// The command name, e.g. `app:sync` or `migrate`.
     pub name: String,
+    /// Alternative names the command answers to (`#[Aliases]`,
+    /// `#[Signature(aliases:)]`, `#[AsCommand(aliases:)]`).
+    pub aliases: Vec<String>,
     /// Best-effort fully-qualified class name (`App\Console\Commands\Sync`).
     pub fqn: Option<String>,
     /// URI of the file declaring the command.
@@ -128,6 +135,11 @@ impl LaravelCommandIndex {
                 by_name
                     .entry(entry.name.clone())
                     .or_insert_with(|| entry.clone());
+                for alias in &entry.aliases {
+                    by_name
+                        .entry(alias.clone())
+                        .or_insert_with(|| entry.clone());
+                }
             }
         }
         self.by_name = by_name;
@@ -460,6 +472,11 @@ fn command_from_class(
         None => Some(bytes_to_string(class.name.value)),
     };
 
+    // Alias names from #[Aliases([...])] (which wins, mirroring
+    // Illuminate\Console\Command::configureFromAttributes) or the
+    // `aliases:` argument of #[Signature] / #[AsCommand].
+    let aliases = command_aliases(class);
+
     // 1. #[AsCommand(name: '...')] / #[AsCommand('...')].
     if let Some((name, offset)) = as_command_name(class, content) {
         let signature = signature_property_value(class, content)
@@ -470,6 +487,7 @@ fn command_from_class(
             });
         return Some(CommandEntry {
             name,
+            aliases: aliases.clone(),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
@@ -486,6 +504,7 @@ fn command_from_class(
         }
         return Some(CommandEntry {
             name: signature.name.clone(),
+            aliases: aliases.clone(),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
@@ -501,6 +520,7 @@ fn command_from_class(
         }
         return Some(CommandEntry {
             name: signature.name.clone(),
+            aliases: aliases.clone(),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
@@ -515,6 +535,7 @@ fn command_from_class(
         }
         return Some(CommandEntry {
             name: name.clone(),
+            aliases: aliases.clone(),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
@@ -580,6 +601,101 @@ fn signature_attribute_value<'c>(
         }
     }
     None
+}
+
+/// Collect the command's alias names, mirroring
+/// `Illuminate\Console\Command::configureFromAttributes`: a standalone
+/// `#[Aliases([...])]` attribute wins; otherwise the `aliases:` argument of
+/// `#[Signature]` / `#[AsCommand]` is used.
+fn command_aliases(class: &Class<'_>) -> Vec<String> {
+    let mut aliases = Vec::new();
+    for list in class.attribute_lists.iter() {
+        for attr in list.attributes.iter() {
+            let segment = last_segment(attr.name.value());
+            match segment {
+                // #[Aliases(['a', 'b'])] — the single positional argument.
+                b"Aliases" => {
+                    return attr
+                        .argument_list
+                        .as_ref()
+                        .and_then(|args| args.arguments.first())
+                        .and_then(|arg| arg.value())
+                        .and_then(|expr| string_array_literal(expr))
+                        .unwrap_or_default();
+                }
+                // `aliases:` named argument (positional index for
+                // Signature(sig, aliases) / AsCommand(name, desc, aliases)).
+                b"Signature" | b"AsCommand" => {
+                    let Some(arg_list) = attr.argument_list.as_ref() else {
+                        continue;
+                    };
+                    let positional_index = if segment == b"Signature" { 1 } else { 2 };
+                    let mut positional = 0usize;
+                    let mut found: Option<Vec<String>> = None;
+                    for arg in arg_list.arguments.iter() {
+                        match arg {
+                            PartialArgument::Named(named) => {
+                                if bytes_to_string(named.name.value) == "aliases" {
+                                    found = string_array_literal(named.value);
+                                }
+                            }
+                            PartialArgument::Positional(_) => {
+                                if positional == positional_index && found.is_none() {
+                                    found = arg
+                                        .value()
+                                        .and_then(|expr| string_array_literal(expr));
+                                }
+                                positional += 1;
+                            }
+                            PartialArgument::NamedPlaceholder(_)
+                            | PartialArgument::Placeholder(_)
+                            | PartialArgument::VariadicPlaceholder(_) => {}
+                        }
+                    }
+                    if let Some(list) = found
+                        && !list.is_empty()
+                    {
+                        aliases = list;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    aliases
+}
+
+/// Collect the string literals of a `['a', 'b']` array expression (or a bare
+/// string literal, which Laravel also accepts).
+fn string_array_literal(expr: &Expression<'_>) -> Option<Vec<String>> {
+    match expr {
+        Expression::Literal(Literal::String(s)) => s.value.map(|v| vec![bytes_to_string(v)]),
+        Expression::Array(arr) => Some(collect_array_strings(arr.elements.iter())),
+        Expression::LegacyArray(arr) => Some(collect_array_strings(arr.elements.iter())),
+        _ => None,
+    }
+}
+
+fn collect_array_strings<'a, 'b>(
+    elements: impl IntoIterator<Item = &'a ArrayElement<'b>>,
+) -> Vec<String>
+where
+    'b: 'a,
+{
+    elements
+        .into_iter()
+        .filter_map(|el| match el {
+            ArrayElement::Value(v) => Some(v.value),
+            _ => None,
+        })
+        .filter_map(|inner| {
+            if let Expression::Literal(Literal::String(s)) = inner {
+                s.value.map(bytes_to_string)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// The `$signature` property's string value and the inner byte offset of the
