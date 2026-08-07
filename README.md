@@ -73,7 +73,7 @@ Performance measured on a production codebase: 21K PHP files, 1.5M lines of code
 - **Closure parameter inference.** `$users->map(fn($u) => $u->name)` infers `$u` as `User` from the collection's generic context.
 - **Conditional return types.** PHPStan-style conditional `@return` types resolve to the concrete branch at each call site.
 - **Type aliases and shapes.** `@phpstan-type`, `@phpstan-import-type`, and `object{...}` shapes all resolve through to completions.
-- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, and query string compleation on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
+- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string compleation on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
 ## Project Awareness
