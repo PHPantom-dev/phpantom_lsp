@@ -124,8 +124,11 @@ impl Backend {
                     .cloned()
                     .unwrap_or_default()
             };
-            let (virtual_php, source_map) =
-                crate::blade::preprocessor::preprocess_with_vars(content, &injected);
+            let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
+                content,
+                &injected,
+                crate::blade::template_kind(uri, content),
+            );
             self.blade_source_maps
                 .write()
                 .insert(uri.to_string(), source_map);
@@ -431,6 +434,20 @@ impl Backend {
                         for cls in top_classes {
                             classes_with_ns.push((cls, None));
                         }
+                    }
+                    // Laravel compiles a template's `@php` and `<?php`
+                    // regions into the top level of the generated view
+                    // file, so a `use` written in one imports for the whole
+                    // template. Wrapping the body in a function to make it
+                    // analysable buries those imports in a function body,
+                    // where the file's use-map would never see them.
+                    Statement::Function(func)
+                        if bytes_to_str(func.name.value) == crate::blade::WRAPPER_FUNCTION =>
+                    {
+                        Self::extract_use_statements_from_statements(
+                            func.body.statements.iter(),
+                            &mut use_map,
+                        );
                     }
                     _ => {
                         // Walk other top-level statements (expression statements,

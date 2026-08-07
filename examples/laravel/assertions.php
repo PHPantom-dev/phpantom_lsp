@@ -891,6 +891,34 @@ check(
     $models->partition->getTitle()->first()::class === \App\Models\ReviewCollection::class
 );
 
+// ─── Blade component scope ──────────────────────────────────────────────────
+
+// Laravel puts two variables in scope of every component view that no caller
+// passes: `$attributes` (the tag's attributes) and `$slot` (its body).  The
+// LSP declares both in a component template, so their concrete classes have
+// to be the ones the framework actually hands over.
+$component = new class extends \Illuminate\View\Component {
+    public function render(): string { return ''; }
+};
+$component->withAttributes(['class' => 'alert']);
+check(
+    '$attributes in a component view is a ComponentAttributeBag',
+    $component->attributes::class === \Illuminate\View\ComponentAttributeBag::class
+);
+check(
+    'ComponentAttributeBag::merge() returns another attribute bag',
+    $component->attributes->merge(['role' => 'alert']) instanceof \Illuminate\View\ComponentAttributeBag
+);
+
+// `Factory::renderComponent()` builds `['slot' => new ComponentSlot(...)]`,
+// so an empty component body still gives the template a real object.
+$slot = new \Illuminate\View\ComponentSlot();
+check('$slot in a component view is empty when the tag has no body', $slot->isEmpty());
+check(
+    'ComponentSlot renders its contents as HTML',
+    (new \Illuminate\View\ComponentSlot('<b>hi</b>'))->toHtml() === '<b>hi</b>'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

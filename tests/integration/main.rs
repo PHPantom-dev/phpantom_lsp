@@ -4,6 +4,7 @@ mod blade;
 mod blade_call_site_inference;
 pub mod blade_debug;
 pub mod blade_error;
+mod blade_imports;
 pub mod blade_regression;
 mod classmap_scanner;
 mod code_action_add_override;

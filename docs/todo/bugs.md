@@ -35,55 +35,6 @@ in it is invisible to `route()` / route-name completion.
 provider-resources fix since `Program` does not currently travel through
 that call chain.
 
-#### B36. `use` imports declared inside a Blade file are ignored
-
-**Impact: High · Effort: Medium**
-
-An import written inside a Blade template is never registered, so every
-short class name that depends on it fails to resolve. Both spellings are
-affected:
-
-```blade
-@php
-    use App\Helpers\CurrencyHelper;
-@endphp
-{{ CurrencyHelper::formatPrice(1) }}   {{-- type of 'CurrencyHelper' could not be resolved --}}
-```
-
-```blade
-<?php
-use App\Helpers\CurrencyHelper;
-?>
-{{ CurrencyHelper::formatPrice(1) }}   {{-- same --}}
-```
-
-The failure cascades: `$model = Menu::createMenuViewModel()` leaves
-`$model` untyped, so every `$model->…`, every loop variable derived from
-it, and every `@var` docblock that names the short class fail too. One
-view alone produced 17 diagnostics from a single unresolved import.
-Across the sample set this accounts for 30 diagnostics (26
-`unresolved_member_access` in one project, 3 `unknown_member` and 1
-`unknown_class` in another).
-
-#### B37. `$slot` and `$attributes` are reported as undefined in Blade components
-
-**Impact: High · Effort: Low**
-
-Laravel injects `$attributes` (an `Illuminate\View\ComponentAttributeBag`)
-and `$slot` (an `Illuminate\Support\HtmlString`) into every component
-view. PHPantom knows about neither, so a component template reports both
-an `unknown_variable` and, where the variable is used, an
-`unresolved_member_access`:
-
-```blade
-<img {{ $attributes->merge(['class' => 'img-fluid']) }} src="{{ $src }}" />
-{{ $slot }}
-```
-
-45 diagnostics across two sample projects (30 `unknown_variable` in one,
-14 in the other, plus 7 `unresolved_member_access` on
-`$attributes->merge`), making this the single noisiest Blade cluster.
-
 #### B38. `@props` and anonymous-component attributes are reported as undefined
 
 **Impact: Medium · Effort: Low-Medium**

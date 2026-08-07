@@ -9,9 +9,40 @@ use std::path::{Path, PathBuf};
 /// (<?php header, $errors declaration, $__env declaration, wrapper function, etc.).
 pub const PROLOGUE_LINES: u32 = 6;
 
+/// Name of the function the preprocessor wraps a template's body in, so
+/// that collectors which only analyse function bodies see the template as
+/// analysable code.
+pub const WRAPPER_FUNCTION: &str = "__blade_template";
+
 /// Check whether a URI refers to a Blade template file.
 pub fn is_blade_file(uri: &str) -> bool {
     uri.ends_with(".blade.php")
+}
+
+/// How Laravel renders a Blade template, which decides what it gets in
+/// scope beyond the data its caller passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TemplateKind {
+    /// An ordinary view rendered through `view()` or `@include`.
+    #[default]
+    View,
+    /// A component view, which additionally receives `$attributes` and
+    /// `$slot`.
+    Component,
+}
+
+/// Classify a Blade template from its path and source.
+///
+/// Either signal is conclusive on its own: the template sits in a
+/// `components` directory (Laravel's anonymous-component convention, and
+/// where a class-based component's default view lives), or it uses a
+/// directive only a component can use.
+pub fn template_kind(uri: &str, content: &str) -> TemplateKind {
+    if uri.contains("/components/") || content.contains("@props") || content.contains("@aware") {
+        TemplateKind::Component
+    } else {
+        TemplateKind::View
+    }
 }
 
 /// Discover Laravel Blade view directories from `config/view.php`.

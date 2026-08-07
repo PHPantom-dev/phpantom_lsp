@@ -65,6 +65,10 @@
     {{-- @include: Ctrl+Click navigates to the included view --}}
     @include('emails.order_shipped', ['post' => $posts->first()])
 
+    {{-- The <x-alert> component view is where $attributes and $slot come
+         from: resources/views/components/alert.blade.php --}}
+    <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>
+
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim
         <p>This {{ $blade }} syntax is not processed</p>

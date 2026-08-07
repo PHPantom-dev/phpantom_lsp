@@ -369,4 +369,137 @@ mod tests {
             labels
         );
     }
+
+    // ── Component views: Laravel's implicit `$attributes` / `$slot` ──
+
+    const COMPONENT_COMPOSER: &str =
+        r#"{"autoload": {"psr-4": {"Illuminate\\": "vendor/laravel/framework/src/Illuminate/"}}}"#;
+
+    const ATTRIBUTE_BAG_STUB: &str = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {\n    public function merge(array $attributeDefaults = []): static { return $this; }\n}\n";
+
+    const COMPONENT_SLOT_STUB: &str = "<?php\nnamespace Illuminate\\View;\nclass ComponentSlot {\n    public function isEmpty(): bool { return true; }\n}\n";
+
+    fn component_workspace(
+        view_path: &str,
+        view_body: &str,
+    ) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+        let (backend, dir) = crate::common::create_psr4_workspace(
+            COMPONENT_COMPOSER,
+            &[
+                (
+                    "vendor/laravel/framework/src/Illuminate/View/ComponentAttributeBag.php",
+                    ATTRIBUTE_BAG_STUB,
+                ),
+                (
+                    "vendor/laravel/framework/src/Illuminate/View/ComponentSlot.php",
+                    COMPONENT_SLOT_STUB,
+                ),
+                (view_path, view_body),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = Url::from_file_path(root.join(view_path)).unwrap();
+        (backend, dir, uri)
+    }
+
+    async fn undefined_variables(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<String> {
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_undefined_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        diags
+            .into_iter()
+            .filter(|d| d.message.contains("Undefined variable"))
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_component_view_declares_attributes_and_slot() {
+        let body = "<img {{ $attributes->merge(['class' => 'img-fluid']) }} />\n{{ $slot }}\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/components/image.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        assert!(
+            undefined_variables(&backend, &uri).await.is_empty(),
+            "a component view must have $attributes and $slot in scope"
+        );
+
+        // The declared types resolve, so members on them are known.
+        let hover = hover_text(&backend, &uri, 0, 8).await;
+        assert!(
+            hover.contains("ComponentAttributeBag"),
+            "$attributes must be typed as the attribute bag, got: {}",
+            hover
+        );
+    }
+
+    /// An anonymous component can live outside `components/`; `@props`
+    /// identifies it just as well.
+    #[tokio::test]
+    async fn test_props_directive_marks_a_template_as_a_component() {
+        let body = "@props(['caption'])\n{{ $slot }}\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/widgets/box.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let undefined = undefined_variables(&backend, &uri).await;
+        assert!(
+            !undefined.iter().any(|m| m.contains("$slot")),
+            "@props marks the template as a component: {:?}",
+            undefined
+        );
+    }
+
+    /// The implicit variables are a component's, not every template's.
+    #[tokio::test]
+    async fn test_plain_view_still_flags_slot_as_undefined() {
+        let body = "{{ $slot }}\n";
+        let (backend, _dir, uri) = component_workspace("resources/views/page.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let undefined = undefined_variables(&backend, &uri).await;
+        assert!(
+            undefined.iter().any(|m| m.contains("$slot")),
+            "a plain view does not receive $slot: {:?}",
+            undefined
+        );
+    }
+
+    async fn open_blade(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "blade".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .await;
+    }
+
+    async fn hover_text(
+        backend: &phpantom_lsp::Backend,
+        uri: &Url,
+        line: u32,
+        character: u32,
+    ) -> String {
+        let result = backend
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap();
+        match result.map(|h| h.contents) {
+            Some(HoverContents::Markup(m)) => m.value,
+            _ => String::new(),
+        }
+    }
 }

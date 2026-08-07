@@ -107,8 +107,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B37 | [`$slot` and `$attributes` are reported as undefined in Blade components](todo/bugs.md#b37-slot-and-attributes-are-reported-as-undefined-in-blade-components)                | High        | Low         |
-| B36 | [`use` imports declared inside a Blade file are ignored](todo/bugs.md#b36-use-imports-declared-inside-a-blade-file-are-ignored)                                              | High        | Medium      |
 | B43 | [`App::make()` / `App::makeWith()` with a class-string do not resolve](todo/bugs.md#b43-appmake--appmakewith-with-a-class-string-do-not-resolve)                             | Medium-High | Low         |
 | B41 | [Translation-key diagnostics fire when the app replaces the translation loader](todo/bugs.md#b41-translation-key-diagnostics-fire-when-the-app-replaces-the-translation-loader) | Medium-High | Low-Medium  |
 | B39 | [Multi-line PHP expressions in Blade component attributes are truncated](todo/bugs.md#b39-multi-line-php-expressions-in-blade-component-attributes-are-truncated)            | Medium-High | Medium      |

@@ -1,3 +1,4 @@
+use super::TemplateKind;
 use super::directives::{match_directive, translate_directive};
 use super::source_map::BladeSourceMap;
 
@@ -48,8 +49,15 @@ enum CapturedDirective {
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
-    preprocess_with_vars(content, &[])
+    preprocess_with_vars(content, &[], TemplateKind::View)
 }
+
+/// The variables Laravel puts in a component view's scope on top of the
+/// data its caller passes: (name without `$`, fully qualified type).
+const COMPONENT_VARS: [(&str, &str); 2] = [
+    ("attributes", "\\Illuminate\\View\\ComponentAttributeBag"),
+    ("slot", "\\Illuminate\\View\\ComponentSlot"),
+];
 
 /// A type string that is safe to place inside a one-line `/** @var … */`
 /// docblock, or `mixed` when it is not.
@@ -78,12 +86,27 @@ fn docblock_safe_type(type_string: &str) -> &str {
 /// Callers pass variables inferred from `view()` call sites; a template
 /// that declares its own `@var` for a name shadows the injected one
 /// because in-template annotations are nearer to every use site.
+///
+/// A [`TemplateKind::Component`] template also gets Laravel's implicit
+/// `$attributes` and `$slot`, which no caller passes explicitly.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
+    kind: TemplateKind,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
+
+    let component_vars: &[(&str, &str)] = match kind {
+        TemplateKind::Component => &COMPONENT_VARS,
+        TemplateKind::View => &[],
+    };
+    // A caller cannot pass `$attributes`/`$slot`, so an inferred entry
+    // of either name is a misreading of a call site; the framework's
+    // own type wins rather than being overwritten by a later `= null`.
+    let injected_vars = injected_vars
+        .iter()
+        .filter(|(name, _)| !component_vars.iter().any(|(own, _)| own == name));
 
     // ── Prologue ──
     virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} }\n");
@@ -91,11 +114,21 @@ pub fn preprocess_with_vars(
     virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
     virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
     virtual_php.push_str("$__env = new \\Illuminate\\View\\Factory();\n");
-    for (name, type_string) in injected_vars {
+    for &(name, type_name) in component_vars {
+        virtual_php.push_str(&format!("/** @var {type_name} ${name} */\n"));
+        virtual_php.push_str(&format!("${name} = new {type_name}();\n"));
+    }
+    for (name, type_string) in injected_vars.clone() {
         let type_string = docblock_safe_type(type_string);
         virtual_php.push_str(&format!("/** @var {type_string} ${name} */\n"));
         virtual_php.push_str(&format!("${name} = null;\n"));
     }
+    // Where hoisted `@use` imports are spliced in once the whole
+    // template has been scanned: still in the prologue, so they precede
+    // every name they import (name resolution runs in source order and
+    // an import written after a use of the name does not apply to it).
+    let uses_insert_at = virtual_php.len();
+
     // Wrap the template body in a function so that diagnostic
     // collectors (which only analyse function/method bodies) treat
     // the Blade content as analysable code.  The closing brace is
@@ -103,7 +136,13 @@ pub fn preprocess_with_vars(
     // injected variables) are assigned in the outer scope above, so
     // pull them in with `global` — otherwise every use of them inside
     // the wrapped function is a false-positive "undefined variable".
-    virtual_php.push_str("function __blade_template() { global $errors, $__env");
+    virtual_php.push_str("function ");
+    virtual_php.push_str(super::WRAPPER_FUNCTION);
+    virtual_php.push_str("() { global $errors, $__env");
+    for &(name, _) in component_vars {
+        virtual_php.push_str(", $");
+        virtual_php.push_str(name);
+    }
     for (name, _) in injected_vars {
         virtual_php.push_str(", $");
         virtual_php.push_str(name);
@@ -117,9 +156,8 @@ pub fn preprocess_with_vars(
 
     // `@use` imports cannot be emitted inline: the template body is wrapped
     // in `function __blade_template()`, and PHP `use` imports are only valid
-    // at the top level. They are collected here and appended as real
-    // top-level `use` statements after the wrapper function closes, so the
-    // imported names populate the file's use-map and resolve.
+    // at the top level. They are collected here and spliced into the
+    // prologue as real top-level `use` statements once the scan is done.
     let mut hoisted_uses: Vec<String> = Vec::new();
 
     let mut in_php_directive_block = false;
@@ -722,12 +760,17 @@ pub fn preprocess_with_vars(
     // Close the wrapper function.
     virtual_php.push_str("}\n");
 
-    // Emit collected `@use` imports as real top-level `use` statements.
-    // They live after the wrapper function (and past every Blade line) so
-    // they are valid PHP and do not shift the line-based source map.
-    for stmt in &hoisted_uses {
-        virtual_php.push_str(stmt);
-        virtual_php.push('\n');
+    // Splice the collected `@use` imports into the prologue as real
+    // top-level `use` statements, and grow the prologue height by the
+    // lines they add so every Blade position still maps correctly.
+    if !hoisted_uses.is_empty() {
+        let mut block = String::new();
+        for stmt in &hoisted_uses {
+            block.push_str(stmt);
+            block.push('\n');
+        }
+        source_map.prologue_lines += hoisted_uses.len() as u32;
+        virtual_php.insert_str(uses_insert_at, &block);
     }
 
     (virtual_php, source_map)
@@ -969,6 +1012,57 @@ mod tests {
     }
 
     #[test]
+    fn test_component_prologue_declares_attributes_and_slot() {
+        let (php, map) = preprocess_with_vars(
+            "<img {{ $attributes->merge(['class' => 'x']) }} />{{ $slot }}",
+            &[],
+            TemplateKind::Component,
+        );
+        assert!(
+            php.contains("/** @var \\Illuminate\\View\\ComponentAttributeBag $attributes */")
+                && php.contains("/** @var \\Illuminate\\View\\ComponentSlot $slot */"),
+            "component variables must be declared with their framework types: {}",
+            php
+        );
+        assert!(
+            php.contains(
+                "function __blade_template() { global $errors, $__env, $attributes, $slot;"
+            ),
+            "component variables must be pulled into the wrapper scope: {}",
+            php
+        );
+        // Two declarations of two lines each on top of the base prologue.
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
+    }
+
+    #[test]
+    fn test_plain_view_prologue_has_no_component_variables() {
+        let (php, _) = preprocess("{{ $slot }}");
+        assert!(
+            !php.contains("$attributes = new") && !php.contains("$slot = new"),
+            "a plain view must not receive component variables: {}",
+            php
+        );
+    }
+
+    /// A caller cannot pass `$attributes`, so a call-site inference that
+    /// produced one must not overwrite the framework's own declaration.
+    #[test]
+    fn test_component_variables_are_not_overwritten_by_inferred_vars() {
+        let (php, map) = preprocess_with_vars(
+            "{{ $attributes }}",
+            &[("attributes".to_string(), "string".to_string())],
+            TemplateKind::Component,
+        );
+        assert!(
+            !php.contains("$attributes = null;"),
+            "the inferred declaration must be dropped: {}",
+            php
+        );
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
+    }
+
+    #[test]
     fn test_preprocess_with_vars_injects_declarations() {
         let content = "{{ $user->name }}";
         let (php, map) = preprocess_with_vars(
@@ -977,6 +1071,7 @@ mod tests {
                 ("results".to_string(), "array<int, string>".to_string()),
                 ("user".to_string(), "\\App\\Models\\User".to_string()),
             ],
+            TemplateKind::View,
         );
         assert!(
             php.contains("/** @var array<int, string> $results */"),
@@ -1022,6 +1117,7 @@ mod tests {
         let (php, map) = preprocess_with_vars(
             "{{ $body }}",
             &[("body".to_string(), "'line1\nline2'".to_string())],
+            TemplateKind::View,
         );
         assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 2);
         assert!(
@@ -1042,8 +1138,11 @@ mod tests {
     /// spill the remainder into code.
     #[test]
     fn test_preprocess_with_vars_type_cannot_close_the_docblock() {
-        let (php, _) =
-            preprocess_with_vars("{{ $x }}", &[("x".to_string(), "'*/ evil()'".to_string())]);
+        let (php, _) = preprocess_with_vars(
+            "{{ $x }}",
+            &[("x".to_string(), "'*/ evil()'".to_string())],
+            TemplateKind::View,
+        );
         assert!(
             php.contains("/** @var mixed $x */") && !php.contains("evil()"),
             "a type containing */ must degrade to mixed: {}",
@@ -1670,13 +1769,14 @@ mod tests {
             "@use should emit a real use import: {}",
             php
         );
-        // The import is hoisted after the wrapper function's closing brace,
-        // so it must appear after `}` (top-level, not inside the function).
-        let brace = php.rfind('}').unwrap();
+        // The import is hoisted into the prologue: top-level (not inside
+        // the wrapper function) and ahead of every name it imports, since
+        // name resolution runs in source order.
+        let wrapper = php.find("function __blade_template()").unwrap();
         let import = php.find("use App\\Models\\Post;").unwrap();
         assert!(
-            import > brace,
-            "the use import must be hoisted to the top level: {}",
+            import < wrapper,
+            "the use import must be hoisted into the prologue: {}",
             php
         );
         // Content after @use must stay masked as HTML, not leak as raw PHP.
