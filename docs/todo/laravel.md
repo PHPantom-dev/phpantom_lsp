@@ -716,31 +716,6 @@ declared under `filesystems.disks.*`. The config scanner already parses
 candidate set for completion, go-to-definition (jump to the disk's entry
 in `config/filesystems.php`), and an unknown-disk diagnostic.
 
-#### L26. Gate ability and policy strings
-
-**Impact: Medium-High · Effort: Medium-High**
-
-The Laravel LSP covers auth strings (completion, hover, diagnostics,
-links) by booting and asking the `Gate` for its abilities and policy
-map. The statically recoverable equivalents:
-
-- **Gate definitions:** scan `Gate::define('name', …)` in service
-  provider `boot()` methods — same shape as the existing macro scanner,
-  including the closure signature for hover.
-- **Policies:** the `$policies` array in `AuthServiceProvider`, the
-  `#[UsePolicy]` model attribute, and the default discovery convention
-  (`App\Models\Foo` → `App\Policies\FooPolicy`). Public methods of the
-  policy become abilities valid for that model.
-- **Trigger contexts:** `Gate::allows()/denies()/check()/any()/none()/
-  authorize()/inspect()/has()` (string and array arguments),
-  `$user->can()/cannot()/canAny()`, controller `$this->authorize()`,
-  `Route::can()`, the `can:ability,Model` middleware parameter, and
-  (via the Blade preprocessor) `@can`/`@cannot`/`@canany`.
-- **Model-aware validation:** when the second argument is a
-  `Model::class` literal or a typed variable, verify the ability exists
-  *for that model's policy*, not just anywhere — distinguishing "unknown
-  ability" from "ability not defined for this model."
-
 #### L27. Legacy `Controller@method` action strings
 
 **Impact: Low · Effort: Low**

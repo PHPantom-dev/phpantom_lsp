@@ -175,7 +175,6 @@ unlikely to move the needle for most users.
 | L15 | [Completion for Laravel string keys](todo/laravel.md)                                                                                | High        | Medium      |
 | L5  | [`abort_if`/`abort_unless` type narrowing](todo/laravel.md#l5-abort_ifabort_unless-type-narrowing)                                                                          | High        | Medium      |
 | L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium      |
-| L26 | [Gate ability and policy strings](todo/laravel.md#l26-gate-ability-and-policy-strings)                                                                                      | Medium-High | Medium-High |
 | L16 | [Hover for Laravel string keys](todo/laravel.md)                                                                                          | Medium      | Low-Medium  |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Low-Medium  |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Low-Medium  |
