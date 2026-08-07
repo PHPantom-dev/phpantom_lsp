@@ -282,16 +282,20 @@ pub(super) fn is_gate_facade(clean_subject: &str) -> bool {
         || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Gate")
 }
 
+/// How far back down a method chain a facade root is looked for.
+///
+/// The chains this recognises are short — `Gate::forUser($user)->allows(…)` is
+/// one link, `Route::get(…)->name(…)->middleware(…)` a handful. The bound is
+/// what keeps the cost linear: several of the method names that start this
+/// search (`has`, `any`, `check`) are also ordinary query-builder methods, and
+/// an unbounded walk would rescan the whole spine at every link of a long
+/// Eloquent chain.
+const FACADE_CHAIN_DEPTH: usize = 4;
+
 /// Whether an instance-method chain roots at the `Gate` facade, as
 /// `Gate::forUser($user)->allows('update', $post)` does.
 pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Call(Call::Method(mc)) => chain_roots_at_gate(mc.object),
-        Expression::Call(Call::StaticMethod(sc)) => {
-            is_gate_facade(strip_fqn_prefix(&expr_to_subject_text(sc.class)))
-        }
-        _ => false,
-    }
+    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, &|name| is_gate_facade(name))
 }
 
 /// Whether an instance-method chain roots at the `Route` facade, as
@@ -300,10 +304,27 @@ pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
 /// The `can()` there names an ability, but its second argument is a *route
 /// parameter* name rather than a model, so no model subject is recorded.
 pub(super) fn chain_roots_at_route_facade(expr: &Expression<'_>) -> bool {
+    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, &|name| {
+        name.eq_ignore_ascii_case("Route")
+    })
+}
+
+/// Walk at most `depth` links down a method chain looking for a static call
+/// whose class satisfies `is_facade`.
+fn chain_roots_at_facade(
+    expr: &Expression<'_>,
+    depth: usize,
+    is_facade: &dyn Fn(&str) -> bool,
+) -> bool {
+    if depth == 0 {
+        return false;
+    }
     match expr {
-        Expression::Call(Call::Method(mc)) => chain_roots_at_route_facade(mc.object),
+        Expression::Call(Call::Method(mc)) => {
+            chain_roots_at_facade(mc.object, depth - 1, is_facade)
+        }
         Expression::Call(Call::StaticMethod(sc)) => {
-            strip_fqn_prefix(&expr_to_subject_text(sc.class)).eq_ignore_ascii_case("Route")
+            is_facade(strip_fqn_prefix(&expr_to_subject_text(sc.class)))
         }
         _ => false,
     }
