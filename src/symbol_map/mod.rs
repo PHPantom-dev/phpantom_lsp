@@ -378,6 +378,29 @@ pub(crate) enum LaravelStringKind {
     /// `Relation::getMorphedModel('post')`, and for the `$types` argument of
     /// the `whereHasMorph()` family.
     MorphAlias,
+    /// An authorization ability name: the string a `Gate::allows()`,
+    /// `$user->can()`, `$this->authorize()`, `can:` middleware parameter, or
+    /// Blade `@can` directive checks.  Resolves against `Gate::define()`
+    /// registrations and the methods of the relevant model's policy.
+    GateAbility,
+}
+
+/// The model a gate check names, recorded alongside its ability span.
+///
+/// Kept in a side table rather than inside [`SymbolKind::GateAbility`] so
+/// that the (very hot) [`SymbolKind`] enum does not grow for every span in
+/// every file: only the handful of gate calls in a project contribute an
+/// entry, and only the unknown-ability diagnostic reads them.
+#[derive(Debug, Clone)]
+pub(crate) struct GateSubject {
+    /// Start offset of the [`SymbolKind::GateAbility`] span this describes.
+    pub ability_start: u32,
+    /// Source text of the model expression — `Post` for `Post::class`,
+    /// `$post` for a variable.
+    pub subject_text: SubjectText,
+    /// Whether the subject is a class name (`Post::class`) rather than a
+    /// runtime value, which decides how it is resolved to a type.
+    pub is_static: bool,
 }
 
 // ─── Template parameter definition site structures ──────────────────────────
@@ -660,6 +683,10 @@ pub(crate) struct SymbolMap {
     /// parameters.  Used by inlay hints to show inferred parameter types
     /// and return types from the enclosing callable signature.
     pub untyped_closure_sites: Vec<UntypedClosureSite>,
+    /// The model argument of each gate check that named one, keyed back to
+    /// its ability span by [`GateSubject::ability_start`].  Empty for every
+    /// file that performs no authorization checks.
+    pub gate_subjects: Vec<GateSubject>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).
@@ -698,6 +725,14 @@ impl SymbolMap {
             .get(&crate::atom::atom(name))
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// The model a gate check named, for the ability span starting at
+    /// `ability_start`.
+    pub fn gate_subject(&self, ability_start: u32) -> Option<&GateSubject> {
+        self.gate_subjects
+            .iter()
+            .find(|subject| subject.ability_start == ability_start)
     }
 
     /// Find the symbol span (if any) that contains `offset`.

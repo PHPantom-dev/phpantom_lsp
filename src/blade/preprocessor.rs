@@ -109,7 +109,7 @@ pub fn preprocess_with_vars(
         .filter(|(name, _)| !component_vars.iter().any(|(own, _)| own == name));
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } }\n");
     virtual_php.push_str("/** @var \\Illuminate\\Support\\ViewErrorBag $errors */\n");
     virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
     virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
@@ -374,6 +374,17 @@ pub fn preprocess_with_vars(
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(":");
                             paren_depth = 0;
+                        } else if matches!(
+                            directive,
+                            "can" | "cannot" | "canany" | "elsecan" | "elsecannot" | "elsecanany"
+                        ) {
+                            // `translate_directive` opens an extra unmatched
+                            // `(` (`if(blade_can_directive`), so the
+                            // directive's own closing paren needs a second
+                            // `)` before the `:`.
+                            replacement = format!(" {} ", translate_directive(directive));
+                            next_mode = Mode::DirectiveArgs("):");
+                            paren_depth = 0;
                         } else if matches!(directive, "unless" | "isset") {
                             // `translate_directive` opens an extra unmatched
                             // `(` for both (`if(!` / `if(isset`), so the
@@ -453,6 +464,9 @@ pub fn preprocess_with_vars(
                                 | "endcontext"
                                 | "enderror"
                                 | "endonce"
+                                | "endcan"
+                                | "endcannot"
+                                | "endcanany"
                                 | "endfragment"
                                 | "endPushIf"
                                 | "endPushOnce"
@@ -961,6 +975,49 @@ mod tests {
             php.contains("echo e( $user )"),
             "{{ $user }} after the XML declaration should still translate normally: {}",
             php
+        );
+    }
+
+    /// The authorization directives lower to a synthetic
+    /// `blade_can_directive()` call so the ability string reaches the same
+    /// extraction as `Gate::allows()`, wrapped in a real conditional so the
+    /// block's body still parses as PHP.
+    #[test]
+    fn test_preprocess_can_directives() {
+        let content = "\
+@can('update', $post)
+    a
+@elsecan('view', $post)
+    b
+@endcan
+@cannot('delete', $post)
+    c
+@endcannot
+@canany(['update', 'delete'], $post)
+    d
+@endcanany
+";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("if(blade_can_directive ('update', $post)):"),
+            "@can should open a conditional around the ability check: {php}"
+        );
+        assert!(
+            php.contains("elseif(blade_can_directive ('view', $post)):"),
+            "@elsecan should continue the conditional: {php}"
+        );
+        assert!(
+            php.contains("if(!blade_can_directive ('delete', $post)):"),
+            "@cannot should negate the check: {php}"
+        );
+        assert!(
+            php.contains("if(blade_can_directive (['update', 'delete'], $post)):"),
+            "@canany should pass the ability list through: {php}"
+        );
+        assert_eq!(
+            php.matches("endif;").count(),
+            3,
+            "each block must close exactly once: {php}"
         );
     }
 

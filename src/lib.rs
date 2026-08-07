@@ -333,6 +333,9 @@ pub(crate) struct LaravelStringKeyCache {
             crate::virtual_members::laravel::config_values::ConfigNode,
         )>,
     >,
+    /// Every authorization ability the project knows: `Gate::define()`
+    /// registrations plus the methods of every policy class.
+    pub gate_abilities: Option<Vec<String>>,
 }
 
 /// Compute-once guards for the entries of [`LaravelStringKeyCache`].
@@ -355,10 +358,20 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub view_names: parking_lot::Mutex<()>,
     pub trans_keys: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
+    pub gate_abilities: parking_lot::Mutex<()>,
 }
 
 impl LaravelStringKeyCache {
-    fn invalidate_for_uri(&mut self, uri: &str) {
+    fn invalidate_for_uri(&mut self, uri: &str, content: &str) {
+        // Abilities come from `Gate::define()` calls and from the methods of
+        // every policy class, so an edit to either invalidates the set.  The
+        // token is `Gate::` rather than `Gate` so an unrelated `Gateway` does
+        // not throw the enumeration away on every keystroke.
+        if uri.ends_with("Policy.php")
+            || memchr::memmem::find(content.as_bytes(), b"Gate::").is_some()
+        {
+            self.gate_abilities = None;
+        }
         if uri.contains("/routes/") {
             self.routes = None;
         }
@@ -603,6 +616,14 @@ pub struct Backend {
     /// appear in `*_type` columns and morph query arguments.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::morph_map`].
     pub(crate) laravel_morph_map: Arc<RwLock<virtual_members::laravel::LaravelMorphMapIndex>>,
+    /// Authorization gate registrations (`Gate::define()` abilities and the
+    /// model → policy map) recovered from service-provider source.  Built
+    /// during `initialized` for Laravel projects and refreshed when a
+    /// registering file changes.  Powers completion, hover, go-to-definition,
+    /// and the unknown-ability diagnostic for the strings `Gate::allows()`,
+    /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
+    /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
+    pub(crate) laravel_gates: Arc<RwLock<virtual_members::laravel::LaravelGateIndex>>,
     /// Laravel macro seed files (service providers plus the app's provider
     /// registration files), mapped to the class references each contributed
     /// at the last macro-index build.  An edit that changes a seed's
@@ -909,6 +930,9 @@ impl Backend {
             laravel_morph_map: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMorphMapIndex::default(),
             )),
+            laravel_gates: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelGateIndex::default(),
+            )),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -998,6 +1022,9 @@ impl Backend {
             laravel_has_commands: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             laravel_morph_map: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMorphMapIndex::default(),
+            )),
+            laravel_gates: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelGateIndex::default(),
             )),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
@@ -1625,6 +1652,7 @@ impl Backend {
             laravel_commands: Arc::clone(&self.laravel_commands),
             laravel_has_commands: Arc::clone(&self.laravel_has_commands),
             laravel_morph_map: Arc::clone(&self.laravel_morph_map),
+            laravel_gates: Arc::clone(&self.laravel_gates),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),

@@ -248,6 +248,298 @@ fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<S
     });
 }
 
+// ─── Authorization gate abilities ───────────────────────────────────────────
+
+/// The synthetic function the Blade preprocessor lowers `@can`, `@cannot`,
+/// and `@canany` to, so their ability strings reach the same extraction as
+/// the PHP forms.
+pub(crate) const BLADE_CAN_DIRECTIVE: &str = "blade_can_directive";
+
+/// Methods on Laravel's `Gate` whose first argument is an ability name (or a
+/// list of them), and whose second is the model the check is about.
+///
+/// Compared case-insensitively without lowercasing into a `String`: this runs
+/// for every method call in every file.
+pub(super) fn is_gate_check_method(member_name: &str) -> bool {
+    const GATE_CHECK_METHODS: &[&str] = &[
+        "allows",
+        "denies",
+        "check",
+        "any",
+        "none",
+        "authorize",
+        "inspect",
+        "has",
+    ];
+    GATE_CHECK_METHODS
+        .iter()
+        .any(|name| member_name.eq_ignore_ascii_case(name))
+}
+
+/// Whether a static-call subject names Laravel's `Gate` facade.
+pub(super) fn is_gate_facade(clean_subject: &str) -> bool {
+    clean_subject.eq_ignore_ascii_case("Gate")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Gate")
+}
+
+/// Whether an instance-method chain roots at the `Gate` facade, as
+/// `Gate::forUser($user)->allows('update', $post)` does.
+pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Call(Call::Method(mc)) => chain_roots_at_gate(mc.object),
+        Expression::Call(Call::StaticMethod(sc)) => {
+            is_gate_facade(strip_fqn_prefix(&expr_to_subject_text(sc.class)))
+        }
+        _ => false,
+    }
+}
+
+/// Whether an instance-method chain roots at the `Route` facade, as
+/// `Route::get(…)->can('update', 'post')` does.
+///
+/// The `can()` there names an ability, but its second argument is a *route
+/// parameter* name rather than a model, so no model subject is recorded.
+pub(super) fn chain_roots_at_route_facade(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Call(Call::Method(mc)) => chain_roots_at_route_facade(mc.object),
+        Expression::Call(Call::StaticMethod(sc)) => {
+            strip_fqn_prefix(&expr_to_subject_text(sc.class)).eq_ignore_ascii_case("Route")
+        }
+        _ => false,
+    }
+}
+
+/// Whether a receiver plainly reads as the authenticated user, which is what
+/// makes `->can('update', $post)` an authorization check rather than a
+/// same-named method on an unrelated object.
+///
+/// Matches a variable whose name ends in `user` (`$user`, `$authUser`), a
+/// property of that shape (`$this->user`), and any `user()` call
+/// (`auth()->user()`, `Auth::user()`, `$request->user()`).  Anything else is
+/// left alone: `can()` is too ordinary a method name to claim on sight.
+pub(super) fn receiver_is_user_like(expr: &Expression<'_>) -> bool {
+    fn ends_with_user(name: &str) -> bool {
+        let name = name.trim_start_matches('$');
+        name.len() >= 4 && name[name.len() - 4..].eq_ignore_ascii_case("user")
+    }
+
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => ends_with_user(bytes_to_str(dv.name)),
+        Expression::Access(Access::Property(access)) => match &access.property {
+            ClassLikeMemberSelector::Identifier(ident) => ends_with_user(bytes_to_str(ident.value)),
+            _ => false,
+        },
+        Expression::Call(Call::Method(mc)) => match &mc.method {
+            ClassLikeMemberSelector::Identifier(ident) => {
+                bytes_to_str(ident.value).eq_ignore_ascii_case("user")
+            }
+            _ => false,
+        },
+        Expression::Call(Call::StaticMethod(sc)) => match &sc.method {
+            ClassLikeMemberSelector::Identifier(ident) => {
+                bytes_to_str(ident.value).eq_ignore_ascii_case("user")
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Emit a [`crate::symbol_map::LaravelStringKind::GateAbility`] span for the
+/// argument at `ability_index`, which Laravel accepts as either a single
+/// string or an array of strings, and record the model named at
+/// `model_index` (when there is one) as the checked subject.
+pub(super) fn try_emit_gate_ability_spans(
+    argument_list: &ArgumentList<'_>,
+    ability_index: usize,
+    model_index: Option<usize>,
+    is_definition: bool,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+    gate_subjects: &mut Vec<crate::symbol_map::GateSubject>,
+) {
+    let Some(ability_arg) = argument_list.arguments.iter().nth(ability_index) else {
+        return;
+    };
+
+    let first_span = spans.len();
+    match ability_arg.value() {
+        Expression::Array(array) => {
+            for element in array.elements.iter() {
+                if let ArrayElement::Value(value) = element {
+                    push_gate_ability_span(value.value, is_definition, content, spans);
+                }
+            }
+        }
+        Expression::LegacyArray(array) => {
+            for element in array.elements.iter() {
+                if let ArrayElement::Value(value) = element {
+                    push_gate_ability_span(value.value, is_definition, content, spans);
+                }
+            }
+        }
+        expr => push_gate_ability_span(expr, is_definition, content, spans),
+    }
+    if spans.len() == first_span {
+        return;
+    }
+
+    let Some(model_index) = model_index else {
+        return;
+    };
+    let Some(model_arg) = argument_list.arguments.iter().nth(model_index) else {
+        return;
+    };
+    let Some((subject_text, is_static)) = gate_model_subject(model_arg.value(), content) else {
+        return;
+    };
+    for span in &spans[first_span..] {
+        gate_subjects.push(crate::symbol_map::GateSubject {
+            ability_start: span.start,
+            subject_text: subject_text.clone(),
+            is_static,
+        });
+    }
+}
+
+/// Push a gate-ability span for a single string-literal expression.
+fn push_gate_ability_span(
+    expr: &Expression<'_>,
+    is_definition: bool,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let ability = &content[inner_start as usize..inner_end as usize];
+    if ability.is_empty() {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelStringKey {
+            kind: crate::symbol_map::LaravelStringKind::GateAbility,
+            key: ability.to_string(),
+            is_write: is_definition,
+        },
+    });
+}
+
+/// The subject text of a gate check's model argument: `Post` for
+/// `Post::class` (a class name), `$post` for a variable, `Post` for
+/// `new Post`.  Anything else names no model we can resolve.
+fn gate_model_subject(
+    expr: &Expression<'_>,
+    content: &str,
+) -> Option<(crate::symbol_map::SubjectText, bool)> {
+    let span = expr.span();
+    match expr {
+        Expression::Access(Access::ClassConstant(cca))
+            if matches!(
+                &cca.constant,
+                ClassLikeConstantSelector::Identifier(ident)
+                    if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
+            ) =>
+        {
+            let name = expr_to_subject_text(cca.class);
+            let class_span = cca.class.span();
+            (!name.is_empty()).then(|| {
+                (
+                    SubjectText::new(
+                        name,
+                        class_span.start.offset,
+                        class_span.end.offset,
+                        content,
+                    ),
+                    true,
+                )
+            })
+        }
+        Expression::Variable(Variable::Direct(dv)) => Some((
+            SubjectText::new(
+                bytes_to_str(dv.name).to_string(),
+                span.start.offset,
+                span.end.offset,
+                content,
+            ),
+            false,
+        )),
+        Expression::Instantiation(inst) => {
+            let name = expr_to_subject_text(inst.class);
+            (!name.is_empty()).then(|| (SubjectText::owned(name), true))
+        }
+        _ => None,
+    }
+}
+
+/// Emit gate-ability spans for the `can:ability,Model` entries of a
+/// `middleware(...)` argument, which Laravel accepts as a single string or an
+/// array of them.
+pub(super) fn try_emit_can_middleware_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    match first_arg.value() {
+        Expression::Array(array) => {
+            for element in array.elements.iter() {
+                if let ArrayElement::Value(value) = element {
+                    push_can_middleware_span(value.value, content, spans);
+                }
+            }
+        }
+        Expression::LegacyArray(array) => {
+            for element in array.elements.iter() {
+                if let ArrayElement::Value(value) = element {
+                    push_can_middleware_span(value.value, content, spans);
+                }
+            }
+        }
+        expr => push_can_middleware_span(expr, content, spans),
+    }
+}
+
+/// Push a gate-ability span covering just the ability part of a
+/// `'can:update,post'` middleware string.
+fn push_can_middleware_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let text = &content[inner_start as usize..inner_end as usize];
+    let Some(rest) = text.strip_prefix("can:") else {
+        return;
+    };
+    let ability = rest.split(',').next().unwrap_or(rest);
+    if ability.is_empty() {
+        return;
+    }
+    let start = inner_start + "can:".len() as u32;
+    spans.push(SymbolSpan {
+        start,
+        end: start + ability.len() as u32,
+        kind: SymbolKind::LaravelStringKey {
+            kind: crate::symbol_map::LaravelStringKind::GateAbility,
+            key: ability.to_string(),
+            is_write: false,
+        },
+    });
+}
+
 /// If the first argument of `argument_list` is a plain, non-empty string
 /// literal, push a [`SymbolKind::CommandOwnParam`] span covering the string
 /// content.  Used for `$this->argument('user')` / `$this->option('queue')`

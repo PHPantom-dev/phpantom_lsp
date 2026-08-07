@@ -213,6 +213,12 @@ fn detect_laravel_string_key_context(
             // Eloquent morph aliases.
             ("relation", "getmorphedmodel") => (Some(LaravelStringKind::MorphAlias), None),
             ("model", "getactualclassnameformorph") => (Some(LaravelStringKind::MorphAlias), None),
+            // Authorization abilities checked through the Gate facade.
+            (
+                "gate",
+                "allows" | "denies" | "check" | "any" | "none" | "authorize" | "inspect" | "has"
+                | "define",
+            ) => (Some(LaravelStringKind::GateAbility), None),
             _ => (None, None),
         }
     } else if is_instance_method {
@@ -225,12 +231,53 @@ fn detect_laravel_string_key_context(
                 .trim_end();
             recv.ends_with("$this")
         };
+        // Whether the receiver plainly reads as the authenticated user,
+        // which is what makes `->can('…')` an authorization check rather
+        // than a same-named method on an unrelated object.  Mirrors the
+        // symbol-map rule that decides which `can()` calls get a span.
+        let receiver_is_user_like = {
+            let recv = trimmed_before
+                .trim_end_matches("?->")
+                .trim_end_matches("->")
+                .trim_end();
+            let tail = recv
+                .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .next()
+                .unwrap_or("");
+            tail.to_ascii_lowercase().ends_with("user") || recv.ends_with("user()")
+        };
+        // A chain that starts at the `Gate` facade
+        // (`Gate::forUser($user)->allows('…')`) or at a route registration
+        // (`Route::get(…)->can('…')`) is an authorization check whatever the
+        // rest of the chain looks like.  Only the text back to the start of
+        // the statement is searched — `trimmed_before` is the whole file
+        // prefix, and an unrelated `Gate::` far above would false-positive.
+        let chain_text = &trimmed_before[trimmed_before
+            .rfind(['\n', ';', '{', '}'])
+            .map_or(0, |idx| idx + 1)..];
+        let chain_starts_at_gate = chain_text.contains("Gate::");
+        let chain_starts_at_route = chain_text.contains("Route::");
         let k = match func_name.to_ascii_lowercase().as_str() {
             "route" => Some(LaravelStringKind::Route),
             // `$this->call('cmd')` / `$this->callSilently('cmd')` inside a
             // console command run another Artisan command.  Restricted to a
             // `$this` receiver because `->call()` is a common method name.
             "call" | "callsilently" if receiver_is_this => Some(LaravelStringKind::Command),
+            // `$this->authorize('update', $post)` in a controller.
+            "authorize" if receiver_is_this || chain_starts_at_gate => {
+                Some(LaravelStringKind::GateAbility)
+            }
+            // `$user->can('update', $post)`.
+            "can" | "cannot" | "canany"
+                if receiver_is_user_like || chain_starts_at_route || chain_starts_at_gate =>
+            {
+                Some(LaravelStringKind::GateAbility)
+            }
+            "allows" | "denies" | "check" | "any" | "none" | "inspect" | "has"
+                if chain_starts_at_gate =>
+            {
+                Some(LaravelStringKind::GateAbility)
+            }
             _ => None,
         };
         (k, None)
@@ -240,6 +287,9 @@ fn detect_laravel_string_key_context(
             "config" => (Some(LaravelStringKind::Config), None),
             "view" | "blade_view_directive" => (Some(LaravelStringKind::View), None),
             "__" | "trans" | "trans_choice" => (Some(LaravelStringKind::Trans), None),
+            // The Blade preprocessor lowers `@can`/`@cannot`/`@canany` to
+            // this call, so completion inside the directive works too.
+            "blade_can_directive" => (Some(LaravelStringKind::GateAbility), None),
             // auth('guard') helper accepts a guard name
             "auth" => (Some(LaravelStringKind::Config), Some("auth.guards.")),
             _ => (None, None),
@@ -462,6 +512,17 @@ impl Backend {
         )
     }
 
+    /// Every authorization ability the project defines, from `Gate::define()`
+    /// registrations and policy class methods.
+    pub(crate) fn cached_gate_abilities(&self) -> Vec<String> {
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.gate_abilities,
+            |cache| cache.gate_abilities.clone(),
+            |cache, names| cache.gate_abilities = Some(names),
+            || crate::virtual_members::laravel::enumerate_gate_abilities(self),
+        )
+    }
+
     pub(crate) fn cached_trans_keys(&self) -> Vec<String> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.trans_keys,
@@ -635,6 +696,7 @@ impl Backend {
                 aliases.sort();
                 aliases
             }
+            LaravelStringKind::GateAbility => self.cached_gate_abilities(),
         };
 
         // For config-backed attributes like #[Database('mysql')], filter
@@ -687,6 +749,7 @@ impl Backend {
                     LaravelStringKind::Trans => CompletionItemKind::TEXT,
                     LaravelStringKind::Command => CompletionItemKind::VALUE,
                     LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
+                    LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
                 };
                 CompletionItem {
                     label: name.clone(),
@@ -774,6 +837,61 @@ mod tests {
         assert!(
             ctx.is_none(),
             "->call() on a non-$this receiver should not match"
+        );
+    }
+
+    #[test]
+    fn detects_gate_facade_ability() {
+        let content = "<?php\nGate::allows('upd');\n";
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("upd").unwrap() as u32 + 3;
+        let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
+            .expect("should detect Gate::allows() context");
+        assert!(matches!(ctx.kind, LaravelStringKind::GateAbility));
+        assert_eq!(ctx.prefix, "upd");
+    }
+
+    #[test]
+    fn detects_ability_on_a_gate_chain() {
+        let content = "<?php\nGate::forUser($user)->allows('upd');\n";
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("upd").unwrap() as u32 + 3;
+        let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
+            .expect("should detect an ability on a Gate chain");
+        assert!(matches!(ctx.kind, LaravelStringKind::GateAbility));
+    }
+
+    #[test]
+    fn detects_user_can_ability() {
+        let content = "<?php\n$user->can('upd', $post);\n";
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("upd").unwrap() as u32 + 3;
+        let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
+            .expect("should detect $user->can() context");
+        assert!(matches!(ctx.kind, LaravelStringKind::GateAbility));
+    }
+
+    #[test]
+    fn rejects_can_on_an_unrelated_receiver() {
+        let content = "<?php\n$rules->can('read');\n";
+        let line_text = content.lines().nth(1).unwrap();
+        let col = line_text.find("read").unwrap() as u32 + 4;
+        assert!(
+            detect_laravel_string_key_context(content, Position::new(1, col)).is_none(),
+            "->can() on a receiver that is not a user must not match"
+        );
+    }
+
+    /// A `Gate::` call earlier in the file must not turn an unrelated
+    /// `->has()` several statements later into an ability check.
+    #[test]
+    fn a_gate_call_in_an_earlier_statement_does_not_leak() {
+        let content = "<?php\nGate::allows('update');\n$bag->has('key');\n";
+        let line_text = content.lines().nth(2).unwrap();
+        let col = line_text.find("key").unwrap() as u32 + 3;
+        assert!(
+            detect_laravel_string_key_context(content, Position::new(2, col)).is_none(),
+            "an earlier Gate:: statement must not reach a later chain"
         );
     }
 

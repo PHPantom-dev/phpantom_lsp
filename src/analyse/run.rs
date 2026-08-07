@@ -203,6 +203,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         // Discover the Eloquent morph map so alias strings are validated the
         // same way here as in the LSP.
         backend.build_laravel_morph_map_index();
+        // Discover the gate abilities and policy map so authorization strings
+        // are validated the same way here as in the LSP.
+        backend.build_laravel_gate_index();
         // Scan the whole FQN → URI index for Artisan commands and for macro
         // registrations.  `update_ast` only refreshes these from the files it
         // parses, which here is the project's own source, so without a full

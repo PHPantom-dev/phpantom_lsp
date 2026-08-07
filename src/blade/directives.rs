@@ -69,6 +69,16 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
         "endproduction",
         "env",
         "endenv",
+        // Authorization directives
+        "canany",
+        "cannot",
+        "can",
+        "elsecanany",
+        "elsecannot",
+        "elsecan",
+        "endcanany",
+        "endcannot",
+        "endcan",
         // Session/context directives
         "session",
         "endsession",
@@ -124,17 +134,23 @@ pub fn translate_directive(directive: &str) -> String {
         "else" => "else:".to_string(),
         "endif" | "endforeach" | "endfor" | "endwhile" | "endunless" | "endisset" | "endempty"
         | "endswitch" | "endforelse" | "endsession" | "endcontext" | "enderror" | "endauth"
-        | "endguest" | "endproduction" | "endenv" | "endonce" => {
+        | "endguest" | "endproduction" | "endenv" | "endonce" | "endcan" | "endcannot"
+        | "endcanany" => {
             let mapped = match directive {
                 "endunless" | "endisset" | "endempty" | "endsession" | "endcontext"
-                | "enderror" | "endauth" | "endguest" | "endproduction" | "endenv" | "endonce" => {
-                    "endif"
-                }
+                | "enderror" | "endauth" | "endguest" | "endproduction" | "endenv" | "endonce"
+                | "endcan" | "endcannot" | "endcanany" => "endif",
                 "endforelse" => "endif",
                 other => other,
             };
             format!("{mapped};")
         }
+        // Authorization blocks lower to a synthetic call so the ability
+        // string is extracted like the PHP `Gate::allows()` forms.
+        "can" | "canany" => "if(blade_can_directive".to_string(),
+        "cannot" => "if(!blade_can_directive".to_string(),
+        "elsecan" | "elsecanany" => "elseif(blade_can_directive".to_string(),
+        "elsecannot" => "elseif(!blade_can_directive".to_string(),
         "isset" => "if(isset".to_string(),
         "empty" => "if(empty".to_string(),
         "break" => "break;".to_string(),
