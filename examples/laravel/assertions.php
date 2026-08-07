@@ -919,6 +919,48 @@ check(
     (new \Illuminate\View\ComponentSlot('<b>hi</b>'))->toHtml() === '<b>hi</b>'
 );
 
+// ─── Authorization abilities and policies ───────────────────────────────────
+
+// PHPantom resolves a model's policy without booting the app, so the order it
+// checks — explicit registration, then `#[UsePolicy]`, then the naming
+// convention — has to be the order the Gate itself uses.
+$gate = new \Illuminate\Auth\Access\Gate(
+    new \Illuminate\Container\Container(),
+    fn () => null
+);
+
+check(
+    'the naming convention finds a policy with no registration',
+    $gate->getPolicyFor(\App\Models\Bakery::class) instanceof \App\Policies\BakeryPolicy
+);
+check(
+    'the #[UsePolicy] attribute names the policy for a model',
+    $gate->getPolicyFor(\App\Models\Review::class) instanceof \App\Policies\ReviewModerationPolicy
+);
+
+$gate->policy(\App\Models\BlogPost::class, \App\Policies\PublishingPolicy::class);
+check(
+    'an explicit registration wins over the naming convention',
+    $gate->getPolicyFor(\App\Models\BlogPost::class) instanceof \App\Policies\PublishingPolicy
+);
+
+$gate->define('manage-bakery-network', fn () => true);
+check('Gate::define() registers an ability by name', $gate->has('manage-bakery-network'));
+
+// `Gate::resource()` expands to one ability per CRUD verb, which is the set
+// PHPantom synthesizes for the shorthand.
+$gate->resource('photos', \App\Policies\BakeryPolicy::class);
+check(
+    'Gate::resource() registers one ability per CRUD verb',
+    $gate->has([
+        'photos.viewAny',
+        'photos.view',
+        'photos.create',
+        'photos.update',
+        'photos.delete',
+    ])
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

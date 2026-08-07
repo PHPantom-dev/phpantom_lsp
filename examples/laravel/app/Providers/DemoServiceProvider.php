@@ -4,11 +4,14 @@ namespace App\Providers;
 
 use App\Models\Bakery;
 use App\Models\BlogPost;
+use App\Models\Customer;
+use App\Policies\PublishingPolicy;
 use App\Support\CarbonMixin;
 use App\Support\CollectionMixin;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class DemoServiceProvider extends ServiceProvider
@@ -23,6 +26,18 @@ class DemoServiceProvider extends ServiceProvider
             'blog_post' => BlogPost::class,
             'bakery'    => Bakery::class,
         ]);
+
+        // An ability defined here is valid for any subject.  PHPantom reads
+        // the registration, so the string completes and hovers with this
+        // closure's signature wherever it is checked.
+        Gate::define('manage-bakery-network', function (Customer $user, string $region): bool {
+            return $user->isPremium();
+        });
+
+        // An explicit policy registration wins over the naming convention:
+        // BlogPost's abilities are PublishingPolicy's public methods, not
+        // those of an App\Policies\BlogPostPolicy that does not exist.
+        Gate::policy(BlogPost::class, PublishingPolicy::class);
 
         // A macro registered here becomes a real method on Collection:
         // it autocompletes, hovers with this signature, and type-checks.

@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Policies\ReviewModerationPolicy;
 use Illuminate\Database\Eloquent\Attributes\CollectedBy;
+use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 #[CollectedBy(ReviewCollection::class)]
+#[UsePolicy(ReviewModerationPolicy::class)]
 class Review extends Model
 {
     public function getTitle(): string { return ''; }
