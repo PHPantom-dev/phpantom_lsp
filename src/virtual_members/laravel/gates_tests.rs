@@ -174,6 +174,35 @@ fn a_file_with_no_gate_reference_is_not_parsed() {
     assert!(scan.is_empty());
 }
 
+/// A file whose only mention of `Gate` is an ordinary identifier registers
+/// nothing, even though it does qualify for the walk.
+#[test]
+fn an_identifier_containing_gate_registers_nothing() {
+    let scan = scan("<?php\n$subscriptionGateways = paymentGateway();\n");
+    assert!(scan.is_empty());
+}
+
+/// PHP nests one AST node per link of a method chain, so a real file's chains
+/// go deep enough to overflow a recursive walk.  The scan must survive one
+/// alongside a registration it has to find.
+#[test]
+fn a_deep_method_chain_does_not_overflow_the_walk() {
+    let mut content = String::from(
+        "<?php\n\
+        use Illuminate\\Support\\Facades\\Gate;\n\
+        Gate::define('deep', fn () => true);\n\
+        $q = DB::table('t')",
+    );
+    for index in 0..2_000 {
+        content.push_str(&format!("->where('c{index}', {index})"));
+    }
+    content.push_str(";\n");
+
+    let scan = scan(&content);
+    assert_eq!(scan.definitions.len(), 1);
+    assert_eq!(scan.definitions[0].name, "deep");
+}
+
 #[test]
 fn index_merges_files_and_keeps_the_first_registration() {
     let mut index = LaravelGateIndex::default();

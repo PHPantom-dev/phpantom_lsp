@@ -104,7 +104,11 @@ impl GateScan {
 /// file's source.
 ///
 /// Returns an empty scan when the file mentions neither `Gate` nor a
-/// `$policies` property, so the parse is only paid for candidate files.
+/// `$policies` property, so the parse is only paid for candidate files.  The
+/// token is the bare word rather than `Gate::` so that an aliased import
+/// (`use …\Gate as Authorization;`) still qualifies; the price is a walk of
+/// the odd file that only holds a `PaymentGateway`, which the worklist below
+/// keeps cheap.
 pub(crate) fn scan_gate_registrations(content: &str) -> GateScan {
     let bytes = content.as_bytes();
     if memchr::memmem::find(bytes, b"Gate").is_none()
@@ -124,41 +128,49 @@ pub(crate) fn scan_gate_registrations(content: &str) -> GateScan {
     scan
 }
 
-/// Recursively collect `Gate::…` calls and `$policies` property arrays.
-fn collect_gate_nodes(
-    node: Node<'_, '_>,
+/// Collect `Gate::…` calls and `$policies` property arrays from the whole
+/// tree.
+///
+/// Walks an explicit worklist rather than recursing: PHP nests one node per
+/// link of a method chain, and a real file's chains go deep enough that a
+/// recursive walk overflows the stack.
+fn collect_gate_nodes<'ast, 'arena>(
+    root: Node<'ast, 'arena>,
     resolved: &OwnedResolvedNames,
     content: &str,
     scan: &mut GateScan,
 ) {
-    match node {
-        Node::StaticMethodCall(smc) => {
-            if let ClassLikeMemberSelector::Identifier(ident) = &smc.method
-                && subject_is_gate(smc.class, resolved)
-            {
-                collect_gate_call(
-                    bytes_to_str(ident.value),
-                    &smc.argument_list,
-                    resolved,
-                    content,
-                    scan,
-                );
-            }
-        }
-        Node::PlainProperty(plain) => {
-            for item in plain.items.iter() {
-                let PropertyItem::Concrete(concrete) = item else {
-                    continue;
-                };
-                if concrete.variable.name.strip_prefix(b"$").unwrap_or(b"") != b"policies" {
-                    continue;
+    let mut pending: Vec<Node<'ast, 'arena>> = vec![root];
+    while let Some(node) = pending.pop() {
+        match node {
+            Node::StaticMethodCall(smc) => {
+                if let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+                    && subject_is_gate(smc.class, resolved)
+                {
+                    collect_gate_call(
+                        bytes_to_str(ident.value),
+                        &smc.argument_list,
+                        resolved,
+                        content,
+                        scan,
+                    );
                 }
-                collect_policy_map(concrete.value, resolved, scan);
             }
+            Node::PlainProperty(plain) => {
+                for item in plain.items.iter() {
+                    let PropertyItem::Concrete(concrete) = item else {
+                        continue;
+                    };
+                    if concrete.variable.name.strip_prefix(b"$").unwrap_or(b"") != b"policies" {
+                        continue;
+                    }
+                    collect_policy_map(concrete.value, resolved, scan);
+                }
+            }
+            _ => {}
         }
-        _ => {}
+        node.visit_children(|child| pending.push(child));
     }
-    node.visit_children(|child| collect_gate_nodes(child, resolved, content, scan));
 }
 
 /// Read one `Gate::<method>(…)` call into the scan.
