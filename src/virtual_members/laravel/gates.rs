@@ -335,16 +335,13 @@ fn class_constant_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> O
                     if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
             ) =>
         {
+            // `self`/`static`/`parent` are their own expression kinds, so
+            // requiring a plain identifier already excludes them — a keyword
+            // names no class that can be loaded from here.
             let Expression::Identifier(ident) = access.class else {
                 return None;
             };
             let raw = bytes_to_str(ident.value());
-            if matches!(
-                raw.to_ascii_lowercase().as_str(),
-                "self" | "static" | "parent"
-            ) {
-                return None;
-            }
             resolved
                 .get(ident.span().start.offset)
                 .map(|fqn| fqn.trim_start_matches('\\').to_string())
@@ -523,12 +520,17 @@ pub(crate) fn policy_class_for_model(
 /// policy extending a shared base contributes the base's abilities too.
 fn load_policy(backend: &crate::Backend, fqn: &str) -> Option<Arc<ClassInfo>> {
     let class = backend.find_or_load_class(fqn.trim_start_matches('\\'))?;
+    Some(resolve_policy(backend, &class))
+}
+
+/// Merge a policy's parent chain and traits into it.
+fn resolve_policy(backend: &crate::Backend, class: &ClassInfo) -> Arc<ClassInfo> {
     let class_loader = |name: &str| backend.find_or_load_class(name);
-    Some(crate::virtual_members::resolve_class_fully_cached(
-        &class,
+    crate::virtual_members::resolve_class_fully_cached(
+        class,
         &class_loader,
         &backend.resolved_class_cache,
-    ))
+    )
 }
 
 /// The policy class names Laravel's `Gate::guessPolicyName()` tries, in the
@@ -627,9 +629,24 @@ pub(crate) fn enumerate_gate_abilities(backend: &crate::Backend) -> Vec<String> 
 
 /// Every policy class the project declares, loaded and fully resolved.
 pub(crate) fn project_policy_classes(backend: &crate::Backend) -> Vec<Arc<ClassInfo>> {
+    project_policies(backend)
+        .into_iter()
+        .map(|(_, resolved)| resolved)
+        .collect()
+}
+
+/// Every policy class as a `(declared, resolved)` pair.
+///
+/// The declared class holds only the policy's own members, which is what
+/// identifies where an ability is written; the resolved one carries the
+/// inherited and trait members, which is what makes it an ability at all.
+fn project_policies(backend: &crate::Backend) -> Vec<(Arc<ClassInfo>, Arc<ClassInfo>)> {
     policy_class_fqns(backend)
         .into_iter()
-        .filter_map(|fqn| load_policy(backend, &fqn))
+        .filter_map(|fqn| {
+            let declared = backend.find_or_load_class(fqn.trim_start_matches('\\'))?;
+            Some((Arc::clone(&declared), resolve_policy(backend, &declared)))
+        })
         .collect()
 }
 
@@ -645,8 +662,8 @@ pub(crate) fn policy_methods_named(
     ability: &str,
 ) -> Vec<(Arc<ClassInfo>, Arc<MethodInfo>)> {
     let mut found: Vec<(Arc<ClassInfo>, Arc<MethodInfo>)> = Vec::new();
-    for policy in project_policy_classes(backend) {
-        let Some(method) = policy_abilities(&policy)
+    for (declared, resolved) in project_policies(backend) {
+        let Some(method) = policy_abilities(&resolved)
             .into_iter()
             .find(|method| method.name.eq_ignore_ascii_case(ability))
             .cloned()
@@ -656,7 +673,7 @@ pub(crate) fn policy_methods_named(
         // The resolved policy carries inherited methods, whose `name_offset`
         // indexes the file that declares them — so walk back to that class.
         let (owner, method) =
-            declaring_policy_class(backend, &policy, ability).unwrap_or((policy, method));
+            declaring_policy_class(backend, declared, ability).unwrap_or((resolved, method));
         if !found
             .iter()
             .any(|(existing, _)| existing.fqn() == owner.fqn())
@@ -671,15 +688,17 @@ pub(crate) fn policy_methods_named(
 /// Walk a policy's own methods and then its parent chain for the class that
 /// declares `ability`.
 ///
-/// Returns `None` when no class in the chain declares it as its own member —
-/// which happens when the ability comes from a trait, or a parent cannot be
-/// loaded — leaving the caller with the resolved policy it started from.
+/// `policy` is the *declared* class — its own members only — so a match means
+/// the ability is written there rather than inherited.  Returns `None` when no
+/// class in the chain declares it as its own member (the ability comes from a
+/// trait, or a parent cannot be loaded), leaving the caller with the resolved
+/// policy it started from.
 fn declaring_policy_class(
     backend: &crate::Backend,
-    policy: &ClassInfo,
+    policy: Arc<ClassInfo>,
     ability: &str,
 ) -> Option<(Arc<ClassInfo>, Arc<MethodInfo>)> {
-    let mut current = backend.find_or_load_class(policy.fqn().as_str())?;
+    let mut current = policy;
     loop {
         let own = current
             .methods
