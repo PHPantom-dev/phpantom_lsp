@@ -661,28 +661,30 @@ impl Backend {
         };
 
         for (kind, key, start, end) in &key_spans {
-            if kind == &LaravelStringKind::GateAbility {
-                if gate_abilities.is_empty() {
-                    continue;
-                }
-                let Some(message) =
-                    self.gate_ability_problem(uri, content, key, *start, &gate_abilities)
-                else {
-                    continue;
-                };
-                if let Some(range) =
-                    self.offset_range_to_lsp_range(uri, content, *start as usize, *end as usize)
-                {
-                    out.push(helpers::make_diagnostic(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        "invalid_laravel_ability",
-                        message,
-                    ));
-                }
-                continue;
-            }
             let (valid, label, code) = match kind {
+                // An ability is judged against the model the check names, so
+                // it reports which model rather than the shared
+                // "Unknown <kind>: '<key>'" message the others share.
+                LaravelStringKind::GateAbility => {
+                    if !gate_abilities.is_empty()
+                        && let Some(message) =
+                            self.gate_ability_problem(uri, content, key, *start, &gate_abilities)
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
+                            content,
+                            *start as usize,
+                            *end as usize,
+                        )
+                    {
+                        out.push(helpers::make_diagnostic(
+                            range,
+                            DiagnosticSeverity::WARNING,
+                            "invalid_laravel_ability",
+                            message,
+                        ));
+                    }
+                    continue;
+                }
                 LaravelStringKind::Route => {
                     // A package with no routes of its own, whose names are
                     // registered by the host application, cannot be judged:
@@ -753,9 +755,6 @@ impl Backend {
                         "invalid_laravel_morph_alias",
                     )
                 }
-                // Handled above: an ability is judged against the model the
-                // check names, so it has its own message.
-                LaravelStringKind::GateAbility => continue,
             };
             if !valid
                 && let Some(range) =

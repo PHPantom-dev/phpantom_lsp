@@ -511,6 +511,68 @@ class PostPolicy extends BasePolicy
     );
 }
 
+/// A policy may document an ability with an `@method` tag instead of writing
+/// it out.  The tag carries no offset of its own, so the jump lands on the
+/// policy's declaration rather than nowhere.
+#[tokio::test]
+async fn a_documented_ability_resolves_to_its_policy() {
+    let consumer = "\
+<?php
+namespace App;
+use App\\Models\\Post;
+class Consumer {
+    public function go($user, Post $post): void {
+        $user->can('archive', $post);
+    }
+}
+";
+    let documented_policy = "\
+<?php
+namespace App\\Policies;
+use App\\Models\\Post;
+/**
+ * @method bool archive($user, Post $post)
+ */
+class PostPolicy
+{
+    public function update($user, Post $post): bool { return true; }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
+            ("src/Models/Post.php", POST_PHP),
+            ("src/Models/Video.php", VIDEO_PHP),
+            ("src/Policies/PostPolicy.php", documented_policy),
+            ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    assert!(
+        ability_diagnostics(&diags).is_empty(),
+        "a documented ability is still an ability, got {:?}",
+        ability_diagnostics(&diags)
+    );
+
+    let targets = definition_uris(&backend, &uri, position_after(consumer, "can('arc")).await;
+    assert!(
+        targets
+            .iter()
+            .any(|t| t.ends_with("/Policies/PostPolicy.php")),
+        "should offer the policy that documents it, got {targets:?}"
+    );
+}
+
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -739,6 +801,43 @@ class Consumer {
     assert_eq!(
         &line[flagged[0].range.start.character as usize..flagged[0].range.end.character as usize],
         "updatte"
+    );
+}
+
+/// The symbol map is rebuilt on a background task, so a diagnostic pass can
+/// be handed newer text than the map was built from.  The recorded model is a
+/// range into the older text, so it is not read against the newer buffer — the
+/// ability falls back to the project-wide check rather than slicing at an
+/// offset that now means something else.
+#[tokio::test]
+async fn a_stale_symbol_map_does_not_resolve_the_checked_model() {
+    let consumer = "\
+<?php
+namespace App;
+use App\\Models\\Post;
+class Consumer {
+    public function go($user, Post $post): void {
+        $user->can('publish', $post);
+    }
+}
+";
+    let (backend, _dir, uri) = workspace(consumer).await;
+
+    // `publish` is a Video ability, so against `Post` it is normally flagged.
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    assert_eq!(ability_diagnostics(&diags).len(), 1);
+
+    // Diagnosing longer text than the map was built from must not read the
+    // recorded range, and `publish` does exist somewhere.
+    let edited = consumer.replace("public function go", "public function golf");
+    assert_ne!(edited.len(), consumer.len());
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, &edited, &mut diags);
+    assert!(
+        ability_diagnostics(&diags).is_empty(),
+        "a stale map must not be read against newer text, got {:?}",
+        ability_diagnostics(&diags)
     );
 }
 

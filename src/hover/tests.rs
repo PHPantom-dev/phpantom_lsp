@@ -497,3 +497,49 @@ fn format_property_source_relationship_with_pivot() {
         ]
     );
 }
+
+// ── Authorization ability hover ─────────────────────────────────────
+
+/// An ability nothing in the project declares still hovers — with the one
+/// fact that is true of it, rather than a location it does not have.
+#[test]
+fn an_unknown_ability_hovers_as_an_ability() {
+    let backend = crate::Backend::new_test();
+    assert_eq!(
+        backend.gate_ability_detail("no-such-ability"),
+        "Authorization ability"
+    );
+}
+
+/// A registration in a file outside the workspace (or before a root is known)
+/// still reports where the ability comes from, just without a path.
+#[test]
+fn a_definition_outside_the_workspace_hovers_without_a_path() {
+    let backend = crate::Backend::new_test();
+    let provider = "<?php\nuse Illuminate\\Support\\Facades\\Gate;\n\
+        Gate::define('manage-billing', fn (User $user) => true);\n";
+    let uri = "file:///elsewhere/Provider.php";
+    backend.update_ast(uri, provider);
+    {
+        let mut index = backend.laravel_gates.write();
+        index.set_file(
+            uri.to_string(),
+            crate::virtual_members::laravel::scan_gate_registrations(provider),
+        );
+        index.rebuild();
+    }
+
+    let detail = backend.gate_ability_detail("manage-billing");
+    assert!(
+        detail.starts_with("Defined by `Gate::define()`"),
+        "should still name the registration, got: {detail}"
+    );
+    assert!(
+        !detail.contains(" in `"),
+        "no workspace root means no path to show, got: {detail}"
+    );
+    assert!(
+        detail.contains("User $user"),
+        "the callback signature is known regardless, got: {detail}"
+    );
+}

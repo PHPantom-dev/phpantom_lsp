@@ -79,11 +79,10 @@ fn resolve_gate_ability_definitions(backend: &crate::Backend, ability: &str) -> 
 
 /// The [`Location`] of a policy method's name token.
 ///
-/// The policy is resolved with its parents merged in, so a method may have
-/// been declared in a base class — and then its `name_offset` indexes *that*
-/// file, not the subclass's.  The name at the offset is checked against the
-/// method's own before it is trusted; when it does not match, the policy's
-/// declaration is offered instead of a wrong position.
+/// `policy` is the class that *declares* the method, so its `name_offset`
+/// indexes that class's own file.  A synthesized member — an `@method` tag —
+/// has no offset at all, and there the policy's declaration is the closest
+/// thing to a location the ability has.
 fn policy_method_location(
     backend: &crate::Backend,
     policy: &crate::types::ClassInfo,
@@ -92,35 +91,25 @@ fn policy_method_location(
     use tower_lsp::lsp_types::Url;
 
     let fqn = policy.fqn();
-    let declared_here = method.name_offset != 0;
-    let uri = declared_here
+    let at_declaration = (method.name_offset != 0)
         .then(|| {
-            backend
+            let uri = backend
                 .symbols
                 .fqn_uri_index
                 .read()
                 .get(fqn.as_str())
-                .cloned()
+                .cloned()?;
+            let content = backend.get_file_content(&uri)?;
+            let position =
+                crate::text_position::offset_to_position(&content, method.name_offset as usize);
+            Some(crate::definition::point_location(
+                Url::parse(&uri).ok()?,
+                position,
+            ))
         })
         .flatten();
-    let Some(uri) = uri else {
-        return backend.class_declaration_location(&fqn);
-    };
 
-    let Some(content) = backend.get_file_content(&uri) else {
-        return backend.class_declaration_location(&fqn);
-    };
-    let at_offset = content.get(method.name_offset as usize..);
-    if !at_offset.is_some_and(|rest| {
-        rest.len() >= method.name.len()
-            && rest[..method.name.len()].eq_ignore_ascii_case(&method.name)
-    }) {
-        return backend.class_declaration_location(&fqn);
-    }
-
-    let parsed_uri = Url::parse(&uri).ok()?;
-    let position = crate::text_position::offset_to_position(&content, method.name_offset as usize);
-    Some(crate::definition::point_location(parsed_uri, position))
+    at_declaration.or_else(|| backend.class_declaration_location(&fqn))
 }
 
 /// Resolve a morph alias to its `Relation::morphMap()` registration and to the

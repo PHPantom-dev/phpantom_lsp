@@ -438,10 +438,9 @@ fn push_gate_ability_span(
     if inner_start >= inner_end || inner_end as usize > content.len() {
         return;
     }
+    // The span check above already rejects an empty literal, so whatever is
+    // between the quotes is a name.
     let ability = &content[inner_start as usize..inner_end as usize];
-    if ability.is_empty() {
-        return;
-    }
     spans.push(SymbolSpan {
         start: inner_start,
         end: inner_end,

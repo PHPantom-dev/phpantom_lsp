@@ -851,14 +851,47 @@ mod tests {
         assert_eq!(ctx.prefix, "upd");
     }
 
+    /// Every entry point that names an ability completes from the same set.
     #[test]
-    fn detects_ability_on_a_gate_chain() {
-        let content = "<?php\nGate::forUser($user)->allows('upd');\n";
-        let line_text = content.lines().nth(1).unwrap();
-        let col = line_text.find("upd").unwrap() as u32 + 3;
-        let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
-            .expect("should detect an ability on a Gate chain");
-        assert!(matches!(ctx.kind, LaravelStringKind::GateAbility));
+    fn detects_every_ability_call_shape() {
+        for call in [
+            // The facade's own API, including the registration itself.
+            "Gate::allows('upd'",
+            "Gate::denies('upd'",
+            "Gate::check('upd'",
+            "Gate::any('upd'",
+            "Gate::none('upd'",
+            "Gate::authorize('upd'",
+            "Gate::inspect('upd'",
+            "Gate::has('upd'",
+            "Gate::define('upd'",
+            // A chain rooted at the facade.
+            "Gate::forUser($user)->allows('upd'",
+            "Gate::forUser($user)->authorize('upd'",
+            "Gate::forUser($user)->has('upd'",
+            // A controller's own helper.
+            "$this->authorize('upd'",
+            // The user the check is about.
+            "$user->can('upd'",
+            "$user->cannot('upd'",
+            "$user->canAny('upd'",
+            // A route registration.
+            "Route::get('/p', $a)->can('upd'",
+            // The Blade `@can` directive, after preprocessing.
+            "blade_can_directive('upd'",
+        ] {
+            let content = format!("<?php\n{call});\n");
+            let line_text = content.lines().nth(1).unwrap();
+            let col = line_text.rfind("upd").unwrap() as u32 + 3;
+            let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
+                .unwrap_or_else(|| panic!("`{call}` should offer abilities"));
+            assert!(
+                matches!(ctx.kind, LaravelStringKind::GateAbility),
+                "`{call}` should offer abilities, got {:?}",
+                ctx.kind
+            );
+            assert_eq!(ctx.prefix, "upd", "for `{call}`");
+        }
     }
 
     #[test]
