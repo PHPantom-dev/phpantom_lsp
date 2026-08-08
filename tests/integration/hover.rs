@@ -13305,3 +13305,61 @@ function test(): void {
         "$mailer = app(Mailer::class) should resolve to Mailer, got: {text}"
     );
 }
+
+// ─── Global keyword re-entry cycle ──────────────────────────────────────────
+
+/// A file containing `global` plus top-level call arguments that require
+/// variable resolution must not cause unbounded recursion when resolving
+/// a top-level variable.  Regression test for #327.
+#[test]
+fn hover_global_keyword_reentry_terminates() {
+    let backend = create_test_backend();
+    let uri = "file:///global_reentry.php";
+    let content = r#"<?php
+function capture($input) {
+    global $shared;
+    $shared = $input;
+}
+$arg = 1;
+$old_global = strlen($arg);
+$value = intval($old_global);
+$value;
+"#;
+
+    // Hovering $value must terminate.  Before the fix this recursed
+    // until stack overflow.
+    let _hover = hover_at(&backend, uri, content, 8, 1);
+}
+
+/// When a file uses `global` and top-level variables are assigned from
+/// functions with declared return types, the variable's type must still
+/// resolve correctly through the re-entry guards.
+#[test]
+fn hover_global_keyword_preserves_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///global_return_type.php";
+    let content = r#"<?php
+class ResultObj {
+    public function done(): bool { return true; }
+}
+
+function factory(): ResultObj {
+    return new ResultObj();
+}
+
+function worker() {
+    global $shared;
+    $shared = 1;
+}
+
+$result = factory();
+$result;
+"#;
+
+    let hover = hover_at(&backend, uri, content, 15, 1).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("ResultObj"),
+        "$result = factory() should resolve to ResultObj, got: {text}"
+    );
+}

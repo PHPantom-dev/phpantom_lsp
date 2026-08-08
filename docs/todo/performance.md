@@ -909,6 +909,29 @@ lengths where it shows.
 
 ---
 
+## P50. Cache the top-level scope for `global` keyword resolution
+
+**Impact: Low-Medium · Effort: Medium**
+
+Every `resolve_variable_types` call on a file containing `global `
+rebuilds the top-level scope by forward-walking every top-level
+statement with `cursor_offset = u32::MAX`. This is done once per
+variable query, so hovering three variables in the same file walks the
+top-level three times.
+
+Re-entry guards (added to fix #327) prevent the walk from recursing
+unboundedly, but the repeated cost remains. The preferred shape is
+pre-compute-and-cache: build the top-level scope once per file version
+(keyed by content hash or pointer) and reuse it across queries within
+the same request cycle.
+
+**Where to look:** `resolve_variable_in_statements` in
+`type_engine/variable/resolution.rs`, the `walk_top_level_for_globals`
+call. A per-request cache (similar to the chain resolution cache in
+`type_engine/resolver/context.rs`) would eliminate the redundant walks.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues were addressed by eager class
