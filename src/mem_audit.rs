@@ -1667,6 +1667,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.laravel_date_seed_uris.write().clear();
         *backend.laravel_pivots.write() = Default::default();
         *backend.laravel_commands.write() = Default::default();
+        *backend.laravel_gates.write() = Default::default();
     });
     probe("blade_uris", &mut || backend.blade_uris.write().clear());
     probe("phar_archives", &mut || {

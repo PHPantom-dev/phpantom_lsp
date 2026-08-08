@@ -1575,6 +1575,14 @@ pub struct LaravelMetadata {
     /// the standard `Illuminate\Database\Eloquent\Builder` for
     /// builder-as-static forwarding and `query()` resolution.
     pub custom_builder: Option<PhpType>,
+    /// Authorization policy class declared by the
+    /// `#[UsePolicy(PostPolicy::class)]` attribute on the model
+    /// (Laravel 11+), resolved to an FQN in the name-resolution pass.
+    ///
+    /// Takes precedence over Laravel's naming convention when resolving
+    /// which policy governs the model, so the abilities a `$user->can(…)`
+    /// check may name are read from the declared class.
+    pub policy_class: Option<String>,
     /// Pivot configuration recovered from `belongsToMany`/`morphToMany`
     /// relationship method bodies.
     ///

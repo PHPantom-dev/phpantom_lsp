@@ -34,7 +34,82 @@ pub(crate) fn resolve_laravel_string_key(
             .into_iter()
             .collect(),
         LaravelStringKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
+        LaravelStringKind::GateAbility => resolve_gate_ability_definitions(backend, key),
     }
+}
+
+/// Resolve an authorization ability to every place it is declared: the
+/// `Gate::define()` call that registers it, and the policy methods that
+/// implement it.
+///
+/// A gate definition comes first — it applies to any model, so it is the
+/// broadest answer — followed by each policy method, ordered by policy FQN so
+/// the list is stable between requests.
+fn resolve_gate_ability_definitions(backend: &crate::Backend, ability: &str) -> Vec<Location> {
+    use tower_lsp::lsp_types::Url;
+
+    let mut locations = Vec::new();
+
+    let definition = backend
+        .laravel_gates
+        .read()
+        .definition(ability)
+        .map(|target| (target.uri.clone(), target.offset));
+    if let Some((uri, offset)) = definition
+        && let Ok(parsed_uri) = Url::parse(&uri)
+        && let Some(content) = backend.get_file_content(&uri)
+    {
+        let position = crate::text_position::offset_to_position(&content, offset as usize);
+        locations.push(crate::definition::point_location(parsed_uri, position));
+    }
+
+    for (policy, method) in super::gates::policy_methods_named(backend, ability) {
+        if let Some(location) = policy_method_location(backend, &policy, &method) {
+            crate::references::push_unique_location(
+                &mut locations,
+                &location.uri,
+                location.range.start,
+                location.range.end,
+            );
+        }
+    }
+
+    locations
+}
+
+/// The [`Location`] of a policy method's name token.
+///
+/// `policy` is the class that *declares* the method, so its `name_offset`
+/// indexes that class's own file.  A synthesized member — an `@method` tag —
+/// has no offset at all, and there the policy's declaration is the closest
+/// thing to a location the ability has.
+fn policy_method_location(
+    backend: &crate::Backend,
+    policy: &crate::types::ClassInfo,
+    method: &crate::types::MethodInfo,
+) -> Option<Location> {
+    use tower_lsp::lsp_types::Url;
+
+    let fqn = policy.fqn();
+    let at_declaration = (method.name_offset != 0)
+        .then(|| {
+            let uri = backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get(fqn.as_str())
+                .cloned()?;
+            let content = backend.get_file_content(&uri)?;
+            let position =
+                crate::text_position::offset_to_position(&content, method.name_offset as usize);
+            Some(crate::definition::point_location(
+                Url::parse(&uri).ok()?,
+                position,
+            ))
+        })
+        .flatten();
+
+    at_declaration.or_else(|| backend.class_declaration_location(&fqn))
 }
 
 /// Resolve a morph alias to its `Relation::morphMap()` registration and to the
@@ -100,7 +175,8 @@ pub(crate) fn find_laravel_string_key_references(
         | LaravelStringKind::Route
         | LaravelStringKind::Trans
         | LaravelStringKind::Command
-        | LaravelStringKind::MorphAlias => find_string_key_usages(kind, key, backend, snapshot),
+        | LaravelStringKind::MorphAlias
+        | LaravelStringKind::GateAbility => find_string_key_usages(kind, key, backend, snapshot),
     };
 
     if include_declaration && kind != &LaravelStringKind::Config {

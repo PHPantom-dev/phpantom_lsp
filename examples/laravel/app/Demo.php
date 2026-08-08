@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Schedule;
@@ -473,6 +474,49 @@ class Demo
             '--fresh' => true,
             '--since' => '2024-01-01',
         ]);
+    }
+
+
+    // ── Authorization Abilities & Policies ─────────────────────────────────
+
+    /**
+     * Authorization strings are recoverable statically: `Gate::define()`
+     * registers an ability by name, and every public method of a model's
+     * policy is an ability valid for that model.
+     *
+     * Try:
+     *  1. Trigger completion inside `Gate::allows('|')` — offers
+     *     `manage-bakery-network` plus every policy method.
+     *  2. Ctrl+Click "manage-bakery-network" to jump to the `Gate::define()`
+     *     call in DemoServiceProvider; Ctrl+Click "update" to jump to
+     *     BakeryPolicy::update().
+     *  3. Hover "manage-bakery-network" to see the closure it was defined
+     *     with, and "update" to see the policy methods that implement it.
+     *  4. Change `'publish'` below to `'update'` — the ability exists, but
+     *     not for BlogPost, so it is flagged as such rather than as unknown.
+     */
+    public function authorizationAbilities(Review $review): void
+    {
+        $bakery = new Bakery();
+
+        // Defined by Gate::define() in DemoServiceProvider, so valid for any
+        // subject.
+        Gate::allows('manage-bakery-network', 'north');
+        Gate::authorize('manage-bakery-network', 'north');
+
+        // BakeryPolicy is found by the naming convention
+        // (App\Models\Bakery → App\Policies\BakeryPolicy).  `before()` is a
+        // hook and `sameOwner()` is protected, so neither is offered.
+        Gate::allows('update', $bakery);
+        Gate::any(['update', 'delete'], $bakery);
+        auth()->user()->can('delete', $bakery);
+        auth()->user()->cannot('viewAny', Bakery::class);
+
+        // BlogPost is bound to PublishingPolicy by Gate::policy().
+        Gate::allows('publish', BlogPost::class);
+
+        // Review points at its policy with #[UsePolicy].
+        Gate::allows('moderate', $review);
     }
 
 

@@ -113,6 +113,7 @@ mod const_eval;
 pub(crate) mod database_schema;
 mod env_vars;
 mod factory;
+pub(crate) mod gates;
 mod helpers;
 mod higher_order_proxy;
 mod macros;
@@ -142,6 +143,9 @@ pub(crate) use config_keys::{
     resolve_config_key_definition_fallback,
 };
 pub(crate) use env_vars::resolve_env_definition;
+pub(crate) use gates::{
+    LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
+};
 pub(crate) use macros::{
     LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
     extract_mixin_registrations, inject_macros, macro_closure_this_target,

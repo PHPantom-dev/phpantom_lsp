@@ -615,9 +615,61 @@ impl Backend {
                 };
                 ("Morph type", detail)
             }
+            LaravelStringKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
         };
 
         Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))
+    }
+
+    /// Describe where an authorization ability comes from: the
+    /// `Gate::define()` call that registers it (with the callback's
+    /// parameters) and every policy method that implements it.
+    fn gate_ability_detail(&self, ability: &str) -> String {
+        let mut parts = Vec::new();
+
+        let definition = self
+            .laravel_gates
+            .read()
+            .definition(ability)
+            .map(|target| (target.uri.clone(), target.signature.clone()));
+        if let Some((uri, signature)) = definition {
+            let mut line = match self.workspace_relative_path(&uri) {
+                Some(rel) => format!("Defined by `Gate::define()` in `{rel}`"),
+                None => "Defined by `Gate::define()`".to_string(),
+            };
+            if let Some(signature) = signature {
+                line.push_str(&format!("\n\n```php\nfn ({signature})\n```"));
+            }
+            parts.push(line);
+        }
+
+        let policies = crate::virtual_members::laravel::gates::policy_methods_named(self, ability);
+        if !policies.is_empty() {
+            let mut lines = vec!["Policy methods:".to_string()];
+            for (policy, method) in policies {
+                let parameters: Vec<String> = method
+                    .parameters
+                    .iter()
+                    .map(|param| match &param.type_hint {
+                        Some(ty) => format!("{} {}", ty, param.name),
+                        None => param.name.to_string(),
+                    })
+                    .collect();
+                lines.push(format!(
+                    "- `{}::{}({})`",
+                    policy.fqn(),
+                    method.name,
+                    parameters.join(", ")
+                ));
+            }
+            parts.push(lines.join("\n"));
+        }
+
+        if parts.is_empty() {
+            "Authorization ability".to_string()
+        } else {
+            parts.join("\n\n")
+        }
     }
 
     /// Produce hover information for a function call.

@@ -98,15 +98,33 @@ fn extract_collected_by_attribute(
     None
 }
 
+/// Extract the policy class name from a `#[UsePolicy(X::class)]` attribute.
+fn extract_use_policy_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    content: &str,
+) -> Option<String> {
+    extract_class_constant_attribute(attribute_lists, content, b"UsePolicy")
+}
+
 /// Extract the custom builder class name from a `#[UseEloquentBuilder(X::class)]` attribute.
 fn extract_use_eloquent_builder_attribute(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     content: &str,
 ) -> Option<String> {
+    extract_class_constant_attribute(attribute_lists, content, b"UseEloquentBuilder")
+}
+
+/// The `X` of the first `#[Name(X::class)]` attribute whose short name is
+/// `attr_name`.
+fn extract_class_constant_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    content: &str,
+    attr_name: &[u8],
+) -> Option<String> {
     for attr_list in attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
             let short = last_segment(attr.name.value());
-            if short != b"UseEloquentBuilder" {
+            if short != attr_name {
                 continue;
             }
             let arg_list = attr.argument_list.as_ref()?;
@@ -860,6 +878,8 @@ pub(crate) fn extract_laravel_metadata<'a>(
     let custom_builder =
         extract_custom_builder(&class.attribute_lists, use_generics, methods, content);
 
+    let policy_class = extract_use_policy_attribute(&class.attribute_lists, content);
+
     let casts_definitions = extract_casts_definitions(class.members.iter(), content);
 
     let belongs_to_many_pivots = extract_pivot_relations(class.members.iter(), content);
@@ -912,6 +932,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         created_at_name,
         updated_at_name,
         custom_builder,
+        policy_class,
         belongs_to_many_pivots,
     }
 }

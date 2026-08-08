@@ -142,6 +142,20 @@ fn extract_call<'a>(
                             &mut ctx.spans,
                         );
                     }
+                    // The Blade preprocessor lowers `@can`/`@cannot`/`@canany`
+                    // to this call so the ability string is extracted here
+                    // like any other authorization check.
+                    if name_clean == BLADE_CAN_DIRECTIVE {
+                        try_emit_gate_ability_spans(
+                            &func_call.argument_list,
+                            0,
+                            Some(1),
+                            false,
+                            ctx.content,
+                            &mut ctx.spans,
+                            &mut ctx.gate_subjects,
+                        );
+                    }
                 }
                 _ => {
                     extract_from_expression(func_call.function, ctx, scope_start);
@@ -217,6 +231,17 @@ fn extract_call<'a>(
                         _ => {}
                     }
                 }
+                // Authorization abilities.  `->can()` and friends are named
+                // too plainly to claim on the method name alone, so each
+                // shape is gated on what its receiver reads as: the `Gate`
+                // facade, a route registration, `$this` in a controller, or
+                // something that plainly is the authenticated user.
+                emit_gate_ability_spans_for_method(
+                    method_call.object,
+                    &member_name,
+                    &method_call.argument_list,
+                    ctx,
+                );
                 // `$query->whereHasMorph('commentable', ['post'], …)` resolves
                 // each type through the morph map, so a literal there is an
                 // alias.  Keyed on the method name alone: every method in the
@@ -402,6 +427,20 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // Authorization abilities checked (or defined) through the
+                // `Gate` facade, and the `can:ability,Model` middleware
+                // parameter of a route registration.
+                if is_gate_facade(clean_subject) {
+                    emit_gate_facade_ability_spans(&member_name, &static_call.argument_list, ctx);
+                } else if clean_subject.eq_ignore_ascii_case("Route")
+                    && member_name.eq_ignore_ascii_case("middleware")
+                {
+                    try_emit_can_middleware_spans(
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
                 // Eloquent morph aliases: the keys of a
                 // `Relation::morphMap(['post' => Post::class])` registration,
                 // and the argument of `Relation::getMorphedModel('post')` /
@@ -448,6 +487,137 @@ fn extract_call<'a>(
             extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
         }
     }
+}
+
+// ─── Authorization gate abilities ───────────────────────────────────────────
+
+/// Emit ability spans for a `Gate::<method>(…)` static call.
+///
+/// `define()` declares the ability it names, so its span is marked as a write
+/// and never judged against the known set.  Every other gate method reads one
+/// (or a list), with the model — when the call names one — in the second
+/// argument.
+fn emit_gate_facade_ability_spans<'a>(
+    member_name: &str,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    if member_name.eq_ignore_ascii_case("define") {
+        try_emit_gate_ability_spans(
+            argument_list,
+            0,
+            None,
+            true,
+            ctx.content,
+            &mut ctx.spans,
+            &mut ctx.gate_subjects,
+        );
+        return;
+    }
+    if is_gate_check_method(member_name) {
+        try_emit_gate_ability_spans(
+            argument_list,
+            0,
+            Some(1),
+            false,
+            ctx.content,
+            &mut ctx.spans,
+            &mut ctx.gate_subjects,
+        );
+    }
+}
+
+/// Emit ability spans for an instance-method authorization check.
+///
+/// Recognises the four unambiguous shapes: a chain rooted at the `Gate`
+/// facade, `$this->authorize()` / `$this->authorizeForUser()` from the
+/// `AuthorizesRequests` trait, `->can()` on something that plainly is the
+/// authenticated user, and a route registration's `->can()` /
+/// `->middleware('can:…')`.
+fn emit_gate_ability_spans_for_method<'a>(
+    object: &'a Expression<'a>,
+    member_name: &str,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    // Every shape below is one of a handful of method names, and this runs for
+    // every method call in every file, so reject on the name first — before
+    // walking any receiver chain or touching the heap.
+    let is_can = member_name.eq_ignore_ascii_case("can")
+        || member_name.eq_ignore_ascii_case("cannot")
+        || member_name.eq_ignore_ascii_case("canAny");
+    let is_authorize_for_user = member_name.eq_ignore_ascii_case("authorizeForUser");
+    let is_middleware = member_name.eq_ignore_ascii_case("middleware");
+    if !is_can
+        && !is_authorize_for_user
+        && !is_middleware
+        && !member_name.eq_ignore_ascii_case("authorize")
+        && !is_gate_check_method(member_name)
+    {
+        return;
+    }
+
+    let receiver_is_this =
+        matches!(object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this");
+
+    // `$this->authorizeForUser($user, 'update', $post)` puts the user first,
+    // shifting the ability and model along by one.  It is a method of the
+    // `AuthorizesRequests` trait, so `$this` is the only receiver it has —
+    // anything else is a different method that happens to share the name.
+    if is_authorize_for_user {
+        if receiver_is_this {
+            try_emit_gate_ability_spans(
+                argument_list,
+                1,
+                Some(2),
+                false,
+                ctx.content,
+                &mut ctx.spans,
+                &mut ctx.gate_subjects,
+            );
+        }
+        return;
+    }
+
+    if is_middleware && (receiver_is_this || chain_roots_at_route_facade(object)) {
+        try_emit_can_middleware_spans(argument_list, ctx.content, &mut ctx.spans);
+        return;
+    }
+
+    // A route registration's `->can('update', 'post')` names a route
+    // parameter, not a model, in its second argument.
+    if is_can && chain_roots_at_route_facade(object) {
+        try_emit_gate_ability_spans(
+            argument_list,
+            0,
+            None,
+            false,
+            ctx.content,
+            &mut ctx.spans,
+            &mut ctx.gate_subjects,
+        );
+        return;
+    }
+
+    let is_check = if is_can {
+        receiver_is_user_like(object)
+    } else if member_name.eq_ignore_ascii_case("authorize") {
+        receiver_is_this || chain_roots_at_gate(object)
+    } else {
+        chain_roots_at_gate(object)
+    };
+    if !is_check {
+        return;
+    }
+    try_emit_gate_ability_spans(
+        argument_list,
+        0,
+        Some(1),
+        false,
+        ctx.content,
+        &mut ctx.spans,
+        &mut ctx.gate_subjects,
+    );
 }
 
 // ─── First-class callable / partial application ─────────────────────────────

@@ -543,6 +543,7 @@ impl Backend {
         let mut has_trans = false;
         let mut has_command = false;
         let mut has_morph_alias = false;
+        let mut has_gate_ability = false;
         let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
             let maps = self.symbol_maps.read();
             let Some(symbol_map) = maps.get(uri) else {
@@ -570,6 +571,7 @@ impl Backend {
                             LaravelStringKind::Trans => has_trans = true,
                             LaravelStringKind::Command => has_command = true,
                             LaravelStringKind::MorphAlias => has_morph_alias = true,
+                            LaravelStringKind::GateAbility => has_gate_ability = true,
                         }
                         Some((kind.clone(), key.clone(), span.start, span.end))
                     } else {
@@ -580,7 +582,13 @@ impl Backend {
             // `maps` read lock is dropped here.
         };
 
-        if !has_route && !has_config && !has_view && !has_trans && !has_command && !has_morph_alias
+        if !has_route
+            && !has_config
+            && !has_view
+            && !has_trans
+            && !has_command
+            && !has_morph_alias
+            && !has_gate_ability
         {
             return;
         }
@@ -651,8 +659,42 @@ impl Backend {
             None
         };
 
+        // Abilities are only checkable when the project defines some: an
+        // empty set means gate discovery found nothing (a project that
+        // authorizes entirely through runtime-registered callbacks, or one
+        // that is not really using Laravel's gate), not that every ability
+        // referenced is wrong.
+        let gate_abilities: HashSet<String> = if has_gate_ability {
+            self.cached_gate_abilities().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+
         for (kind, key, start, end) in &key_spans {
             let (valid, label, code) = match kind {
+                // An ability is judged against the model the check names, so
+                // it reports which model rather than the shared
+                // "Unknown <kind>: '<key>'" message the others share.
+                LaravelStringKind::GateAbility => {
+                    if !gate_abilities.is_empty()
+                        && let Some(message) =
+                            self.gate_ability_problem(uri, content, key, *start, &gate_abilities)
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
+                            content,
+                            *start as usize,
+                            *end as usize,
+                        )
+                    {
+                        out.push(helpers::make_diagnostic(
+                            range,
+                            DiagnosticSeverity::WARNING,
+                            "invalid_laravel_ability",
+                            message,
+                        ));
+                    }
+                    continue;
+                }
                 LaravelStringKind::Route => {
                     // A package with no routes of its own, whose names are
                     // registered by the host application, cannot be judged:
@@ -736,6 +778,104 @@ impl Backend {
                 ));
             }
         }
+    }
+
+    /// Judge one authorization ability, returning the diagnostic message when
+    /// it is wrong and `None` when it checks out.
+    ///
+    /// A check that names a model (`$user->can('update', $post)`,
+    /// `Gate::allows('update', Post::class)`) is judged against *that model's*
+    /// policy, so a real ability used on the wrong model is caught and named
+    /// as such.  A `Gate::define()` registration applies to any subject, so it
+    /// satisfies a model-bound check too.  When the model cannot be resolved —
+    /// or the call names none — the ability only has to exist somewhere.
+    fn gate_ability_problem(
+        &self,
+        uri: &str,
+        content: &str,
+        ability: &str,
+        span_start: u32,
+        known_abilities: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        let is_defined = self.laravel_gates.read().definition(ability).is_some();
+        if is_defined {
+            return None;
+        }
+
+        if let Some(model_fqn) = self.gate_subject_model(uri, content, span_start)
+            && let Some((policy, abilities)) =
+                crate::virtual_members::laravel::model_policy_abilities(self, &model_fqn)
+        {
+            if abilities
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(ability))
+            {
+                return None;
+            }
+            return Some(format!(
+                "Ability '{}' is not defined for '{}' (policy {})",
+                ability,
+                model_fqn,
+                policy.fqn()
+            ));
+        }
+
+        if known_abilities.contains(ability) {
+            return None;
+        }
+        Some(format!("Unknown ability: '{}'", ability))
+    }
+
+    /// The FQN of the model a gate check named, when the symbol map recorded
+    /// one and it resolves to a class.
+    fn gate_subject_model(&self, uri: &str, content: &str, span_start: u32) -> Option<String> {
+        // A Blade file's symbol map is built from the preprocessed virtual
+        // PHP, so every offset in it — including the subject's — indexes that
+        // text rather than the template the caller handed us.
+        let virtual_php = self.blade_virtual_php(uri);
+        let content = virtual_php.as_deref().unwrap_or(content);
+
+        let (subject_text, is_static) = {
+            let maps = self.symbol_maps.read();
+            let map = maps.get(uri)?;
+            // The subject is stored as a range into the text the map was
+            // built from, so a map built from older text would slice the
+            // wrong bytes (or none at all).
+            if !map.matches_source(content) {
+                return None;
+            }
+            let subject = map.gate_subject(span_start)?;
+            (
+                subject.subject_text.as_str(content).to_string(),
+                subject.is_static,
+            )
+        };
+
+        let ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&ctx);
+        let function_loader = self.function_loader(&ctx);
+        let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
+            local_classes: &ctx.classes,
+            use_map: &ctx.use_map,
+            namespace: &ctx.namespace,
+            content,
+            class_loader: &class_loader,
+            backend: Some(self),
+            function_loader: &function_loader,
+        };
+        let name = crate::type_engine::subject_resolution::resolve_subject_type(
+            &subject_text,
+            is_static,
+            span_start,
+            &resolution_ctx,
+        )?
+        .top_level_class_names()
+        .into_iter()
+        .next()?;
+        // The resolved type carries the name as written, so run it back
+        // through the loader to canonicalize a short name against the file's
+        // imports before looking up the model's policy.
+        Some(class_loader(&name)?.fqn().to_string())
     }
 }
 

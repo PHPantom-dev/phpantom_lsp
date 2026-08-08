@@ -4238,3 +4238,268 @@ fn real_member_access_is_not_marked_as_array_callable() {
         other => panic!("Expected MemberAccess, got {:?}", other),
     }
 }
+
+// ── Authorization ability spans ─────────────────────────────────────
+
+/// Every `GateAbility` key the map records, in source order.
+fn ability_keys(map: &SymbolMap) -> Vec<String> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::GateAbility,
+                key,
+                ..
+            } => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `->can()` is far too ordinary a method name to claim on sight, so the
+/// receiver has to read as the authenticated user for the string to count.
+#[test]
+fn can_is_an_ability_check_only_on_a_user_like_receiver() {
+    for (receiver, expected) in [
+        ("$user", true),
+        ("$adminUser", true),
+        ("$this->user", true),
+        ("$request->user()", true),
+        ("auth()->user()", true),
+        ("Auth::user()", true),
+        ("$this->{$prop}", false),
+        ("$permissions", false),
+        ("$repo->rules()", false),
+        ("Config::all()", false),
+        ("[1, 2]", false),
+        // A dynamic selector names no method we can read.
+        ("$repo->{$method}()", false),
+        ("Config::{$method}()", false),
+    ] {
+        let php = format!("<?php\n{receiver}->can('update-post', $post);\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(
+            !ability_keys(&map).is_empty(),
+            expected,
+            "`{receiver}->can(…)` should{} be read as an authorization check",
+            if expected { "" } else { " not" }
+        );
+    }
+}
+
+/// The gate methods take either a single ability or a list of them, in both
+/// array spellings.
+#[test]
+fn an_ability_list_records_one_span_per_entry() {
+    for arg in ["['update', 'delete']", "array('update', 'delete')"] {
+        let php = format!("<?php\nGate::any({arg}, $post);\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(ability_keys(&map), vec!["update", "delete"], "for `{arg}`");
+        // Each entry is checked against the same model.
+        assert_eq!(map.gate_subjects.len(), 2, "for `{arg}`");
+    }
+}
+
+/// A gate call naming nothing readable records no span rather than a partial
+/// one.
+#[test]
+fn unreadable_gate_arguments_record_no_ability() {
+    for call in [
+        // No argument at all.
+        "Gate::allows()",
+        // A computed ability name.
+        "Gate::allows($ability, $post)",
+        // An empty name.
+        "Gate::allows('', $post)",
+        // A list whose entries are computed.
+        "Gate::any([$ability], $post)",
+        // A key-value array is not a list of abilities.
+        "Gate::any(['a' => 'update'], $post)",
+    ] {
+        let php = format!("<?php\n{call};\n");
+        assert!(
+            ability_keys(&parse_and_extract(&php)).is_empty(),
+            "`{call}` should record no ability"
+        );
+    }
+}
+
+/// The model a check names is recorded so the ability can be judged against
+/// that model's policy — as a class name, a variable, or a fresh instance.
+#[test]
+fn the_checked_model_is_recorded_in_each_spelling() {
+    for (subject, text, is_static) in [
+        ("Post::class", "Post", true),
+        ("new Post", "Post", true),
+        ("$post", "$post", false),
+        // `static::class` names the enclosing class, which the diagnostic
+        // resolves the same way it resolves the keyword anywhere else.
+        ("static::class", "static", true),
+    ] {
+        let php = format!("<?php\nGate::allows('update', {subject});\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(ability_keys(&map), vec!["update"], "for `{subject}`");
+        let recorded = map
+            .gate_subjects
+            .first()
+            .unwrap_or_else(|| panic!("`{subject}` should be recorded as the checked model"));
+        assert_eq!(recorded.is_static, is_static, "for `{subject}`");
+        assert_eq!(recorded.subject_text.as_str(&php), text, "for `{subject}`");
+    }
+}
+
+/// An argument that names no resolvable model leaves the ability judged
+/// against the project-wide set instead.
+#[test]
+fn an_unresolvable_model_argument_is_not_recorded() {
+    for subject in ["'post'", "[Post::class, $post]", "$post->id", "42"] {
+        let php = format!("<?php\nGate::allows('update', {subject});\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(ability_keys(&map), vec!["update"], "for `{subject}`");
+        assert!(
+            map.gate_subjects.is_empty(),
+            "`{subject}` names no model to check against"
+        );
+    }
+}
+
+/// A chain rooted at the `Gate` facade is an authorization check however many
+/// links it runs through — up to the bound that keeps the lookup linear.
+#[test]
+fn a_gate_chain_is_followed_to_its_root_within_the_depth_bound() {
+    for (chain, expected) in [
+        ("Gate::forUser($user)", true),
+        ("Gate::forUser($user)->after($cb)", true),
+        ("Gate::forUser($user)->a()->b()", true),
+        // Beyond the bound the root is out of reach, which is the price of
+        // not rescanning a long chain at every link.
+        ("Gate::forUser($user)->a()->b()->c()->d()", false),
+        // A chain that never reaches the facade is somebody else's `allows`.
+        ("$policy->forUser($user)", false),
+    ] {
+        let php = format!("<?php\n{chain}->allows('update-post');\n");
+        assert_eq!(
+            !ability_keys(&parse_and_extract(&php)).is_empty(),
+            expected,
+            "`{chain}->allows(…)`"
+        );
+    }
+}
+
+/// `$this->authorizeForUser($user, 'ability', $model)` puts the user first,
+/// shifting the ability and the model along by one.
+#[test]
+fn authorize_for_user_reads_its_shifted_arguments() {
+    let php = "<?php\n$this->authorizeForUser($user, 'update-post', $post);\n";
+    let map = parse_and_extract(php);
+    assert_eq!(ability_keys(&map), vec!["update-post"]);
+    assert_eq!(
+        map.gate_subjects
+            .first()
+            .map(|s| s.subject_text.as_str(php)),
+        Some("$post")
+    );
+
+    // It is a trait method, so `$this` is the only receiver it has.
+    let php = "<?php\n$gate->authorizeForUser($user, 'update-post', $post);\n";
+    assert!(ability_keys(&parse_and_extract(php)).is_empty());
+}
+
+/// A route registration's `->can()` names an ability, but its second argument
+/// is a route parameter rather than a model.
+#[test]
+fn a_route_can_records_the_ability_but_no_model() {
+    let php = "<?php\nRoute::get('/posts/{post}', $action)->can('update', 'post');\n";
+    let map = parse_and_extract(php);
+    assert_eq!(ability_keys(&map), vec!["update"]);
+    assert!(
+        map.gate_subjects.is_empty(),
+        "`'post'` is a route parameter, not a model"
+    );
+}
+
+/// The `can:` middleware parameter carries the ability inside a larger
+/// string, in either the single or the list spelling.
+#[test]
+fn the_can_middleware_parameter_is_read_from_its_string() {
+    for arg in [
+        "'can:update,post'",
+        "['auth', 'can:update,post']",
+        "array('can:update,post')",
+    ] {
+        let php = format!("<?php\nRoute::middleware({arg});\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(ability_keys(&map), vec!["update"], "for `{arg}`");
+        // The span covers only the ability, not the whole middleware string.
+        let span = map
+            .spans
+            .iter()
+            .find(|s| {
+                matches!(
+                    &s.kind,
+                    SymbolKind::LaravelStringKey {
+                        kind: LaravelStringKind::GateAbility,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        assert_eq!(&php[span.start as usize..span.end as usize], "update");
+    }
+}
+
+/// Middleware that is not a `can:` parameter records nothing.
+#[test]
+fn other_middleware_records_no_ability() {
+    for arg in [
+        "",
+        "''",
+        "'auth'",
+        "$middleware",
+        "'can:'",
+        "['can:update', $x]",
+    ] {
+        let php = format!("<?php\nRoute::middleware({arg});\n");
+        let expected: Vec<String> = if arg == "['can:update', $x]" {
+            vec!["update".to_string()]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(
+            ability_keys(&parse_and_extract(&php)),
+            expected,
+            "for `middleware({arg})`"
+        );
+    }
+}
+
+/// `Gate::define()` declares the ability it names, so its span is marked as a
+/// write and never judged against the known set.
+#[test]
+fn a_gate_definition_is_recorded_as_a_write() {
+    let php = "<?php\nGate::define('update-post', fn () => true);\n";
+    let map = parse_and_extract(php);
+    let span = map
+        .spans
+        .iter()
+        .find(|s| {
+            matches!(
+                &s.kind,
+                SymbolKind::LaravelStringKey {
+                    kind: LaravelStringKind::GateAbility,
+                    ..
+                }
+            )
+        })
+        .expect("the definition should record its ability");
+    match &span.kind {
+        SymbolKind::LaravelStringKey { is_write, .. } => {
+            assert!(*is_write, "a definition declares the ability it names")
+        }
+        other => panic!("expected a Laravel string key, got {other:?}"),
+    }
+    assert!(
+        map.gate_subjects.is_empty(),
+        "a definition is not bound to a model"
+    );
+}
