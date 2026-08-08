@@ -358,12 +358,17 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // argument is omitted entirely, fall back to a `Foo::class`
                 // parameter default so `app()` resolves the same as
                 // `app(Foo::class)`.
-                let class_name = arg_text.and_then(extract_class_name_from_text).or_else(|| {
-                    arg_text
-                        .is_none()
-                        .then(|| default_class_string_name(params.get(param_idx)))
-                        .flatten()
-                });
+                let class_name = arg_text
+                    .and_then(extract_class_name_from_text)
+                    .or_else(|| {
+                        arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader))
+                    })
+                    .or_else(|| {
+                        arg_text
+                            .is_none()
+                            .then(|| default_class_string_name(params.get(param_idx)))
+                            .flatten()
+                    });
                 if let Some(class_name) = class_name {
                     let class_name =
                         resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
@@ -954,8 +959,11 @@ fn condition_includes_array(condition: &PhpType) -> bool {
     }
 }
 
-/// Split a textual argument list by commas, respecting nested parentheses
+/// Split a textual argument list by commas, respecting nested brackets
 /// so that `"foo(a, b), c"` splits into `["foo(a, b)", "c"]`.
+///
+/// Braces count as brackets too, so a closure argument written out in full
+/// (`function ($a) { return [$a, 1]; }, $rest`) stays one argument.
 pub fn split_text_args(text: &str) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth = 0u32;
@@ -982,10 +990,10 @@ pub fn split_text_args(text: &str) -> Vec<&str> {
             '"' if !in_single_quote => {
                 in_double_quote = !in_double_quote;
             }
-            '(' | '[' if !in_single_quote && !in_double_quote => {
+            '(' | '[' | '{' if !in_single_quote && !in_double_quote => {
                 depth += 1;
             }
-            ')' | ']' if !in_single_quote && !in_double_quote => {
+            ')' | ']' | '}' if !in_single_quote && !in_double_quote => {
                 depth = depth.saturating_sub(1);
             }
             ',' if depth == 0 && !in_single_quote && !in_double_quote => {
@@ -1274,6 +1282,11 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 // default so `app()` resolves the same as `app(Foo::class)`.
                 let class_name = arg_expr
                     .and_then(extract_class_string_from_expr)
+                    .or_else(|| {
+                        arg_expr
+                            .and_then(string_literal_content)
+                            .and_then(|name| class_named_by_string(name, class_loader))
+                    })
                     .or_else(|| {
                         arg_expr
                             .is_none()
@@ -1695,6 +1708,43 @@ pub fn resolve_conditional_from_values(
         );
     }
     None
+}
+
+/// The class a plain string argument names, when it names one at all.
+///
+/// PHP accepts a string wherever a `class-string` is expected, so
+/// `$container->make('App\Services\Clock')` is as much a class-string call as
+/// `make(Clock::class)` is; in a Laravel project the loader also answers for
+/// the container keys service providers bind (`make('sentry')`).  The class
+/// has to actually resolve: an ordinary string argument must keep falling
+/// through to the conditional's else branch rather than being read as the name
+/// of a class that does not exist.
+fn class_named_by_string(
+    name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<String> {
+    if name.is_empty() {
+        return None;
+    }
+    class_loader(name).map(|cls| cls.fqn().to_string())
+}
+
+/// [`class_named_by_string`] for the text-argument path, where the argument is
+/// still the quoted source text.
+fn class_named_by_quoted_string(
+    arg_text: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<String> {
+    let name = crate::util::unescape_php_string_literal(arg_text.trim())?;
+    class_named_by_string(&name, class_loader)
+}
+
+/// The content of a string-literal expression, without its quotes.
+fn string_literal_content<'a>(expr: &Expression<'a>) -> Option<&'a str> {
+    match expr {
+        Expression::Literal(literal::Literal::String(s)) => s.value.map(crate::atom::bytes_to_str),
+        _ => None,
+    }
 }
 
 /// Extract the class name from an `X::class` expression.

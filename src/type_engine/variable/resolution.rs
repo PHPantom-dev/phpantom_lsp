@@ -1865,17 +1865,6 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
 
 // ── Array function type preservation helpers ─────────────────────────
 
-/// Extract the first positional argument expression from an
-/// argument list.
-pub(in crate::type_engine) fn first_arg_expr<'b>(
-    args: &'b ArgumentList<'b>,
-) -> Option<&'b Expression<'b>> {
-    args.arguments.first().map(|arg| match arg {
-        Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    })
-}
-
 /// Extract the nth positional argument expression (0-based).
 pub(in crate::type_engine) fn nth_arg_expr<'b>(
     args: &'b ArgumentList<'b>,

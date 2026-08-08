@@ -25,7 +25,17 @@ pub(crate) fn process_statement<'b>(
     // RHS, a scalar RHS blocks a class override).  Every other statement
     // kind only ever sees standalone annotations.
     if !matches!(stmt, Statement::Expression(_)) {
-        apply_standalone_var_docblocks(stmt.span().start.offset, scope, ctx);
+        let stmt_offset = stmt.span().start.offset;
+        if apply_standalone_var_docblocks(stmt_offset, scope, ctx) {
+            // The diagnostic scope snapshot at this offset was recorded
+            // by the caller *before* this call, so it still holds the
+            // pre-docblock scope. Re-record it now so that a lookup for
+            // an expression inside this same statement (e.g. `echo
+            // $v->method()` right after a standalone `@var $v` block)
+            // sees the type the docblock just applied instead of
+            // falling through to the stale snapshot.
+            record_scope_snapshot(stmt_offset, scope);
+        }
     }
 
     match stmt {
@@ -112,10 +122,16 @@ pub(crate) fn process_expression_statement<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let expr = expr_stmt.expression;
+    // `($a = expr);` is a parenthesized expression statement, written by
+    // hand or produced by the Blade preprocessor for `@php($a = expr)`.
+    // The statement offset stays on the outer expression so a preceding
+    // `@var` docblock is still found, but everything that inspects the
+    // expression's shape works on the inner one.
+    let outer = expr_stmt.expression;
+    let expr = unwrap_parens(outer);
 
     // Try inline `/** @var Type $x */` override first.
-    match try_process_inline_var_override(expr, stmt_offset(expr), scope, ctx) {
+    match try_process_inline_var_override(expr, stmt_offset(outer), scope, ctx) {
         VarOverrideResult::NamedVar => {
             // Re-record the scope snapshot at this expression's offset
             // so that variable lookups within the same statement (e.g.
@@ -124,7 +140,7 @@ pub(crate) fn process_expression_statement<'b>(
             // The snapshot recorded by `walk_body_for_diagnostics` at
             // the statement start was taken *before* the `@var`
             // override was applied.
-            record_scope_snapshot(stmt_offset(expr), scope);
+            record_scope_snapshot(stmt_offset(outer), scope);
             return;
         }
         VarOverrideResult::NoVar => {
@@ -168,110 +184,46 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     match expr {
-        Expression::Call(Call::Function(fc)) => {
-            let Some(func_name) = (match fc.function {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                _ => None,
-            }) else {
-                return;
-            };
+        Expression::Call(call) => {
+            // The receiver runs before the arguments, and a chained call
+            // (`$db->connect()->transaction(...)`) hides closure arguments
+            // inside its receiver expression, so recurse into it first.
+            match call {
+                Call::Method(mc) => process_by_ref_closure_captures(mc.object, scope, ctx),
+                Call::NullSafeMethod(mc) => process_by_ref_closure_captures(mc.object, scope, ctx),
+                _ => {}
+            }
 
+            // `(function () use (&$x) { ... })()` runs the closure right
+            // here, so its final variable state replaces the outer one.
+            if let Call::Function(fc) = call
+                && let Expression::Closure(closure) = unwrap_parens(fc.function)
+            {
+                process_by_ref_closure_capture(closure, scope, ctx, true);
+            }
+
+            let args = match call {
+                Call::Function(fc) => &fc.argument_list,
+                Call::Method(mc) => &mc.argument_list,
+                Call::NullSafeMethod(mc) => &mc.argument_list,
+                Call::StaticMethod(sc) => &sc.argument_list,
+            };
             let mut next_positional = 0usize;
-            for arg in fc.argument_list.arguments.iter() {
+            for arg in args.arguments.iter() {
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && function_invokes_callable_arg_immediately(&func_name, &selector, ctx)
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
+                if let Expression::Closure(closure) = arg_expr {
+                    let certain = call_invokes_arg_immediately(call, &selector, scope, ctx);
+                    process_by_ref_closure_capture(closure, scope, ctx, certain);
+                } else {
+                    process_by_ref_closure_captures(arg_expr, scope, ctx);
                 }
             }
         }
-        Expression::Call(Call::Method(mc)) => {
-            let Some(method_name) = (match &mc.method {
-                ClassLikeMemberSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
-                }
-                _ => None,
-            }) else {
-                return;
-            };
-            let receiver_names = receiver_class_names(mc.object, scope, ctx);
-            if receiver_names.is_empty() {
-                return;
-            }
-
-            let mut next_positional = 0usize;
-            for arg in mc.argument_list.arguments.iter() {
-                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && method_invokes_callable_arg_immediately(
-                        &receiver_names,
-                        &method_name,
-                        &selector,
-                        ctx,
-                    )
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
-                }
-            }
-        }
-        Expression::Call(Call::NullSafeMethod(mc)) => {
-            let Some(method_name) = (match &mc.method {
-                ClassLikeMemberSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
-                }
-                _ => None,
-            }) else {
-                return;
-            };
-            let receiver_names = receiver_class_names(mc.object, scope, ctx);
-            if receiver_names.is_empty() {
-                return;
-            }
-
-            let mut next_positional = 0usize;
-            for arg in mc.argument_list.arguments.iter() {
-                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && method_invokes_callable_arg_immediately(
-                        &receiver_names,
-                        &method_name,
-                        &selector,
-                        ctx,
-                    )
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
-                }
-            }
-        }
-        Expression::Call(Call::StaticMethod(sc)) => {
-            let Some(method_name) = (match &sc.method {
-                ClassLikeMemberSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
-                }
-                _ => None,
-            }) else {
-                return;
-            };
-            let receiver_names = static_receiver_class_names(sc.class, ctx);
-            if receiver_names.is_empty() {
-                return;
-            }
-
-            let mut next_positional = 0usize;
-            for arg in sc.argument_list.arguments.iter() {
-                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && method_invokes_callable_arg_immediately(
-                        &receiver_names,
-                        &method_name,
-                        &selector,
-                        ctx,
-                    )
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
-                }
-            }
+        // A closure that is defined but not provably invoked (stored in a
+        // variable, passed somewhere opaque) may still run any time later,
+        // so the types it assigns are unioned into the captured variables.
+        Expression::Closure(closure) => {
+            process_by_ref_closure_capture(closure, scope, ctx, false);
         }
         Expression::Parenthesized(inner) => {
             process_by_ref_closure_captures(inner.expression, scope, ctx);
@@ -280,6 +232,71 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             process_by_ref_closure_captures(assignment.rhs, scope, ctx);
         }
         _ => {}
+    }
+}
+
+/// Whether a call provably invokes its callable argument before
+/// returning, so a by-ref capture's final state can *replace* the outer
+/// variable rather than widen it.
+///
+/// Follows PHPStan's defaults: function callable parameters are
+/// immediate unless tagged `@param-later-invoked-callable`; method
+/// callable parameters are later-invoked unless tagged
+/// `@param-immediately-invoked-callable`.  An unresolvable callee or
+/// receiver is not proof either way, so it answers `false` and the
+/// caller falls back to widening.
+fn call_invokes_arg_immediately(
+    call: &Call<'_>,
+    selector: &ArgSelector,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    match call {
+        Call::Function(fc) => {
+            let Expression::Identifier(ident) = fc.function else {
+                return false;
+            };
+            function_invokes_callable_arg_immediately(bytes_to_str(ident.value()), selector, ctx)
+        }
+        Call::Method(mc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return false;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            !receiver_names.is_empty()
+                && method_invokes_callable_arg_immediately(
+                    &receiver_names,
+                    bytes_to_str(ident.value),
+                    selector,
+                    ctx,
+                )
+        }
+        Call::NullSafeMethod(mc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return false;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            !receiver_names.is_empty()
+                && method_invokes_callable_arg_immediately(
+                    &receiver_names,
+                    bytes_to_str(ident.value),
+                    selector,
+                    ctx,
+                )
+        }
+        Call::StaticMethod(sc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return false;
+            };
+            let receiver_names = static_receiver_class_names(sc.class, ctx);
+            !receiver_names.is_empty()
+                && method_invokes_callable_arg_immediately(
+                    &receiver_names,
+                    bytes_to_str(ident.value),
+                    selector,
+                    ctx,
+                )
+        }
     }
 }
 
@@ -525,10 +542,20 @@ pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Optio
     Some(&before[doc_start..doc_end])
 }
 
+/// Walk a closure body and propagate the types it assigns to `use (&$x)`
+/// captures back into the outer scope.
+///
+/// `invoked_immediately` decides how: when the closure provably runs
+/// before the call returns, the closure's final state *replaces* the
+/// outer variable; otherwise the closure may run zero or more times at
+/// any later point, so the assigned types are *unioned* with the outer
+/// types (mirroring PHPStan, which widens by-ref captures even for
+/// closures that are merely defined).
 pub(crate) fn process_by_ref_closure_capture<'b>(
     closure: &'b Closure<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
+    invoked_immediately: bool,
 ) {
     let captured: Vec<String> = closure
         .use_clause
@@ -582,9 +609,16 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
 
     for var_name in captured {
         scope.invalidate_dependent_keys(&var_name);
+        scope.invalidate_assertions(&var_name);
         let types = closure_scope.get(&var_name).to_vec();
         if !types.is_empty() {
-            scope.set(&var_name, types);
+            if invoked_immediately {
+                scope.set(&var_name, types);
+            } else {
+                let mut combined = scope.get(&var_name).to_vec();
+                ResolvedType::extend_unique(&mut combined, types);
+                scope.set(&var_name, combined);
+            }
         } else if closure_scope.contains(&var_name) {
             scope.set_empty(&var_name);
         }
@@ -918,11 +952,16 @@ pub(crate) fn resolve_rhs_native_type(
 /// processed) for additional standalone `/** @var Type $var */` blocks.
 /// Each discovered block's `@var` tags are applied to `scope`.  Stops as
 /// soon as the text no longer ends with `*/` (after trimming).
+///
+/// Returns whether any `@var` annotation was applied, so callers that
+/// recorded a diagnostic scope snapshot before this call know to
+/// re-record it afterward.
 pub(crate) fn apply_preceding_var_docblocks(
     before: &str,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) {
+) -> bool {
+    let mut applied = false;
     let mut remaining = trim_trailing_line_comments(before);
     // Keep scanning as long as the preceding text ends with a docblock.
     while remaining.ends_with("*/") {
@@ -941,8 +980,10 @@ pub(crate) fn apply_preceding_var_docblocks(
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
         }
+        applied = true;
         remaining = trim_trailing_line_comments(&remaining[..doc_start]);
     }
+    applied
 }
 
 /// Trim trailing whitespace and whole-line `//` / `#` comments from
@@ -1002,16 +1043,18 @@ const MAX_COMMENT_LINE_LOOKBACK: usize = 512;
 /// the walker's scope and every use of it falls back to a backward text
 /// scan, which cannot tell a preceding sibling block from a preceding
 /// sibling function body.
+///
+/// Returns whether any `@var` annotation was applied.
 pub(crate) fn apply_standalone_var_docblocks(
     stmt_offset: u32,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) {
+) -> bool {
     let offset = (stmt_offset as usize).min(ctx.content.len());
     if offset == 0 {
-        return;
+        return false;
     }
-    apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx);
+    apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx)
 }
 
 /// Resolve a [`PhpType`] to a complete `Vec<ResolvedType>` with
@@ -1162,7 +1205,9 @@ pub(crate) fn process_assignment_expr<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    if let Expression::Assignment(assignment) = expr {
+    // `($a = expr);` is a parenthesized assignment statement — written by
+    // hand, or produced by the Blade preprocessor for `@php($a = expr)`.
+    if let Expression::Assignment(assignment) = unwrap_parens(expr) {
         if !assignment.operator.is_assign() {
             // Compound assignment: $x op= expr.
             // The type depends on the operator.
@@ -1250,6 +1295,7 @@ pub(crate) fn process_assignment_expr<'b>(
                     return;
                 }
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                scope.invalidate_assertions(&key);
                 if !rhs_types.is_empty() {
                     scope.set(&key, rhs_types);
                 }
@@ -1282,11 +1328,15 @@ pub(crate) fn process_assignment_expr<'b>(
         // after resolving the RHS, so `$x = $x->foo` still reads the old
         // key while resolving.
         scope.invalidate_dependent_keys(&lhs_name);
+        scope.invalidate_assertions(&lhs_name);
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
         } else if !scope.contains(&lhs_name) {
             scope.set_empty(&lhs_name);
         }
+        // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
+        // for the check, so testing it later narrows `$raw`.
+        record_assertion_variable(&lhs_name, assignment.rhs, scope);
     }
 }
 

@@ -130,24 +130,43 @@ pub(crate) fn trailing_class_name(s: &str) -> &str {
     &s[start..]
 }
 
+/// Recognise a closure or arrow-function literal, skipping an optional
+/// `static` modifier.
+///
+/// Returns whether the literal is an arrow function, together with the text
+/// from the `fn`/`function` keyword onward, so callers can scan the
+/// signature without tripping over the modifier.  `static fn ($x) => …` is
+/// an ordinary closure literal; a caller that stops at the modifier reads
+/// it as "not a closure" and silently binds no template from it.
+fn closure_literal_parts(text: &str) -> Option<(bool, &str)> {
+    let trimmed = text.trim();
+    let trimmed = trimmed
+        .strip_prefix("static")
+        .filter(|rest| rest.starts_with(char::is_whitespace))
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    if trimmed.starts_with("fn")
+        && trimmed
+            .get(2..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('))
+    {
+        return Some((true, trimmed));
+    }
+    if trimmed.starts_with("function")
+        && trimmed
+            .get(8..)
+            .is_some_and(|rest| rest.trim_start().starts_with('('))
+    {
+        return Some((false, trimmed));
+    }
+    None
+}
+
 /// Check whether text is a closure or arrow-function literal, optionally
 /// prefixed with `static` — e.g. `fn($x) => …`, `function ($x) use (…) { … }`,
 /// `static fn($x) => …`.
 pub(crate) fn is_closure_like_text(text: &str) -> bool {
-    let trimmed = text.trim();
-    let trimmed = trimmed
-        .strip_prefix("static")
-        .map(str::trim_start)
-        .unwrap_or(trimmed);
-    let is_arrow = trimmed.starts_with("fn")
-        && trimmed
-            .get(2..)
-            .is_some_and(|rest| rest.trim_start().starts_with('('));
-    let is_closure = trimmed.starts_with("function")
-        && trimmed
-            .get(8..)
-            .is_some_and(|rest| rest.trim_start().starts_with('('));
-    is_arrow || is_closure
+    closure_literal_parts(text).is_some()
 }
 
 /// Extract the return type annotation from a closure or arrow-function
@@ -162,20 +181,7 @@ pub(crate) fn is_closure_like_text(text: &str) -> bool {
 /// Returns `None` if the text is not a closure/arrow-function or if
 /// there is no return type hint.
 pub(crate) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
-    let trimmed = text.trim();
-
-    let is_arrow = trimmed.starts_with("fn")
-        && trimmed
-            .get(2..2 + 1)
-            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
-    let is_closure = trimmed.starts_with("function")
-        && trimmed
-            .get(8..)
-            .is_some_and(|rest| rest.trim_start().starts_with('('));
-
-    if !is_arrow && !is_closure {
-        return None;
-    }
+    let (_, trimmed) = closure_literal_parts(text)?;
 
     // Find the opening `(` of the parameter list.
     let paren_open = trimmed.find('(')?;
@@ -253,21 +259,7 @@ pub(crate) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpTyp
 ///
 /// Returns `None` if the text doesn't contain `yield`.
 pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<PhpType> {
-    let trimmed = text.trim();
-
-    // Must be a closure or function literal.
-    let is_arrow = trimmed.starts_with("fn")
-        && trimmed
-            .get(2..3)
-            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
-    let is_closure = trimmed.starts_with("function")
-        && trimmed
-            .get(8..)
-            .is_some_and(|rest| rest.trim_start().starts_with('('));
-
-    if !is_arrow && !is_closure {
-        return None;
-    }
+    let (_, trimmed) = closure_literal_parts(text)?;
 
     // Find the opening `{` of the body.
     let body_start = trimmed.find('{')?;
@@ -438,20 +430,7 @@ pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<Php
 /// text is not a closure/arrow function or no returnable expression is
 /// found.
 pub(crate) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
-    let trimmed = text.trim();
-
-    let is_arrow = trimmed.starts_with("fn")
-        && trimmed
-            .get(2..3)
-            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
-    let is_closure = trimmed.starts_with("function")
-        && trimmed
-            .get(8..)
-            .is_some_and(|rest| rest.trim_start().starts_with('('));
-
-    if !is_arrow && !is_closure {
-        return None;
-    }
+    let (is_arrow, trimmed) = closure_literal_parts(text)?;
 
     // Find the parameter list's closing `)` by matching depth.
     let paren_open = trimmed.find('(')?;
@@ -671,20 +650,7 @@ pub(crate) fn extract_closure_param_type_from_text(text: &str, position: usize) 
 pub(crate) fn extract_closure_params_from_text(
     text: &str,
 ) -> Option<Vec<(String, Option<PhpType>)>> {
-    let trimmed = text.trim();
-
-    let is_arrow = trimmed.starts_with("fn")
-        && trimmed
-            .get(2..2 + 1)
-            .is_some_and(|c| c.starts_with('(') || c.starts_with(' ') || c.starts_with('\t'));
-    let is_closure = trimmed.starts_with("function")
-        && trimmed
-            .get(8..)
-            .is_some_and(|rest| rest.trim_start().starts_with('('));
-
-    if !is_arrow && !is_closure {
-        return None;
-    }
+    let (_, trimmed) = closure_literal_parts(text)?;
 
     // Find the opening `(` of the parameter list.
     let paren_open = trimmed.find('(')?;

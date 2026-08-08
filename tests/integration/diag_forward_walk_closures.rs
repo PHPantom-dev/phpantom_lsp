@@ -652,3 +652,68 @@ class Runner {
          diagnostic scope cache, got: {unresolved:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A wide declared closure param narrows to the call site's element type
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A callback passed to `array_map()` may declare its parameter as plain
+/// `array` while the call site knows the element shape.  The bare `array`
+/// hint carries no element information, so the inferred shape must win:
+/// otherwise `$case[0]` has no type and the opt-in
+/// `unresolved-member-access` diagnostic fires on `$case[0]->name`.
+#[test]
+fn wide_array_closure_param_narrows_to_call_site_element_type() {
+    let backend = create_test_backend_with_full_stubs();
+
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    let uri = "file:///wide_array_param.php";
+    let text = r#"<?php
+class DiscountType {
+    public string $name = '';
+}
+
+class Cases {
+    /** @return array<array{DiscountType, string}> */
+    private static function cases(): array { return []; }
+
+    /** @return list<string> */
+    public function run(): array {
+        return array_map(
+            static fn (array $case): string => $case[0]->name,
+            self::cases()
+        );
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(
+                    c,
+                    NumberOrString::String(s)
+                        if s == "unresolved_member_access" || s == "unknown_member"
+                )
+            })
+        })
+        .map(|d| d.message.clone())
+        .collect();
+
+    assert!(
+        unresolved.is_empty(),
+        "Expected no unresolved/unknown member diagnostics: the declared `array` \
+         parameter must narrow to `array{{DiscountType, string}}` from the \
+         array_map() call site, got: {unresolved:?}"
+    );
+}

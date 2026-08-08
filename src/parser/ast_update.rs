@@ -804,6 +804,19 @@ impl Backend {
                         continue;
                     }
                     let fqn = class.fqn().to_string();
+                    // A package may declare the same class in more than one
+                    // file behind a `class_exists` guard — Carbon ships an
+                    // empty `DatePeriodBase` alongside one that carries the
+                    // pre-8.2 properties.  Both get indexed, so settle the
+                    // duplicate on the lowest-sorting URI instead of on
+                    // whichever parse worker happened to finish last, which
+                    // decided the members the name resolved to (and the
+                    // diagnostics that followed) anew on every run.
+                    if let Some(existing) = idx.get(&fqn)
+                        && existing.as_str() < update.uri.as_str()
+                    {
+                        continue;
+                    }
                     idx.insert(fqn.clone(), update.uri.clone());
                     fqn_idx.insert(fqn, Arc::clone(class));
                 }

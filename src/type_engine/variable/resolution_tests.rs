@@ -1701,7 +1701,10 @@ $foo;
 }
 
 #[test]
-fn by_ref_closure_capture_does_not_propagate_when_callable_not_invoked() {
+fn by_ref_closure_capture_widens_when_callable_not_invoked_immediately() {
+    // A later-invoked callable may run zero or more times at any later
+    // point, so the capture's assigned type is unioned with the outer
+    // type rather than replacing it.
     let content = r#"<?php
 /** @param-later-invoked-callable $x */
 function c(callable $x) {
@@ -1731,11 +1734,13 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null");
+    assert_eq!(ts, "null|1");
 }
 
 #[test]
-fn by_ref_closure_capture_does_not_propagate_for_method_by_default() {
+fn by_ref_closure_capture_widens_for_method_by_default() {
+    // Method callable parameters are later-invoked by default, so the
+    // capture widens the outer type instead of replacing it.
     let content = r#"<?php
 class A {
     public function c(callable $x) {
@@ -1776,7 +1781,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null");
+    assert_eq!(ts, "null|1");
 }
 
 #[test]
@@ -1874,7 +1879,8 @@ fn by_ref_closure_capture_matches_named_argument_by_name_for_function() {
     // `$b` is stored (later-invoked), not called immediately. Passing the
     // closure as the named argument `b:` places it in the first argument
     // slot, but it must still be matched to `$b` (not `$a`) so its
-    // later-invoked tag suppresses propagation.
+    // later-invoked tag widens the outer type instead of replacing it
+    // (a wrong match to the untagged `$a` would replace, giving `1`).
     let content = r#"<?php
 /** @param-later-invoked-callable $b */
 function c(callable $a, callable $b) {
@@ -1904,7 +1910,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "null");
+    assert_eq!(ts, "null|1");
 }
 
 #[test]
@@ -1953,6 +1959,203 @@ $foo;
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(ts, "1");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_for_unresolvable_method_receiver() {
+    // The receiver of `transaction()` resolves through a chained static
+    // call whose class may be unknown.  The closure could still run, so
+    // the capture's assigned type must widen the outer null rather than
+    // being ignored entirely.
+    let content = r#"<?php
+$foo = null;
+
+\Some\Unknown\Db::connection()->transaction(function () use (&$foo) {
+    $foo = 'string';
+});
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|'string'");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_with_conditional_assignment_inside() {
+    // The assignment inside the closure sits in an `if` branch; the
+    // merged closure exit state (`null|'string'`) still reaches the
+    // outer scope.
+    let content = r#"<?php
+$foo = null;
+
+\Some\Unknown\Helper::run(function () use (&$foo) {
+    $asset = 'object';
+    if ($asset !== null) {
+        $foo = 'string';
+    }
+});
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert!(
+        ts.contains("null") && ts.contains("'string'"),
+        "Expected null|'string', got: {ts}"
+    );
+}
+
+#[test]
+fn by_ref_closure_capture_propagates_for_immediately_invoked_closure_expression() {
+    // An IIFE runs before the statement completes, so the closure's
+    // final state replaces the outer type.
+    let content = r#"<?php
+$foo = null;
+
+(function () use (&$foo) {
+    $foo = 1;
+})();
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "1");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_when_closure_stored_in_variable() {
+    // A closure assigned to a variable may run later (PHPStan widens at
+    // the definition, not the call), so the outer type becomes a union.
+    let content = r#"<?php
+$foo = null;
+
+$fn = function () use (&$foo) {
+    $foo = 1;
+};
+$fn();
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|1");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_when_closure_sits_in_a_chain_receiver() {
+    // The closure is an argument of the *receiver* of the outer call,
+    // not of the outer call itself, so it is only reached by descending
+    // into the receiver expression before the argument list.
+    let content = r#"<?php
+$foo = null;
+
+\Some\Unknown\Db::query(function () use (&$foo) {
+    $foo = 1;
+})->run();
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|1");
+}
+
+#[test]
+fn by_ref_closure_capture_widens_when_closure_is_nested_in_another_argument() {
+    // The closure is an argument of a call that is itself an argument,
+    // so reaching it means descending through the outer argument list.
+    let content = r#"<?php
+$foo = null;
+
+outer(inner(function () use (&$foo) {
+    $foo = 1;
+}));
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|1");
 }
 
 /// `array_reduce` with a class initial value should resolve to that class.

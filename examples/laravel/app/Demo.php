@@ -223,6 +223,27 @@ class Demo
         return $review->replies()->get();
     }
 
+    /**
+     * `keyBy()` re-keys the collection, so the key type comes from the
+     * callback instead of staying the `int` a freshly fetched collection
+     * starts with.  A `static` callback binds it just the same.
+     */
+    public function reKeyedReviews(): void
+    {
+        $byTitle = Review::query()->get()
+            ->keyBy(fn (Review $review): string => $review->getTitle());
+        $byTitle->get('Sourdough');         // → ReviewCollection<string, Review>
+
+        Review::query()->get()
+            ->keyBy(static fn (Review $review): string => $review->getTitle())
+            ->get('Sourdough');             // → ReviewCollection<string, Review>
+
+        // Keying by a column name can only promise an array key.
+        Review::query()->get()
+            ->keyBy('title')
+            ->get('Sourdough');             // → ReviewCollection<array-key, Review>
+    }
+
 
     // ── Higher-Order Collection Proxies ─────────────────────────────────────
 

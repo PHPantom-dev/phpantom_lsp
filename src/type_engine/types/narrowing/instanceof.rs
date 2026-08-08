@@ -322,6 +322,7 @@ pub(in crate::type_engine) fn try_extract_instanceof<'b>(
 ///   `$x::class === Foo::class`) where subclasses should NOT be preserved.
 ///   `false` for `instanceof` / `is_a()` checks where a more-specific subtype
 ///   in the current results should be kept.
+#[derive(Clone)]
 pub(in crate::type_engine) struct InstanceofExtraction {
     /// The narrowed type (e.g. `PhpType::named(atom("ClassName"))`).
     pub class_type: PhpType,

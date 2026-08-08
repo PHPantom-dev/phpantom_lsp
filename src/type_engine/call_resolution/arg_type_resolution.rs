@@ -13,8 +13,9 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
-use crate::type_engine::conditional_resolution::split_call_subject;
+use crate::type_engine::conditional_resolution::{split_call_subject, split_text_args};
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::variable::array_func_rules::ArrayFuncArgs;
 
 thread_local! {
     /// Re-entry guard for [`Backend::resolve_inline_arg_raw_type`].
@@ -47,6 +48,77 @@ impl Drop for InlineArgResolvingGuard {
         INLINE_ARG_RESOLVING.with(|cell| {
             cell.borrow_mut().remove(&self.key);
         });
+    }
+}
+
+/// [`ArrayFuncArgs`] over a call's raw argument source text.
+///
+/// The counterpart to the AST implementation in
+/// `type_engine::variable::raw_type_inference`; both feed the shared
+/// rules in [`crate::type_engine::variable::array_func_rules`] so an
+/// inline `array_map(…)` gets the same element type as one assigned to a
+/// variable.
+pub(super) struct TextArrayFuncArgs<'a, 'ctx> {
+    args: Vec<&'a str>,
+    ctx: &'a ResolutionCtx<'ctx>,
+}
+
+impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
+    pub(super) fn new(text_args: &'a str, ctx: &'a ResolutionCtx<'ctx>) -> Self {
+        Self {
+            args: split_text_args(text_args),
+            ctx,
+        }
+    }
+
+    /// The nth argument's value text, with any `name:` prefix removed
+    /// so that a named argument reads the same as a positional one.
+    fn arg_text(&self, index: usize) -> Option<&'a str> {
+        self.args.get(index).map(|arg| strip_arg_name(arg.trim()))
+    }
+}
+
+/// Strip a leading `name:` label from a named argument's source text.
+///
+/// Returns the text unchanged when there is no label, taking care not
+/// to mistake `Foo::BAR`, `$a ? b : c`, or a colon inside a string
+/// literal for one.
+fn strip_arg_name(arg: &str) -> &str {
+    let Some(colon) = arg.find(':') else {
+        return arg;
+    };
+    if arg[colon + 1..].starts_with(':') {
+        return arg;
+    }
+    let name = arg[..colon].trim_end();
+    let is_identifier = !name.is_empty()
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+        && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    if is_identifier {
+        arg[colon + 1..].trim_start()
+    } else {
+        arg
+    }
+}
+
+impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
+    fn arg_raw_type(&self, index: usize) -> Option<PhpType> {
+        Backend::resolve_inline_arg_raw_type(self.arg_text(index)?, self.ctx)
+    }
+
+    fn is_false_literal(&self, index: usize) -> bool {
+        self.arg_text(index)
+            .is_some_and(|arg| arg.eq_ignore_ascii_case("false"))
+    }
+
+    fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
+        crate::completion::source::helpers::extract_closure_return_type_from_text(
+            self.arg_text(index)?,
+        )
+    }
+
+    fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
+        Backend::infer_closure_return_type_from_body(self.arg_text(index)?, param_type, self.ctx)
     }
 }
 
@@ -178,9 +250,28 @@ impl Backend {
 
         // ── Call expression ending with `)` ─────────────────────────────
         if arg_text.ends_with(')')
-            && let Some((call_body, _args)) = split_call_subject(arg_text)
+            && let Some((call_body, call_args)) = split_call_subject(arg_text)
         {
             match &SubjectExpr::parse_callee(call_body) {
+                // A nested function call (e.g. `array_map($cb,
+                // iterator_to_array($it))`) needs the full return-type
+                // resolution rather than a declared type hint: the
+                // element-type rules for the array-producing standard
+                // library functions, conditional return types and
+                // function-level `@template` substitution all report
+                // through the hint.
+                callee @ SubjectExpr::FunctionCall(_) => {
+                    let mut hint: Option<PhpType> = None;
+                    let _ = Backend::resolve_call_return_types_expr_with_hint(
+                        callee,
+                        call_args,
+                        ctx,
+                        Some(&mut hint),
+                    );
+                    if hint.is_some() {
+                        return hint;
+                    }
+                }
                 SubjectExpr::MethodCall { base, method } => {
                     let base_text = base.to_subject_text();
                     let lhs_classes = ResolvedType::into_arced_classes(

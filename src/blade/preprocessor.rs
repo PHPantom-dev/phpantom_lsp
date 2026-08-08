@@ -1,4 +1,8 @@
+use mago_span::HasSpan;
+use mago_syntax::cst::*;
+
 use super::TemplateKind;
+use super::call_site_inference::string_literal_contents;
 use super::directives::{match_directive, translate_directive};
 use super::source_map::BladeSourceMap;
 
@@ -39,13 +43,16 @@ enum Mode {
 }
 
 /// Which directive is having its argument list captured by
-/// [`Mode::CaptureArgs`]. The two have different real-PHP translations:
+/// [`Mode::CaptureArgs`]. Each has a different real-PHP translation:
 /// `@use` becomes a top-level `use` import (hoisted out of the wrapper
-/// function), `@inject` becomes an inline `$var = app(service);` assignment.
+/// function), `@inject` becomes an inline `$var = app(service);`
+/// assignment, and `@props` becomes one `$name = default;` assignment per
+/// declared prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CapturedDirective {
     Use,
     Inject,
+    Props,
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
@@ -172,8 +179,23 @@ pub fn preprocess_with_vars(
     // attributes, which are only valid at attribute position inside a tag.
     let mut in_html_tag = false;
     let mut html_attr_string: Option<char> = None;
+    // Text captured by `Mode::CaptureArgs` from lines before the current
+    // one. A captured argument list (e.g. a multi-line `@props([...])`
+    // array) can span several lines, but the per-line `buffer` below is
+    // reset every iteration of the outer loop, so each line's contribution
+    // is appended here (instead of being flushed into `processed`) until
+    // the closing paren is reached and the whole span is transformed as
+    // one unit.
+    let mut capture_buffer = String::new();
+    // Whether the bound attribute currently open in `Mode::BoundAttr` has
+    // its closing quote on a later line, so the expression must stay open
+    // at end of line instead of being closed off. Set when the attribute
+    // opens; see `bound_attr_spans_lines`.
+    let mut bound_attr_multiline = false;
 
-    for line in content.lines() {
+    let lines: Vec<&str> = content.lines().collect();
+
+    for (line_idx, line) in lines.iter().enumerate() {
         let mut processed = String::new();
         let mut adjustments = vec![(0, 0)]; // (blade_utf16_col, php_utf16_col)
 
@@ -407,7 +429,6 @@ pub fn preprocess_with_vars(
                                 | "prepend"
                                 | "component"
                                 | "slot"
-                                | "props"
                                 | "aware"
                                 | "fragment"
                                 | "hasSection"
@@ -476,19 +497,19 @@ pub fn preprocess_with_vars(
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::Html; // These don't take args and return to HTML mode immediately
-                        } else if matches!(directive, "use" | "inject") {
-                            // `@use(...)` / `@inject(...)` need their string
-                            // argument(s) parsed into a real PHP construct, so
-                            // the argument list is captured (not emitted
-                            // verbatim) and transformed when it closes. Emit
-                            // nothing inline until then.
+                        } else if matches!(directive, "use" | "inject" | "props") {
+                            // `@use(...)` / `@inject(...)` / `@props(...)` need
+                            // their argument(s) parsed into a real PHP
+                            // construct, so the argument list is captured (not
+                            // emitted verbatim) and transformed when it
+                            // closes. Emit nothing inline until then.
                             let after_dir: String = rest_str[directive.len()..].chars().collect();
                             if after_dir.trim_start().starts_with('(') {
                                 replacement = "".to_string();
-                                next_mode = Mode::CaptureArgs(if directive == "use" {
-                                    CapturedDirective::Use
-                                } else {
-                                    CapturedDirective::Inject
+                                next_mode = Mode::CaptureArgs(match directive {
+                                    "use" => CapturedDirective::Use,
+                                    "inject" => CapturedDirective::Inject,
+                                    _ => CapturedDirective::Props,
                                 });
                                 paren_depth = 0;
                             } else {
@@ -521,11 +542,17 @@ pub fn preprocess_with_vars(
                         match_len = 1;
                         replacement = " blade_directive(".to_string();
                         next_mode = Mode::BoundAttr(None);
+                        bound_attr_multiline = false;
                     } else if let Some(open_len) = bound_attr_open_len(remaining) {
                         let quote = remaining[open_len - 1];
                         match_len = open_len;
                         replacement = " blade_directive(".to_string();
                         next_mode = Mode::BoundAttr(Some(quote));
+                        bound_attr_multiline = bound_attr_spans_lines(
+                            quote,
+                            &remaining[open_len..],
+                            &lines[line_idx + 1..],
+                        );
                     }
                 }
             } else if mode == Mode::Comment {
@@ -632,9 +659,15 @@ pub fn preprocess_with_vars(
                     if paren_depth <= 0 {
                         char_idx += 1;
                         current_utf16_col += 1;
-                        // `buffer` holds the argument text from the opening
-                        // `(` up to (but not including) this closing `)`.
-                        let raw = std::mem::take(&mut buffer);
+                        // `capture_buffer` holds any prior lines of this
+                        // argument list; `buffer` holds the current line's
+                        // text from the opening `(` (or line start) up to
+                        // (but not including) this closing `)`. Together
+                        // they are the argument text from the opening `(`
+                        // to the closing `)`.
+                        let mut raw = std::mem::take(&mut capture_buffer);
+                        raw.push_str(&buffer);
+                        buffer.clear();
                         let emitted = match kind {
                             CapturedDirective::Use => {
                                 if let Some(stmt) = build_use_statement(&raw) {
@@ -644,6 +677,7 @@ pub fn preprocess_with_vars(
                                 String::new()
                             }
                             CapturedDirective::Inject => build_inject_statement(&raw),
+                            CapturedDirective::Props => build_props_statement(&raw),
                         };
 
                         let start_suffix = utf16_count(&processed) as u32;
@@ -733,9 +767,15 @@ pub fn preprocess_with_vars(
             current_utf16_col += ch.len_utf16() as u32;
         }
 
-        // A bound-attribute expression must not span lines. If its closing
-        // quote never appeared on this line, close the `blade_directive(`
-        // call here so the rest of the template is not corrupted.
+        // A bound-attribute expression whose closing quote is on a later
+        // line (what a formatter produces for a long array or argument
+        // list) stays open: this line's PHP is flushed as-is and the next
+        // line continues the same `blade_directive(` call. Cutting it off
+        // here would truncate the expression mid-syntax.
+        //
+        // When the closing quote never appears at all the attribute is
+        // malformed, and the call is closed off so only the attribute
+        // itself is lost rather than the rest of the template.
         if let Mode::BoundAttr(_) = mode {
             flush_buffer(
                 &mut processed,
@@ -744,19 +784,31 @@ pub fn preprocess_with_vars(
                 current_utf16_col,
                 &mut adjustments,
             );
-            processed.push_str(");");
-            adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
-            mode = Mode::Html;
-            in_string = None;
+            if !bound_attr_multiline {
+                processed.push_str(");");
+                adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
+                mode = Mode::Html;
+                in_string = None;
+            }
         }
 
-        flush_buffer(
-            &mut processed,
-            &mut buffer,
-            mode,
-            current_utf16_col,
-            &mut adjustments,
-        );
+        if let Mode::CaptureArgs(_) = mode {
+            // The argument list is still open at end of line: defer this
+            // line's text instead of flushing it into `processed`, which
+            // would leak a raw fragment into the virtual PHP before the
+            // closing paren transforms the whole span as one unit.
+            capture_buffer.push_str(&buffer);
+            capture_buffer.push('\n');
+            buffer.clear();
+        } else {
+            flush_buffer(
+                &mut processed,
+                &mut buffer,
+                mode,
+                current_utf16_col,
+                &mut adjustments,
+            );
+        }
 
         virtual_php.push_str(&processed);
         virtual_php.push('\n');
@@ -769,6 +821,13 @@ pub fn preprocess_with_vars(
     // unparseable. Close it so only the comment itself is lost.
     if mode == Mode::Comment {
         virtual_php.push_str(" */\n");
+    }
+
+    // Likewise for a multi-line bound attribute whose closing quote turned
+    // out to be unreachable: leaving `blade_directive(` open would swallow
+    // the wrapper's closing brace.
+    if let Mode::BoundAttr(_) = mode {
+        virtual_php.push_str(");\n");
     }
 
     // Close the wrapper function.
@@ -931,6 +990,94 @@ fn build_inject_statement(raw: &str) -> String {
     format!(" ${variable} = app({service}); ")
 }
 
+/// Translate the captured argument text of a `@props(...)` directive into
+/// one `$name = default;` assignment per declared prop, so the forward
+/// walker sees each variable as defined (typed from its default value)
+/// without any dependency on the caller's `<x-… />` tag. `raw` is
+/// everything from the opening `(` up to (not including) the closing `)`;
+/// the argument list may span multiple lines.
+///
+/// Falls back to an inert `blade_directive(...)` call, matching how the
+/// other directives discard their arguments, when the argument is not a
+/// plain array literal (e.g. a variable holding a dynamically built props
+/// array) or no entry has a plain string key/value.
+fn build_props_statement(raw: &str) -> String {
+    // `raw` starts with the directive's own opening `(`, which has no
+    // matching `)` in this text; the array literal itself starts right
+    // after it.
+    let inner = match raw.find('(') {
+        Some(idx) => &raw[idx + 1..],
+        None => raw,
+    };
+
+    const PARSE_PREFIX: &str = "<?php ";
+    let synthetic = format!("{PARSE_PREFIX}{inner};");
+
+    let assignments = crate::parser::with_parsed_program(
+        &synthetic,
+        "blade_props_directive",
+        |program, _content| {
+            // `program.statements` includes the leading `<?php` opening tag
+            // as its own statement, so the array literal is the first
+            // *expression* statement, not necessarily `.first()`.
+            let Some(Statement::Expression(expr_stmt)) = program
+                .statements
+                .iter()
+                .find(|stmt| matches!(stmt, Statement::Expression(_)))
+            else {
+                return String::new();
+            };
+            let elements = match expr_stmt.expression {
+                Expression::Array(array) => &array.elements,
+                Expression::LegacyArray(array) => &array.elements,
+                _ => return String::new(),
+            };
+
+            let mut out = String::new();
+            for element in elements.iter() {
+                let (name, default_text) = match element {
+                    ArrayElement::KeyValue(kv) => {
+                        let Expression::Literal(Literal::String(s)) = kv.key else {
+                            continue;
+                        };
+                        let Some(name) = string_literal_contents(s) else {
+                            continue;
+                        };
+                        let span = kv.value.span();
+                        let start = (span.start.offset as usize).saturating_sub(PARSE_PREFIX.len());
+                        let end = (span.end.offset as usize).saturating_sub(PARSE_PREFIX.len());
+                        let Some(default_text) = inner.get(start..end) else {
+                            continue;
+                        };
+                        (name, default_text.to_string())
+                    }
+                    ArrayElement::Value(v) => {
+                        // A shorthand prop with no default (`@props(['visible'])`)
+                        // is only defined when the caller passes it; declare it
+                        // as `null` so it is at least never "undefined".
+                        let Expression::Literal(Literal::String(s)) = v.value else {
+                            continue;
+                        };
+                        let Some(name) = string_literal_contents(s) else {
+                            continue;
+                        };
+                        (name, "null".to_string())
+                    }
+                    _ => continue,
+                };
+                out.push_str(&format!(" ${name} = {default_text}; "));
+            }
+            out
+        },
+    );
+
+    if assignments.trim().is_empty() {
+        format!(" blade_directive({inner}); ")
+    } else {
+        assignments
+    }
+}
+
 /// If `rem` (starting at a `:`) opens a `:name="` or `:name='` bound
 /// attribute, return the length (in chars) of that opening span, up to and
 /// including the opening quote. Returns `None` when the syntax does not
@@ -953,6 +1100,57 @@ fn bound_attr_open_len(rem: &[char]) -> Option<usize> {
         Some('"') | Some('\'') => Some(i + 1),
         _ => None,
     }
+}
+
+/// Whether a bound attribute delimited by `quote` closes on a line after
+/// the one it opens on. `rest` is the remainder of the opening line (after
+/// the opening quote) and `following` the lines after it.
+///
+/// `false` covers both the single-line case and a malformed attribute whose
+/// closing quote never appears, so the caller closes the expression at end
+/// of line in either case. A malformed attribute can still pick up a quote
+/// from further down the template, but that markup is already broken.
+fn bound_attr_spans_lines(quote: char, rest: &[char], following: &[&str]) -> bool {
+    let mut in_string = None;
+    let mut is_escaped = false;
+    if scan_to_bound_attr_end(quote, rest.iter().copied(), &mut in_string, &mut is_escaped) {
+        return false;
+    }
+    following
+        .iter()
+        .any(|line| scan_to_bound_attr_end(quote, line.chars(), &mut in_string, &mut is_escaped))
+}
+
+/// Scan one line's worth of a bound-attribute expression, reporting whether
+/// the closing `quote` was reached. `in_string` and `is_escaped` carry the
+/// PHP string state into the next line and must mirror how the main scan
+/// tracks it, or the two disagree about where the attribute ends.
+fn scan_to_bound_attr_end(
+    quote: char,
+    chars: impl Iterator<Item = char>,
+    in_string: &mut Option<char>,
+    is_escaped: &mut bool,
+) -> bool {
+    for ch in chars {
+        match *in_string {
+            _ if ch == quote && in_string.is_none() => return true,
+            Some(delim) => {
+                if *is_escaped {
+                    *is_escaped = false;
+                } else if ch == '\\' {
+                    *is_escaped = true;
+                } else if ch == delim {
+                    *in_string = None;
+                }
+            }
+            None => {
+                if ch == '\'' || ch == '"' {
+                    *in_string = Some(ch);
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1425,6 +1623,66 @@ mod tests {
         assert!(
             php.contains("blade_directive($image);"),
             "binding on a continuation line should be recognized: {}",
+            php
+        );
+    }
+
+    /// A bound attribute whose expression is wrapped over several lines
+    /// (what a formatter does to a long array) must be emitted whole, not
+    /// truncated at the first line break.
+    #[test]
+    fn test_preprocess_bound_attribute_multiline_expression() {
+        let content = "<x-file.upload name=\"image\"\n    :rules=\"[\n        'Dimensions must match: 2420 x 1614',\n        'Max file size: 2 mb',\n    ]\" />\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive([") && php.contains("]);"),
+            "the wrapped array must be emitted whole: {}",
+            php
+        );
+        assert!(
+            php.contains("'Dimensions must match: 2420 x 1614',"),
+            "continuation lines must survive: {}",
+            php
+        );
+        assert!(
+            !php.contains("[);"),
+            "the expression must not be closed off at the line break: {}",
+            php
+        );
+        assert!(
+            !php.contains("name=\"image\""),
+            "the surrounding tag markup must stay masked: {}",
+            php
+        );
+    }
+
+    /// A multi-line bound attribute holding a call must keep every argument,
+    /// otherwise the truncated call reports a bogus argument-count mismatch.
+    #[test]
+    fn test_preprocess_bound_attribute_multiline_call() {
+        let content = "<x-alert\n    :message=\"__('a.b',\n        ['count' => 2])\"\n/>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("__('a.b',") && php.contains("['count' => 2]));"),
+            "both call arguments must survive the wrap: {}",
+            php
+        );
+    }
+
+    /// A bound attribute whose closing quote never appears is malformed;
+    /// the call is closed at end of line so only that attribute is lost.
+    #[test]
+    fn test_preprocess_bound_attribute_unterminated() {
+        let content = "<x-alert :message=\"$msg\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($msg);"),
+            "an unterminated attribute must be closed at end of line: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after );"),
+            "the rest of the template must still be processed: {}",
             php
         );
     }
@@ -2063,6 +2321,67 @@ mod tests {
         assert!(
             php.contains("$repo = app(App\\Repo::class);"),
             "@inject should preserve a ::class service expression: {}",
+            php
+        );
+    }
+
+    /// `@props` declares each key as a local variable assigned its default
+    /// value, so the forward walker sees it as defined and typed without
+    /// waiting on the caller's `<x-… />` attributes.
+    #[test]
+    fn test_preprocess_props_directive_declares_variables() {
+        let content = "@props(['caption' => '', 'count' => 0])\n{{ $caption }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$caption = '';"),
+            "@props should declare $caption with its default: {}",
+            php
+        );
+        assert!(
+            php.contains("$count = 0;"),
+            "@props should declare $count with its default: {}",
+            php
+        );
+    }
+
+    /// The array literal in `@props(...)` commonly spans multiple lines;
+    /// the whole argument list must be captured across lines, not just the
+    /// closing line, or every prop declared before the last line is lost.
+    #[test]
+    fn test_preprocess_props_directive_spans_multiple_lines() {
+        let content = "@props([\n    'caption' => '',\n])\n{{ $caption }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$caption = '';"),
+            "a multi-line @props array must still declare its keys: {}",
+            php
+        );
+    }
+
+    /// A prop with no default (`@props(['visible'])`) is declared `null`
+    /// rather than left undefined, matching Blade allowing the shorthand
+    /// form for a prop the caller may or may not pass.
+    #[test]
+    fn test_preprocess_props_directive_shorthand_without_default() {
+        let content = "@props(['visible'])\n{{ $visible }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$visible = null;"),
+            "a defaultless prop should still be declared: {}",
+            php
+        );
+    }
+
+    /// A dynamic props argument (not a plain array literal) cannot be read
+    /// directly; it must fall back to the inert directive call rather than
+    /// producing invalid PHP.
+    #[test]
+    fn test_preprocess_props_directive_dynamic_argument_falls_back() {
+        let content = "@props($dynamicProps)\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($dynamicProps);"),
+            "a non-literal @props argument should fall back to the inert call: {}",
             php
         );
     }

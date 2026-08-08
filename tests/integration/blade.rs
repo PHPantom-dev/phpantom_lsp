@@ -67,6 +67,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_inline_php_directive_assignment_updates_scope() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_text = "<?php class Logger { public function info() {} }";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let blade_uri = Url::parse("file:///inline.blade.php").unwrap();
+        let blade_text = "@php($logger = new Logger())\n{{ $logger->info() }}";
+
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: blade_uri.clone(),
+                    language_id: "blade".to_string(),
+                    version: 1,
+                    text: blade_text.to_string(),
+                },
+            })
+            .await;
+
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: blade_uri.clone(),
+                },
+                position: Position {
+                    line: 1,
+                    character: 13, // $logger->in|fo()
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let result = backend.goto_definition(params).await.unwrap();
+
+        assert!(
+            result.is_some(),
+            "Inline @php(...) assignment should update the template scope"
+        );
+        match result.unwrap() {
+            GotoDefinitionResponse::Scalar(location) => {
+                assert_eq!(location.uri, php_uri);
+                assert_eq!(location.range.start.line, 0);
+            }
+            _ => panic!("Expected scalar location"),
+        }
+    }
+
+    /// A standalone `@var` block immediately above an inline `@php(…)`
+    /// must not swallow the assignment that follows it.
+    #[tokio::test]
+    async fn test_inline_php_directive_assignment_after_var_block() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_text = "<?php class Logger { public function info() {} \
+                        public function self_(): Logger { return $this; } }";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let blade_uri = Url::parse("file:///inline_var.blade.php").unwrap();
+        let blade_text = "@php\n/** @var \\Logger $base */\n@endphp\n\
+                          @php($logger = $base->self_())\n{{ $logger->info() }}";
+
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: blade_uri.clone(),
+                    language_id: "blade".to_string(),
+                    version: 1,
+                    text: blade_text.to_string(),
+                },
+            })
+            .await;
+
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: blade_uri.clone(),
+                },
+                position: Position {
+                    line: 4,
+                    character: 13, // $logger->in|fo()
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let result = backend.goto_definition(params).await.unwrap();
+
+        assert!(
+            result.is_some(),
+            "Inline @php(...) assignment below a @var block should still update the scope"
+        );
+    }
+
+    #[tokio::test]
     async fn test_blade_if_endif_parsing() {
         let backend = create_test_backend();
 
@@ -453,6 +570,32 @@ mod tests {
         );
     }
 
+    /// `@props` declares its keys as local variables (typed from their
+    /// default), so a component that only reads its own declared props
+    /// never reports them as undefined — regression test for the
+    /// multi-line array form used throughout real components.
+    #[tokio::test]
+    async fn test_props_directive_declares_its_variables() {
+        let body = "@props([\n    'caption' => '',\n])\n<span>{{ $caption }}</span>\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/components/box.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let undefined = undefined_variables(&backend, &uri).await;
+        assert!(
+            undefined.is_empty(),
+            "@props should declare $caption: {:?}",
+            undefined
+        );
+
+        let hover = hover_text(&backend, &uri, 3, 9).await;
+        assert!(
+            hover.contains("$caption = ''"),
+            "$caption should resolve to its '' default, got: {}",
+            hover
+        );
+    }
+
     /// The implicit variables are a component's, not every template's.
     #[tokio::test]
     async fn test_plain_view_still_flags_slot_as_undefined() {
@@ -464,6 +607,23 @@ mod tests {
         assert!(
             undefined.iter().any(|m| m.contains("$slot")),
             "a plain view does not receive $slot: {:?}",
+            undefined
+        );
+    }
+
+    /// `isset($x) &&`/`!isset($x) ||` guards the rest of the same
+    /// short-circuit chain, a pattern that shows up constantly in
+    /// `@if` conditions.
+    #[tokio::test]
+    async fn test_isset_guards_short_circuit_chain_in_if_directive() {
+        let body = "@if (isset($isOutlet) && $isOutlet == 1)\nyes\n@endif\n@if (!isset($stockGtr0) || $stockGtr0 == 'true')\nyes\n@endif\n";
+        let (backend, _dir, uri) = component_workspace("resources/views/page.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let undefined = undefined_variables(&backend, &uri).await;
+        assert!(
+            undefined.is_empty(),
+            "isset()/!isset() should guard the rest of the && / || chain: {:?}",
             undefined
         );
     }
@@ -534,6 +694,52 @@ mod tests {
             hover.contains("ShowViewModel"),
             "$model must still be typed inside the nested array literal, got: {}",
             hover
+        );
+    }
+
+    /// A standalone `@var` docblock that carries generic arguments
+    /// (`Collection<string, Loaf>`) must narrow a member call through
+    /// the class-level `@template`, not just resolve the bare class.
+    ///
+    /// Every `{{ … }}` echo in a Blade template compiles to `echo e( … );`,
+    /// which is a non-expression statement — the forward walker's
+    /// diagnostic scope cache recorded a scope snapshot for that statement
+    /// *before* applying the standalone `@var`, and never re-recorded it
+    /// afterward, so a call site inside the echo's own expression saw
+    /// `$byName` typed as bare `Collection` and fell back to `TKey`'s
+    /// declared bound (`array-key`) instead of the annotated `string`.
+    #[tokio::test]
+    async fn test_var_docblock_with_generic_args_narrows_echo_call() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///Collection.php").unwrap();
+        let php_text = "<?php\nnamespace App\\Models;\nclass Loaf {}\n/**\n * @template TKey of array-key\n * @template TValue\n */\nclass Collection {\n    /** @param TKey|null $key */\n    public function get($key) {}\n}\n";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri,
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let uri = Url::parse("file:///byname.blade.php").unwrap();
+        let body = "@php\n/** @var \\App\\Models\\Collection<string, \\App\\Models\\Loaf> $byName */\n@endphp\n{{ $byName->get([1]) }}\n";
+        open_blade(&backend, &uri, body).await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+
+        assert!(
+            messages.iter().any(|m| m.contains("expects string|null")),
+            "expected TKey to narrow to string via the @var's generic arguments, got: {:?}",
+            messages
         );
     }
 }

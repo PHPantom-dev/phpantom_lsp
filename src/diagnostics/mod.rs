@@ -627,6 +627,16 @@ impl Backend {
         } else {
             HashSet::new()
         };
+        // An application whose strings live in a database still has `vendor/`'s
+        // own `lang/` files on disk, so the enumerated set is non-empty while
+        // covering none of the application's own keys.  Once a provider has
+        // rebound the translator away from Laravel's file loader, what is valid
+        // is unknowable.
+        let trans_source_is_unknowable = has_trans
+            && self
+                .laravel_provider_resources
+                .read()
+                .custom_translation_loader;
         let command_names: HashSet<String> = if has_command {
             self.laravel_commands
                 .read()
@@ -721,7 +731,7 @@ impl Backend {
                     // diagnostics entirely.  This avoids false positives in
                     // non-Laravel projects (WordPress, GetText) that also use
                     // `__()` or `trans()` as function names.
-                    if trans_keys.is_empty() {
+                    if trans_keys.is_empty() || trans_source_is_unknowable {
                         continue;
                     }
                     let valid = trans_keys.contains(key)

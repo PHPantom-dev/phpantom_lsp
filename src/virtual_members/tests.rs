@@ -1786,3 +1786,70 @@ fn resolve_class_fully_merges_transitive_interface_constants() {
         "should have UnitValue::JANUARY constant (3rd extended interface)"
     );
 }
+
+// ── Resolution is independent of cache warmth ───────────────────────
+//
+// Whether a dependency happens to be resolved before or after the class
+// that uses it must not change the class's members: eager population
+// fans out over several workers, so the order they reach a class in
+// varies between runs, and a warmth-sensitive merge made the same file
+// report different diagnostics each time.
+
+/// An implementing class picks up the members its interface contributes
+/// whether or not that interface was resolved (and cached) first.
+///
+/// `Illuminate\Contracts\View\View` gets its concrete class bound as a
+/// mixin while it is being fully resolved, so a merge that skipped the
+/// full resolution when the cache was cold saw the bare contract.
+#[test]
+fn interface_merge_matches_with_and_without_a_warm_cache() {
+    let mut contract = make_class("Illuminate\\Contracts\\View\\View");
+    contract.kind = ClassLikeKind::Interface;
+
+    let mut concrete = make_class("Illuminate\\View\\View");
+    concrete
+        .methods
+        .push(Arc::new(make_method("render", Some("string"))));
+
+    let mut view = make_class("App\\Views\\Profile");
+    view.interfaces = vec![atom("Illuminate\\Contracts\\View\\View")];
+
+    let contract_arc = Arc::new(contract);
+    let concrete_arc = Arc::new(concrete);
+    let view_arc = Arc::new(view);
+    let class_loader = {
+        let contract_arc = Arc::clone(&contract_arc);
+        let concrete_arc = Arc::clone(&concrete_arc);
+        let view_arc = Arc::clone(&view_arc);
+        move |name: &str| -> Option<Arc<ClassInfo>> {
+            match name {
+                "Illuminate\\Contracts\\View\\View" => Some(Arc::clone(&contract_arc)),
+                "Illuminate\\View\\View" => Some(Arc::clone(&concrete_arc)),
+                "App\\Views\\Profile" => Some(Arc::clone(&view_arc)),
+                _ => None,
+            }
+        }
+    };
+
+    let cold = new_resolved_class_cache();
+    let from_cold = resolve_class_fully_cached(&view_arc, &class_loader, &cold);
+
+    let warm = new_resolved_class_cache();
+    resolve_class_fully_cached(&contract_arc, &class_loader, &warm);
+    let from_warm = resolve_class_fully_cached(&view_arc, &class_loader, &warm);
+
+    let names = |class: &ClassInfo| -> Vec<String> {
+        let mut names: Vec<String> = class.methods.iter().map(|m| m.name.to_string()).collect();
+        names.sort();
+        names
+    };
+    assert_eq!(
+        names(&from_cold),
+        names(&from_warm),
+        "resolving the interface first must not change the implementing class"
+    );
+    assert!(
+        from_cold.methods.iter().any(|m| m.name == "render"),
+        "the contract's bound concrete should come through either way"
+    );
+}

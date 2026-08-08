@@ -711,3 +711,108 @@ async fn test_array_access_own_template_self_reference_resolves_to_bound() {
     let items = unwrap_items(result);
     assert_has_member(&items, "getImage");
 }
+
+// ─── Array functions used inline, not assigned to a variable ───────────
+//
+// The element-type rules for the array-producing standard library
+// functions must fire wherever the call appears, not only as an
+// assignment right-hand side.
+
+#[tokio::test]
+async fn test_iterator_to_array_inline_array_access() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test_inline_iterator_to_array.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "/** @var Iterator<int, Customer> $iter */\n",
+        "iterator_to_array($iter)[0]->\n",
+    );
+
+    let result = complete_at(&backend, &uri, text, 6, 29).await;
+    let items = unwrap_items(result);
+    assert_has_member(&items, "name");
+    assert_has_member(&items, "getEmail");
+}
+
+#[tokio::test]
+async fn test_iterator_to_array_inline_nested_array_access() {
+    // The bug report's shape: a tuple-shaped element indexed twice.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test_inline_iterator_nested.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class DiscountType {\n",
+        "    public string $name;\n",
+        "}\n",
+        "/** @var iterable<array{DiscountType, ?string}> $it */\n",
+        "iterator_to_array($it)[0][0]->\n",
+    );
+
+    let result = complete_at(&backend, &uri, text, 5, 30).await;
+    let items = unwrap_items(result);
+    assert_has_member(&items, "name");
+}
+
+#[tokio::test]
+async fn test_array_filter_inline_array_access() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test_inline_array_filter.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "/** @var list<Customer> $customers */\n",
+        "array_filter($customers)[0]->\n",
+    );
+
+    let result = complete_at(&backend, &uri, text, 5, 29).await;
+    let items = unwrap_items(result);
+    assert_has_member(&items, "getEmail");
+}
+
+#[tokio::test]
+async fn test_array_map_inline_array_access_uses_callback_return_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test_inline_array_map.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class Invoice {\n",
+        "    public function getTotal(): int {}\n",
+        "}\n",
+        "/** @var list<Customer> $customers */\n",
+        "array_map(fn ($c): Invoice => new Invoice(), $customers)[0]->\n",
+    );
+
+    let result = complete_at(&backend, &uri, text, 8, 61).await;
+    let items = unwrap_items(result);
+    assert_has_member(&items, "getTotal");
+}
+
+#[tokio::test]
+async fn test_array_func_call_as_argument_keeps_element_type() {
+    // An array function nested as another call's argument goes through
+    // the same text-driven path; its element type must survive so the
+    // outer call's own rules can read it.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test_nested_array_func_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "/** @var Iterator<int, Customer> $iter */\n",
+        "array_values(iterator_to_array($iter))[0]->\n",
+    );
+
+    let result = complete_at(&backend, &uri, text, 5, 43).await;
+    let items = unwrap_items(result);
+    assert_has_member(&items, "getEmail");
+}

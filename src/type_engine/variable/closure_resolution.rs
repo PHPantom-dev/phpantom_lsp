@@ -729,17 +729,31 @@ fn resolve_closure_this_type(
 /// Check whether the inferred callable-signature type is a more specific
 /// version of the explicit type hint.
 ///
-/// Returns `true` when the explicit hint is a bare class name (e.g.
-/// `Collection`) and the inferred type is the same class with generic
-/// arguments (e.g. `Collection<int, Customer>`).  Namespace-qualified
-/// names are compared by their last segment so that `Collection` matches
-/// `Illuminate\Support\Collection<int, Customer>`.
+/// Returns `true` in two situations:
+///
+/// * The explicit hint is a bare class name (e.g. `Collection`) and the
+///   inferred type is the same class with generic arguments (e.g.
+///   `Collection<int, Customer>`).  Namespace-qualified names are compared
+///   by their last segment so that `Collection` matches
+///   `Illuminate\Support\Collection<int, Customer>`.
+/// * The explicit hint is a bare `array`/`iterable` keyword, which says
+///   nothing about the elements, and the inferred type is an array-like
+///   type that does describe them (e.g. `array{Foo, string}`,
+///   `list<User>`, `User[]`).  A closure passed to `array_map()` over
+///   `list<array{Foo, string}>` may declare its parameter as plain
+///   `array`; the call site still knows the shape.
 fn inferred_type_is_more_specific(explicit_hint: &PhpType, inferred: &PhpType) -> bool {
-    // The explicit hint must be a bare class name (no generic args).
+    // The explicit hint must be a bare name (no generic args).
     let explicit_base = match explicit_hint.kind() {
         TypeKind::Named(name) => name.as_str(),
         _ => return false,
     };
+
+    if explicit_base.eq_ignore_ascii_case("array") || explicit_base.eq_ignore_ascii_case("iterable")
+    {
+        let allow_iterable = explicit_base.eq_ignore_ascii_case("iterable");
+        return describes_elements(inferred, allow_iterable);
+    }
 
     // The inferred type must be a generic type (carries generic args).
     let inferred_base = match inferred.kind() {
@@ -753,6 +767,26 @@ fn inferred_type_is_more_specific(explicit_hint: &PhpType, inferred: &PhpType) -
     let inferred_short = crate::util::short_name(inferred_base);
 
     explicit_short.eq_ignore_ascii_case(inferred_short)
+}
+
+/// Whether an array type carries element information worth keeping over a
+/// bare `array`/`iterable` hint.  `array<mixed>` and a bare `array` do
+/// not; `array{Foo}`, `list<User>` and `User[]` do.
+///
+/// The replacement must not give up what the declared hint guarantees, so
+/// `iterable<T>` only qualifies when the hint was `iterable` itself
+/// (`allow_iterable`), and a nullable type never does.
+fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
+    match ty.kind() {
+        TypeKind::ArrayShape(entries) => !entries.is_empty(),
+        TypeKind::Array(inner) => inner.is_informative(),
+        TypeKind::Generic(g) => {
+            crate::php_type::is_array_like_name(&g.name)
+                && (allow_iterable || !g.name.eq_ignore_ascii_case("iterable"))
+                && g.args.iter().any(|arg| arg.is_informative())
+        }
+        _ => false,
+    }
 }
 
 // ── Callable parameter inference helpers ────────────────────────────

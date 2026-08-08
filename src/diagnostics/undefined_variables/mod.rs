@@ -69,7 +69,8 @@ mod offset_guards;
 pub(crate) use feature_guards::{collect_compact_vars, has_get_defined_vars};
 use feature_guards::{has_dynamic_variables, has_extract_call};
 use offset_guards::{
-    collect_error_suppressed_offsets, collect_guarded_offsets, collect_var_annotations,
+    collect_error_suppressed_offsets, collect_guarded_offsets,
+    collect_short_circuit_guarded_offsets, collect_var_annotations,
 };
 
 /// Diagnostic code used for undefined-variable diagnostics so that
@@ -364,8 +365,11 @@ fn check_scope(
     // operator (e.g. `@$var`).
     let error_suppressed_offsets = collect_error_suppressed_offsets(statements);
 
-    // Collect byte offsets of variables inside `isset()` and `empty()`.
-    let guarded_offsets = collect_guarded_offsets(statements);
+    // Collect byte offsets of variables inside `isset()` and `empty()`,
+    // plus reads guarded by an `isset()`/`!isset()` earlier in the same
+    // short-circuiting `&&`/`||` chain.
+    let mut guarded_offsets = collect_guarded_offsets(statements);
+    guarded_offsets.extend(collect_short_circuit_guarded_offsets(statements));
 
     if scope.frames.is_empty() {
         return;

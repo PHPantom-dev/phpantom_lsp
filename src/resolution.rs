@@ -438,8 +438,7 @@ impl Backend {
             // differently-cased lookups share one cache entry.
             let stub_uri = format!("phpantom-stub://{}", canonical_name);
             let ver = Some(self.php_version());
-            if let Some(classes) =
-                self.parse_and_cache_content_versioned(stub_content, &stub_uri, ver)
+            if let Some(classes) = self.parse_and_cache_stub(stub_content, &stub_uri, ver)
                 && let Some(cls) = classes
                     .iter()
                     .find(|c| c.name.eq_ignore_ascii_case(last_segment))
@@ -502,7 +501,7 @@ impl Backend {
         if let Some((canonical_name, &content)) = stub_lookup {
             let stub_uri = format!("phpantom-stub://{}", canonical_name);
             let ver = Some(self.php_version());
-            if let Some(classes) = self.parse_and_cache_content_versioned(content, &stub_uri, ver)
+            if let Some(classes) = self.parse_and_cache_stub(content, &stub_uri, ver)
                 && let Some(cls) = classes
                     .iter()
                     .find(|c| c.name.eq_ignore_ascii_case(last_segment))
@@ -574,6 +573,35 @@ impl Backend {
         };
         let content = std::fs::read_to_string(file_path).ok();
         content.and_then(|c| self.parse_and_cache_content(&c, &uri))
+    }
+
+    /// Parse an embedded stub under its `phpantom-stub://` URI, sharing
+    /// the work with any thread that is already parsing the same stub.
+    ///
+    /// Stubs bypass [`parse_and_cache_file`] (they have no on-disk path),
+    /// so they need their own claim on `parse_inflight`.  Without one, two
+    /// workers that both miss the same stub parse it twice, and whichever
+    /// finishes second sees the URI already in `parsed_uris` and takes the
+    /// re-parse branch: it evicts every resolved class that depends on the
+    /// stub's classes, discarding work the other workers had already
+    /// finished.  Which dependants survived then came down to thread
+    /// timing, and the discarded ones were re-resolved later against a
+    /// different cache state, so the same file could report different
+    /// diagnostics from one run to the next.
+    fn parse_and_cache_stub(
+        &self,
+        content: &'static str,
+        uri: &str,
+        php_version: Option<PhpVersion>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
+        if !self.parse_inflight.try_claim(uri) {
+            return self.wait_for_cached_result(uri);
+        }
+        let _guard = InflightGuard {
+            inflight: &self.parse_inflight,
+            uri: uri.to_owned(),
+        };
+        self.parse_and_cache_content_versioned(content, uri, php_version)
     }
 
     /// Block until another thread finishes parsing a file, then return
@@ -685,13 +713,24 @@ impl Backend {
         // PSR-4 / class index carry their namespace.  This mirrors the
         // same assignment done in `update_ast_inner` for files opened
         // through `did_open` / `did_change`.
+        //
+        // In a file with several namespace blocks the per-class namespace is
+        // authoritative, including when it is `None`: a class in an anonymous
+        // `namespace { }` block (as in the bundled `PDO/PDO.php`, which pairs
+        // one with a `namespace Pdo { }` block) is global, and falling back to
+        // the file-level namespace would label it `Pdo\PDO`.  The fallback is
+        // only meaningful for single-namespace files, where a missing
+        // per-class value means the namespace simply was not tracked.
+        let single_namespace = ns_groups.len() <= 1;
         for (i, cls) in classes.iter_mut().enumerate() {
             if cls.file_namespace.is_none() {
-                cls.file_namespace = classes_with_ns[i]
-                    .1
-                    .as_deref()
-                    .or(file_namespace.as_deref())
-                    .map(crate::atom::atom);
+                let class_ns = classes_with_ns[i].1.as_deref();
+                cls.file_namespace = if single_namespace {
+                    class_ns.or(file_namespace.as_deref())
+                } else {
+                    class_ns
+                }
+                .map(crate::atom::atom);
             }
             cls.cache_fqn();
         }

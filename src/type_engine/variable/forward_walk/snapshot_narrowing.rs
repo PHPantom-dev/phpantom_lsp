@@ -126,7 +126,8 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                         || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
                             .is_some()
                 })
-            } || condition_proves_member(conditional.condition, scope);
+            } || condition_proves_member(conditional.condition, scope)
+                || !assertion_alias_extractions(conditional.condition, scope).is_empty();
             if has_narrowing {
                 let mut then_scope = scope.clone();
                 apply_condition_narrowing(conditional.condition, &mut then_scope, ctx);

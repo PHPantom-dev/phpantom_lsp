@@ -1164,6 +1164,50 @@ function test(): void {
     assert!(diags[0].message.contains("$x"));
 }
 
+#[test]
+fn no_diagnostic_for_isset_guarding_and_chain_rhs() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    if (isset($isOutlet) && $isOutlet == 1) {
+        echo "outlet";
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn no_diagnostic_for_negated_isset_guarding_or_chain_rhs() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    if (!isset($stockGtr0) || $stockGtr0 == 'true') {
+        echo "ok";
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn flags_undefined_variable_outside_isset_and_chain() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    if (isset($x) && $x == 1) {
+        echo "x";
+    }
+    echo $y;
+}
+"#,
+    );
+    assert_eq!(diags.len(), 1, "Got: {:?}", diags);
+    assert!(diags[0].message.contains("$y"));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Nested closures and arrow functions
 // ═══════════════════════════════════════════════════════════════════════════

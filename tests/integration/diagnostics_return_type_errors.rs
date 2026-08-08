@@ -2986,6 +2986,201 @@ namespace App {
     );
 }
 
+#[test]
+fn mock_helpers_survive_an_imprecise_method_tag_on_the_test_base() {
+    // A test class that also carries `@method MockInterface mock()` in
+    // its own docblock.  The tag is a lie: `mock()` exists for real on
+    // the inherited trait, so PHP dispatches straight to it and never
+    // reaches `__call()`.  Honouring the tag over the real method threw
+    // away the framework's precise conditional return and reported the
+    // mock as a bare `MockInterface`.
+    let php = r#"<?php
+namespace Mockery {
+    interface LegacyMockInterface {}
+    interface MockInterface extends LegacyMockInterface {}
+}
+
+namespace App {
+    class Client {}
+
+    trait InteractsWithContainer
+    {
+        /**
+         * @template TInstance of object
+         *
+         * @param  string  $abstract
+         * @param  TInstance  $instance
+         * @return TInstance
+         */
+        protected function instance($abstract, $instance) {}
+
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function mock($abstract) {}
+
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function partialMock($abstract) {}
+
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function spy($abstract) {}
+    }
+
+    class TestCase
+    {
+        use InteractsWithContainer;
+    }
+
+    /**
+     * @method \Mockery\MockInterface mock(string $abstract, callable():mixed $mockDefinition = null)
+     */
+    class MyTest extends TestCase
+    {
+        private function mockClient(): Client&\Mockery\MockInterface
+        {
+            $mock = $this->mock(Client::class);
+
+            return $mock;
+        }
+
+        private function partialMockClient(): Client&\Mockery\MockInterface
+        {
+            $mock = $this->partialMock(Client::class);
+
+            return $mock;
+        }
+
+        private function spyClient(): Client&\Mockery\MockInterface
+        {
+            $mock = $this->spy(Client::class);
+
+            return $mock;
+        }
+
+        private function instanceClient(): Client
+        {
+            $instance = $this->instance(Client::class, new Client());
+
+            return $instance;
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "a `@method` tag must not shadow the real inherited helper, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn mock_conditional_return_survives_a_local_variable() {
+    // Same helper, but the call result is parked in a local first.  The
+    // stored variable type has to keep the intersection, not decay to the
+    // bare interface.
+    let php = r#"<?php
+namespace Mockery {
+    interface MockInterface {}
+}
+
+namespace App {
+    class Client {}
+
+    trait InteractsWithContainer
+    {
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function mock($abstract) {}
+
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function partialMock($abstract) {}
+
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function spy($abstract) {}
+
+        /**
+         * @template TInstance of object
+         *
+         * @param  string  $abstract
+         * @param  TInstance  $instance
+         * @return TInstance
+         */
+        protected function instance($abstract, $instance) {}
+    }
+
+    class TestCase
+    {
+        use InteractsWithContainer;
+    }
+
+    class MyTest extends TestCase
+    {
+        private function mockClient(): Client&\Mockery\MockInterface
+        {
+            $mock = $this->mock(Client::class);
+
+            return $mock;
+        }
+
+        private function partialMockClient(): Client&\Mockery\MockInterface
+        {
+            $mock = $this->partialMock(Client::class);
+
+            return $mock;
+        }
+
+        private function spyClient(): Client&\Mockery\MockInterface
+        {
+            $mock = $this->spy(Client::class);
+
+            return $mock;
+        }
+
+        private function instanceClient(): Client
+        {
+            $instance = $this->instance(Client::class, new Client());
+
+            return $instance;
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "a mock parked in a local should keep the intersection, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
 // ─── Eloquent custom collections and the view() helper ──────────────────────
 
 /// Eloquent scaffolding with a model that declares a custom collection and a

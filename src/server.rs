@@ -2595,6 +2595,7 @@ impl Backend {
         let view_count = resources.view_dirs.len();
         let trans_count = resources.trans_dirs.len();
         let route_count = resources.route_files.len();
+        let binding_count = resources.bindings.len();
         *self.laravel_provider_resources.write() = resources;
 
         if config_count + view_count + trans_count + route_count > 0 {
@@ -2606,12 +2607,20 @@ impl Backend {
             cache.routes = None;
         }
 
+        // The provider bindings overlay the core container alias table, which
+        // an earlier resolution may already have built without them.
+        if binding_count > 0 {
+            *self.laravel_aliases.write() = None;
+            self.clear_class_not_found_cache();
+        }
+
         tracing::info!(
-            "PHPantom: discovered {} package config files, {} view dirs, {} translation dirs, {} route files from service providers",
+            "PHPantom: discovered {} package config files, {} view dirs, {} translation dirs, {} route files, {} container bindings from service providers",
             config_count,
             view_count,
             trans_count,
             route_count,
+            binding_count,
         );
     }
 

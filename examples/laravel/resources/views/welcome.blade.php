@@ -24,6 +24,13 @@
         <p>Email: {{ $user->email }}</p>
     @endif
 
+    {{-- The inline @php(…) directive assigns just like the block form:
+         $featured is a \App\Models\BlogPost from here on --}}
+    @php($featured = $posts->published()->byNewest()->first())
+    @if($featured)
+        <p>Featured: {{ $featured->getTitle() }}</p>
+    @endif
+
     {{-- @error injects an implicit $message variable --}}
     @error('email')
         <div class="alert">{{ $message }}</div>
@@ -68,6 +75,16 @@
     {{-- The <x-alert> component view is where $attributes and $slot come
          from: resources/views/components/alert.blade.php --}}
     <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>
+
+    {{-- A bound attribute whose expression is wrapped over several lines
+         (what a formatter does to a long array) is still read as one PHP
+         expression. Try: Ctrl+Click __ and hover $posts on the last line. --}}
+    <x-alert class="mt-4"
+        :messages="[
+            __('messages.welcome'),
+            trans('auth.failed'),
+            $posts->first()?->title,
+        ]" />
 
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim

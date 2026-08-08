@@ -1,0 +1,21 @@
+// test: a declared `array` callback parameter narrows to the call site's element shape
+// feature: completion
+// expect: name
+---
+<?php
+
+class DiscountType {
+    public string $name = '';
+}
+
+class Cases {
+    /** @return array<array{DiscountType, string}> */
+    private static function cases(): array { return []; }
+
+    public function run(): void {
+        array_map(
+            static fn (array $case): string => $case[0]-><>,
+            self::cases()
+        );
+    }
+}

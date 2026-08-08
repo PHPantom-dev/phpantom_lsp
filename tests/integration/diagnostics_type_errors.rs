@@ -7016,3 +7016,301 @@ takesResults([1, 2]);
         type_error_messages(&diags)
     );
 }
+
+// ─── Re-keying callbacks rebind the key template ────────────────────────────
+
+/// A generic collection shaped like Laravel's `Illuminate\Support\Collection`:
+/// `keyBy()` re-keys it, so the key template of the returned collection comes
+/// from the callback's return type.
+const REKEYING_COLLECTION: &str = r#"<?php
+class Item {
+    public string $slug = '';
+
+    public function getSlug(): string { return $this->slug; }
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll
+{
+    /**
+     * @template TNewKey of array-key
+     *
+     * @param (callable(TValue, TKey): TNewKey)|array|string $keyBy
+     * @return static<($keyBy is (array|string) ? array-key : TNewKey), TValue>
+     */
+    public function keyBy($keyBy) {}
+
+    /** @param TKey|null $key */
+    public function get($key) {}
+}
+"#;
+
+/// Build a source file that re-keys a `Coll<int, Item>` with `$callback` and
+/// then looks the result up with an argument no key type accepts, so the
+/// diagnostic spells out the key type `get()` was checked against.
+fn rekeyed_lookup_message(callback: &str, chained: bool) -> String {
+    let call = if chained {
+        format!("$c->keyBy({callback})->get([1]);")
+    } else {
+        format!("$keyed = $c->keyBy({callback});\n$keyed->get([1]);")
+    };
+    let php = format!(
+        "{REKEYING_COLLECTION}\n/** @var Coll<int, Item> $c */\n$c = new Coll();\n{call}\n"
+    );
+    let messages = type_error_messages(&collect(&php));
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected exactly one type error for `{callback}`, got {messages:?}"
+    );
+    messages.into_iter().next().unwrap()
+}
+
+#[test]
+fn keyby_with_annotated_callback_rebinds_the_key_template() {
+    for chained in [false, true] {
+        assert!(
+            rekeyed_lookup_message("fn (Item $i): string => $i->slug", chained)
+                .contains("expects string|null"),
+            "chained={chained}"
+        );
+    }
+}
+
+/// `static fn` and `static function` are ordinary closure literals; the
+/// modifier must not stop the callback's return type from binding the
+/// template.
+#[test]
+fn keyby_with_static_callback_rebinds_the_key_template() {
+    for callback in [
+        "static fn (Item $i): string => $i->slug",
+        "static function (Item $i): string { return $i->slug; }",
+    ] {
+        for chained in [false, true] {
+            assert!(
+                rekeyed_lookup_message(callback, chained).contains("expects string|null"),
+                "callback={callback} chained={chained}"
+            );
+        }
+    }
+}
+
+/// Without a return-type annotation the callback's body is the only source
+/// for the key type, so it has to survive into the resolved call.
+#[test]
+fn keyby_with_unannotated_callback_binds_the_key_from_the_body() {
+    for callback in [
+        "fn (Item $i) => $i->slug",
+        "function (Item $i) { return $i->slug; }",
+    ] {
+        for chained in [false, true] {
+            assert!(
+                rekeyed_lookup_message(callback, chained).contains("expects string|null"),
+                "callback={callback} chained={chained}"
+            );
+        }
+    }
+}
+
+/// A body that is a *call* has to bind the template from the callee's return
+/// type, just like a body that is a property read or a literal.
+#[test]
+fn keyby_with_unannotated_call_body_binds_the_key_from_the_return_type() {
+    for callback in [
+        "fn (Item $i) => $i->getSlug()",
+        "function (Item $i) { return $i->getSlug(); }",
+    ] {
+        for chained in [false, true] {
+            assert!(
+                rekeyed_lookup_message(callback, chained).contains("expects string|null"),
+                "callback={callback} chained={chained}"
+            );
+        }
+    }
+}
+
+// ─── A standalone `@var` docblock narrows a non-Expression statement ───────
+
+/// A generic collection with a `get()` whose parameter type comes from the
+/// class-level `@template`, matching Laravel's `Illuminate\Support\Collection`.
+const GENERIC_COLLECTION: &str = r#"<?php
+namespace App\Models;
+
+class Loaf {}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Collection
+{
+    /** @param TKey|null $key */
+    public function get($key) {}
+}
+"#;
+
+/// A standalone `/** @var Collection<string, Loaf> $byName */` followed by
+/// an `echo` (rather than a bare `$byName->get(...)` expression statement)
+/// used to lose the `<string, Loaf>` generic arguments once the diagnostic
+/// scope cache was active: the cache recorded the pre-docblock scope at the
+/// echo statement's start offset and never re-recorded it after the
+/// docblock was applied, so a lookup for the call site inside the echo's
+/// expression saw `$byName` typed only as bare `Collection` and fell back
+/// to `TKey`'s bound (`array-key`) instead of the annotated `string`. Every
+/// Blade `{{ $byName->get(...) }}` compiles to exactly this shape
+/// (`echo e( $byName->get(...) );`), which is how the bug originally
+/// surfaced.
+#[test]
+fn standalone_var_docblock_narrows_echo_statement() {
+    let php = format!(
+        "{GENERIC_COLLECTION}\nfunction e($x) {{ return $x; }}\n\
+         function render() {{\n\
+         /** @var \\App\\Models\\Collection<string, \\App\\Models\\Loaf> $byName */\n\
+         echo e( $byName->get([1]) );\n}}\n"
+    );
+    let diags = collect_slow(&php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.iter().any(|m| m.contains("expects string|null")),
+        "expected TKey to narrow to string, got {msgs:?}"
+    );
+}
+
+// ─── A union parameter hint binds through the alternative that matches ──────
+
+/// `Collection::wrap()`'s shape: the argument is either the element itself or
+/// a container of elements, so the template binds one level deeper for a
+/// container argument and directly for a scalar one.
+const UNION_WRAP_COLLECTION: &str = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Wrapper
+{
+    /**
+     * @template TWrapValue
+     *
+     * @param  iterable<array-key, TWrapValue>|TWrapValue  $value
+     * @return static<array-key, TWrapValue>
+     */
+    public static function wrap($value) {}
+
+    /** @param TValue $value */
+    public function push($value) {}
+}
+
+/** @return array<string> */
+function names(): array { return []; }
+"#;
+
+/// Report the type error `push()` raises for `Wrapper::wrap($arg)`, which
+/// spells out what `TWrapValue` bound to.
+fn wrapped_push_message(arg: &str) -> String {
+    let php = format!("{UNION_WRAP_COLLECTION}\n$w = Wrapper::wrap({arg});\n$w->push([1]);\n");
+    let messages = type_error_messages(&collect(&php));
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected exactly one type error for `{arg}`, got {messages:?}"
+    );
+    messages.into_iter().next().unwrap()
+}
+
+#[test]
+fn a_container_argument_binds_the_template_through_the_iterable_alternative() {
+    assert!(wrapped_push_message("names()").contains("expects string"));
+}
+
+/// The bare `TWrapValue` alternative matches anything, so it must still win
+/// when the argument is not a container.
+#[test]
+fn a_scalar_argument_binds_the_template_through_the_bare_alternative() {
+    assert!(wrapped_push_message("'solo'").contains("expects string"));
+}
+
+/// An array *literal* argument resolves to a bare `array` with no element
+/// type, unlike a variable or call typed `array<string>`. The iterable
+/// alternative must still bind through its element rather than leaving
+/// `TWrapValue` unbound.
+#[test]
+fn an_array_literal_argument_binds_the_template_through_the_iterable_alternative() {
+    assert!(wrapped_push_message("['a', 'b']").contains("expects string"));
+}
+
+// ─── A method-level template survives into a directly chained call ──────────
+
+/// A generic wrapper with both a static factory and an instance method that
+/// bind a method-level `@template` from their argument and return a re-typed
+/// wrapper.  `push()` then reports what that template bound to.
+const METHOD_TEMPLATE_FACTORY: &str = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Wrapper
+{
+    /**
+     * @template TMakeValue
+     *
+     * @param  iterable<array-key, TMakeValue>  $value
+     * @return static<array-key, TMakeValue>
+     */
+    public static function make($value) {}
+
+    /**
+     * @template TReValue
+     *
+     * @param  iterable<array-key, TReValue>  $value
+     * @return static<array-key, TReValue>
+     */
+    public function rewrap($value) {}
+
+    /** @param TValue $value */
+    public function push($value) {}
+}
+
+/** @return array<string> */
+function names(): array { return []; }
+"#;
+
+/// Report the type error `push()` raises for `$expr->push([1])`, where the
+/// receiver is a call that binds a method-level template.
+fn factory_push_message(expr: &str) -> String {
+    let php = format!("{METHOD_TEMPLATE_FACTORY}\n{expr}->push([1]);\n");
+    let messages = type_error_messages(&collect(&php));
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected exactly one type error for `{expr}`, got {messages:?}"
+    );
+    messages.into_iter().next().unwrap()
+}
+
+#[test]
+fn a_static_factory_binds_its_template_into_a_chained_call() {
+    assert!(factory_push_message("Wrapper::make(names())").contains("expects string"));
+}
+
+#[test]
+fn an_instance_method_binds_its_template_into_a_chained_call() {
+    let php = format!("{METHOD_TEMPLATE_FACTORY}\n$w = new Wrapper();\n");
+    assert!(
+        type_error_messages(&collect(&format!("{php}$w->rewrap(names())->push([1]);\n")))
+            .concat()
+            .contains("expects string")
+    );
+}
+
+#[test]
+fn a_static_factory_binds_its_template_through_a_variable() {
+    let php = format!("{METHOD_TEMPLATE_FACTORY}\n$w = Wrapper::make(names());\n$w->push([1]);\n");
+    assert!(
+        type_error_messages(&collect(&php))
+            .concat()
+            .contains("expects string")
+    );
+}

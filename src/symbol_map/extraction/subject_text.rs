@@ -334,12 +334,22 @@ pub(super) fn format_all_call_args(args: &TokenSeparatedSequence<'_, Argument<'_
     parts.join(", ")
 }
 
+/// Longest closure body kept verbatim in an argument's subject text.
+///
+/// A callback with no return-type annotation can only bind a
+/// `callable(): T` template through its body, so the body has to survive
+/// into the text.  Real callbacks are short (`fn ($p) => $p->slug`); this
+/// bound keeps a pathological one from bloating the symbol map, at the
+/// cost of losing the binding for that call.
+const MAX_INLINE_CLOSURE_BODY: usize = 160;
+
 /// Format a single argument expression to text.
 ///
-/// For closures and arrow functions the full body is replaced with a
-/// placeholder (`=> ...` or `{ ... }`) to keep the subject text compact
-/// while preserving parameter types and return type annotations that
-/// template inference depends on.
+/// For closures and arrow functions the parameter list and return type
+/// annotation are always preserved, since template inference reads them.
+/// The body is replaced with a placeholder (`=> ...` or `{ ... }`) unless
+/// the callback has no return-type annotation, in which case the body is
+/// the only thing left that can bind the callback's return template.
 pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
     match expr {
         // Foo::class
@@ -380,22 +390,37 @@ pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
         // parameter types and the return type annotation.
         Expression::ArrowFunction(arrow) => {
             let params = format_callable_params(&arrow.parameter_list);
-            let ret = arrow
-                .return_type_hint
-                .as_ref()
-                .map(|rth| format!(": {}", crate::parser::extract_hint_type(&rth.hint)))
-                .unwrap_or_default();
-            format!("fn({}){} => ...", params, ret)
+            match &arrow.return_type_hint {
+                Some(rth) => format!(
+                    "fn({}): {} => ...",
+                    params,
+                    crate::parser::extract_hint_type(&rth.hint)
+                ),
+                None => format!(
+                    "fn({}) => {}",
+                    params,
+                    inline_closure_body(format_arg_expr(arrow.expression))
+                ),
+            }
         }
         // Closure: function(Type $a, Type $b): ReturnType { … }
         Expression::Closure(closure) => {
             let params = format_callable_params(&closure.parameter_list);
-            let ret = closure
-                .return_type_hint
-                .as_ref()
-                .map(|rth| format!(": {}", crate::parser::extract_hint_type(&rth.hint)))
-                .unwrap_or_default();
-            format!("function({}){} {{ ... }}", params, ret)
+            match &closure.return_type_hint {
+                Some(rth) => format!(
+                    "function({}): {} {{ ... }}",
+                    params,
+                    crate::parser::extract_hint_type(&rth.hint)
+                ),
+                None => match first_return_expr(closure.body.statements.as_slice()) {
+                    Some(value) => format!(
+                        "function({}) {{ return {}; }}",
+                        params,
+                        inline_closure_body(format_arg_expr(value))
+                    ),
+                    None => format!("function({}) {{ ... }}", params),
+                },
+            }
         }
         // Any other expression — delegate to the general subject text
         // formatter.  Falls back to `...` when it can't be represented.
@@ -408,6 +433,28 @@ pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
             }
         }
     }
+}
+
+/// Keep a rendered closure body only while it stays short, falling back to
+/// the `...` placeholder otherwise.
+fn inline_closure_body(body: String) -> String {
+    if body.len() > MAX_INLINE_CLOSURE_BODY {
+        "...".to_string()
+    } else {
+        body
+    }
+}
+
+/// The value of a closure body's first top-level `return`.
+///
+/// Returns inside nested blocks are skipped: the point is to recover the
+/// single-expression bodies callbacks are usually written as, not to
+/// reconstruct control flow.
+fn first_return_expr<'a>(statements: &'a [Statement<'a>]) -> Option<&'a Expression<'a>> {
+    statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })
 }
 
 /// Format a callable's parameter list as a comma-separated string of

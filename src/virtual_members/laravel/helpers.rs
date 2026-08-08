@@ -950,6 +950,16 @@ pub(crate) fn walk_program_expressions(
     }
 }
 
+/// Like [`walk_program_expressions`], but rooted at a single expression the
+/// caller already holds (e.g. one argument of a call it matched), descending
+/// into closure and arrow-function bodies the same way.
+pub(crate) fn walk_expression_tree(
+    expr: &Expression<'_>,
+    visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
+) {
+    let _ = walk_expr_depth(expr, visitor);
+}
+
 // ─── Scope walking ──────────────────────────────────────────────────────────
 
 /// Whether `span` covers `offset`, inclusive at both ends.

@@ -25,7 +25,8 @@ class Application
 }
 "#;
 
-    let aliases = parse_container_aliases(src).expect("container aliases parsed");
+    let aliases = parse_container_aliases(src, "Illuminate\\Foundation\\Application")
+        .expect("container aliases parsed");
 
     // Concrete class (first entry) mapped by the string key.
     assert_eq!(
@@ -40,8 +41,11 @@ class Application
         aliases.get("db.connection").map(String::as_str),
         Some("Illuminate\\Database\\Connection")
     );
-    // `self::class` carries no concrete; the `app` entry is skipped.
-    assert!(!aliases.contains_key("app"));
+    // `self::class` resolves to the FQN of the class being parsed.
+    assert_eq!(
+        aliases.get("app").map(String::as_str),
+        Some("Illuminate\\Foundation\\Application")
+    );
 }
 
 #[test]
@@ -207,7 +211,7 @@ class Nothing
     }
 }
 "#;
-    assert!(parse_container_aliases(src).is_none());
+    assert!(parse_container_aliases(src, "Nothing").is_none());
     assert!(parse_facade_default_aliases(src).is_none());
     assert!(parse_config_facade_aliases(src).is_empty());
 }

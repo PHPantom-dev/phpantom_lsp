@@ -539,6 +539,28 @@ fn resolve_target_classes_expr_inner(
                 ClassInfo::extend_unique_arc(&mut arc_results, resolved);
             }
 
+            // ── `class-string<T>` unwrapping for `prop::` access ────
+            // A property typed `class-string<T>` holds a class name at
+            // runtime, not an instance of its own declared type.
+            // `resolve_property_types` skips it (it isn't a class
+            // type), so when the chain is followed by `::`, resolve
+            // static members against `T` instead of leaving
+            // `arc_results` empty.
+            if arc_results.is_empty() && access_kind == AccessKind::DoubleColon {
+                for cls in &base_arcs {
+                    if let Some(raw_type) = resolve_property_type_hint(cls, property, class_loader)
+                    {
+                        let classes = resolve_class_string_inner_classes(
+                            &raw_type,
+                            &cls.fqn(),
+                            all_classes,
+                            class_loader,
+                        );
+                        ClassInfo::extend_unique_arc(&mut arc_results, classes);
+                    }
+                }
+            }
+
             // ── Property-level narrowing ────────────────────────
             // When the property chain resolves to a union (or a
             // broad interface type), an enclosing `instanceof`
@@ -901,6 +923,26 @@ fn resolve_call_raw_return_type(
 
 // ─── Enriched subject resolution for diagnostics ────────────────────────────
 
+/// Whether every non-null member of `ty` is the bare `string` type.
+///
+/// `$var::method()` is valid PHP when `$var` holds a class name at
+/// runtime — the string names the class — so a `string`-only subject
+/// accessed via `::` can only be "unverifiable", never a scalar-access
+/// error the way `$var->method()` on a scalar is.  Other scalars
+/// (`int`, `bool`, …) can never be a class name, so they keep reporting
+/// as scalar access.
+fn is_all_string_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(name) => name.eq_ignore_ascii_case("string"),
+        TypeKind::Nullable(inner) => is_all_string_type(inner),
+        TypeKind::Union(members) => members
+            .iter()
+            .filter(|m| !m.is_null())
+            .all(is_all_string_type),
+        _ => false,
+    }
+}
+
 /// The outcome of resolving a subject for diagnostic purposes.
 ///
 /// [`resolve_target_classes`] only returns `Vec<Arc<ClassInfo>>` and
@@ -961,10 +1003,15 @@ pub(crate) fn resolve_subject_outcome(
         // ── All entries are type-string-only (no class info) ────
         let joined = ResolvedType::types_joined(&resolved);
 
-        // Pure scalar — member access is a runtime crash.
+        // Pure scalar — member access is a runtime crash, unless this
+        // is a `::` access on a `string`-only subject (see
+        // `is_all_string_type`), which is unverifiable rather than
+        // wrong.
         if joined.all_members_primitive_scalar() {
-            let scalar = joined.non_null_type().unwrap_or(joined);
-            return SubjectOutcome::Scalar(scalar);
+            let scalar = joined.non_null_type().unwrap_or_else(|| joined.clone());
+            if access_kind != AccessKind::DoubleColon || !is_all_string_type(&scalar) {
+                return SubjectOutcome::Scalar(scalar);
+            }
         }
 
         // stdClass / object — synthetic resolution.
@@ -1022,7 +1069,10 @@ pub(crate) fn resolve_subject_outcome(
             if let Some(parsed) = resolve_property_type_hint(&merged, property, ctx.class_loader) {
                 if parsed.all_members_primitive_scalar() {
                     let scalar = parsed.non_null_type().unwrap_or(parsed);
-                    return SubjectOutcome::Scalar(scalar);
+                    if access_kind != AccessKind::DoubleColon || !is_all_string_type(&scalar) {
+                        return SubjectOutcome::Scalar(scalar);
+                    }
+                    return SubjectOutcome::Untyped;
                 }
                 return SubjectOutcome::Untyped;
             }
@@ -1225,6 +1275,42 @@ fn scope_type_discriminator(vars: &[String], ctx: &ResolutionCtx<'_>) -> Option<
     Some(disc)
 }
 
+/// Resolve the classes named by `class-string<T>` (or `?class-string<T>`,
+/// or a union containing it) inside `ty`.
+///
+/// A subject typed `class-string<T>` holds a class name at runtime, not
+/// an instance of `T` — but a `::` access on it (`$class::method()`)
+/// resolves against `T`'s static members.  Used by both bare-variable
+/// and property-chain subjects so `$var::` and `$obj->prop::` share the
+/// same unwrapping behaviour.
+fn resolve_class_string_inner_classes(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Vec<Arc<ClassInfo>> {
+    fn inner_types(ty: &PhpType) -> Vec<&PhpType> {
+        match ty.kind() {
+            TypeKind::ClassString(Some(inner)) => vec![inner],
+            TypeKind::Nullable(inner) => inner_types(inner),
+            TypeKind::Union(members) => members.iter().flat_map(inner_types).collect(),
+            _ => vec![],
+        }
+    }
+
+    let mut results = Vec::new();
+    for inner in inner_types(ty) {
+        let resolved = super::type_resolution::type_hint_to_classes_typed(
+            inner,
+            owning_class_name,
+            all_classes,
+            class_loader,
+        );
+        ClassInfo::extend_unique_arc(&mut results, resolved);
+    }
+    results
+}
+
 /// Resolve a bare `$var` subject to its classes.
 ///
 /// Resolves a variable to its classes by running the full variable
@@ -1351,56 +1437,14 @@ fn resolve_variable_fallback(
     if access_kind == AccessKind::DoubleColon {
         let mut class_string_results: Vec<ResolvedType> = Vec::new();
         for rt in &resolved_types {
-            let inner = match &rt.type_string.kind() {
-                TypeKind::ClassString(Some(inner)) => Some(inner),
-                // Handle `?class-string<T>` — unwrap nullable first.
-                TypeKind::Nullable(inner) => match inner.kind() {
-                    TypeKind::ClassString(Some(cs_inner)) => Some(cs_inner),
-                    _ => None,
-                },
-                // Handle union types containing class-string<T>.
-                TypeKind::Union(members) => {
-                    for member in members {
-                        let cs_inner = match member.kind() {
-                            TypeKind::ClassString(Some(inner)) => Some(inner),
-                            TypeKind::Nullable(inner) => match inner.kind() {
-                                TypeKind::ClassString(Some(cs_inner)) => Some(cs_inner),
-                                _ => None,
-                            },
-                            _ => None,
-                        };
-                        if let Some(inner_ty) = cs_inner {
-                            let resolved = super::type_resolution::type_hint_to_classes_typed(
-                                inner_ty,
-                                &effective_class.name,
-                                all_classes,
-                                class_loader,
-                            );
-                            for cls in resolved {
-                                ResolvedType::push_unique(
-                                    &mut class_string_results,
-                                    ResolvedType::from_arc(cls),
-                                );
-                            }
-                        }
-                    }
-                    None // already handled inline
-                }
-                _ => None,
-            };
-            if let Some(inner_ty) = inner {
-                let resolved = super::type_resolution::type_hint_to_classes_typed(
-                    inner_ty,
-                    &effective_class.name,
-                    all_classes,
-                    class_loader,
-                );
-                for cls in resolved {
-                    ResolvedType::push_unique(
-                        &mut class_string_results,
-                        ResolvedType::from_arc(cls),
-                    );
-                }
+            let classes = resolve_class_string_inner_classes(
+                &rt.type_string,
+                &effective_class.name,
+                all_classes,
+                class_loader,
+            );
+            for cls in classes {
+                ResolvedType::push_unique(&mut class_string_results, ResolvedType::from_arc(cls));
             }
         }
         if !class_string_results.is_empty() {

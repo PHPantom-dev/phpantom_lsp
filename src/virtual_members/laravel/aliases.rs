@@ -90,6 +90,14 @@ impl Backend {
         self.find_or_load_class(fqn)
     }
 
+    /// The concrete class FQN a container string alias (e.g. `'app'`, as
+    /// returned by a facade's `getFacadeAccessor()`) is bound to, without
+    /// loading the class. Used when a caller needs the name itself rather
+    /// than the loaded `ClassInfo` (e.g. to feed a caller-supplied loader).
+    pub(crate) fn container_alias_concrete_fqn(&self, key: &str) -> Option<String> {
+        self.laravel_aliases().container.get(key).cloned()
+    }
+
     /// Expand a file's macro registrations so a macro registered through a
     /// facade also attaches to the facade's concrete container-bound class.
     ///
@@ -163,9 +171,17 @@ impl Backend {
 /// installed. Returns empty tables for a non-Laravel project (the framework
 /// classes are absent from the class index).
 fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
-    let container = read_source_by_fqn(backend, APPLICATION_FQN)
-        .and_then(|src| parse_container_aliases(&src))
+    let mut container = read_source_by_fqn(backend, APPLICATION_FQN)
+        .and_then(|src| parse_container_aliases(&src, APPLICATION_FQN))
         .unwrap_or_default();
+
+    // Overlay the string keys the project's own service providers bind
+    // (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  These
+    // are registered after the core aliases at runtime, so a provider that
+    // rebinds a core key wins here too.
+    for (key, fqn) in backend.laravel_provider_resources.read().bindings.iter() {
+        container.insert(key.clone(), fqn.clone());
+    }
 
     // Facade aliases: the framework defaults, then the project's config
     // overlay (which may add to or override individual entries).
@@ -243,10 +259,12 @@ fn with_parsed<R>(content: &str, f: impl FnOnce(&Program<'_>, &OwnedResolvedName
 /// Parse the core container aliases out of `registerCoreContainerAliases()`.
 ///
 /// Shape: a `'alias' => [Concrete::class, Contract::class, …]` array. We take
-/// the *concrete* class (first element) of each entry and map the string key to
-/// it. Entries whose concrete class we cannot resolve (e.g. `self::class`) are
-/// skipped. Returns `None` when no array of that shape is found.
-fn parse_container_aliases(content: &str) -> Option<HashMap<String, String>> {
+/// the *concrete* class (first element) of each entry and map the string key
+/// to it. `self_fqn` is the FQN of the class this source belongs to
+/// (`Illuminate\Foundation\Application`), needed because the `'app'` entry's
+/// concrete is written as `self::class`. Returns `None` when no array of
+/// that shape is found.
+fn parse_container_aliases(content: &str, self_fqn: &str) -> Option<HashMap<String, String>> {
     with_parsed(content, |program, resolved| {
         let mut arrays = Vec::new();
         collect_arrays(Node::Program(program), &mut arrays);
@@ -264,7 +282,7 @@ fn parse_container_aliases(content: &str) -> Option<HashMap<String, String>> {
             let Some(concrete) = first_array_element(value) else {
                 continue;
             };
-            if let Some(fqn) = class_const_fqn(concrete, resolved) {
+            if let Some(fqn) = class_const_fqn(concrete, resolved, Some(self_fqn)) {
                 out.insert(alias, fqn);
             }
         }
@@ -336,7 +354,7 @@ pub(crate) fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
         if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
             return Some(FacadeAccessor::Alias(text.to_string()));
         }
-        class_const_fqn(return_value, resolved).map(FacadeAccessor::Class)
+        class_const_fqn(return_value, resolved, None).map(FacadeAccessor::Class)
     })
 }
 
@@ -358,7 +376,7 @@ pub(crate) fn parse_facade_accessor_for_class(
         if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
             return Some(FacadeAccessor::Alias(text.to_string()));
         }
-        class_const_fqn(return_value, resolved).map(FacadeAccessor::Class)
+        class_const_fqn(return_value, resolved, None).map(FacadeAccessor::Class)
     })
 }
 
@@ -482,7 +500,7 @@ fn collect_string_class_pairs(
         let Some(alias) = string_literal(key, content) else {
             continue;
         };
-        if let Some(fqn) = class_const_fqn(value, resolved) {
+        if let Some(fqn) = class_const_fqn(value, resolved, None) {
             out.insert(alias, fqn);
         }
     }
@@ -504,9 +522,16 @@ fn is_class_const(expr: &Expression<'_>) -> bool {
 
 /// Extract the fully-qualified name from a `Something::class` expression,
 /// resolving short names through the file's namespace and use statements.
-/// Returns `None` for non-`::class` expressions and for `self::class` /
-/// dynamic class expressions we cannot pin to a name.
-fn class_const_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
+/// Returns `None` for non-`::class` expressions and for `parent::class` /
+/// dynamic class expressions we cannot pin to a name. `self::class` /
+/// `static::class` resolve to `self_fqn` when the caller knows which class's
+/// source is being parsed (e.g. `registerCoreContainerAliases()`'s own
+/// `self::class` entry), and are otherwise treated like `parent::class`.
+fn class_const_fqn(
+    expr: &Expression<'_>,
+    resolved: &OwnedResolvedNames,
+    self_fqn: Option<&str>,
+) -> Option<String> {
     let Expression::Access(Access::ClassConstant(cca)) = expr else {
         return None;
     };
@@ -516,18 +541,17 @@ fn class_const_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> Opti
     if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
         return None;
     }
+    // `self::class` / `static::class` are their own expression variants (not
+    // `Expression::Identifier`); resolve them to `self_fqn` when the caller
+    // knows which class's source is being parsed. `parent::class` is
+    // relative and carries no useful concrete for an alias table.
+    if matches!(cca.class, Expression::Self_(_) | Expression::Static(_)) {
+        return self_fqn.map(|fqn| fqn.trim_start_matches('\\').to_string());
+    }
     let Expression::Identifier(ident) = cca.class else {
         return None;
     };
-    // `self::class` / `static::class` / `parent::class` are relative and carry
-    // no useful concrete for an alias table; skip them.
     let raw = bytes_to_str(ident.value());
-    if matches!(
-        raw.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return None;
-    }
     let offset = ident.span().start.offset;
     if let Some(fqn) = resolved.get(offset) {
         return Some(fqn.trim_start_matches('\\').to_string());

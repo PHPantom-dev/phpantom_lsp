@@ -741,27 +741,24 @@ fn resolve_class_fully_inner(
                 }
             }
 
-            // When we have substitutions to apply, we cannot use a
-            // cached bare-interface resolution because the cached version
-            // has unsubstituted template parameters.  Only use the cache
-            // for interfaces without generic substitutions.
-            if iface_subs.is_empty() {
-                let iface_key: ResolvedClassCacheKey = (iface.fqn(), Vec::new());
-                let map = cache.read();
-                if let Some(cached) = map.get(&iface_key) {
-                    let resolved_iface = ClassInfo::clone(cached);
-                    drop(map);
-                    merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
-                    continue;
-                }
-            }
+            // Take the interface through the same full resolution whether
+            // or not it is already cached.  Serving a warm cache the fully
+            // resolved interface while a cold one got a base-plus-providers
+            // approximation made a class's members depend on which classes
+            // the workers happened to resolve first, so the same file
+            // reported different diagnostics from one run to the next.
+            //
+            // The cached entry is keyed on the bare FQN and so still holds
+            // unsubstituted template parameters; `merge_interface_members_into`
+            // applies `iface_subs` to the members it copies, so it is the
+            // right input for the substituted case too.
+            let resolved_iface = resolve_class_fully_inner(&iface, class_loader, Some(cache));
 
-            let mut resolved_iface = resolve_class_with_inheritance(&iface, class_loader);
-            if !providers.is_empty() {
-                apply_virtual_members(&mut resolved_iface, class_loader, &providers, Some(cache));
-            }
-
-            merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
+            merge_interface_members_into(
+                &mut merged,
+                ClassInfo::clone(&resolved_iface),
+                &iface_subs,
+            );
         }
     }
 

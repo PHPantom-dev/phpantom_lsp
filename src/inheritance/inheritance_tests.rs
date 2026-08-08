@@ -564,3 +564,50 @@ fn test_apply_generic_args_right_align_with_int_bound() {
         .expect("get() should exist");
     assert_eq!(get.return_type.as_ref().unwrap().to_string(), "Product",);
 }
+
+#[test]
+fn method_tag_does_not_shadow_a_real_inherited_method() {
+    // `__call()` only runs when no accessible method exists, so a
+    // `@method` tag naming a method the parent really declares is dead
+    // documentation: PHP dispatches to the parent's implementation.  The
+    // inheritance walk must therefore keep merging the real method.
+    let parent_class = ClassInfo {
+        name: crate::atom::atom("TestCase"),
+        methods: vec![Arc::new(MethodInfo {
+            visibility: crate::types::Visibility::Protected,
+            is_virtual: false,
+            ..MethodInfo::virtual_method("mock", Some("Foo&MockInterface"))
+        })]
+        .into(),
+        ..ClassInfo::default()
+    };
+
+    let mut child_class = ClassInfo {
+        name: crate::atom::atom("MyTest"),
+        parent_class: Some(atom("TestCase")),
+        ..ClassInfo::default()
+    };
+    child_class.set_class_docblock(Some(
+        "/**\n * @method MockInterface mock(string $abstract)\n */".to_string(),
+    ));
+
+    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "TestCase" => Some(Arc::new(parent_class.clone())),
+            _ => None,
+        }
+    };
+
+    let resolved = resolve_class_with_inheritance(&child_class, &class_loader);
+
+    let mock = resolved
+        .methods
+        .iter()
+        .find(|m| m.name == "mock")
+        .expect("the real inherited mock() should survive the @method tag");
+    assert!(!mock.is_virtual);
+    assert_eq!(
+        mock.return_type.as_ref().unwrap().to_string(),
+        "Foo&MockInterface"
+    );
+}

@@ -1,0 +1,21 @@
+// test: a declared `iterable` callback parameter narrows to the call site's element type
+// feature: completion
+// expect: getLabel(
+---
+<?php
+
+class Tag {
+    public function getLabel(): string { return ''; }
+}
+
+class Groups {
+    /** @return array<list<Tag>> */
+    private static function groups(): array { return []; }
+
+    public function run(): void {
+        array_map(
+            static fn (iterable $group): string => $group[0]-><>,
+            self::groups()
+        );
+    }
+}

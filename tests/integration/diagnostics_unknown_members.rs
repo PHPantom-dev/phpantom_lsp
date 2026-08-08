@@ -8704,6 +8704,104 @@ function test(int $value): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Static call (`::`) through a string-typed subject
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_scalar_diagnostic_for_static_call_through_string_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class JobRecord {
+    public string $class_name;
+}
+
+class Test {
+    public function run(JobRecord $job): void {
+        $job->class_name::dispatch();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a plain `string` subject accessed via `::` is unverifiable, not a scalar-access \
+         error, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_scalar_diagnostic_for_static_call_through_bare_string_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Test {
+    public function run(string $className): void {
+        $className::dispatch();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a plain `string` variable accessed via `::` is unverifiable, not a scalar-access \
+         error, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn flags_scalar_access_on_static_call_through_int_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Test {
+    public function run(int $value): void {
+        $value::method();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("int") && d.message.contains("method")),
+        "an `int` subject can never be a class name, so `::` access must still be flagged, \
+         got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn class_string_property_static_call_resolves_against_inner_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Job {
+    public static function dispatch(): void {}
+}
+
+class JobRecord {
+    /** @var class-string<Job> */
+    public string $class_name;
+}
+
+class Test {
+    public function run(JobRecord $job): void {
+        $job->class_name::nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("nonexistent")),
+        "a `class-string<T>` property accessed via `::` should resolve against `T`, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Unknown class parameter / return types
 // ═══════════════════════════════════════════════════════════════════════════
 

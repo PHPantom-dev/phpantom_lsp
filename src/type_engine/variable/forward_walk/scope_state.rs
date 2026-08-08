@@ -12,6 +12,24 @@ use crate::types::{ClassInfo, ResolvedType};
 
 // ─── Core data structures ───────────────────────────────────────────────────
 
+/// An `instanceof`-style check that a boolean variable stands for.
+///
+/// `$isHtml = $raw instanceof HtmlString;` records `subject = "$raw"`
+/// under `$isHtml`, so a later truthy test on `$isHtml` narrows `$raw`
+/// exactly as the original expression does.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VarAssertion {
+    /// Scope key the check narrows (`"$raw"`, `"$this->node"`, …).
+    pub subject: Atom,
+    /// The type checked against.
+    pub class_type: PhpType,
+    /// The check was written negated (`$notHtml = !$raw instanceof …`).
+    pub negated: bool,
+    /// Exact class identity (`get_class($raw) === …`) rather than a
+    /// subtype check.
+    pub exact: bool,
+}
+
 /// The type-state of all variables at a single program point.
 ///
 /// This is the equivalent of PHPStan's `expressionTypes` map and Mago's
@@ -27,12 +45,20 @@ pub(crate) struct ScopeState {
     /// declared as a parameter, or bound by a foreach/catch before the
     /// current statement has an entry here.
     pub locals: AtomMap<Vec<ResolvedType>>,
+
+    /// Boolean variable name → the checks its value stands for.
+    ///
+    /// PHPStan calls these conditional expressions: the boolean carries
+    /// the assertion from the expression it was assigned, so testing it
+    /// narrows the original subject.
+    pub assertions: AtomMap<Vec<VarAssertion>>,
 }
 
 impl ScopeState {
     pub fn new() -> Self {
         Self {
             locals: AtomMap::default(),
+            assertions: AtomMap::default(),
         }
     }
 
@@ -77,6 +103,7 @@ impl ScopeState {
     /// Remove a variable (e.g. after `unset($x)`).
     pub fn remove(&mut self, var_name: &str) {
         self.locals.remove(&atom(var_name));
+        self.invalidate_assertions(var_name);
     }
 
     /// Remove synthetic property/array-access keys rooted at `var_name`
@@ -88,6 +115,28 @@ impl ScopeState {
         let arr_prefix = format!("{var_name}[");
         self.locals
             .retain(|key, _| !key.starts_with(&prop_prefix) && !key.starts_with(&arr_prefix));
+    }
+
+    /// Drop the checks that writing to `var_name` invalidates: whatever
+    /// the variable itself stood for, plus every check whose subject is
+    /// that variable or a path rooted at it.  A boolean only describes
+    /// the value its subject held when the check ran.
+    pub fn invalidate_assertions(&mut self, var_name: &str) {
+        if self.assertions.is_empty() {
+            return;
+        }
+        let key = atom(var_name);
+        self.assertions.remove(&key);
+        let prop_prefix = format!("{var_name}->");
+        let arr_prefix = format!("{var_name}[");
+        self.assertions.retain(|_, checks| {
+            checks.retain(|c| {
+                c.subject != key
+                    && !c.subject.starts_with(&prop_prefix)
+                    && !c.subject.starts_with(&arr_prefix)
+            });
+            !checks.is_empty()
+        });
     }
 
     /// Merge another scope into `self`.
@@ -105,6 +154,14 @@ impl ScopeState {
     /// narrowed types from non-exiting if-branches leak into the
     /// post-merge scope and pollute subsequent narrowing operations.
     pub fn merge_branch(&mut self, other: &ScopeState) {
+        // A boolean only still stands for a check if every incoming path
+        // agrees on it.  A check one branch established (or reassigned
+        // out from under) says nothing about the joined program point.
+        if !self.assertions.is_empty() {
+            self.assertions
+                .retain(|name, checks| other.assertions.get(name) == Some(checks));
+        }
+
         for (name, other_types) in &other.locals {
             let entry = self.locals.entry(*name).or_default();
 

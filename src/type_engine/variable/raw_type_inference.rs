@@ -6,7 +6,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
+use super::array_func_rules::{ArrayFuncArgs, array_func_element_type, array_func_raw_type};
 
 use crate::atom::{atom, bytes_to_str};
 use crate::docblock;
@@ -236,6 +236,45 @@ fn infer_element_type_precise<'b>(
     }
 }
 
+/// [`ArrayFuncArgs`] over a parsed argument list.
+struct AstArrayFuncArgs<'a, 'ast, 'ctx> {
+    args: &'a ArgumentList<'ast>,
+    ctx: &'a VarResolutionCtx<'ctx>,
+}
+
+impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
+    fn arg_raw_type(&self, index: usize) -> Option<PhpType> {
+        let expr = super::resolution::nth_arg_expr(self.args, index)?;
+        super::resolution::resolve_arg_raw_type(expr, self.ctx)
+    }
+
+    fn is_false_literal(&self, index: usize) -> bool {
+        matches!(
+            super::resolution::nth_arg_expr(self.args, index),
+            Some(Expression::Literal(Literal::False(_)))
+        )
+    }
+
+    fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
+        match super::resolution::nth_arg_expr(self.args, index)? {
+            Expression::Closure(closure) => closure
+                .return_type_hint
+                .as_ref()
+                .map(|rth| extract_hint_type(&rth.hint)),
+            Expression::ArrowFunction(arrow) => arrow
+                .return_type_hint
+                .as_ref()
+                .map(|rth| extract_hint_type(&rth.hint)),
+            _ => None,
+        }
+    }
+
+    fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
+        let expr = super::resolution::nth_arg_expr(self.args, index)?;
+        infer_callback_return_type(expr, param_type, self.ctx)
+    }
+}
+
 /// For known array-producing functions, resolve the **raw output type**
 /// (e.g. `list<User>`) from the input arguments.
 ///
@@ -248,88 +287,20 @@ pub(in crate::type_engine) fn resolve_array_func_raw_type(
     args: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    // Type-preserving functions: output array has same element type.
-    if ARRAY_PRESERVING_FUNCS
-        .iter()
-        .any(|f| f.eq_ignore_ascii_case(func_name))
-    {
-        let arr_expr = super::resolution::first_arg_expr(args)?;
-        let raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-        // If the raw type already has generic params, return it as-is
-        // so downstream `PhpType::extract_value_type` can extract the
-        // element type.  Otherwise it's a plain class name and we
-        // can't infer element type.
-        if raw.extract_value_type(true).is_some() {
-            return Some(raw);
-        }
-    }
-
-    // array_map: callback is first arg, array is second.
-    // The callback's return type determines the output element type.
-    if func_name.eq_ignore_ascii_case("array_map")
-        && let Some(element_type) = extract_array_map_element_type(args, ctx)
-    {
-        return Some(PhpType::list(element_type.widen_scalar_literals()));
-    }
-
-    // iterator_to_array: converts an iterator to an array, preserving
-    // key and value types.  `iterator_to_array($iter)` where `$iter`
-    // is `Iterator<int, Foo>` produces `array<int, Foo>`.  When only
-    // a value type is available (single generic param), produces
-    // `list<Foo>`.
-    if func_name.eq_ignore_ascii_case("iterator_to_array") {
-        let iter_expr = super::resolution::first_arg_expr(args)?;
-        let raw = super::resolution::resolve_arg_raw_type(iter_expr, ctx)?;
-        let val = raw
-            .iterable_element_type()
-            .map(|value| value.widen_scalar_literals());
-        if matches!(
-            super::resolution::nth_arg_expr(args, 1),
-            Some(Expression::Literal(Literal::False(_)))
-        ) {
-            return Some(val.map_or_else(PhpType::array, PhpType::list));
-        }
-        let key = raw
-            .iterable_key_type()
-            .and_then(|key| super::resolution::normalize_array_key_type(&key));
-        return match (key, val) {
-            (Some(k), Some(v)) => Some(PhpType::generic_array(k, v)),
-            (None, Some(v)) => Some(PhpType::list(v)),
-            _ => Some(PhpType::array()),
-        };
-    }
-
-    None
+    array_func_raw_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
 /// For known array functions, resolve the **element type**
 /// (e.g. `User`) of the output.
 ///
 /// Used by `resolve_rhs_expression` so that `$item = array_pop($users)`
-/// resolves `$item` to `User`.  This only covers true element-extracting
-/// functions (array_pop, current, etc.) that return a single element.
-///
-/// Array-producing functions like `array_map` and `iterator_to_array`
-/// are handled exclusively by [`resolve_array_func_raw_type`] which
-/// preserves the container type (e.g. `list<User>`).  Returning the
-/// element type here would lose the array wrapper and break downstream
-/// consumers that need to walk bracket segments (e.g. `$result[0]->`).
+/// resolves `$item` to `User`.
 pub(in crate::type_engine) fn resolve_array_func_element_type(
     func_name: &str,
     args: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    // Element-extracting functions: return the element type directly.
-    if ARRAY_ELEMENT_FUNCS
-        .iter()
-        .any(|f| f.eq_ignore_ascii_case(func_name))
-    {
-        let arr_expr = super::resolution::first_arg_expr(args)?;
-        let raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-        return raw.extract_value_type(true).cloned();
-    }
-
-    None
+    array_func_element_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
 /// Extract per-argument source text from a parsed `ArgumentList`.
@@ -371,58 +342,6 @@ pub(in crate::type_engine) fn extract_arg_texts_from_ast(
             }
         })
         .collect()
-}
-
-/// Extract the output element type for `array_map($callback, $array)`.
-///
-/// Strategy:
-/// 1. If the callback (first arg) is a closure/arrow function with a
-///    return type hint, use that.
-/// 2. Otherwise, fall back to the **input array's** element type
-///    (assumes the callback preserves type, which is a reasonable
-///    default when no return type is declared).
-fn extract_array_map_element_type(
-    args: &ArgumentList<'_>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<PhpType> {
-    let callback_expr = super::resolution::first_arg_expr(args)?;
-
-    // Try to get the callback's return type hint.
-    let return_hint = match callback_expr {
-        Expression::Closure(closure) => closure
-            .return_type_hint
-            .as_ref()
-            .map(|rth| extract_hint_type(&rth.hint)),
-        Expression::ArrowFunction(arrow) => arrow
-            .return_type_hint
-            .as_ref()
-            .map(|rth| extract_hint_type(&rth.hint)),
-        _ => None,
-    };
-
-    if let Some(ref parsed) = return_hint
-        && !parsed.is_untyped()
-    {
-        return return_hint;
-    }
-
-    // No explicit return type — try to infer it from the callback body
-    // by resolving the body expression with the callback parameter
-    // seeded to the input array's element type.
-    let arr_expr = super::resolution::nth_arg_expr(args, 1)?;
-    let input_raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-    let input_element = input_raw.extract_element_type()?.clone();
-
-    if let Some(inferred) = infer_callback_return_type(callback_expr, &input_element, ctx) {
-        return Some(inferred);
-    }
-
-    // Final fallback: assume the callback passes its element through. That
-    // only holds for element types a callback is unlikely to convert; a
-    // scalar element says nothing about the result, and `array_map('intval',
-    // $strings)` would be reported as `list<string>` on the strength of an
-    // input the callback exists to change.
-    (!input_element.is_scalar_leaf()).then_some(input_element)
 }
 
 /// Infer the return type of a callback (arrow function or closure) by

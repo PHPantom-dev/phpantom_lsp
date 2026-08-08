@@ -95,22 +95,6 @@ pub(crate) struct MergeDedup {
     pub constants: AtomSet,
 }
 
-/// Reserve the names of `class`'s `@method` tags into the method dedup set.
-///
-/// A `@method` tag declares a method on the class that carries it.  That
-/// declaration overrides any method of the same name inherited from a
-/// superclass, exactly like a real overriding method would.  The virtual
-/// members themselves are synthesized later by the PHPDoc provider; this
-/// only stakes the claim so the inheritance walk stops merging the inherited
-/// real method over the `@method` declaration.
-fn reserve_method_tag_names(class: &ClassInfo, dedup: &mut MergeDedup) {
-    for m in class.doc_methods() {
-        dedup
-            .methods
-            .insert(crate::atom::ascii_lowercase_atom(&m.name));
-    }
-}
-
 impl MergeDedup {
     /// Build from the members already present on a `ClassInfo`.
     fn from_class(class: &ClassInfo) -> Self {
@@ -155,13 +139,12 @@ pub(crate) fn resolve_class_with_inheritance(
     // addition is tracked in O(1) across all recursion levels.
     let mut dedup = MergeDedup::from_class(&merged);
 
-    // Stake a claim on the class's own `@method` tag names before merging
-    // any inherited members.  A `@method` declaration overrides a method of
-    // the same name inherited from a superclass, exactly like a real
-    // overriding method would (the virtual members themselves are
-    // synthesized later by the PHPDoc provider — here we only prevent the
-    // inheritance walk from merging the inherited real method over them).
-    reserve_method_tag_names(class, &mut dedup);
+    // A `@method` tag names something `__call()` handles, and PHP only
+    // reaches `__call()` when no accessible method of that name exists.
+    // A tag that collides with a real method from a trait or the parent
+    // chain is therefore dead documentation, however precise it looks:
+    // the walk below merges the real method, and the PHPDoc provider's
+    // virtual member loses to it during the virtual-member merge.
 
     // 1. Merge traits used by this class.
     //    PHP precedence: class methods > trait methods > inherited methods.
@@ -216,14 +199,6 @@ pub(crate) fn resolve_class_with_inheritance(
         } else {
             break;
         };
-
-        // Stake a claim on this ancestor's `@method` tag names at its depth
-        // in the hierarchy, so that a real method of the same name inherited
-        // from a *farther* ancestor does not shadow the `@method`
-        // declaration.  Reserved before the ancestor's own members are
-        // merged so a real method on this same ancestor still wins over its
-        // own `@method` tag.
-        reserve_method_tag_names(&parent, &mut dedup);
 
         // Build the substitution map for this parent level.
         //

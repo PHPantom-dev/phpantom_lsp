@@ -301,6 +301,23 @@ class TypeNarrowingDemo
         if (!$guard instanceof Rock || !$guard->crush()) {
             // guard clause body
         }
+
+        // A boolean holding the result of an instanceof check carries the
+        // check with it: testing the boolean narrows the original subject.
+        $stored = pickRockOrBanana();
+        $isRock = $stored instanceof Rock;
+        if ($isRock) {
+            $stored->crush();                     // narrowed to Rock via $isRock
+        }
+        echo $isRock ? $stored->crush() : $stored->peel();   // both branches narrowed
+
+        // The negated form works as a guard clause too.
+        $held = pickRockOrBanana();
+        $isBanana = $held instanceof Banana;
+        if (!$isBanana) {
+            return;
+        }
+        $held->peel();                            // narrowed to Banana after the guard
     }
 }
 
@@ -922,6 +939,14 @@ class MethodTemplateDemo
         Factory::create(Pen::class)->write();             // static @template
         resolve(Marker::class)->highlight();              // function @template
 
+        // A static factory's method-level @template binds the element
+        // type of the collection it returns, whether the result goes
+        // through a variable or the call is chained straight through.
+        $iteration = new ScaffoldingIteration();
+        $made = TypedCollection::make($iteration->allPens());
+        $made->first()->write();                          // TValue = Pen via a variable
+        TypedCollection::make($iteration->allPens())->first()->write(); // ...and chained directly
+
         $mapper = new ObjectMapper();
         $mapped = $mapper->wrap(new Pen());
         $mapped->first();                         // → Pen (T resolved from argument)
@@ -1011,6 +1036,20 @@ class ClosureReturnTemplateDemo
         $cache->remember('marker', function () {
             return new Marker('cached');
         })->highlight();                                                // block-closure return → Marker
+
+        // The `static` modifier is just a modifier: a static closure binds
+        // the template exactly like a plain one.
+        $cache->remember('static-pen', static fn(): Pen => new Pen('cached'))->write();
+        $cache->remember('static-marker', static function () {
+            return new Marker('cached');
+        })->highlight();                                                // static block-closure → Marker
+
+        // A body that is a *call* binds the template from the call's return
+        // type, the same way a `new` expression or a literal body does.
+        $cache->remember('made', fn() => Pen::make('blue'))->write();   // static call → Pen
+        $marker = new Marker('yellow');
+        $cache->remember('renamed', fn() => $marker->rename('bold'))
+            ->highlight();                                              // method call → Marker
     }
 }
 
@@ -1655,6 +1694,30 @@ class ClassStringVarDemo
 }
 
 
+// ── class-string Property Resolution ────────────────────────────────────────
+// A property declared `class-string<T>` holds a class name at runtime, not
+// an instance of its own declared type, so a `::` access on it resolves
+// against `T`. A property that is merely a plain `string` also holds a
+// class name at runtime for all PHPantom can prove, so `::` on it is left
+// unresolved rather than reported as scalar access — see
+// ScalarMemberAccessDemo above for the case that is still flagged.
+
+class ClassStringPropertyDemo
+{
+    /** @var class-string<Pen> */
+    public string $penClass;
+
+    public string $anyClassName;
+
+    public function demo(): void
+    {
+        $this->penClass::make()->write();  // resolves Pen through class-string<T> property
+
+        $this->anyClassName::create();     // no diagnostic — unverifiable, not scalar access
+    }
+}
+
+
 // ── iterator_to_array Resolution ────────────────────────────────────────────
 
 class IteratorToArrayDemo
@@ -1666,6 +1729,11 @@ class IteratorToArrayDemo
 
         $items = iterator_to_array($iter);
         $items[0]->write();                       // resolves Pen from iterator value type
+
+        // The element type survives without the intermediate variable,
+        // and through a nested array function call.
+        iterator_to_array($iter)[0]->write();     // Pen straight off the call
+        array_values(iterator_to_array($iter))[0]->write();
     }
 }
 
@@ -2112,6 +2180,10 @@ class ArrayFuncDemo
         $mapped = array_map(fn($pen) => $pen, $src->members);
         $mapped[0]->write();              // Pen from array_map fallback
 
+        // The same rules apply without an intermediate variable.
+        array_filter($src->members)[0]->write();
+        array_map(fn($pen): Pen => $pen, $src->members)[0]->write();
+
         // Untyped callback parameter inferred from a method-call array
         // argument: `$pen` resolves to Pen from roster()'s list<Pen>.
         array_map(fn($pen) => $pen->color(), $src->roster());
@@ -2126,6 +2198,20 @@ class ArrayFuncDemo
         // array_sum / array_product: always int|float
         $total = array_sum([10, 20, 30]);
         $product = array_product([2, 3, 4]);
+    }
+
+    /**
+     * A callback may declare the widest hint PHP has a keyword for; the
+     * element shape from the call site still narrows it.
+     *
+     * @return list<string>
+     */
+    public function pairColors(ScaffoldingArrayFunc $src): array
+    {
+        return array_map(
+            static fn(array $pair): string => $pair[0]->color(),  // Pen from array{Pen, string}
+            $src->pairs()
+        );
     }
 }
 
@@ -3333,6 +3419,13 @@ class ScalarMemberAccessDemo
         // Works with Response too — isSuccess() returns bool:
         $resp = new Response(200, 'OK');
         $resp->isSuccess()->flag;
+
+        // A `::` access is different: `$string::method()` is valid PHP
+        // (the string names a class at runtime), so it is left
+        // unresolved rather than flagged — see ClassStringPropertyDemo
+        // below. A scalar that can never name a class, like `int`,
+        // still triggers this same diagnostic through `::`:
+        $user->age::method();
     }
 }
 
@@ -5096,6 +5189,9 @@ class ScaffoldingArrayFunc
 
     /** @return list<Pen> */
     public function roster(): array { return []; }
+
+    /** @return list<array{Pen, string}> */
+    public function pairs(): array { return [[new Pen('blue'), 'ink'], [new Pen('red'), 'ink']]; }
 }
 
 class ScaffoldingException
@@ -5838,6 +5934,17 @@ class TypedCollection
 
     /** @param array<TKey, TValue> $items */
     public function __construct(array $items = []) { $this->items = $items; }
+
+    /**
+     * Static factory carrying a method-level `@template` into the
+     * class-level `TValue` of the collection it returns.
+     *
+     * @template TMakeValue
+     *
+     * @param  array<array-key, TMakeValue>  $items
+     * @return static<array-key, TMakeValue>
+     */
+    public static function make(array $items = []): static { return new static($items); }
 
     /** @return TValue */
     public function first() { return reset($this->items); }
@@ -6621,6 +6728,10 @@ function runDemoAssertions(): void
     assert($memberDemo->ternary($ternaryResp) === 'd|e', 'property_exists and isset ternaries read the proven properties');
     assert($memberDemo->ternary(new ApiResponse()) === 'none|none', 'member-existence ternaries fall back when the properties are absent');
 
+    // ── Wide `array` callback parameter narrows to the element shape ────
+    $pairColors = (new ArrayFuncDemo())->pairColors(new ScaffoldingArrayFunc());
+    assert($pairColors === ['blue', 'red'], 'array_map callback reads Pen::color() through a declared `array` parameter');
+
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = loadPensOrFail();
     assert($pens !== false && $pens[0] instanceof Pen, 'loadPensOrFail() returns array<int, Pen> on success');
@@ -6831,6 +6942,12 @@ function runDemoAssertions(): void
     $resolved = resolve(Marker::class);
     assert($resolved instanceof Marker, 'resolve(Marker::class) must return Marker');
 
+    // ── TypedCollection::make() carries its element type ────────────────
+    $madePens = TypedCollection::make([new Pen('blue')]);
+    assert($madePens instanceof TypedCollection, 'TypedCollection::make() must return a TypedCollection');
+    assert($madePens->first() instanceof Pen, 'TypedCollection::make([Pen])->first() must return Pen');
+    assert(TypedCollection::make([new Pen('red')])->first() instanceof Pen, 'the same holds for a directly chained call');
+
     // ── ObjectMapper::wrap() → TypedCollection ──────────────────────────
     $mapper = new ObjectMapper();
     $wrapped = $mapper->wrap(new Pen());
@@ -6881,6 +6998,17 @@ function runDemoAssertions(): void
         return new Marker('cached');
     });
     assert($cachedMarker instanceof Marker, 'remember(function () { return new Marker(); }) must return Marker (T from closure body)');
+    $staticPen = $cache->remember('static-pen', static fn(): Pen => new Pen('cached'));
+    assert($staticPen instanceof Pen, 'remember(static fn(): Pen => ...) must return Pen (T from static arrow function)');
+    $staticMarker = $cache->remember('static-marker', static function () {
+        return new Marker('cached');
+    });
+    assert($staticMarker instanceof Marker, 'remember(static function () { return new Marker(); }) must return Marker (T from static closure body)');
+    $madePen = $cache->remember('made', fn() => Pen::make('blue'));
+    assert($madePen instanceof Pen, 'remember(fn() => Pen::make(...)) must return Pen (T from a static-call body)');
+    $renamedMarker = new Marker('yellow');
+    $cachedRenamed = $cache->remember('renamed', fn() => $renamedMarker->rename('bold'));
+    assert($cachedRenamed instanceof Marker, 'remember(fn() => $marker->rename(...)) must return Marker (T from a method-call body)');
 
     // ── ScaffoldingEventBus::listen() — closure param type binding ──────
     $bus = new ScaffoldingEventBus();
@@ -7316,6 +7444,18 @@ function runDemoAssertions(): void
 
     $product = array_product([2, 3, 4]);
     assert(is_int($product) || is_float($product), 'array_product must return int or float');
+
+    // Inline, without an intermediate variable — the same element type.
+    $penArray3 = [new Pen('x'), new Pen('y')];
+    assert(array_values($penArray3)[0] instanceof Pen, 'array_values must preserve Pen inline');
+    assert(array_map(fn(Pen $p): Pen => $p, $penArray3)[0] instanceof Pen,
+        'array_map must preserve Pen inline');
+
+    $penIterator = new \ArrayIterator([new Pen('i'), new Pen('j')]);
+    assert(iterator_to_array($penIterator)[0] instanceof Pen,
+        'iterator_to_array must preserve Pen inline');
+    assert(array_values(iterator_to_array($penIterator))[0] instanceof Pen,
+        'a nested array function call must preserve Pen');
 
     // ── Match expression types ──────────────────────────────────────────
     $matchResult = match (0) {

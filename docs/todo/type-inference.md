@@ -462,6 +462,23 @@ Fixed by adding array-literal element inference in the
 `each([1, 2, 3], fn($x) => ...)` now infers `T = int` and shows
 the correct type hint for `$x`.
 
+**Still missing: the type engine itself, not just the hint.** Steps 1
+and 2 wired the substitution into the inlay hint path only. Hover,
+completion and diagnostics resolve a closure parameter through the
+forward walker, which never consults the enclosing call's
+`callable(T)` annotation, so the parameter stays untyped there:
+
+```php
+/** @var list<Foo> $rows */
+each($rows, fn ($x) => $x->name);   // $x has no type on hover
+array_map(fn ($case) => $case[0]->name, $rows);
+```
+
+The binding belongs in the shared pipeline (a closure literal passed
+as an argument should seed its parameters from the callable parameter
+type the call site substitutes), so every consumer benefits rather
+than inlay hints alone.
+
 **References:**
 - PHPStan: `GenericFunctionsReturnTypeExtension`, argument-based
   template inference in `FunctionCallNode`.

@@ -19,6 +19,8 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
+use crate::atom::bytes_to_str;
+
 /// Emit [`Walker`] overrides that stop traversal at nested variable
 /// scopes (closures, arrow functions, named function declarations) while
 /// still walking an anonymous class's constructor arguments, which belong
@@ -197,4 +199,176 @@ fn collect_guard_targets(expr: &Expression<'_>, offsets: &mut HashSet<u32>) {
         }
         _ => {}
     }
+}
+
+// ─── Short-circuit `isset()` guard collection ──────────────────────────────
+
+/// Collect byte offsets of variable reads that are guarded by an
+/// `isset()`/`!isset()` check earlier in the same short-circuiting `&&`
+/// or `||` chain, e.g. `isset($x) && $x > 1` or `!isset($x) || $x > 1`.
+/// The right-hand side only evaluates once the left-hand side has
+/// established that the variable exists, so a read there is not a use
+/// of an undefined variable.
+///
+/// This only covers the operands of the boolean expression itself, not
+/// the surrounding `if`/`while` body — a plain `isset($x)` check does
+/// not otherwise define `$x` (see `flags_undefined_variable_after_isset_guard`).
+pub(super) fn collect_short_circuit_guarded_offsets(statements: &[Statement<'_>]) -> HashSet<u32> {
+    let walker = ShortCircuitWalker;
+    let mut offsets = HashSet::new();
+    for stmt in statements {
+        walker.walk_statement(stmt, &mut offsets);
+    }
+    offsets
+}
+
+struct ShortCircuitWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<u32>> for ShortCircuitWalker {
+    fn walk_in_binary(&self, node: &'ast Binary<'arena>, context: &mut HashSet<u32>) {
+        let is_or = match node.operator {
+            BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => false,
+            BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => true,
+            _ => return,
+        };
+
+        let mut operands = Vec::new();
+        collect_chain_operands(node.lhs, is_or, &mut operands);
+        collect_chain_operands(node.rhs, is_or, &mut operands);
+        if operands.len() < 2 {
+            return;
+        }
+
+        // `&&` only guards later operands with a positive `isset()`;
+        // `||` only guards later operands with a negated `!isset()`
+        // (the right-hand side runs only when the left-hand side, and
+        // therefore the isset() check, was false).
+        let mut guarded: HashSet<String> = HashSet::new();
+        for operand in &operands {
+            mark_guarded_reads(operand, &guarded, context);
+            for name in isset_guard_names(operand, is_or) {
+                guarded.insert(name);
+            }
+        }
+    }
+
+    stop_at_inner_scopes!(HashSet<u32>);
+}
+
+/// Flatten a left-associative chain of the same short-circuiting
+/// operator (`&&`/`and` when `is_or` is `false`, `||`/`or` otherwise)
+/// into its individual operands, unwrapping parentheses around nested
+/// chains of the same operator.
+fn collect_chain_operands<'e>(
+    expr: &'e Expression<'e>,
+    is_or: bool,
+    out: &mut Vec<&'e Expression<'e>>,
+) {
+    if let Expression::Binary(bin) = expr {
+        let matches_operator = if is_or {
+            matches!(
+                bin.operator,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+            )
+        } else {
+            matches!(
+                bin.operator,
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+            )
+        };
+        if matches_operator {
+            collect_chain_operands(bin.lhs, is_or, out);
+            collect_chain_operands(bin.rhs, is_or, out);
+            return;
+        }
+    }
+    if let Expression::Parenthesized(inner) = expr {
+        let mut inner_operands = Vec::new();
+        collect_chain_operands(inner.expression, is_or, &mut inner_operands);
+        if inner_operands.len() > 1 {
+            out.extend(inner_operands);
+            return;
+        }
+    }
+    out.push(expr);
+}
+
+/// Unwrap parentheses and a single `!` prefix from a condition,
+/// returning `(inner_expr, negated)`.
+fn unwrap_negation<'e>(expr: &'e Expression<'e>) -> (&'e Expression<'e>, bool) {
+    match expr {
+        Expression::Parenthesized(inner) => unwrap_negation(inner.expression),
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            let (inner, already_negated) = unwrap_negation(prefix.operand);
+            (inner, !already_negated)
+        }
+        _ => (expr, false),
+    }
+}
+
+/// If `expr` (after unwrapping parens/`!`) is an `isset()` call whose
+/// negation matches `want_negated`, return the base variable names of
+/// its guard targets.
+fn isset_guard_names(expr: &Expression<'_>, want_negated: bool) -> Vec<String> {
+    let (inner, negated) = unwrap_negation(expr);
+    if negated != want_negated {
+        return Vec::new();
+    }
+    let Expression::Construct(Construct::Isset(isset)) = inner else {
+        return Vec::new();
+    };
+    isset
+        .values
+        .iter()
+        .filter_map(|value| base_variable_name(value))
+        .collect()
+}
+
+/// Resolve the base variable name of an `isset()` guard target, e.g.
+/// `$arr` for `$arr['key']` or `$obj` for `$obj->prop`.
+fn base_variable_name(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
+        Expression::ArrayAccess(aa) => base_variable_name(aa.array),
+        Expression::Access(Access::Property(pa)) => base_variable_name(pa.object),
+        Expression::Access(Access::NullSafeProperty(pa)) => base_variable_name(pa.object),
+        Expression::Access(Access::StaticProperty(spa)) => base_variable_name(spa.class),
+        _ => None,
+    }
+}
+
+/// Mark the byte offsets of every read of a variable named in `names`
+/// found anywhere within `expr`.
+fn mark_guarded_reads(expr: &Expression<'_>, names: &HashSet<String>, offsets: &mut HashSet<u32>) {
+    if names.is_empty() {
+        return;
+    }
+    let walker = VarNameOffsetWalker;
+    let mut ctx = VarNameOffsetCtx {
+        names,
+        offsets: HashSet::new(),
+    };
+    walker.walk_expression(expr, &mut ctx);
+    offsets.extend(ctx.offsets);
+}
+
+struct VarNameOffsetCtx<'n> {
+    names: &'n HashSet<String>,
+    offsets: HashSet<u32>,
+}
+
+struct VarNameOffsetWalker;
+
+impl<'ast, 'arena, 'n> Walker<'ast, 'arena, VarNameOffsetCtx<'n>> for VarNameOffsetWalker {
+    fn walk_in_direct_variable(
+        &self,
+        node: &'ast DirectVariable<'arena>,
+        context: &mut VarNameOffsetCtx<'n>,
+    ) {
+        if context.names.contains(bytes_to_str(node.name)) {
+            context.offsets.insert(node.span().start.offset);
+        }
+    }
+
+    stop_at_inner_scopes!(VarNameOffsetCtx<'n>);
 }

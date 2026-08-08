@@ -76,7 +76,8 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                         || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
                             .is_some()
                 })
-            } || condition_proves_member(conditional.condition, scope);
+            } || condition_proves_member(conditional.condition, scope)
+                || !assertion_alias_extractions(conditional.condition, scope).is_empty();
             if has_narrowing {
                 if let Some(then_expr) = conditional.then {
                     let then_span = then_expr.span();
@@ -230,6 +231,107 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
     }
 }
 
+// ─── Boolean variables that stand for a check ───────────────────────────────
+
+/// Record the checks a boolean assignment carries.
+///
+/// `$isHtml = $raw instanceof HtmlString;` proves nothing on its own,
+/// but `$isHtml` now stands for the check: wherever it is tested, `$raw`
+/// narrows the same way the original expression would narrow it.
+///
+/// Only the `&&` conjuncts that are themselves `instanceof`-style checks
+/// are recorded; anything else in the expression (`$flag`, a comparison,
+/// a call) contributes no assertion and is skipped, which still leaves
+/// the recorded conjuncts sound for a truthy test.
+pub(crate) fn record_assertion_variable<'b>(
+    lhs_name: &str,
+    rhs: &'b Expression<'b>,
+    scope: &mut ScopeState,
+) {
+    let mut checks: Vec<VarAssertion> = Vec::new();
+    for operand in collect_and_chain_operands(rhs) {
+        let mut subjects = collect_condition_var_names(operand);
+        subjects.extend(collect_condition_property_keys(operand));
+        for subject in subjects {
+            // `$x = $x instanceof Foo` overwrites its own subject, so the
+            // recorded check would describe a value that no longer exists.
+            if subject == lhs_name {
+                continue;
+            }
+            if let Some(extraction) =
+                narrowing::try_extract_instanceof_with_negation(operand, &subject)
+            {
+                checks.push(VarAssertion {
+                    subject: atom(&subject),
+                    class_type: extraction.class_type,
+                    negated: extraction.negated,
+                    exact: extraction.exact,
+                });
+                break;
+            }
+        }
+    }
+    if !checks.is_empty() {
+        scope.assertions.insert(atom(lhs_name), checks);
+    }
+}
+
+/// Expand a bare boolean operand into the checks it stands for.
+///
+/// `$isHtml` and `!$isHtml` both resolve through the recorded check,
+/// with the operand's own negation folded into the result, so the
+/// callers below treat them exactly like the original `instanceof`
+/// expression.
+///
+/// A boolean built from several conjuncts only proves its parts when it
+/// is true: `!$ok` says one of them failed without saying which, so a
+/// negated operand expands only a single-check boolean.
+pub(in crate::type_engine) fn assertion_alias_extractions(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+) -> Vec<(String, narrowing::InstanceofExtraction)> {
+    if scope.assertions.is_empty() {
+        return Vec::new();
+    }
+
+    let mut negated = false;
+    let mut inner = expr;
+    loop {
+        match inner {
+            Expression::Parenthesized(p) => inner = p.expression,
+            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+                negated = !negated;
+                inner = prefix.operand;
+            }
+            _ => break,
+        }
+    }
+
+    let Expression::Variable(Variable::Direct(dv)) = inner else {
+        return Vec::new();
+    };
+    let Some(checks) = scope.assertions.get(&atom(bytes_to_str(dv.name))) else {
+        return Vec::new();
+    };
+    if negated && checks.len() > 1 {
+        return Vec::new();
+    }
+
+    checks
+        .iter()
+        .map(|c| {
+            (
+                c.subject.to_string(),
+                narrowing::InstanceofExtraction {
+                    class_type: c.class_type.clone(),
+                    negated: c.negated != negated,
+                    exact: c.exact,
+                },
+            )
+        })
+        .collect()
+}
+
 // ─── Narrowing helpers ──────────────────────────────────────────────────────
 
 /// Narrow a `match ($x::class)` subject to the classes one arm names.
@@ -307,12 +409,25 @@ pub(crate) fn apply_condition_narrowing<'b>(
             var_names.push(key);
         }
     }
+    // Expand operands that are a bare boolean standing for a check
+    // (`$isHtml` from `$isHtml = $raw instanceof HtmlString`) into the
+    // check itself, and make sure its subject is narrowed below even
+    // when the condition never names it.
+    let alias_extractions: Vec<Vec<(String, narrowing::InstanceofExtraction)>> = operands
+        .iter()
+        .map(|operand| assertion_alias_extractions(operand, scope))
+        .collect();
+    for subject in alias_extractions.iter().flatten().map(|(s, _)| s) {
+        if !var_names.contains(subject) {
+            var_names.push(subject.clone());
+        }
+    }
 
     // Track which variables have been narrowed by instanceof across
     // `&&` operands so we can merge them into a union.
     let mut instanceof_results: HashMap<String, Vec<ResolvedType>> = HashMap::new();
 
-    for operand in &operands {
+    for (op_idx, operand) in operands.iter().enumerate() {
         for var_name in &var_names {
             // Compound OR instanceof: `$x instanceof A || $x instanceof B`
             if let Some(classes) = narrowing::try_extract_compound_or_instanceof(operand, var_name)
@@ -330,9 +445,15 @@ pub(crate) fn apply_condition_narrowing<'b>(
                 continue;
             }
 
-            // Single instanceof (including negated, is_a, get_class).
+            // Single instanceof (including negated, is_a, get_class),
+            // or a boolean that stands for one.
             if let Some(extraction) =
-                narrowing::try_extract_instanceof_with_negation(operand, var_name)
+                narrowing::try_extract_instanceof_with_negation(operand, var_name).or_else(|| {
+                    alias_extractions[op_idx]
+                        .iter()
+                        .find(|(subject, _)| subject == var_name)
+                        .map(|(_, e)| e.clone())
+                })
             {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                 if extraction.negated {
@@ -551,6 +672,15 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             var_names.push(key);
         }
     }
+    // A bare boolean standing for a check inverts along with the rest of
+    // the condition: `if (!$isHtml) { return; }` leaves `$raw` narrowed
+    // to `HtmlString` after the guard.
+    let alias_extractions = assertion_alias_extractions(condition, scope);
+    for (subject, _) in &alias_extractions {
+        if !var_names.contains(subject) {
+            var_names.push(subject.clone());
+        }
+    }
     for var_name in &var_names {
         if let Some(classes) = narrowing::try_extract_compound_or_instanceof(condition, var_name)
             && !classes.is_empty()
@@ -569,7 +699,12 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
         }
 
         if let Some(extraction) =
-            narrowing::try_extract_instanceof_with_negation(condition, var_name)
+            narrowing::try_extract_instanceof_with_negation(condition, var_name).or_else(|| {
+                alias_extractions
+                    .iter()
+                    .find(|(subject, _)| subject == var_name)
+                    .map(|(_, e)| e.clone())
+            })
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
             let mut results = scope.get(var_name).to_vec();
@@ -1905,6 +2040,12 @@ pub(crate) fn is_synthetic_key(key: &str) -> bool {
 /// condition-based narrowing no longer holds.
 pub(crate) fn strip_synthetic_property_keys(scope: &mut ScopeState) {
     scope.locals.retain(|key, _| !is_synthetic_key(key));
+    // A check on a property path is narrowing too, so a boolean that
+    // stands for one is dropped alongside the key it describes.
+    scope.assertions.retain(|_, checks| {
+        checks.retain(|c| !is_synthetic_key(&c.subject));
+        !checks.is_empty()
+    });
 }
 
 /// Keep only the synthetic property/array access keys that *every*

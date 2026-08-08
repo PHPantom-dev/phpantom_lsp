@@ -1,4 +1,7 @@
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{
+    create_test_backend, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs,
+};
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use tower_lsp::LanguageServer;
@@ -2171,6 +2174,82 @@ new OldService();
         deprecated.is_empty(),
         "Class deprecation should be suppressed when target PHP (7.4) < since (8.1), got: {:?}",
         deprecated
+    );
+}
+
+// ─── Same suppression applies to embedded-stub members, not just user code ──
+
+#[test]
+fn deprecated_stub_method_since_suppressed_when_target_is_older() {
+    let backend = create_test_backend_with_full_stubs();
+    backend.set_php_version(phpantom_lsp::types::PhpVersion::new(8, 4));
+
+    let uri = "file:///test_stub_since_suppressed.php";
+    let text = r#"<?php
+$pdo = new \PDO('sqlite::memory:');
+$pdo->sqliteCreateFunction('foo', function () {});
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "PDO::sqliteCreateFunction (deprecated since 8.5) should be suppressed when the \
+         project targets PHP 8.4, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn deprecated_stub_method_since_not_suppressed_when_target_matches() {
+    let backend = create_test_backend_with_full_stubs();
+    backend.set_php_version(phpantom_lsp::types::PhpVersion::new(8, 5));
+
+    let uri = "file:///test_stub_since_not_suppressed.php";
+    let text = r#"<?php
+$pdo = new \PDO('sqlite::memory:');
+$pdo->sqliteCreateFunction('foo', function () {});
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        !deprecated.is_empty(),
+        "PDO::sqliteCreateFunction (deprecated since 8.5) should fire when the project \
+         targets PHP 8.5"
+    );
+}
+
+/// The PDO stub declares `PDO` in an anonymous `namespace { }` block and
+/// `Pdo\Sqlite` in a sibling `namespace Pdo { }` block.  The global class must
+/// not inherit the sibling's namespace.
+#[test]
+fn class_in_anonymous_namespace_block_is_not_labelled_with_sibling_namespace() {
+    let backend = create_test_backend_with_full_stubs();
+    backend.set_php_version(phpantom_lsp::types::PhpVersion::new(8, 5));
+
+    let uri = "file:///test_anonymous_namespace_block.php";
+    let text = r#"<?php
+$pdo = new \PDO('sqlite::memory:');
+$pdo->sqliteCreateFunction('foo', function () {});
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("'PDO::sqliteCreateFunction'")),
+        "Deprecation should name the global PDO class, got: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("Pdo\\PDO")),
+        "The global PDO class must not be labelled with the sibling `Pdo` namespace, got: {:?}",
+        messages
     );
 }
 

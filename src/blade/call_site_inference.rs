@@ -687,7 +687,7 @@ pub(crate) fn has_var_docblock(blade_content: &str) -> bool {
 
 /// The contents of a single- or double-quoted string literal, when it
 /// is a plain identifier-safe name.
-fn string_literal_contents(s: &LiteralString<'_>) -> Option<String> {
+pub(crate) fn string_literal_contents(s: &LiteralString<'_>) -> Option<String> {
     let value = s.value.map(bytes_to_str)?;
     if value.is_empty()
         || !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
