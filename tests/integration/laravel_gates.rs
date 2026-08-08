@@ -871,6 +871,204 @@ class Consumer {
     );
 }
 
+/// The registered-provider list is written by hand, so it may name a class
+/// that no longer exists, and two providers may share a file.  Neither may
+/// derail the scan or scan the same file twice.
+#[tokio::test]
+async fn an_odd_provider_list_still_yields_the_abilities() {
+    // Both providers live in one file, so the second resolves to a URI the
+    // scan has already read.
+    let providers = "\
+<?php
+return [
+    App\\Providers\\MissingProvider::class,
+    App\\Providers\\AuthServiceProvider::class,
+    App\\Providers\\SecondProvider::class,
+];
+";
+    let two_in_one_file = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Support\\Facades\\Gate;
+class AuthServiceProvider
+{
+    public function boot(): void
+    {
+        Gate::define('manage-billing', fn ($user) => true);
+    }
+}
+class SecondProvider
+{
+    public function boot(): void
+    {
+        Gate::define('manage-tenancy', fn ($user) => true);
+    }
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Gate;
+class Consumer {
+    public function go(): void {
+        Gate::allows('manage-billing');
+        Gate::allows('manage-tenancy');
+        Gate::allows('manage-billling');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", providers),
+            ("src/Providers/AuthServiceProvider.php", two_in_one_file),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    // Both files' abilities are indexed, and the file shared by two providers
+    // contributed each of its registrations once.
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    let flagged = ability_diagnostics(&diags);
+    assert_eq!(
+        flagged.len(),
+        1,
+        "only the typo should be flagged, got {flagged:?}"
+    );
+    assert!(flagged[0].message.contains("manage-billling"));
+}
+
+/// A provider file can disappear between being indexed and being scanned — a
+/// branch switch mid-session does exactly that.  The class index still names
+/// it, so the scan has to cope with the file no longer being readable.
+#[tokio::test]
+async fn a_provider_deleted_after_indexing_does_not_derail_the_scan() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Gate;
+class Consumer {
+    public function go(): void {
+        Gate::allows('manage-billing');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
+            ("src/Models/Post.php", POST_PHP),
+            ("src/Models/Video.php", VIDEO_PHP),
+            ("src/Policies/PostPolicy.php", POST_POLICY_PHP),
+            ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    std::fs::remove_file(dir.path().join("src/Providers/AuthServiceProvider.php"))
+        .expect("the provider file should be removable");
+
+    // Re-running discovery finds the provider still named by the class index
+    // but no longer readable.  The policies remain, so abilities still
+    // resolve — the run simply loses the file's own registrations.
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    // Whether `manage-billing` survived the deletion is not the point; that
+    // the scan completed and the ability set is still usable is.
+    assert!(
+        ability_diagnostics(&diags).len() <= 1,
+        "the scan should complete rather than derail, got {:?}",
+        ability_diagnostics(&diags)
+    );
+}
+
+/// Analyse `consumer` on its own inside a gate-bearing workspace, and return
+/// the process exit code (`0` clean, `1` diagnostics found).
+///
+/// A `Gate` stub keeps the file free of unrelated diagnostics, and the path
+/// filter keeps the provider's own out of the result, so the exit code speaks
+/// only to the abilities the consumer checks.
+async fn analyse_consumer(consumer: &str) -> i32 {
+    let gate_stub = "\
+<?php
+namespace Illuminate\\Support\\Facades;
+class Gate {
+    public static function allows($ability, $arguments = []): bool { return true; }
+}
+";
+    let (_backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
+            ("src/Models/Post.php", POST_PHP),
+            ("src/Models/Video.php", VIDEO_PHP),
+            ("src/Policies/PostPolicy.php", POST_POLICY_PHP),
+            ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
+            ("stubs/Gate.php", gate_stub),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+
+    phpantom_lsp::analyse::run(phpantom_lsp::analyse::AnalyseOptions {
+        workspace_root: dir.path().to_path_buf(),
+        path_filter: Some(dir.path().join("src/Consumer.php")),
+        severity_filter: phpantom_lsp::analyse::SeverityFilter::All,
+        use_colour: false,
+        output_format: phpantom_lsp::analyse::OutputFormat::Json,
+        // Suppresses the progress bar, which has no terminal to draw on here.
+        debug: true,
+        verbosity: 0,
+    })
+    .await
+}
+
+/// The `analyze` CLI builds the gate index itself rather than inheriting the
+/// LSP's, so a project that checks its abilities has to be judged the same way
+/// on the command line as it is in the editor.
+#[tokio::test]
+async fn the_analyze_command_judges_abilities_too() {
+    let clean = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Gate;
+class Consumer {
+    public function go(): void {
+        Gate::allows('manage-billing', 'pro');
+        Gate::allows('update', 'post');
+    }
+}
+";
+    assert_eq!(
+        analyse_consumer(clean).await,
+        0,
+        "a defined ability and a policy method are both valid"
+    );
+
+    // The same file with one letter changed is the only difference, so the
+    // exit code can only be coming from the ability check.
+    let typo = clean.replace("'update'", "'updatte'");
+    assert_eq!(
+        analyse_consumer(&typo).await,
+        1,
+        "the typo'd ability should be reported"
+    );
+}
+
 // ─── Blade ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
