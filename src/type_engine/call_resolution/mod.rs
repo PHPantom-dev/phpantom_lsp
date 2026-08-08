@@ -51,11 +51,15 @@
 //!   map from call-site argument texts.
 //! - [`arg_type_resolution`]: resolving inline argument expressions to
 //!   their raw `PhpType`.
+//! - [`facade_owner`]: picking the concrete container class that types a
+//!   static call made through a Laravel facade.
 mod arg_type_resolution;
 mod callable_target;
+mod facade_owner;
 mod return_types;
 mod target_cache;
 mod template_subs;
 
+pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use return_types::MethodReturnCtx;
 pub(crate) use target_cache::{activate_type_engine_caches, try_infer_body_return_type};

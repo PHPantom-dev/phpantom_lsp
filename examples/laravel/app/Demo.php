@@ -8,6 +8,7 @@
 
 namespace App;
 
+use App\Http\Controllers\BakeryController;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Bakery;
@@ -19,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -799,6 +801,13 @@ class Demo
         // A bare global facade alias resolves without an explicit import,
         // from the framework's own `Facade::defaultAliases()` table.
         \App::environment('production');                        // → App facade
+
+        // A class-string handed to the container resolves to that class,
+        // whether the result is stored first or chained inline.
+        $controller = App::make(BakeryController::class);
+        $controller->index();                                   // → View
+        App::make(BakeryController::class)->index();            // → View
+        App::makeWith(BakeryController::class, [])->index();    // → View
     }
 
 

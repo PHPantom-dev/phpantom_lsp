@@ -218,6 +218,91 @@ class Consumer {
     assert_resolves_to_currency_helper(&backend, consumer);
 }
 
+/// Hover over the `format` member of a chained call and assert the chain
+/// subject resolved to `CurrencyHelper`.
+fn assert_chained_format_resolves(backend: &phpantom_lsp::Backend, consumer: &str) {
+    backend.update_ast("file:///src/Consumer.php", consumer);
+    let idx = consumer
+        .find("->format()")
+        .expect("consumer should chain format")
+        + 2;
+    let prefix = &consumer[..idx];
+    let line = prefix.bytes().filter(|b| *b == b'\n').count() as u32;
+    let character = prefix.rsplit('\n').next().unwrap().len() as u32;
+    let hover = backend
+        .handle_hover(
+            "file:///src/Consumer.php",
+            consumer,
+            Position { line, character },
+        )
+        .expect("hover should resolve the chained method");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("CurrencyHelper"),
+        "expected the chained call to resolve to CurrencyHelper, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn app_facade_make_resolves_when_chained_directly() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\App;
+class Consumer {
+    public function go(): void {
+        App::make(CurrencyHelper::class)->format();
+    }
+}
+";
+    let mut files = base_files();
+    files.push(("src/Consumer.php", consumer));
+    let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+    assert_chained_format_resolves(&backend, consumer);
+}
+
+#[tokio::test]
+async fn app_facade_makewith_resolves_when_chained_directly() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\App;
+class Consumer {
+    public function go(): void {
+        App::makeWith(CurrencyHelper::class, [])->format();
+    }
+}
+";
+    let mut files = base_files();
+    files.push(("src/Consumer.php", consumer));
+    let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+    assert_chained_format_resolves(&backend, consumer);
+}
+
+/// `resolve()` has no `@method` tag on the facade, so it reaches the
+/// concrete container through `__callStatic` forwarding rather than the
+/// flattened-tag fall-through the other two take.
+#[tokio::test]
+async fn app_facade_resolve_resolves_when_chained_directly() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\App;
+class Consumer {
+    public function go(): void {
+        App::resolve(CurrencyHelper::class)->format();
+    }
+}
+";
+    let mut files = base_files();
+    files.push(("src/Consumer.php", consumer));
+    let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    open(&backend, "file:///src/Consumer.php", consumer).await;
+    assert_chained_format_resolves(&backend, consumer);
+}
+
 #[tokio::test]
 async fn app_facade_resolve_resolves_classstring_argument() {
     let consumer = "\

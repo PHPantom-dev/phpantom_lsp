@@ -600,6 +600,20 @@ impl Backend {
                 };
 
                 if let Some(ref owner) = owner_class {
+                    // A static call through a Laravel facade is typed by the
+                    // container class the facade forwards to, so that
+                    // `App::make(Foo::class)->…` sees the same
+                    // argument-dependent return the assignment path does.
+                    let concrete_owner = super::facade_concrete_owner(
+                        owner,
+                        method_name,
+                        ctx.content,
+                        ctx.class_loader,
+                        ctx.resolved_class_cache,
+                        ctx.backend,
+                    );
+                    let owner = concrete_owner.as_ref().unwrap_or(owner);
+
                     // Fully resolve the owner so post-resolution patches
                     // (e.g. Laravel facade return-type corrections) and
                     // inherited / interface-merged members are visible.

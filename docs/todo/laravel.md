@@ -716,6 +716,87 @@ declared under `filesystems.disks.*`. The config scanner already parses
 candidate set for completion, go-to-definition (jump to the disk's entry
 in `config/filesystems.php`), and an unknown-disk diagnostic.
 
+#### L46. `Storage::disk()` returns the contract instead of the configured adapter
+
+**Impact: Medium · Effort: Low**
+
+`FilesystemManager::disk()`, `get()`, and `build()` all declare
+`@return \Illuminate\Contracts\Filesystem\Filesystem`, but every driver
+the framework ships builds a `FilesystemAdapter` or a subclass of one:
+
+| `filesystems.disks.*.driver` | built at runtime                                |
+| ---------------------------- | ----------------------------------------------- |
+| `local`                      | `LocalFilesystemAdapter extends FilesystemAdapter` |
+| `ftp`, `sftp`                | `FilesystemAdapter`                             |
+| `s3`                         | `AwsS3V3Adapter extends FilesystemAdapter`      |
+| `scoped`                     | delegates to `build()` → the parent disk's driver |
+| custom, via `Storage::extend()` | whatever the registered closure returns      |
+
+So `Storage::disk('cdn')->assertExists(…)` in a test, and
+`->download(…)` in a controller, report the assertion and adapter
+methods as missing even though they are always there. This is the same
+declared-type correction `patch_storage_fake_return_types` already makes
+for `Storage::fake()` / `persistentFake()`, and it is far more common:
+`fake()` is one call in a `setUp()`, `disk()` is every call after it.
+
+The correction is only unconditional in the absence of custom drivers.
+A project that calls `Storage::extend('name', …)` can bind a disk to
+anything, and the closure's declared return is the bare contract, so a
+blanket rewrite would be unsound there. That is exactly the shape
+`patch_auth_user_class` already handles for `config/auth.php`: read the
+config, map each candidate, union the results, and never widen to
+`mixed`.
+
+```text
+filesystems.disks.<name>.driver  →  concrete adapter class
+```
+
+Read `config/filesystems.php` with `parse_config_tree`, map each built-in
+driver to its concrete class, resolve any driver matched by a
+`Storage::extend()` registration to that closure's return type (or leave
+it as the contract when the closure is unreadable), and patch the
+manager methods and the `Storage` facade's `@method` tags to the union.
+`cloud()` wants the same treatment against the `Cloud` contract, which
+`AwsS3V3Adapter` implements.
+
+Note this inherits the limitation `patch_auth_user_class` has: the patch
+is per method, not per argument, so `disk('cdn')` and `disk('s3')` both
+receive the union rather than their own disk's type — the same way
+`auth('admin')->user()` currently receives the default guard's model.
+That is harmless while the union is a single class, and the fix for both
+is the same argument-aware work, not something to solve here.
+
+**Where to look:** `patch_storage_fake_return_types` in
+`virtual_members/laravel/patches.rs` for the rewrite, and
+`virtual_members/laravel/auth.rs` for the config traversal and fan-out
+to copy. L25 exposes the same `filesystems.disks` children as a string
+candidate set, so the two share a config read.
+
+#### L26. Gate ability and policy strings
+
+**Impact: Medium-High · Effort: Medium-High**
+
+The Laravel LSP covers auth strings (completion, hover, diagnostics,
+links) by booting and asking the `Gate` for its abilities and policy
+map. The statically recoverable equivalents:
+
+- **Gate definitions:** scan `Gate::define('name', …)` in service
+  provider `boot()` methods — same shape as the existing macro scanner,
+  including the closure signature for hover.
+- **Policies:** the `$policies` array in `AuthServiceProvider`, the
+  `#[UsePolicy]` model attribute, and the default discovery convention
+  (`App\Models\Foo` → `App\Policies\FooPolicy`). Public methods of the
+  policy become abilities valid for that model.
+- **Trigger contexts:** `Gate::allows()/denies()/check()/any()/none()/
+  authorize()/inspect()/has()` (string and array arguments),
+  `$user->can()/cannot()/canAny()`, controller `$this->authorize()`,
+  `Route::can()`, the `can:ability,Model` middleware parameter, and
+  (via the Blade preprocessor) `@can`/`@cannot`/`@canany`.
+- **Model-aware validation:** when the second argument is a
+  `Model::class` literal or a typed variable, verify the ability exists
+  *for that model's policy*, not just anywhere — distinguishing "unknown
+  ability" from "ability not defined for this model."
+
 #### L27. Legacy `Controller@method` action strings
 
 **Impact: Low · Effort: Low**
@@ -903,10 +984,19 @@ Application : mixed)`).
 
 **Impact: Medium · Effort: Low-Medium**
 
-`keyBy()` re-keys a collection, but we keep the original `TKey`, so
-looking the result up by its new key is reported as a mismatch:
+Rebinding now works on a plain `Collection`, and `groupBy()`, `flip()`,
+`pluck()` with a key argument, and the `keyBy('column')` form are all
+correct. Two cases are still wrong.
+
+A collection class that fixes its key type through `@extends` keeps that
+key type across the re-keying call, so the rebind is dropped exactly
+where a project is most likely to hit it — Eloquent hands back the
+model's own collection class, not a plain one:
 
 ```php
+/** @extends Collection<int, ProductPrice> */
+final class ProductPriceCollection extends Collection {}
+
 $byMarket = ProductPrice::where(...)->get()
     ->keyBy(fn (ProductPrice $pp): string => $pp->market->value);
 
@@ -914,37 +1004,25 @@ $byMarket->get($someString);
 // false positive: Argument 1 ($key) expects int|null, got string
 ```
 
-The callback's return type (or the string column name in the
-`keyBy('id')` form) is the new `TKey`. `mapWithKeys()`, `groupBy()`,
-`flip()`, and `pluck()` with a key argument reshape keys the same way
-and should be checked together.
+`static<TNewKey, TValue>` is being resolved against a subclass whose
+`@extends` already bound `TKey`, and the binding wins over the rebind.
+The `keyBy('id')` form on a subclass has the same problem from the other
+direction: the declared `int` is kept where the new key is really
+unknown, so an `array-key` handed in from `groupBy()` is then rejected.
+A key the call cannot determine must widen to `array-key`, never fall
+back to the declared binding.
+
+`mapWithKeys()` rebinds to the wrong thing entirely — it takes the
+callback's *return type* as the new key rather than that array's key
+type:
+
+```php
+$c->mapWithKeys(fn (Order $o): array => ['x' => $o])->get('dk');
+// false positive: Argument 1 ($key) expects array|null, got 'dk'
+```
 
 **Where to look:** the collection method modelling in
 `virtual_members/laravel/`, alongside the custom-collection rewrite.
-
-#### L43. `$this->mock()` should return an intersection with the mocked class
-
-**Impact: Low-Medium · Effort: Low**
-
-Laravel's `InteractsWithContainer::mock()` is typed as returning
-`MockInterface`, but it always returns a mock *of* the given class, and
-test helpers routinely declare the intersection:
-
-```php
-private function mockHelloRetailClient(): Client&MockInterface
-{
-    $mock = $this->mock(Client::class);
-    // ...
-    return $mock;  // false positive: MockInterface is not Client&MockInterface
-}
-```
-
-Typing `mock()`/`partialMock()`/`spy()` as `T&MockInterface` for a
-`class-string<T>` argument fixes the return, and also makes completion
-on the mock offer the mocked class's own members.
-
-**Where to look:** the Laravel method return-type modelling in
-`virtual_members/laravel/`.
 
 #### L44. Sibling resource registrations and degenerate resource names
 
