@@ -894,6 +894,52 @@ pub fn scan_workspace_fallback_full(
     scan_files_parallel_full(&php_files, progress)
 }
 
+/// Scan the files and directories named by `[indexing] include`,
+/// bypassing both the gitignore and the hidden-entry filters.
+//////
+/// Directories are walked recursively; files are scanned directly. A
+/// path the normal walk already covered is simply scanned twice and
+/// loses the first-wins merge, so callers need not deduplicate.
+pub fn scan_include_paths(
+    paths: &[PathBuf],
+    progress: Option<&ScanProgress>,
+) -> WorkspaceScanResult {
+    use ignore::WalkBuilder;
+
+    let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
+    for path in paths {
+        if path.is_file() {
+            if is_php_file(path) {
+                php_files.push((path.clone(), crate::ClassCompletionOrigin::Project));
+            }
+            continue;
+        }
+
+        let walker = WalkBuilder::new(path)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .ignore(false)
+            .parents(false)
+            .hidden(false)
+            .build();
+        for entry in walker.flatten() {
+            let entry_path = entry.path();
+            if is_php_file(entry_path)
+                && (entry.file_type().is_some_and(|ft| ft.is_file()) || entry_path.is_file())
+            {
+                php_files.push((
+                    entry_path.to_path_buf(),
+                    crate::ClassCompletionOrigin::Project,
+                ));
+            }
+        }
+    }
+
+    progress_add_total(progress, php_files.len());
+    scan_files_parallel_full(&php_files, progress)
+}
+
 /// Scan Drupal-specific directories for PHP symbols, bypassing `.gitignore`.
 ///
 /// Drupal projects typically exclude their web root directories
