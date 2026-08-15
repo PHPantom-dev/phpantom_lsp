@@ -628,4 +628,40 @@ impl Backend {
             }
         }
     }
+
+    /// Index the extra paths named by `[indexing] include`.
+    ///
+    /// Runs after the strategy-specific classmap build so the entries it
+    /// adds lose every first-wins merge: an included path fills the gaps
+    /// the workspace scan left, it does not shadow what that scan found.
+    /// A no-op when the option is unset, which is the default.
+    pub(crate) fn scan_configured_include_paths(
+        &self,
+        root: &std::path::Path,
+        progress: Option<&crate::progress::ScanProgress>,
+    ) {
+        let paths = self.config().indexing.include_paths(root);
+        if paths.is_empty() {
+            return;
+        }
+
+        let scan = classmap_scanner::scan_include_paths(&paths, progress);
+        let class_count = scan.classmap.len();
+        let symbol_count = class_count + scan.function_index.len() + scan.constant_index.len();
+        self.populate_autoload_indices(&scan);
+        {
+            let mut idx = self.symbols.fqn_uri_index.write();
+            let mut origins = self.symbols.fqn_origin_index.write();
+            for (fqn, path) in scan.classmap {
+                origins.or_insert_with(fqn.as_str(), || crate::ClassCompletionOrigin::Project);
+                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
+            }
+        }
+
+        tracing::info!(
+            "PHPantom: indexing.include — {} symbols from {} configured path(s)",
+            symbol_count,
+            paths.len()
+        );
+    }
 }

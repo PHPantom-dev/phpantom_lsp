@@ -152,6 +152,7 @@ mod folding_ranges;
 mod formatting_blade;
 mod hover;
 mod implementation;
+mod indexing_include;
 mod inlay_hints;
 mod laravel_app_facade_container;
 mod laravel_binding_precedence;

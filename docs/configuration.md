@@ -58,9 +58,35 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 
 ### `[indexing]`
 
-| Key        | Type   | Default  | Description |
-| ---------- | ------ | -------- | ----------- |
-| `strategy` | string | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+| Key        | Type            | Default  | Description |
+| ---------- | --------------- | -------- | ----------- |
+| `strategy` | string          | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+| `include`  | array of string | `[]`     | Extra files and directories to index, relative to the workspace root. See [Extra Include Paths](#extra-include-paths) below. |
+
+#### Extra Include Paths
+
+The workspace scan is gitignore-aware and skips hidden entries, which is
+what keeps it off `vendor/`, `node_modules/` and build output. That same
+filtering hides two things a project can legitimately depend on:
+first-party PHP living in a dotted directory, and generated IDE stub
+files, which are gitignored precisely because they are build artefacts —
+yet are the only declaration of the symbols the project calls.
+
+Listing a path under `include` indexes it regardless of both filters.
+Directories are walked recursively, files are scanned directly, and
+entries that do not exist are ignored. Absolute paths are accepted;
+relative ones resolve against the workspace root.
+
+A project whose helpers live in a dotted directory and whose signatures
+come from a generated stub needs both halves:
+
+```toml
+[indexing]
+include = [".lib", ".lib.stub.php"]
+```
+
+Included paths are indexed after the workspace scan, so they fill gaps
+rather than shadowing symbols the scan already found.
 
 ### `[semantic_tokens]`
 

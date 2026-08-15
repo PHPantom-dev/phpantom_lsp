@@ -83,6 +83,14 @@
             "none"
           ],
           "default": "full"
+        },
+        "include": {
+          "type": "array",
+          "description": "Extra files and directories to index, relative to the workspace root unless absolute. Listing a path here indexes it: directories are walked recursively, files are scanned directly, and entries that do not exist are ignored. Included paths are indexed after the workspace scan, so they fill gaps rather than shadowing symbols the scan already found.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       }
     },

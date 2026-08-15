@@ -453,6 +453,108 @@ fn scan_workspace_fallback_full_skips_hidden_dirs() {
     );
 }
 
+// ── scan_include_paths ──────────────────────────────────────────
+
+/// A hidden directory holding first-party PHP (Castor's `.castor/`) is
+/// invisible to the workspace walk, which is the case `include` exists
+/// for.
+#[test]
+fn scan_include_paths_walks_hidden_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let hidden = dir.path().join(".castor");
+    std::fs::create_dir_all(&hidden).unwrap();
+    std::fs::write(
+        hidden.join("docker.php"),
+        "<?php\nnamespace docker;\nfunction up(): void {}\n",
+    )
+    .unwrap();
+
+    let skip = std::collections::HashSet::new();
+    assert!(
+        !scan_workspace_fallback_full(dir.path(), &skip, None)
+            .function_index
+            .contains_key("docker\\up"),
+        "precondition: the workspace walk must not see it"
+    );
+
+    let result = scan_include_paths(&[hidden], None);
+    assert!(
+        result.function_index.contains_key("docker\\up"),
+        "got: {:?}",
+        result.function_index.keys().collect::<Vec<_>>()
+    );
+}
+
+/// A generated stub is hidden *and* gitignored; naming it directly has
+/// to defeat both filters.
+#[test]
+fn scan_include_paths_reads_hidden_gitignored_file() {
+    let dir = tempfile::tempdir().unwrap();
+    // `ignore` only honours `.gitignore` inside a git repository.
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::write(dir.path().join(".gitignore"), "/.castor.stub.php\n").unwrap();
+    let stub = dir.path().join(".castor.stub.php");
+    std::fs::write(
+        &stub,
+        "<?php\nnamespace Castor {\n    function run(string $command): void {}\n    function io(): void {}\n}\n",
+    )
+    .unwrap();
+
+    let skip = std::collections::HashSet::new();
+    assert!(
+        !scan_workspace_fallback_full(dir.path(), &skip, None)
+            .function_index
+            .contains_key("Castor\\run"),
+        "precondition: the workspace walk must not see it"
+    );
+
+    let result = scan_include_paths(&[stub], None);
+    assert!(result.function_index.contains_key("Castor\\run"));
+    assert!(result.function_index.contains_key("Castor\\io"));
+}
+
+#[test]
+fn scan_include_paths_reports_classes_and_constants() {
+    let dir = tempfile::tempdir().unwrap();
+    let hidden = dir.path().join(".tools");
+    std::fs::create_dir_all(&hidden).unwrap();
+    std::fs::write(
+        hidden.join("helpers.php"),
+        "<?php\nclass Helper {}\nconst TOOL_VERSION = 1;\n",
+    )
+    .unwrap();
+
+    let result = scan_include_paths(&[hidden], None);
+    assert!(result.classmap.contains_key("Helper"));
+    assert!(result.constant_index.contains_key("TOOL_VERSION"));
+}
+
+/// Non-PHP files in an included directory must be left alone.
+#[test]
+fn scan_include_paths_ignores_non_php_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let included = dir.path().join(".castor");
+    std::fs::create_dir_all(&included).unwrap();
+    std::fs::write(included.join("notes.md"), "function notAFunction() {}").unwrap();
+    std::fs::write(
+        included.join("tasks.php"),
+        "<?php\nfunction realFunction(): void {}\n",
+    )
+    .unwrap();
+
+    let result = scan_include_paths(&[included], None);
+    assert!(result.function_index.contains_key("realFunction"));
+    assert!(!result.function_index.contains_key("notAFunction"));
+}
+
+#[test]
+fn scan_include_paths_with_no_paths_is_empty() {
+    let result = scan_include_paths(&[], None);
+    assert!(result.classmap.is_empty());
+    assert!(result.function_index.is_empty());
+    assert!(result.constant_index.is_empty());
+}
+
 // ── is_drupal_php_file ──────────────────────────────────────────
 
 #[test]

@@ -45,7 +45,10 @@ access provides complete `FunctionInfo`/`DefineInfo`. All directory
 walkers (full-scan, PSR-4 scanner, vendor package scanner, and
 go-to-implementation file collector) use the `ignore` crate for
 gitignore-aware traversal instead of hardcoded directory name
-filtering. Hidden directories are skipped automatically.
+filtering. Hidden directories are skipped automatically. Paths listed
+under `[indexing] include` are scanned on top of that walk, bypassing
+both filters, for first-party PHP in a dotted directory and for
+generated stub files that are gitignored as build artefacts.
 
 The monorepo path activates when there is no root `composer.json` but
 `discover_subproject_roots` finds subdirectories with their own

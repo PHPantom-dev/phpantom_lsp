@@ -487,11 +487,43 @@ pub struct IndexingConfig {
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
     pub strategy: Option<IndexingStrategy>,
+
+    /// Extra files and directories to index, relative to the workspace
+    /// root (absolute paths are also accepted).
+    ///
+    /// Listing a path here indexes it regardless of both filters.
+    /// Directories are walked recursively; files are scanned directly.
+    ///
+    /// ```toml
+    /// [indexing]
+    /// include = [".lib", ".lib.stub.php"]
+    /// ```
+    pub include: Vec<String>,
 }
 
 impl IndexingConfig {
     pub fn strategy(&self) -> IndexingStrategy {
         self.strategy.unwrap_or_default()
+    }
+
+    /// Resolve [`include`](Self::include) against the workspace root,
+    /// dropping entries that do not exist.
+    ///
+    /// Relative entries are joined to `workspace_root`; absolute ones
+    /// are taken as-is.
+    pub fn include_paths(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        self.include
+            .iter()
+            .map(|entry| {
+                let path = Path::new(entry);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    workspace_root.join(path)
+                }
+            })
+            .filter(|path| path.exists())
+            .collect()
     }
 }
 
@@ -1191,6 +1223,73 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::write(&path, "[indexing]\nstrategy = \"none\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::None));
+    }
+
+    /// Asserted on the default value rather than through
+    /// [`load_config`], which merges the developer's own global
+    /// `.phpantom.toml` and would make the result machine-dependent.
+    #[test]
+    fn indexing_include_defaults_to_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = IndexingConfig::default();
+        assert!(config.include.is_empty());
+        assert!(config.include_paths(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn parses_indexing_include() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            "[indexing]\ninclude = [\".castor\", \".castor.stub.php\"]\n",
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.include, [".castor", ".castor.stub.php"]);
+    }
+
+    #[test]
+    fn include_paths_resolve_relative_to_workspace_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".castor")).unwrap();
+
+        let config = IndexingConfig {
+            include: vec![".castor".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            config.include_paths(dir.path()),
+            [dir.path().join(".castor")]
+        );
+    }
+
+    #[test]
+    fn include_paths_accept_absolute_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join(".castor.stub.php");
+        std::fs::write(&stub, "<?php\n").unwrap();
+
+        let config = IndexingConfig {
+            include: vec![stub.display().to_string()],
+            ..Default::default()
+        };
+        // Resolved against a *different* root: an absolute entry is
+        // taken as-is rather than joined.
+        let other_root = tempfile::tempdir().unwrap();
+        assert_eq!(config.include_paths(other_root.path()), [stub]);
+    }
+
+    /// A stale entry must not become a phantom path handed to the
+    /// scanner — dropping it keeps the walk honest.
+    #[test]
+    fn include_paths_drop_missing_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = IndexingConfig {
+            include: vec!["does/not/exist".to_string()],
+            ..Default::default()
+        };
+        assert!(config.include_paths(dir.path()).is_empty());
     }
 
     #[test]
