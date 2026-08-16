@@ -13,16 +13,91 @@ pub(super) const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
     "DB",
     "Cache",
     "Log",
-    "Storage",
     "Auth",
     "Authenticated",
 ];
 
+/// The Laravel-specific meaning of a container-injection attribute.
+pub(super) enum LaravelContainerAttribute {
+    /// A full config key, as accepted by `#[Config]` and the pre-existing
+    /// generic handling for the other container attributes.
+    Config,
+    /// A disk name accepted by `#[Storage]`.
+    StorageDisk,
+}
+
+/// Whether a written class name is the global `Storage` facade alias, its
+/// exact Laravel class, or a directly imported alias. In a namespace the
+/// short spelling is accepted only when that facade is explicitly imported,
+/// preventing a local `Storage` class from being mistaken for Laravel's.
+pub(super) fn matches_laravel_storage_facade(class_name: &str, content: &str) -> bool {
+    let is_root_qualified = class_name.starts_with('\\');
+    let class_name = class_name.trim_start_matches('\\');
+    if class_name.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Storage") {
+        return true;
+    }
+    if class_name.contains('\\') {
+        return false;
+    }
+    if imports_laravel_storage_facade_as(content, class_name) {
+        return true;
+    }
+    class_name.eq_ignore_ascii_case("Storage")
+        && (is_root_qualified || !source_has_namespace(content))
+}
+
+fn imports_laravel_storage_facade_as(content: &str, class_name: &str) -> bool {
+    const FACADE: &str = "Illuminate\\Support\\Facades\\Storage";
+    for line in content.lines() {
+        let mut line = line.trim();
+        if let Some(rest) = line.strip_prefix("<?php") {
+            line = rest.trim();
+        }
+        line = line.strip_suffix(';').unwrap_or(line).trim_end();
+        let mut words = line.split_ascii_whitespace();
+        if !words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("use"))
+            || !words
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case(FACADE))
+        {
+            continue;
+        }
+        let Some(as_keyword) = words.next() else {
+            if class_name.eq_ignore_ascii_case("Storage") {
+                return true;
+            }
+            continue;
+        };
+        let Some(alias) = words.next() else {
+            continue;
+        };
+        if words.next().is_none()
+            && as_keyword.eq_ignore_ascii_case("as")
+            && alias.eq_ignore_ascii_case(class_name)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn source_has_namespace(content: &str) -> bool {
+    content.lines().any(|line| {
+        let mut line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("<?php") {
+            line = rest.trim_start();
+        }
+        line.get(..9)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("namespace"))
+            && line.as_bytes().get(9).is_some_and(u8::is_ascii_whitespace)
+    })
+}
+
 /// Check whether an attribute class name refers to a Laravel container
 /// attribute (`Config`, `Database`, `Cache`, `Log`, `Storage`, `Auth`,
-/// `Authenticated`).  Returns the corresponding [`LaravelStringKind`] if
-/// so — always `Config` since all container attributes resolve to config
-/// sub-keys.
+/// `Authenticated`). Returns the corresponding Laravel-specific meaning.
 ///
 /// FQN names (containing `\`) are matched directly against
 /// `Illuminate\Container\Attributes\*`.  Short names require the file to
@@ -32,13 +107,21 @@ pub(super) fn resolve_laravel_container_attr(
     class_name: &str,
     import_cache: &mut Option<bool>,
     content: &str,
-) -> Option<crate::symbol_map::LaravelStringKind> {
+) -> Option<LaravelContainerAttribute> {
     if class_name.contains('\\') {
         let stripped = class_name.strip_prefix(LARAVEL_CONTAINER_ATTR_NS)?;
+        if stripped == "Storage" {
+            return Some(LaravelContainerAttribute::StorageDisk);
+        }
         if LARAVEL_CONTAINER_ATTR_NAMES.contains(&stripped) {
-            return Some(crate::symbol_map::LaravelStringKind::Config);
+            return Some(LaravelContainerAttribute::Config);
         }
         return None;
+    }
+    if class_name == "Storage" {
+        return content
+            .contains("use Illuminate\\Container\\Attributes\\Storage;")
+            .then_some(LaravelContainerAttribute::StorageDisk);
     }
     if !LARAVEL_CONTAINER_ATTR_NAMES.contains(&class_name) {
         return None;
@@ -46,7 +129,7 @@ pub(super) fn resolve_laravel_container_attr(
     let has_import = *import_cache
         .get_or_insert_with(|| content.contains("use Illuminate\\Container\\Attributes\\"));
     if has_import {
-        Some(crate::symbol_map::LaravelStringKind::Config)
+        Some(LaravelContainerAttribute::Config)
     } else {
         None
     }
@@ -80,6 +163,142 @@ pub(super) fn try_emit_laravel_string_span_at(
     spans: &mut Vec<SymbolSpan>,
 ) {
     emit_laravel_string_span(kind, false, index, argument_list, content, spans);
+}
+
+const STORAGE_DISK_CONFIG_PREFIX: &str = "filesystems.disks.";
+
+/// Emit config-key spans for the disk names accepted by Laravel's `Storage`
+/// facade. Registration helpers are writes; `forgetDisk()` is an optional
+/// read because forgetting an unconfigured disk is valid.
+pub(super) fn try_emit_laravel_storage_disk_spans(
+    facade: &str,
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let (parameter, accepts_array, is_write, is_optional) =
+        if member_name.eq_ignore_ascii_case("disk") {
+            ("name", false, false, false)
+        } else if member_name.eq_ignore_ascii_case("fake")
+            || member_name.eq_ignore_ascii_case("persistentFake")
+        {
+            ("disk", false, true, false)
+        } else if member_name.eq_ignore_ascii_case("forgetDisk") {
+            ("disk", true, false, true)
+        } else {
+            return;
+        };
+    if !matches_laravel_storage_facade(facade, content) {
+        return;
+    }
+
+    let Some(argument) = argument_expr_for_parameter(argument_list, parameter) else {
+        return;
+    };
+    if accepts_array {
+        let elements = match argument {
+            Expression::Array(array) => Some(&array.elements),
+            Expression::LegacyArray(array) => Some(&array.elements),
+            _ => None,
+        };
+        if let Some(elements) = elements {
+            for element in elements.iter() {
+                let value = match element {
+                    ArrayElement::KeyValue(element) => element.value,
+                    ArrayElement::Value(element) => element.value,
+                    ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+                };
+                push_storage_disk_span(value, is_write, is_optional, content, spans);
+            }
+            return;
+        }
+    }
+    push_storage_disk_span(argument, is_write, is_optional, content, spans);
+}
+
+/// Emit the disk name accepted by Laravel's `#[Storage]` container
+/// attribute, selecting the `disk` argument even when named arguments are
+/// reordered.
+pub(super) fn try_emit_laravel_storage_disk_span_partial(
+    argument_list: &PartialArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if let Some(argument) = partial_argument_expr_for_parameter(argument_list, "disk") {
+        push_storage_disk_span(argument, false, false, content, spans);
+    }
+}
+
+fn argument_expr_for_parameter<'a>(
+    argument_list: &ArgumentList<'a>,
+    parameter: &str,
+) -> Option<&'a Expression<'a>> {
+    for argument in argument_list.arguments.iter() {
+        if let Argument::Named(named) = argument
+            && bytes_to_str(named.name.value).eq_ignore_ascii_case(parameter)
+        {
+            return Some(named.value);
+        }
+    }
+    argument_list
+        .arguments
+        .iter()
+        .find_map(|argument| match argument {
+            Argument::Positional(positional) => Some(positional.value),
+            Argument::Named(_) => None,
+        })
+}
+
+fn partial_argument_expr_for_parameter<'a>(
+    argument_list: &PartialArgumentList<'a>,
+    parameter: &str,
+) -> Option<&'a Expression<'a>> {
+    for argument in argument_list.arguments.iter() {
+        if let PartialArgument::Named(named) = argument
+            && bytes_to_str(named.name.value).eq_ignore_ascii_case(parameter)
+        {
+            return Some(named.value);
+        }
+    }
+    argument_list
+        .arguments
+        .iter()
+        .find_map(|argument| match argument {
+            PartialArgument::Positional(positional) => Some(positional.value),
+            _ => None,
+        })
+}
+
+fn push_storage_disk_span(
+    expression: &Expression<'_>,
+    is_write: bool,
+    is_optional: bool,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Expression::Literal(literal::Literal::String(string)) = expression else {
+        return;
+    };
+    let start = string.span.start.offset + 1;
+    let end = string.span.end.offset - 1;
+    if start >= end || end as usize > content.len() {
+        return;
+    }
+    let disk = &content[start as usize..end as usize];
+    let mut key = String::with_capacity(STORAGE_DISK_CONFIG_PREFIX.len() + disk.len());
+    key.push_str(STORAGE_DISK_CONFIG_PREFIX);
+    key.push_str(disk);
+    spans.push(SymbolSpan {
+        start,
+        end,
+        kind: SymbolKind::LaravelStringKey {
+            key,
+            kind: crate::symbol_map::LaravelStringKind::Config,
+            is_write,
+            is_optional,
+        },
+    });
 }
 
 /// Emit the section- or stack-name span for one of the marker calls the
@@ -1537,5 +1756,68 @@ pub(super) fn laravel_route_scan_expr(
             });
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod storage_disk_tests {
+    use super::*;
+
+    #[test]
+    fn storage_facade_imports_require_a_valid_direct_import() {
+        let direct = "namespace App;\nuse Illuminate\\Support\\Facades\\Storage;";
+        assert!(matches_laravel_storage_facade("Storage", direct));
+        assert!(!matches_laravel_storage_facade("LaravelStorage", direct));
+
+        let aliased =
+            "namespace App;\nuse Illuminate\\Support\\Facades\\Storage as LaravelStorage;";
+        assert!(matches_laravel_storage_facade("LaravelStorage", aliased));
+
+        let incomplete_alias = "namespace App;\nuse Illuminate\\Support\\Facades\\Storage as;";
+        assert!(!matches_laravel_storage_facade(
+            "LaravelStorage",
+            incomplete_alias
+        ));
+
+        let malformed =
+            "namespace App;\nuse Illuminate\\Support\\Facades\\Storage from LaravelStorage;";
+        assert!(!matches_laravel_storage_facade("LaravelStorage", malformed));
+    }
+
+    #[test]
+    fn fully_qualified_container_attributes_keep_their_distinct_meanings() {
+        let mut import_cache = None;
+        assert!(matches!(
+            resolve_laravel_container_attr(
+                "Illuminate\\Container\\Attributes\\Storage",
+                &mut import_cache,
+                ""
+            ),
+            Some(LaravelContainerAttribute::StorageDisk)
+        ));
+        assert!(matches!(
+            resolve_laravel_container_attr(
+                "Illuminate\\Container\\Attributes\\Config",
+                &mut import_cache,
+                ""
+            ),
+            Some(LaravelContainerAttribute::Config)
+        ));
+    }
+
+    #[test]
+    fn storage_attribute_without_a_disk_argument_emits_no_config_key() {
+        let php = r#"<?php
+#[\Illuminate\Container\Attributes\Storage()]
+class EmptyStorage {}
+#[\Illuminate\Container\Attributes\Storage(config: 'archive')]
+class WrongNamedArgument {}
+"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"storage-attributes.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let map = super::super::extract_symbol_map(program, php);
+        let archive = php.find("archive").expect("fixture should name a disk") as u32;
+        assert!(map.lookup(archive).is_none());
     }
 }

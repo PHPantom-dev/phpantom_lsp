@@ -493,6 +493,13 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                try_emit_laravel_storage_disk_spans(
+                    &subject_text,
+                    &member_name,
+                    &static_call.argument_list,
+                    ctx.content,
+                    &mut ctx.spans,
+                );
                 // The `View` facade proxies the view factory, so every
                 // factory method that names a template does so here too.
                 if clean_subject.eq_ignore_ascii_case("View")

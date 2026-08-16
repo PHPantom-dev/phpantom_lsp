@@ -700,7 +700,16 @@ pub(crate) fn discover_user_files(
     source_dirs.sort();
     source_dirs.dedup();
 
-    let vendor_dirs: Vec<PathBuf> = backend.workspace.vendor_dir_paths.lock().clone();
+    // The walker compares canonical entry paths below.  Canonicalize the
+    // registered roots once as well so path aliases such as macOS's `/var`
+    // -> `/private/var` do not let vendor files through.
+    let vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
+    let mut vendor_dirs: Vec<PathBuf> = vendor_dirs
+        .into_iter()
+        .map(|path| path.canonicalize().unwrap_or(path))
+        .collect();
+    vendor_dirs.sort_unstable();
+    vendor_dirs.dedup();
 
     // When an explicit path filter points outside all PSR-4 source
     // directories (e.g. into vendor/), walk the filter path directly
@@ -912,6 +921,37 @@ mod tests {
         assert!(
             !names.contains(&"readme.txt".to_string()),
             "non-PHP files must be skipped: {names:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discover_user_files_normalizes_aliased_vendor_roots() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let real_root = dir.path().join("real-project");
+        let linked_root = dir.path().join("linked-project");
+        std::fs::create_dir_all(real_root.join("app")).unwrap();
+        std::fs::create_dir_all(real_root.join("vendor/pkg")).unwrap();
+        std::fs::write(real_root.join("app/Main.php"), "<?php\n").unwrap();
+        std::fs::write(real_root.join("vendor/pkg/Dep.php"), "<?php\n").unwrap();
+        symlink(&real_root, &linked_root).expect("failed to create workspace alias");
+
+        let backend = Backend::new_headless();
+        backend
+            .workspace
+            .vendor_dir_paths
+            .lock()
+            .push(linked_root.join("vendor"));
+
+        let files = discover_user_files(&backend, &real_root, None);
+        assert!(files.contains(&real_root.join("app/Main.php")), "{files:?}");
+        assert!(
+            !files
+                .iter()
+                .any(|path| path.starts_with(real_root.join("vendor"))),
+            "vendor files must be skipped across path aliases: {files:?}"
         );
     }
 

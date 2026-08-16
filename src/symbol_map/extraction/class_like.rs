@@ -312,17 +312,28 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 // the file to import from the Illuminate namespace;
                 // that check is cached once per file to avoid repeated
                 // linear scans.
-                if let Some(kind) = resolve_laravel_container_attr(
+                if let Some(attribute) = resolve_laravel_container_attr(
                     class_name,
                     &mut ctx.has_laravel_container_attrs,
                     ctx.content,
                 ) {
-                    try_emit_laravel_string_span_partial(
-                        kind,
-                        arg_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
+                    match attribute {
+                        LaravelContainerAttribute::Config => {
+                            try_emit_laravel_string_span_partial(
+                                crate::symbol_map::LaravelStringKind::Config,
+                                arg_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                        LaravelContainerAttribute::StorageDisk => {
+                            try_emit_laravel_storage_disk_span_partial(
+                                arg_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                    }
                 }
 
                 // PHPUnit coverage attributes: #[CoversMethod(Foo::class,
