@@ -27,7 +27,7 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) psr4_mappings: Arc<RwLock<Vec<composer::Psr4Mapping>>>,
     /// `file://` URI prefixes for all known vendor directories.
     pub(crate) vendor_uri_prefixes: Mutex<Vec<String>>,
-    /// Absolute paths of all known vendor directories.
+    /// Absolute raw and canonical paths of all known vendor directories.
     pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
     /// Canonical vendor package roots paired with completion provenance.
     pub(crate) vendor_package_origin_roots:

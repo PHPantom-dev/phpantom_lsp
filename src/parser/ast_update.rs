@@ -7,7 +7,7 @@
 /// helpers (`resolve_parent_class_names`, `resolve_name`) used to convert
 /// short class names to fully-qualified names.
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::ParseErrorEntry;
@@ -15,7 +15,7 @@ use crate::atom::{Atom, atom, bytes_to_str};
 use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
-use crate::symbol_map::{SymbolMap, extract_symbol_map};
+use crate::symbol_map::{LaravelStringDependency, SymbolMap, extract_symbol_map_for_index};
 use crate::types::{
     ClassInfo, DefineInfo, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan, TypeAliasDef,
 };
@@ -178,6 +178,66 @@ fn withdraw_function(
 }
 
 impl Backend {
+    /// Clone and reconcile only published maps whose dormant Laravel spans
+    /// depend on one of `affected`. Passing `None` is reserved for rare
+    /// workspace purges where several declaration indexes changed together.
+    fn refreshed_laravel_candidate_maps(
+        &self,
+        affected: Option<&HashSet<LaravelStringDependency>>,
+        excluded_uris: &HashSet<&str>,
+    ) -> Vec<(String, Arc<SymbolMap>)> {
+        let candidates: Vec<(String, Arc<SymbolMap>)> = self
+            .symbol_maps
+            .read()
+            .iter()
+            .filter(|(uri, _)| !excluded_uris.contains(uri.as_str()))
+            .filter(|(_, map)| map.has_conditional_laravel_dependency(affected))
+            .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
+            .collect();
+        let mut dependency_presence = HashMap::new();
+        candidates
+            .into_iter()
+            .filter_map(|(uri, map)| {
+                let mut dependency_exists = |dependency| {
+                    *dependency_presence
+                        .entry(dependency)
+                        .or_insert_with(|| match dependency {
+                            LaravelStringDependency::Function(name) => {
+                                self.has_indexed_function(name.as_str())
+                            }
+                            LaravelStringDependency::Class(name) => {
+                                self.has_indexed_class(name.as_str())
+                            }
+                        })
+                };
+                if !map.conditional_laravel_spans_need_refresh(affected, &mut dependency_exists) {
+                    return None;
+                }
+                let mut refreshed = map.as_ref().clone();
+                let changed =
+                    refreshed.refresh_conditional_laravel_spans(affected, dependency_exists);
+                debug_assert!(changed);
+                Some((uri, Arc::new(refreshed)))
+            })
+            .collect()
+    }
+
+    /// Publish refreshed conditional maps and keep their reference-index
+    /// entries in the same generation. Used after discovery-index rebuilds;
+    /// normal AST batches fold refreshed maps into their existing reindex.
+    pub(crate) fn refresh_all_published_laravel_candidates(&self) -> bool {
+        let refreshed = self.refreshed_laravel_candidate_maps(None, &HashSet::new());
+        if refreshed.is_empty() {
+            return false;
+        }
+        self.reindex_references_for_symbol_maps_batch(refreshed.clone());
+        let mut symbol_maps = self.symbol_maps.write();
+        for (uri, map) in refreshed {
+            symbol_maps.insert(uri, map);
+        }
+        true
+    }
+
     /// Drop every function declaration contributed by `uris`, handing each
     /// name to the next-lowest file that still declares it.
     ///
@@ -821,7 +881,11 @@ impl Backend {
 
             // Build the precomputed symbol map while the AST is still alive.
             // This must happen before the `Program` (and its arena) are dropped.
-            let symbol_map = Arc::new(extract_symbol_map(program, content));
+            let symbol_map = Arc::new(extract_symbol_map_for_index(
+                program,
+                content,
+                &owned_resolved,
+            ));
 
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
@@ -1303,9 +1367,9 @@ impl Backend {
             );
         }
 
-        let changed = any_signature_changed || any_function_changed;
+        let structural_changed = any_signature_changed || any_function_changed;
 
-        if changed {
+        if structural_changed {
             self.member_completion_cache.lock().clear();
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
@@ -1317,14 +1381,74 @@ impl Backend {
             }
         }
 
-        let reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
+        // The batch declarations are now visible. Activate its prospective
+        // Laravel spans against that final state, not the incomplete index
+        // that happened to exist while parallel workers parsed the files.
+        {
+            let mut dependency_presence = HashMap::new();
+            for update in &mut prepared {
+                Arc::make_mut(&mut update.symbol_map).refresh_conditional_laravel_spans(
+                    None,
+                    |dependency| {
+                        *dependency_presence
+                            .entry(dependency)
+                            .or_insert_with(|| match dependency {
+                                LaravelStringDependency::Function(name) => {
+                                    self.has_indexed_function(name.as_str())
+                                }
+                                LaravelStringDependency::Class(name) => {
+                                    self.has_indexed_class(name.as_str())
+                                }
+                            })
+                    },
+                );
+            }
+        }
+
+        // Only declaration names that can gate a candidate trigger a scan of
+        // the published maps. Function signatures and ordinary class edits
+        // therefore retain the existing O(batch) publication cost.
+        let mut affected_laravel_dependencies = HashSet::new();
+        for fqn in all_old_fqns.iter().chain(&all_new_fqns) {
+            if let Some(dependency) = LaravelStringDependency::root_facade(fqn) {
+                affected_laravel_dependencies.insert(dependency);
+            }
+        }
+        for update in &prepared {
+            for fqn in update
+                .old_function_fqns
+                .iter()
+                .chain(&update.new_function_fqns)
+            {
+                if let Some(dependency) = LaravelStringDependency::namespaced_auth(fqn) {
+                    affected_laravel_dependencies.insert(dependency);
+                }
+            }
+        }
+        let prepared_uris: HashSet<&str> =
+            prepared.iter().map(|update| update.uri.as_str()).collect();
+        let refreshed_existing = if affected_laravel_dependencies.is_empty() {
+            Vec::new()
+        } else {
+            self.refreshed_laravel_candidate_maps(
+                Some(&affected_laravel_dependencies),
+                &prepared_uris,
+            )
+        };
+        let changed = structural_changed || !refreshed_existing.is_empty();
+
+        let mut reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
             .iter()
             .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
             .collect();
+        reference_items.extend(refreshed_existing.iter().cloned());
         self.reindex_references_for_symbol_maps_batch(reference_items);
 
         {
             let mut symbol_maps = self.symbol_maps.write();
+            for (uri, map) in refreshed_existing {
+                symbol_maps.insert(uri, map);
+            }
             for update in prepared {
                 symbol_maps.insert(update.uri, update.symbol_map);
             }
@@ -1904,6 +2028,266 @@ impl Backend {
 mod tests {
     use super::*;
     use crate::Backend;
+
+    fn has_config_resource_span(
+        backend: &Backend,
+        uri: &str,
+        key: &str,
+        resource: crate::symbol_map::LaravelConfigResource,
+    ) -> bool {
+        backend.symbol_map_for(uri).is_some_and(|map| {
+            map.spans.iter().any(|span| {
+                matches!(
+                    &span.kind,
+                    crate::symbol_map::SymbolKind::LaravelStringKey {
+                        kind: crate::symbol_map::LaravelStringKind::ConfigResource(found),
+                        key: found_key,
+                        ..
+                    } if *found == resource && found_key == key
+                )
+            })
+        })
+    }
+
+    fn reference_index_has_config_resource(
+        backend: &Backend,
+        uri: &str,
+        key: &str,
+        resource: crate::symbol_map::LaravelConfigResource,
+    ) -> bool {
+        let index_key = crate::reference_index::laravel_string_reference_key(
+            crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+            key,
+        );
+        backend
+            .reference_index
+            .read()
+            .get(&index_key)
+            .is_some_and(|entries| entries.keys().any(|entry_uri| entry_uri.as_ref() == uri))
+    }
+
+    #[test]
+    fn namespaced_auth_candidates_follow_cross_file_function_lifecycle() {
+        use crate::symbol_map::LaravelConfigResource::AuthGuard;
+
+        let backend = Backend::new_test();
+        let consumer_uri = "file:///app/Consumer.php";
+        let helper_uri = "file:///app/helpers.php";
+        backend.update_ast(consumer_uri, "<?php\nnamespace App;\nauth('web');\n");
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        // An already-correct map must not be cloned or reindexed merely
+        // because a workspace discovery refresh completed.
+        assert!(!backend.refresh_all_published_laravel_candidates());
+
+        let changed = backend.update_ast(
+            helper_uri,
+            "<?php\nnamespace App;\nfunction auth(?string $guard = null): object {}\n",
+        );
+        assert!(changed, "the consumer map changed even on a first parse");
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(!reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        let removed = HashSet::from([helper_uri.to_string()]);
+        backend.withdraw_functions_for_uris(&removed);
+        assert!(backend.refresh_all_published_laravel_candidates());
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        backend.update_ast(
+            helper_uri,
+            "<?php\nnamespace App;\nfunction auth(?string $guard = null): object {}\n",
+        );
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        backend.update_ast(helper_uri, "<?php\nnamespace App;\n");
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+    }
+
+    #[test]
+    fn prospective_batch_functions_shadow_auth_candidates() {
+        use crate::symbol_map::LaravelConfigResource::AuthGuard;
+
+        let backend = Backend::new_test();
+        let consumer_uri = "file:///app/Consumer.php";
+        let helper_uri = "file:///app/helpers.php";
+        let consumer = backend.parse_ast_index_update_for_index(
+            consumer_uri,
+            "<?php\nnamespace App;\nauth('admin');\n",
+        );
+        let helper = backend.parse_ast_index_update_for_index(
+            helper_uri,
+            "<?php\nnamespace App;\nfunction auth(?string $guard = null): object {}\n",
+        );
+        backend.apply_ast_index_parse_results_batch(vec![consumer, helper]);
+
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "admin",
+            AuthGuard
+        ));
+        assert!(!reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "admin",
+            AuthGuard
+        ));
+    }
+
+    #[test]
+    fn root_facade_candidates_follow_global_class_lifecycle() {
+        use crate::symbol_map::LaravelConfigResource::{CacheStore, StorageDisk};
+
+        let backend = Backend::new_test();
+        let consumer_uri = "file:///app/Consumer.php";
+        let class_uri = "file:///app/Cache.php";
+        backend.update_ast(
+            consumer_uri,
+            "<?php\nCache::store('redis');\nStorage::disk('local');\nRoute::get('/')->where('id')->middleware('auth:route');\n",
+        );
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "redis",
+            CacheStore
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "local",
+            StorageDisk
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "route",
+            crate::symbol_map::LaravelConfigResource::AuthGuard
+        ));
+
+        backend.update_ast(
+            class_uri,
+            "<?php\nclass Cache { public static function store() {} }\nclass Route { public static function get() {} }\n",
+        );
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "redis",
+            CacheStore
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "local",
+            StorageDisk
+        ));
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "route",
+            crate::symbol_map::LaravelConfigResource::AuthGuard
+        ));
+        let map = backend
+            .symbol_map_for(consumer_uri)
+            .expect("consumer map should remain published");
+        let disk_indices = map.member_access_indices("disk");
+        assert_eq!(disk_indices.len(), 1);
+        assert!(matches!(
+            &map.spans[disk_indices[0]].kind,
+            crate::symbol_map::SymbolKind::MemberAccess { member_name, .. }
+                if member_name == "disk"
+        ));
+
+        backend.update_ast(class_uri, "<?php\nclass Other {}\n");
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "redis",
+            CacheStore
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "route",
+            crate::symbol_map::LaravelConfigResource::AuthGuard
+        ));
+    }
+
+    #[test]
+    fn controller_middleware_does_not_claim_auth_guards_without_a_typed_receiver() {
+        use crate::symbol_map::LaravelConfigResource::AuthGuard;
+
+        let backend = Backend::new_test();
+        let uri = "file:///app/Controller.php";
+        backend.update_ast(
+            uri,
+            "<?php\nclass Controller {\n    function boot() {\n        $this->middleware('auth:web');\n        $this->middleware('can:update,Post');\n    }\n}\nRoute::get('/')->middleware('auth:admin');\nRoute::get('/')->a()->b()->c()->d()->middleware('auth:too-deep');\n",
+        );
+        assert!(!has_config_resource_span(&backend, uri, "web", AuthGuard));
+        assert!(has_config_resource_span(&backend, uri, "admin", AuthGuard));
+        assert!(!has_config_resource_span(
+            &backend, uri, "too-deep", AuthGuard
+        ));
+        assert!(backend.symbol_map_for(uri).is_some_and(|map| {
+            map.spans.iter().any(|span| {
+                matches!(
+                    &span.kind,
+                    crate::symbol_map::SymbolKind::LaravelStringKey {
+                        kind: crate::symbol_map::LaravelStringKind::GateAbility,
+                        key,
+                        ..
+                    } if key == "update"
+                )
+            })
+        }));
+    }
 
     /// Changing a function's parameter type should cause `update_ast` to
     /// return `true` (signature changed), triggering cross-file

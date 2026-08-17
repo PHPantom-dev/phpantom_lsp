@@ -336,7 +336,10 @@ pub(crate) struct LaravelStringKeyCache {
     /// `Arc` because both the name list and the parameter names of one route
     /// are read from it, and cloning the whole table per read would be waste.
     pub routes: Option<std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>>>,
-    pub config_keys: Option<Vec<String>>,
+    /// Config keys are shared by completion and the parallel diagnostic pass.
+    /// Keeping the immutable sorted list behind an `Arc` avoids cloning every
+    /// key on each resource-name keystroke or file diagnostic.
+    pub config_keys: Option<std::sync::Arc<Vec<String>>>,
     pub view_names: Option<Vec<String>>,
     pub trans_keys: Option<Vec<String>>,
     /// Every translation key mapped to whether it names a group (nested
@@ -1737,6 +1740,11 @@ impl Backend {
                 }
             }
         }
+
+        // The refreshed discovery indexes may add or remove a namespace-local
+        // `auth()` or a real global class that shadows a Laravel facade alias.
+        // Re-evaluate only maps that recorded one of those dormant candidates.
+        self.refresh_all_published_laravel_candidates();
     }
 
     /// Create a shallow clone of this `Backend` that shares every

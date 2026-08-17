@@ -175,6 +175,14 @@ impl Backend {
 
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
+        // Direct resource APIs spell only the child name while generic config
+        // calls spell its full dotted key. Until Laravel string-key rename is
+        // implemented, applying one replacement to their shared reference set
+        // would corrupt one representation.
+        if is_config_resource_identity(&span.kind) {
+            return None;
+        }
+
         // Find all references (including the declaration).
         let locations = self.find_references_for_rename(uri, content, position, true)?;
 
@@ -424,5 +432,54 @@ impl Backend {
             SymbolKind::CompactVariable { .. } => false,
             _ => false,
         }
+    }
+}
+
+fn is_config_resource_identity(kind: &SymbolKind) -> bool {
+    let SymbolKind::LaravelStringKey { kind, key, .. } = kind else {
+        return false;
+    };
+    match kind {
+        crate::symbol_map::LaravelStringKind::ConfigResource(_) => true,
+        crate::symbol_map::LaravelStringKind::Config => {
+            crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod config_resource_identity_tests {
+    use super::*;
+    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+
+    fn string_kind(kind: LaravelStringKind, key: &str) -> SymbolKind {
+        SymbolKind::LaravelStringKey {
+            kind,
+            key: key.to_string(),
+            is_write: false,
+            is_optional: false,
+        }
+    }
+
+    #[test]
+    fn only_config_resource_identities_are_held_for_laravel_string_rename() {
+        assert!(is_config_resource_identity(&string_kind(
+            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            "redis",
+        )));
+        assert!(is_config_resource_identity(&string_kind(
+            LaravelStringKind::Config,
+            "cache.stores.redis",
+        )));
+        assert!(!is_config_resource_identity(&string_kind(
+            LaravelStringKind::Config,
+            "app.name",
+        )));
+        assert!(!is_config_resource_identity(&string_kind(
+            LaravelStringKind::View,
+            "dashboard",
+        )));
+        assert!(!is_config_resource_identity(&SymbolKind::Keyword));
     }
 }

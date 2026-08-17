@@ -887,9 +887,20 @@ impl Backend {
         let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
             return Vec::new();
         };
-        let Ok(path) = url.to_file_path() else {
+        let Ok(mut path) = url.to_file_path() else {
             return Vec::new();
         };
+
+        // Roots are canonicalized below, so normalize the file side once as
+        // well. macOS exposes the same temporary directory through `/var`
+        // and `/private/var`; comparing only one canonical side makes every
+        // template under that alias appear to sit outside its view root.
+        path = path.canonicalize().unwrap_or_else(|_| {
+            path.parent()
+                .and_then(|parent| parent.canonicalize().ok())
+                .and_then(|parent| path.file_name().map(|name| parent.join(name)))
+                .unwrap_or(path)
+        });
 
         let mut names = Vec::new();
         let mut push_name = |rel: &std::path::Path, namespace: &str| {
@@ -2070,6 +2081,9 @@ mod tests {
     use crate::php_type::PhpType;
     use tower_lsp::lsp_types::Url;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     /// The joined union's member order must not depend on the order the
     /// call sites were visited in, since that order comes from a
     /// `HashMap` snapshot and varies across runs.
@@ -2157,6 +2171,35 @@ mod tests {
         assert!(
             scope.vars.iter().all(|(name, _)| name != "excluded"),
             "non-candidate caller must be skipped: {scope:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn view_name_resolution_normalizes_aliased_file_paths() {
+        let dir = tempfile::tempdir().expect("failed to create test workspace");
+        let real_root = dir.path().join("real-project");
+        let linked_root = dir.path().join("linked-project");
+        let views = real_root.join("resources/views");
+        std::fs::create_dir_all(&views).expect("failed to create view directory");
+        symlink(&real_root, &linked_root).expect("failed to create workspace alias");
+
+        let real_template = views.join("shop.blade.php");
+        std::fs::write(&real_template, "").expect("failed to write view");
+        let linked_template = linked_root.join("resources/views/shop.blade.php");
+        let linked_uri =
+            Url::from_file_path(&linked_template).expect("view path should become a file URI");
+        let backend = Backend::new_test_with_workspace(linked_root, Vec::new());
+
+        assert_eq!(
+            backend.view_names_for_blade_uri(linked_uri.as_str()),
+            vec!["shop"]
+        );
+
+        std::fs::remove_file(real_template).expect("failed to remove view");
+        assert_eq!(
+            backend.view_names_for_blade_uri(linked_uri.as_str()),
+            vec!["shop"]
         );
     }
 }

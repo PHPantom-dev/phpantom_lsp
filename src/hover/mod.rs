@@ -574,6 +574,20 @@ impl Backend {
                 };
                 ("Config", detail)
             }
+            LaravelStringKind::ConfigResource(resource) => {
+                let descriptor = crate::symbol_map::laravel_resources::descriptor(*resource);
+                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self, kind, key, uri,
+                );
+                let detail = locations
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || format!("Laravel {}", descriptor.label),
+                        |path| format!("Defined in `{path}`"),
+                    );
+                (descriptor.hover_label, detail)
+            }
             LaravelStringKind::View => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,

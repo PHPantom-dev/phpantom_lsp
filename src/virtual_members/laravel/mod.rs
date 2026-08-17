@@ -150,7 +150,7 @@ pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
     collect_laravel_config_declarations, find_all_config_references,
     laravel_config_prefix_from_uri, resolve_config_key_declaration,
-    resolve_config_key_definition_fallback,
+    resolve_config_key_declaration_exact, resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
 pub(crate) use env_vars::resolve_env_definition;
@@ -171,6 +171,8 @@ pub(crate) use patches::STORAGE_FACADE_FQN;
 pub(crate) use path_helpers::{
     collect_path_helper_links, is_path_helper, path_helper_base, resolve_path_helper_definition,
 };
+#[cfg(test)]
+pub(crate) use provider_resources::ProviderResource;
 pub(crate) use provider_resources::{
     ProviderIdentity, ProviderOrigin, ProviderResources, ProviderScan, ProviderScans,
     extract_provider_resources,

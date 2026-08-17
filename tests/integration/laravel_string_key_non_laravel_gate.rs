@@ -28,6 +28,15 @@ return [
 ];
 ";
 
+const FILESYSTEMS_CONFIG: &str = "\
+<?php
+return [
+    'disks' => [
+        'archive' => ['driver' => 'local'],
+    ],
+];
+";
+
 const CONSUMER: &str = "\
 <?php
 namespace App;
@@ -38,6 +47,17 @@ class Settings {
         config('app.name');
     }
 }
+";
+
+const STORAGE_HOMONYM_CONSUMER: &str = "\
+<?php
+namespace App;
+
+final class Storage {
+    public static function disk(string $name): void {}
+}
+
+Storage::disk('archive');
 ";
 
 async fn setup(composer_json: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
@@ -65,12 +85,130 @@ async fn setup(composer_json: &str) -> (phpantom_lsp::Backend, tempfile::TempDir
     (backend, dir, uri)
 }
 
+async fn setup_storage_homonym() -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON_NON_LARAVEL,
+        &[
+            ("config/filesystems.php", FILESYSTEMS_CONFIG),
+            ("src/StorageConsumer.php", STORAGE_HOMONYM_CONSUMER),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/StorageConsumer.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: STORAGE_HOMONYM_CONSUMER.to_string(),
+            },
+        })
+        .await;
+
+    (backend, dir, uri)
+}
+
+fn position_after(content: &str, unique_prefix: &str) -> Position {
+    let offset = content
+        .find(unique_prefix)
+        .unwrap_or_else(|| panic!("missing `{unique_prefix}`"))
+        + unique_prefix.len();
+    let before = &content[..offset];
+    Position::new(
+        before.bytes().filter(|byte| *byte == b'\n').count() as u32,
+        before
+            .rsplit_once('\n')
+            .map_or(before.len(), |(_, tail)| tail.len()) as u32,
+    )
+}
+
 /// Lands inside the `'app.name'` string literal on the first `config()`
 /// call (line 5, 0-based) in `CONSUMER`.
 const KEY_POSITION: Position = Position {
     line: 5,
     character: 20,
 };
+
+#[tokio::test]
+async fn non_laravel_direct_resource_homonym_has_no_laravel_editor_features() {
+    let (backend, _dir, uri) = setup_storage_homonym().await;
+    let position = position_after(STORAGE_HOMONYM_CONSUMER, "Storage::disk('arch");
+
+    let completion = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let completion_items = match completion {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        completion_items.iter().all(|item| item.label != "archive"),
+        "a non-Laravel Storage homonym must not complete configured disks, got {completion_items:?}"
+    );
+
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        hover.is_none(),
+        "a non-Laravel Storage homonym must not hover as a storage disk, got {hover:?}"
+    );
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        definition.is_none(),
+        "a non-Laravel Storage homonym must not jump to filesystems.php, got {definition:?}"
+    );
+
+    let references = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    assert!(
+        references.is_empty(),
+        "a non-Laravel Storage homonym must not fabricate disk references, got {references:?}"
+    );
+}
 
 #[tokio::test]
 async fn non_laravel_project_hover_does_not_fabricate_config_key() {

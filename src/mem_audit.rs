@@ -1286,6 +1286,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for sp in &sm.spans {
                 sym.add(sp.kind.audit_heap());
             }
+            sym.add(
+                sm.conditional_laravel_spans.capacity()
+                    * size_of::<crate::symbol_map::ConditionalLaravelStringSpan>(),
+            );
+            for candidate in &sm.conditional_laravel_spans {
+                sym.add(candidate.audit_heap());
+            }
             sym += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
             member_idx += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
             for v in sm.member_access_indices.values() {
@@ -1436,10 +1443,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut laravel_keys = Sz::default();
     {
         let c = backend.laravel_string_key_cache.read();
-        for v in [&c.config_keys, &c.view_names, &c.trans_keys]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(keys) = &c.config_keys {
+            laravel_keys += vs(keys);
+        }
+        for v in [&c.view_names, &c.trans_keys].into_iter().flatten() {
             laravel_keys += vs(v);
         }
         if let Some(routes) = &c.routes {

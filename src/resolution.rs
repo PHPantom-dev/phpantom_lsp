@@ -1254,6 +1254,30 @@ impl Backend {
         self.resolve_function_name_at(name, None, 0, file_use_map, file_namespace)
     }
 
+    /// Whether discovery or full parsing has seen this exact function FQN.
+    ///
+    /// This is the allocation-free membership form used when a caller only
+    /// needs to know whether PHP's namespace-local function shadows a global
+    /// fallback. It deliberately does not trigger a lazy parse.
+    pub(crate) fn has_indexed_function(&self, fqn: &str) -> bool {
+        self.symbols.global_functions.read().get(fqn).is_some()
+            || self
+                .symbols
+                .autoload_function_index
+                .read()
+                .get(fqn)
+                .is_some()
+    }
+
+    /// Whether discovery or full parsing has seen this exact class FQN.
+    ///
+    /// Laravel's optional root facade aliases are used only when no real
+    /// global class owns the same name. This membership check does not lazy
+    /// load the class, keeping completion on that fallback allocation-free.
+    pub(crate) fn has_indexed_class(&self, fqn: &str) -> bool {
+        self.symbols.fqn_uri_index.read().get(fqn).is_some()
+    }
+
     /// Resolve a function name, consulting mago-names' per-offset
     /// resolution for the authoritative fully-qualified name.
     ///

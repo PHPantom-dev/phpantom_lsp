@@ -41,10 +41,22 @@ impl Backend {
     /// Register a vendor directory path and its URI prefix for
     /// vendor-file detection.
     pub(crate) fn add_vendor_dir(&self, vendor_path: &std::path::Path) {
-        // Store the absolute path for filesystem-level skip logic.
+        // Keep both filesystem spellings. Walkers normally yield the raw
+        // workspace spelling, while Composer package discovery canonicalizes
+        // its files; on macOS those can be `/var` and `/private/var` for the
+        // same vendor tree. Caching both here keeps the hot lookup paths free
+        // of filesystem calls.
         {
             let mut paths = self.workspace.vendor_dir_paths.lock();
-            paths.push(vendor_path.to_path_buf());
+            let mut insert = |path: PathBuf| {
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            };
+            insert(vendor_path.to_path_buf());
+            if let Ok(canonical) = vendor_path.canonicalize() {
+                insert(canonical);
+            }
         }
         // Store URI prefixes for URI-level skip logic (diagnostics, find
         // references, rename).  Keep both raw and canonical forms so macOS
@@ -81,6 +93,10 @@ impl Backend {
             *self.workspace.psr4_mappings.write() = mappings;
 
             let vendor_path = root.join(&vendor_dir);
+            // `vendor/` may not have existed during initialization (a fresh
+            // clone before `composer install`). Register it again now so the
+            // shared vendor filters cache both raw and canonical spellings.
+            self.add_vendor_dir(&vendor_path);
 
             // Rebuild vendor classmap, tracking dependency provenance so
             // completion ranking stays accurate after a composer change.
@@ -174,6 +190,11 @@ impl Backend {
         self.clear_class_not_found_cache();
         self.resolved_class_cache.write().clear();
         self.member_completion_cache.lock().clear();
+
+        // Composer changes can introduce or remove functions/classes that
+        // shadow Laravel's runtime helper and facade aliases. Only maps with
+        // such candidates are revisited.
+        self.refresh_all_published_laravel_candidates();
     }
 
     /// Scan autoload files for a single project root and populate the
@@ -627,5 +648,50 @@ impl Backend {
                 origins.insert(name.clone(), origin);
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vendor_registration_caches_raw_and_canonical_path_spellings() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_vendor = dir.path().join("packages");
+        std::fs::create_dir(&canonical_vendor).expect("create package directory");
+        let aliased_vendor = dir.path().join("vendor");
+        symlink(&canonical_vendor, &aliased_vendor).expect("create vendor alias");
+
+        let backend = Backend::new_test();
+        backend.add_vendor_dir(&aliased_vendor);
+        backend.add_vendor_dir(&aliased_vendor);
+
+        let paths = backend.workspace.vendor_dir_paths.lock();
+        assert_eq!(paths.len(), 2, "repeat registration must stay deduplicated");
+        assert!(paths.contains(&aliased_vendor));
+        assert!(paths.contains(&canonical_vendor.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn composer_rescan_registers_a_vendor_directory_created_after_startup() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("composer.json"), "{}").expect("write composer.json");
+        let canonical_vendor = dir.path().join("packages");
+        std::fs::create_dir(&canonical_vendor).expect("create package directory");
+        let aliased_vendor = dir.path().join("vendor");
+        symlink(&canonical_vendor, &aliased_vendor).expect("create vendor alias");
+
+        let backend = Backend::new_test();
+        assert!(backend.workspace.vendor_dir_paths.lock().is_empty());
+        backend.rescan_composer_indexes(dir.path());
+
+        let paths = backend.workspace.vendor_dir_paths.lock();
+        assert!(paths.contains(&aliased_vendor));
+        assert!(paths.contains(&canonical_vendor.canonicalize().unwrap()));
     }
 }

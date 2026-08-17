@@ -6,7 +6,10 @@
 //! these as [`crate::symbol_map::LaravelStringKey`] spans; this module turns
 //! a span (kind + key) into concrete definition/reference [`Location`]s.
 
-use super::{find_all_config_references, resolve_config_key_declaration};
+use super::{
+    find_all_config_references, resolve_config_key_declaration,
+    resolve_config_key_declaration_exact,
+};
 use super::{route_names, trans_keys, view_names};
 
 use tower_lsp::lsp_types::Location;
@@ -36,9 +39,23 @@ pub(crate) fn resolve_laravel_string_key(
         LaravelStringKind::Stack => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Stack, key)
         }
-        LaravelStringKind::Config => resolve_config_key_declaration(backend, key)
-            .into_iter()
-            .collect(),
+        LaravelStringKind::Config => {
+            if crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some() {
+                resolve_config_key_declaration_exact(backend, key)
+                    .into_iter()
+                    .collect()
+            } else {
+                resolve_config_key_declaration(backend, key)
+                    .into_iter()
+                    .collect()
+            }
+        }
+        LaravelStringKind::ConfigResource(resource) => {
+            let config_key = crate::symbol_map::laravel_resources::config_key(*resource, key);
+            resolve_config_key_declaration_exact(backend, &config_key)
+                .into_iter()
+                .collect()
+        }
         LaravelStringKind::View => view_names::resolve_view_definitions(backend, key),
         LaravelStringKind::Route => route_names::resolve_route_definitions(backend, key),
         LaravelStringKind::Trans => trans_keys::resolve_trans_definitions(backend, key),
@@ -210,8 +227,8 @@ pub(crate) fn find_laravel_string_key_references(
 ) -> Vec<Location> {
     use crate::symbol_map::LaravelStringKind;
     let mut locations = match kind {
-        LaravelStringKind::Config => {
-            find_all_config_references(backend, key, snapshot, include_declaration)
+        LaravelStringKind::Config | LaravelStringKind::ConfigResource(_) => {
+            find_all_config_references(backend, kind, key, snapshot, include_declaration)
         }
         // Two unrelated pages that both fill `content` fill two different
         // sections, so the span index's project-wide answer is the wrong
@@ -241,7 +258,7 @@ pub(crate) fn find_laravel_string_key_references(
         }
     };
 
-    if include_declaration && kind != &LaravelStringKind::Config {
+    if include_declaration && !kind.is_config_backed() {
         for decl in resolve_laravel_string_key(backend, kind, key, uri) {
             crate::references::push_unique_location(
                 &mut locations,
@@ -325,4 +342,62 @@ fn find_string_key_usages(
         }
     }
     locations
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+
+    #[test]
+    fn configured_resources_resolve_exact_entries_without_file_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config/cache.php");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            "<?php return ['stores' => ['redis' => ['driver' => 'redis']]];\n",
+        )
+        .unwrap();
+
+        let backend = crate::Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        let usage_uri = "file:///project/usage.php";
+        let resource_kind = LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore);
+
+        let short = resolve_laravel_string_key(&backend, &resource_kind, "redis", usage_uri);
+        let full = resolve_laravel_string_key(
+            &backend,
+            &LaravelStringKind::Config,
+            "cache.stores.redis",
+            usage_uri,
+        );
+        assert_eq!(short, full);
+        assert_eq!(short.len(), 1);
+
+        assert!(
+            resolve_laravel_string_key(&backend, &resource_kind, "missing", usage_uri).is_empty()
+        );
+        assert!(
+            resolve_laravel_string_key(
+                &backend,
+                &LaravelStringKind::Config,
+                "cache.stores.missing",
+                usage_uri,
+            )
+            .is_empty()
+        );
+
+        let generic = resolve_laravel_string_key(
+            &backend,
+            &LaravelStringKind::Config,
+            "cache.unlisted",
+            usage_uri,
+        );
+        assert_eq!(generic.len(), 1);
+        assert_eq!(
+            generic[0].range.start,
+            tower_lsp::lsp_types::Position::new(0, 0)
+        );
+    }
 }

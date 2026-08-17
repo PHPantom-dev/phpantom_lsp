@@ -346,18 +346,12 @@ impl Backend {
                 if !self.resolved_class_cache.read().is_laravel() {
                     return Vec::new();
                 }
-                let snapshot = if include_declaration
-                    && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
-                {
-                    self.user_file_symbol_maps()
-                } else {
-                    self.user_file_symbol_maps_for_reference_keys(&[
-                        ReferenceIndexKey::LaravelString {
-                            kind: kind.clone(),
-                            key: key.to_string(),
-                        },
-                    ])
-                };
+                // Config resources and their generic config spelling share a
+                // canonical index identity. Declaration lookup is independent
+                // of this usage snapshot, so every request stays narrow.
+                let reference_key =
+                    crate::reference_index::laravel_string_reference_key(*kind, key);
+                let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
                 laravel::find_laravel_string_key_references(
                     self,
                     kind,
