@@ -61,6 +61,10 @@
 //!   from its path.
 //! - **Class name mismatch diagnostics** — report a single-class file
 //!   whose class name disagrees with the name PSR-4 expects for its path.
+//! - **Unreachable code diagnostics** — dim the statements that follow one
+//!   which always leaves the block (`return`, `throw`, `exit`, `die`,
+//!   `continue`, `break`, or an `if` whose every branch does).  Reads the
+//!   shape of the statement list only, so it needs no type resolution.
 //!
 //! ## Phase 2 — slow (require type resolution)
 //!
@@ -250,6 +254,7 @@ pub(crate) mod undefined_variables;
 pub(crate) mod unknown_classes;
 pub(crate) mod unknown_functions;
 pub(crate) mod unknown_members;
+pub(crate) mod unreachable_code;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
@@ -313,12 +318,19 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        // Four of these parse the file.  Without a shared cache each would
+        // parse it again, on every keystroke; the guard makes them reuse one
+        // AST.  A nested guard is a no-op, so the workspace and analyze paths
+        // that already hold one are unaffected.
+        let _parse_guard = crate::parser::with_parse_cache(content);
+
         self.collect_syntax_error_diagnostics(uri_str, content, out);
         self.collect_unused_import_diagnostics(uri_str, content, out);
         self.collect_unused_variable_diagnostics(uri_str, content, out);
         self.collect_namespace_mismatch_diagnostics(uri_str, content, out);
         self.collect_class_name_mismatch_diagnostics(uri_str, content, out);
         self.collect_docblock_native_mismatch_diagnostics(uri_str, content, out);
+        self.collect_unreachable_code_diagnostics(uri_str, content, out);
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,

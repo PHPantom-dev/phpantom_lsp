@@ -100,7 +100,6 @@ unlikely to move the needle for most users.
 | B320 | [An unclosed echo swallows the `@end…` of the block it sits in](todo/bugs.md#b320-an-unclosed-echo-swallows-the-end-of-the-block-it-sits-in)                                | Low-Medium  | Medium      |
 | B321 | [Echo-delimiter hover fires on `{{` that is not an echo](todo/bugs.md#b321-echo-delimiter-hover-fires-on--that-is-not-an-echo)                                              | Low         | Low         |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
-| D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
@@ -111,6 +110,8 @@ unlikely to move the needle for most users.
 | D21 | [A union of an unreachable and a missing member is reported by neither check](todo/diagnostics.md#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check) | Low         | Medium-High |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D23 | [A rebound closure's scope is added to the lexical one rather than replacing it](todo/diagnostics.md#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it) | Low-Medium  | Medium      |
+| D24 | ["Remove unreachable code" is wired to PHPStan only](todo/diagnostics.md#d24-remove-unreachable-code-is-wired-to-phpstan-only)                                              | Low-Medium  | Medium      |
+| D25 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d25-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium-High |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
