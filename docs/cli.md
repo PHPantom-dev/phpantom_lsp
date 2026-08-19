@@ -172,6 +172,7 @@ Each has a rule identifier shown below the message.
 | `argument_count`         | Error    | Wrong number of arguments to a function or method     |
 | `implementation_error`   | Error    | Missing required interface or abstract methods        |
 | `scalar_member_access`   | Error    | Member access on a scalar type (int, string, etc.)    |
+| `invalid_member_access`  | Error    | `private` or `protected` member reached from outside  |
 | `unused_import`          | Hint     | `use` statement with no references in the file        |
 | `deprecated`             | Hint     | Reference to a `@deprecated` symbol                   |
 
