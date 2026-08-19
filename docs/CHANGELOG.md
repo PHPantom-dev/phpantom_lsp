@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Laravel translations are understood across locales.** JSON and PHP language files under `lang/` and `resources/lang/` share navigation, locale and replacement-key completion, and hover with links to each locale's value. Missing keys offer an insertion quick fix when their PHP group file already exists. Contributed by @shuvroroy.
+- **Code that cannot be reached is dimmed.** Statements after a `return`, `throw`, `exit`, `continue`, `break`, or an `if` whose every branch leaves the block are greyed out the way an unused import is. Contributed by @petrovo-as.
 
 ### Changed
 
