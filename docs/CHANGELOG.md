@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Custom Eloquent pivot accessors.** A many-to-many relationship that renames its pivot with `->as('participation')` now exposes `$participation` on the related model instead of `$pivot`, with the configured pivot model preserved through completion, hover, and chaining. Literal accessor names carried by the relationship's fourth generic are understood too. Contributed by @shuvroroy.
+- **Custom Eloquent pivot accessors.** A many-to-many relationship that renames its pivot with `->as('participation')` now exposes `$participation` on the related model instead of `$pivot`, with the configured pivot model preserved through completion, hover, and chaining. Literal accessor names carried by the relationship's fourth generic are understood too. Contributed by @shuvroroy (#381).
 
 ### Changed
 
