@@ -83,6 +83,11 @@
             "none"
           ],
           "default": "full"
+        },
+        "follow-links": {
+          "type": "boolean",
+          "description": "Follow directory symlinks found inside the workspace during workspace walks. Off by default: a symlinked directory is not descended into, so a link pointing at an external framework tree is skipped. When enabled the walk enters the link target and the symlink spelling is preserved in the index. The Composer pipeline, Drupal scanner, and Laravel migration walk are unaffected. Changes on disk inside a linked target directory do not trigger re-indexing; reload the window after such changes.",
+          "default": false
         }
       }
     },

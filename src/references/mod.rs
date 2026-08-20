@@ -314,6 +314,7 @@ pub(super) fn member_candidate_keys(
 pub(crate) fn collect_php_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
+    follow_links: bool,
 ) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
@@ -331,6 +332,9 @@ pub(crate) fn collect_php_files_gitignore(
         .parents(true)
         // Also respect .ignore files (ripgrep convention)
         .ignore(true)
+        // Follow interior directory symlinks only when configured; a
+        // linked framework tree is otherwise skipped entirely.
+        .follow_links(follow_links)
         // Always skip vendor directories, even if not gitignored
         .filter_entry(move |entry| {
             if entry.file_type().is_some_and(|ft| ft.is_dir()) {

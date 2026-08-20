@@ -84,7 +84,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         .init_single_project(root, php_version, composer_package, None)
         .await;
     // ── 3. Locate user files (via PSR-4) and crop to path ───────────
-    let files = discover_user_files(&backend, root, options.path_filter.as_deref());
+    let files = discover_user_files(
+        &backend,
+        root,
+        options.path_filter.as_deref(),
+        cfg.indexing.follow_links(),
+    );
 
     if files.is_empty() {
         eprintln!("No PHP files found.");
@@ -644,6 +649,7 @@ pub(crate) fn discover_user_files(
     backend: &Backend,
     workspace_root: &Path,
     path_filter: Option<&Path>,
+    follow_links: bool,
 ) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
@@ -758,6 +764,7 @@ pub(crate) fn discover_user_files(
             .hidden(true)
             .parents(true)
             .ignore(true)
+            .follow_links(follow_links)
             .filter_entry(move |entry| {
                 if entry.file_type().is_some_and(|ft| ft.is_dir())
                     && !skip_vendor.is_empty()
@@ -904,7 +911,7 @@ mod tests {
         let backend = Backend::new_headless();
         backend.add_vendor_dir(&root.join("vendor"));
 
-        let files = discover_user_files(&backend, root, None);
+        let files = discover_user_files(&backend, root, None, false);
         let names: Vec<String> = files
             .iter()
             .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
@@ -945,7 +952,7 @@ mod tests {
             .lock()
             .push(linked_root.join("vendor"));
 
-        let files = discover_user_files(&backend, &real_root, None);
+        let files = discover_user_files(&backend, &real_root, None, false);
         assert!(files.contains(&real_root.join("app/Main.php")), "{files:?}");
         assert!(
             !files
@@ -966,7 +973,59 @@ mod tests {
         std::fs::write(root.join("other.php"), "<?php\n").unwrap();
 
         let backend = Backend::new_headless();
-        let files = discover_user_files(&backend, root, Some(Path::new("includes/target.php")));
+        let files = discover_user_files(&backend, root, Some(Path::new("includes/target.php")), false);
         assert_eq!(files, vec![root.join("includes/target.php")]);
+    }
+
+    #[test]
+    fn discover_user_files_follows_interior_symlink_when_enabled() {
+        // CLI analyse's user-file walker keeps the same follow-links
+        // contract as the workspace walkers (issue #383).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, &root, None, true);
+        let linked = files
+            .iter()
+            .find(|p| p.ends_with("Hidden.php"))
+            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+        assert!(
+            linked.starts_with(&link),
+            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+        );
+    }
+
+    #[test]
+    fn discover_user_files_does_not_follow_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, &root, None, false);
+        assert!(
+            !files.iter().any(|p| p.ends_with("Hidden.php")),
+            "interior symlink must not be followed by default: {files:?}"
+        );
     }
 }

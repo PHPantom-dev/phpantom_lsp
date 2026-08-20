@@ -19,7 +19,7 @@ fn scan_directories_finds_classes() {
     .unwrap();
 
     let vendor_dir_paths = vec![dir.path().join("vendor")];
-    let classmap = scan_directories(&[src], &vendor_dir_paths);
+    let classmap = scan_directories(&[src], &vendor_dir_paths, false);
     assert_eq!(classmap.len(), 2);
     assert!(classmap.contains_key("App\\Models\\User"));
     assert!(classmap.contains_key("App\\Models\\Order"));
@@ -32,7 +32,7 @@ fn scan_directories_skips_hidden() {
     std::fs::create_dir_all(&hidden).unwrap();
     std::fs::write(hidden.join("Secret.php"), "<?php\nclass Secret {}").unwrap();
 
-    let classmap = scan_directories(&[dir.path().to_path_buf()], &[]);
+    let classmap = scan_directories(&[dir.path().to_path_buf()], &[], false);
     assert!(!classmap.contains_key("Secret"));
 }
 
@@ -44,7 +44,7 @@ fn scan_directories_skips_vendor() {
     std::fs::write(vendor.join("Lib.php"), "<?php\nclass Lib {}").unwrap();
 
     let vendor_dir_paths = vec![vendor];
-    let classmap = scan_directories(&[dir.path().to_path_buf()], &vendor_dir_paths);
+    let classmap = scan_directories(&[dir.path().to_path_buf()], &vendor_dir_paths, false);
     assert!(!classmap.contains_key("Lib"));
 }
 
@@ -69,7 +69,7 @@ fn psr4_filtering() {
     )
     .unwrap();
 
-    let classmap = scan_psr4_directories(&[("App\\".to_string(), src)], &[], &[]);
+    let classmap = scan_psr4_directories(&[("App\\".to_string(), src)], &[], &[], false);
     assert!(classmap.contains_key("App\\Models\\User"));
     assert!(!classmap.contains_key("App\\Wrong\\Misplaced"));
 }
@@ -365,7 +365,7 @@ fn scan_workspace_fallback_finds_all() {
     std::fs::write(dir.path().join("Bar.php"), "<?php\nclass Bar {}").unwrap();
 
     let vendor_dir_paths = vec![dir.path().join("vendor")];
-    let classmap = scan_workspace_fallback(dir.path(), &vendor_dir_paths);
+    let classmap = scan_workspace_fallback(dir.path(), &vendor_dir_paths, false);
     assert!(classmap.contains_key("Foo"));
     assert!(classmap.contains_key("Bar"));
 }
@@ -383,7 +383,7 @@ fn scan_workspace_fallback_full_finds_all_symbol_types() {
     std::fs::write(dir.path().join("Model.php"), "<?php\nclass User {}").unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None, false);
     assert!(result.classmap.contains_key("User"));
     assert!(
         result.function_index.contains_key("myHelper"),
@@ -420,7 +420,7 @@ fn scan_workspace_fallback_full_skips_vendor() {
 
     let mut skip = std::collections::HashSet::new();
     skip.insert(vendor.clone());
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None, false);
     assert!(result.function_index.contains_key("appFunc"));
     assert!(
         !result.function_index.contains_key("vendorFunc"),
@@ -445,7 +445,7 @@ fn scan_workspace_fallback_full_skips_hidden_dirs() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, None, false);
     assert!(result.function_index.contains_key("publicFunc"));
     assert!(
         !result.function_index.contains_key("secretFunc"),
@@ -659,6 +659,7 @@ fn psr4_prefixes_sharing_a_directory_both_resolve() {
         ],
         &[],
         &[],
+        false,
     );
     assert!(classmap.contains_key("One\\Thing"));
     assert!(classmap.contains_key("Two\\Other"));
@@ -691,6 +692,7 @@ fn psr4_nested_mapping_does_not_shadow_its_parent() {
         ],
         &[],
         &[],
+        false,
     );
     assert!(classmap.contains_key("Outer\\Nested\\Item"));
     assert!(classmap.contains_key("Inner\\Other"));
@@ -712,6 +714,170 @@ fn scan_directories_follows_a_symlinked_root() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
-    let classmap = scan_directories(&[link], &[]);
+    let classmap = scan_directories(&[link], &[], false);
     assert!(classmap.contains_key("Linked"));
+}
+
+// ── follow-links: interior symlink walking (issue #383) ────────────
+//
+// The workspace walker's `follow_links` switch decides whether a
+// symlinked directory *inside* a walk root is descended into.  With the
+// switch off (the default) `ignore` yields the symlink itself and never
+// enters it, which is how a `kdhelp -> ../kdhelp` style link to an
+// external framework tree is skipped entirely.  With it on, the walk
+// enters the link target and keeps the symlink spelling in every path it
+// yields — the spelling contract the index and returned URIs depend on.
+
+#[test]
+fn walk_roots_does_not_follow_interior_symlink_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("Hidden.php"), "<?php\nclass Hidden {}").unwrap();
+
+    let link = root.join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+    let empty = HashSet::new();
+    let opts = WalkOptions::new(Vec::new(), &empty, false);
+    let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
+    assert!(
+        !files.iter().any(|p| p.ends_with("Hidden.php")),
+        "interior symlink must not be followed by default: {files:?}"
+    );
+}
+
+#[test]
+fn walk_roots_follows_interior_symlink_when_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("Hidden.php"), "<?php\nclass Hidden {}").unwrap();
+
+    let link = root.join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+    let empty = HashSet::new();
+    let opts = WalkOptions::new(Vec::new(), &empty, true);
+    let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
+    let linked = files
+        .iter()
+        .find(|p| p.ends_with("Hidden.php"))
+        .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+    assert!(
+        linked.starts_with(&link),
+        "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+    );
+}
+
+#[test]
+fn walk_roots_follows_nested_symlinks() {
+    // The kdhelp/soa scenario: a symlink inside a symlinked target,
+    // pointing at a second external tree, is followed transitively and
+    // keeps the full symlink prefix in its yielded paths.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let ext1 = dir.path().join("ext1");
+    let ext2 = dir.path().join("ext2");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&ext1).unwrap();
+    std::fs::create_dir_all(&ext2).unwrap();
+    std::fs::write(ext2.join("Deep.php"), "<?php\nclass Deep {}").unwrap();
+
+    let kdhelp = root.join("kdhelp");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&ext1, &kdhelp).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&ext1, &kdhelp).unwrap();
+
+    // The second link lives *inside* the first link's target, so it is
+    // only reachable when the walk follows into ext1.
+    let soa = ext1.join("soa");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&ext2, &soa).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&ext2, &soa).unwrap();
+
+    let empty = HashSet::new();
+    let opts = WalkOptions::new(Vec::new(), &empty, true);
+    let files: Vec<PathBuf> = walk_roots(&[root.clone()], &opts).into_iter().flatten().collect();
+    let linked = files
+        .iter()
+        .find(|p| p.ends_with("Deep.php"))
+        .unwrap_or_else(|| panic!("nested linked file must be indexed: {files:?}"));
+    // Both link spellings survive transitively: the yielded path is
+    // ws/kdhelp/soa/Deep.php, never the real ext1/… / ext2/… targets.
+    let expected_prefix = root.join("kdhelp").join("soa");
+    assert!(
+        linked.starts_with(&expected_prefix),
+        "nested links must keep the full symlink prefix: {linked:?} vs {expected_prefix:?}"
+    );
+}
+
+#[test]
+fn walk_roots_follows_symlink_cycle_safely() {
+    // A symlink pointing back at the workspace itself must terminate:
+    // `ignore`'s parallel walker detects the cycle via dev+inode handles
+    // and skips the re-entered directory.  Without the cycle guard this
+    // test would walk forever.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("App.php"), "<?php\nclass App {}").unwrap();
+
+    let link = root.join("loop");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&root, &link).unwrap();
+
+    let empty = HashSet::new();
+    let opts = WalkOptions::new(Vec::new(), &empty, true);
+    let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
+    assert!(
+        files.iter().any(|p| p.ends_with("App.php")),
+        "workspace files must still be found next to a cycle: {files:?}"
+    );
+}
+
+#[test]
+fn walk_roots_skip_dirs_match_literal_walk_spelling() {
+    // `skip_dirs` is a literal path comparison against the walked entry
+    // path.  With follow-links on, an interior symlink is walked under
+    // its *link* spelling, so a skip entry pointing at the link *target*
+    // does not prune the linked tree — a project's own excludes never
+    // accidentally hit a linked external tree, and a linked tree's own
+    // same-named directories are not pruned by the project's excludes
+    // either (the two are the same fact seen from each side).
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let real_vendor = dir.path().join("real-vendor");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&real_vendor).unwrap();
+    std::fs::write(real_vendor.join("Pkg.php"), "<?php\nclass Pkg {}").unwrap();
+
+    let link = root.join("vendor-link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real_vendor, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real_vendor, &link).unwrap();
+
+    let skip_dirs = vec![real_vendor];
+    let empty = HashSet::new();
+    let opts = WalkOptions::new(skip_dirs, &empty, true);
+    let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
+    assert!(
+        files.iter().any(|p| p.ends_with("Pkg.php")),
+        "skip_dirs matches literal walk paths; the target spelling must not prune the link spelling: {files:?}"
+    );
 }

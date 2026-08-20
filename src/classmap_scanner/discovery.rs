@@ -68,9 +68,10 @@ fn thread_count() -> usize {
 pub fn scan_directories(
     dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
+    follow_links: bool,
 ) -> HashMap<String, PathBuf> {
     let skip_paths = HashSet::new();
-    let opts = WalkOptions::new(vendor_dir_paths.to_vec(), &skip_paths);
+    let opts = WalkOptions::new(vendor_dir_paths.to_vec(), &skip_paths, follow_links);
     let paths: Vec<PathBuf> = walk_roots(dirs, &opts).into_iter().flatten().collect();
     scan_files_parallel_classes(&paths, None)
 }
@@ -96,8 +97,16 @@ pub fn scan_psr4_directories(
     psr4: &[(String, PathBuf)],
     classmap_dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
+    follow_links: bool,
 ) -> HashMap<String, PathBuf> {
-    scan_psr4_directories_with_skip(psr4, classmap_dirs, vendor_dir_paths, &HashSet::new(), None)
+    scan_psr4_directories_with_skip(
+        psr4,
+        classmap_dirs,
+        vendor_dir_paths,
+        &HashSet::new(),
+        None,
+        follow_links,
+    )
 }
 
 /// Like [`scan_psr4_directories`] but accepts a set of absolute file
@@ -111,9 +120,10 @@ pub fn scan_psr4_directories_with_skip(
     vendor_dir_paths: &[PathBuf],
     skip_paths: &HashSet<PathBuf>,
     progress: Option<&ScanProgress>,
+    follow_links: bool,
 ) -> HashMap<String, PathBuf> {
     // ── Walk the PSR-4 and classmap roots in one parallel pass ──────
-    let opts = WalkOptions::new(vendor_dir_paths.to_vec(), skip_paths);
+    let opts = WalkOptions::new(vendor_dir_paths.to_vec(), skip_paths, follow_links);
     let mut roots: Vec<PathBuf> = psr4.iter().map(|(_, dir)| dir.clone()).collect();
     roots.extend(classmap_dirs.iter().cloned());
     let mut walked = walk_roots(&roots, &opts);
@@ -155,6 +165,7 @@ pub fn scan_vendor_packages(workspace_root: &Path, vendor_dir: &str) -> Workspac
         &HashSet::new(),
         &HashSet::new(),
         None,
+        false,
     )
 }
 
@@ -387,6 +398,7 @@ pub fn scan_vendor_packages_with_skip(
     skip_paths: &HashSet<PathBuf>,
     explicit_deps: &HashSet<String>,
     progress: Option<&ScanProgress>,
+    follow_links: bool,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
     let installed_path = vendor_path.join("composer").join("installed.json");
@@ -478,7 +490,7 @@ pub fn scan_vendor_packages_with_skip(
     // the cores are shared across all packages instead of one thread per
     // package.  The roots are laid out PSR-4 first and classmap/`files`
     // second, matching the order phase 3 concatenates them in.
-    let opts = WalkOptions::new(vec![vendor_path.clone()], skip_paths);
+    let opts = WalkOptions::new(vec![vendor_path.clone()], skip_paths, follow_links);
     let mut roots: Vec<PathBuf> = Vec::new();
     for (_, sources) in &collected {
         roots.extend(sources.psr4.iter().cloned());
@@ -541,8 +553,9 @@ pub fn scan_vendor_packages_with_skip(
 pub fn scan_workspace_fallback(
     workspace_root: &Path,
     vendor_dir_paths: &[PathBuf],
+    follow_links: bool,
 ) -> HashMap<String, PathBuf> {
-    scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths)
+    scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths, follow_links)
 }
 
 /// Scan a batch of files for class names in parallel and return a classmap.
@@ -878,10 +891,11 @@ pub fn scan_workspace_fallback_full(
     workspace_root: &Path,
     skip_dirs: &HashSet<PathBuf>,
     progress: Option<&ScanProgress>,
+    follow_links: bool,
 ) -> WorkspaceScanResult {
     // Phase 1: collect file paths
     let skip_paths = HashSet::new();
-    let opts = WalkOptions::new(skip_dirs.iter().cloned().collect(), &skip_paths);
+    let opts = WalkOptions::new(skip_dirs.iter().cloned().collect(), &skip_paths, follow_links);
     let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
         walk_roots(&[workspace_root.to_path_buf()], &opts)
             .into_iter()
@@ -1011,13 +1025,23 @@ struct WalkOptions<'a> {
     /// Absolute file paths to leave out of the result, typically the ones
     /// Composer's generated classmap already covers.
     skip_paths: &'a HashSet<PathBuf>,
+    /// Whether to follow directory symlinks found inside a walk root.
+    /// Passed straight to [`ignore::WalkBuilder::follow_links`]; when
+    /// `false` (the default) a symlinked directory is yielded as the
+    /// symlink itself and never descended into.
+    follow_links: bool,
 }
 
 impl<'a> WalkOptions<'a> {
-    fn new(skip_dirs: Vec<PathBuf>, skip_paths: &'a HashSet<PathBuf>) -> Self {
+    fn new(
+        skip_dirs: Vec<PathBuf>,
+        skip_paths: &'a HashSet<PathBuf>,
+        follow_links: bool,
+    ) -> Self {
         Self {
             skip_dirs: std::sync::Arc::new(skip_dirs),
             skip_paths,
+            follow_links,
         }
     }
 }
@@ -1083,6 +1107,7 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
         .hidden(true)
         .parents(true)
         .ignore(true)
+        .follow_links(opts.follow_links)
         .threads(thread_count())
         .filter_entry(move |entry| {
             !(entry.file_type().is_some_and(|ft| ft.is_dir())
@@ -1103,9 +1128,11 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
             if file_type.is_some_and(|ft| ft.is_dir())
                 || !is_php_file(path)
                 || skip_paths.contains(path)
-                // `ignore` reports a symlink's own type, so confirm the
-                // target is a regular file before indexing it.  The tests
-                // above keep this stat off the common path.
+                // `ignore` reports a symlink's own type when not
+                // following; with follow-links the type is the target's.
+                // Either way, confirm the target is a regular file before
+                // indexing it.  The tests above keep this stat off the
+                // common path.
                 || !(file_type.is_some_and(|ft| ft.is_file()) || path.is_file())
             {
                 return WalkState::Continue;

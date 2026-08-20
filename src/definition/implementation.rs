@@ -955,9 +955,10 @@ impl Backend {
             };
 
             let loaded_uris_p5: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
+            let follow_links = self.config().indexing.follow_links();
 
             for dir in &psr4_dirs {
-                let php_files = collect_php_files(dir, &vendor_dir_paths);
+                let php_files = collect_php_files(dir, &vendor_dir_paths, follow_links);
                 if let Some(p) = progress {
                     p.add_total(php_files.len() as u64);
                 }

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`follow-links` under `[indexing]`.** Directory symlinks found inside the workspace are now followed during the workspace walks when `follow-links = true` is set in `.phpantom.toml` — off by default, matching PHPantom's existing opt-in posture for behaviour that widens the scan. A project that keeps its framework or shared library behind a symlink (e.g. `kdhelp -> ../kdhelp`) gets go-to-definition, hover, completion, Find References, and workspace diagnostics for the linked tree, with the symlink spelling preserved in every indexed path and returned URI. The Composer pipeline, the Drupal scanner, and the Laravel migration walk are unaffected. Because the walker reports the target's files under the link's path, changes on disk inside a linked directory (a `git pull` into the framework, say) do not trigger a re-index — a file open in the editor re-parses on `didOpen`/`didChange`, but everything else needs a window reload or server restart. Closes #383.
+
 ### Changed
 
 ### Fixed

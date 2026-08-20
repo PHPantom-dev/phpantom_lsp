@@ -2978,3 +2978,81 @@ async fn function_references_from_a_use_function_import_reach_its_call_sites() {
         "expected the shout() call site, got {locs:?}"
     );
 }
+
+// ─── follow-links: collect_php_files_gitignore (issue #383) ────────
+// The Find References / rename / preload walker is a *serial* `ignore`
+// walk (`.build()` + `flatten()`).  The same follow-links contract as
+// `walk_roots` applies, and a symlink cycle must terminate instead of
+// panicking: `flatten()` silently drops `Err` entries, which is where
+// the loop error lands.
+
+#[test]
+fn collect_php_files_gitignore_follows_interior_symlink_when_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+    let link = root.join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+    let files = crate::references::collect_php_files_gitignore(&root, &[], true);
+    let linked = files
+        .iter()
+        .find(|p| p.ends_with("Hidden.php"))
+        .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+    assert!(
+        linked.starts_with(&link),
+        "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+    );
+}
+
+#[test]
+fn collect_php_files_gitignore_does_not_follow_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+    let link = root.join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+    let files = crate::references::collect_php_files_gitignore(&root, &[], false);
+    assert!(
+        !files.iter().any(|p| p.ends_with("Hidden.php")),
+        "interior symlink must not be followed by default: {files:?}"
+    );
+}
+
+#[test]
+fn collect_php_files_gitignore_follows_symlink_cycle_safely() {
+    // The serial walker's cycle guard reports the loop as an `Err`
+    // entry; `flatten()` drops it instead of panicking, so the walk
+    // terminates and still finds the workspace files.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("App.php"), "<?php\n").unwrap();
+
+    let link = root.join("loop");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&root, &link).unwrap();
+
+    let files = crate::references::collect_php_files_gitignore(&root, &[], true);
+    assert!(
+        files.iter().any(|p| p.ends_with("App.php")),
+        "workspace files must still be found next to a cycle: {files:?}"
+    );
+}

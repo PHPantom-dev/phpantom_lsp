@@ -298,7 +298,11 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
 ///
 /// Silently skips directories and files that cannot be read (e.g.
 /// permission errors, broken symlinks).
-pub(crate) fn collect_php_files(dir: &Path, vendor_dir_paths: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn collect_php_files(
+    dir: &Path,
+    vendor_dir_paths: &[PathBuf],
+    follow_links: bool,
+) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
     let mut result = Vec::new();
@@ -311,6 +315,7 @@ pub(crate) fn collect_php_files(dir: &Path, vendor_dir_paths: &[PathBuf]) -> Vec
         .hidden(true)
         .parents(true)
         .ignore(true)
+        .follow_links(follow_links)
         .filter_entry(move |entry| {
             if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let path = entry.path();
@@ -610,5 +615,55 @@ mod tests {
     fn unescape_string_literal_rejects_unquoted_input() {
         assert_eq!(unescape_php_string_literal("bare"), None);
         assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
+
+    #[test]
+    fn collect_php_files_follows_interior_symlink_when_enabled() {
+        // Go-to-implementation's walker keeps the same follow-links
+        // contract as the other workspace walkers (issue #383).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let files = collect_php_files(&root, &[], true);
+        let linked = files
+            .iter()
+            .find(|p| p.ends_with("Hidden.php"))
+            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+        assert!(
+            linked.starts_with(&link),
+            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+        );
+    }
+
+    #[test]
+    fn collect_php_files_does_not_follow_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let files = collect_php_files(&root, &[], false);
+        assert!(
+            !files.iter().any(|p| p.ends_with("Hidden.php")),
+            "interior symlink must not be followed by default: {files:?}"
+        );
     }
 }

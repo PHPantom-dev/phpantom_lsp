@@ -506,11 +506,40 @@ pub struct IndexingConfig {
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
     pub strategy: Option<IndexingStrategy>,
+    /// Follow directory symlinks found inside the workspace during the
+    /// workspace walks. Off by default: `ignore` yields a symlinked
+    /// directory as the symlink itself and never descends into it, which
+    /// is how a `kdhelp -> ../kdhelp` style link to an external framework
+    /// tree is skipped entirely. When enabled the walk descends into the
+    /// link target, and the symlink spelling is preserved in the index and
+    /// returned URIs.
+    ///
+    /// The Composer pipeline (`strategy = "composer"`), the Drupal
+    /// scanner, and the Laravel migration walk are not affected: the
+    /// composer pipeline keeps scanning the PSR-4 / vendor roots it is
+    /// given, the Drupal scanner stays gitignore-less by design, and the
+    /// migration walker deliberately refuses to follow links to avoid
+    /// walking the whole project through a cycle.
+    ///
+    /// When enabled, changes on disk *inside* a linked target directory
+    /// (e.g. a `git pull` into an external framework) do not trigger a
+    /// re-index — watchers registered by the client only cover the
+    /// workspace root, and a file open in the editor re-parses on
+    /// `didOpen`/`didChange` regardless. Reload the window (or restart
+    /// the server) after such changes.
+    #[serde(rename = "follow-links")]
+    pub follow_links: Option<bool>,
 }
 
 impl IndexingConfig {
     pub fn strategy(&self) -> IndexingStrategy {
         self.strategy.unwrap_or_default()
+    }
+
+    /// Whether the workspace walks should follow interior directory
+    /// symlinks. Defaults to `false`.
+    pub fn follow_links(&self) -> bool {
+        self.follow_links.unwrap_or(false)
     }
 }
 
@@ -1301,6 +1330,26 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::write(&path, "[indexing]\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
+    }
+
+    #[test]
+    fn indexing_follow_links_parses_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nfollow-links = true\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.follow_links, Some(true));
+        assert!(config.indexing.follow_links());
+    }
+
+    #[test]
+    fn indexing_follow_links_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.follow_links, None);
+        assert!(!config.indexing.follow_links());
     }
 
     #[test]

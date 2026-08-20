@@ -114,8 +114,12 @@ impl Backend {
                 if let Some(p) = progress {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
-                let mut scan =
-                    classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+                let mut scan = classmap_scanner::scan_workspace_fallback_full(
+                    root,
+                    &skip_dirs,
+                    progress,
+                    self.config().indexing.follow_links(),
+                );
 
                 // Merge vendor packages (excluded from the workspace
                 // walk above, scanned separately here).
@@ -128,6 +132,7 @@ impl Backend {
                     &HashSet::new(),
                     &explicit_deps,
                     progress,
+                    self.config().indexing.follow_links(),
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
 
@@ -307,6 +312,17 @@ impl Backend {
             ),
         )
         .await;
+
+        // When symlink-following is enabled, tell the user it is active so
+        // a configuration mistake (or a deliberate `git pull` into a linked
+        // framework) is diagnosable from the log alone.
+        if self.config().indexing.follow_links() && has_interior_symlink(root) {
+            self.log(
+                MessageType::INFO,
+                "PHPantom: symlink-following enabled — indexing directories reached through workspace symlinks. Changes inside a linked target on disk do not trigger a re-index; reload the window after a `git pull` or similar.".to_string(),
+            )
+            .await;
+        }
     }
 
     /// Initialize a monorepo workspace (no root `composer.json`, but
@@ -463,7 +479,12 @@ impl Backend {
             p.set_scope(80, 85, "Scanning loose PHP files");
         }
 
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+        let scan = classmap_scanner::scan_workspace_fallback_full(
+            root,
+            &skip_dirs,
+            progress,
+            self.config().indexing.follow_links(),
+        );
         self.populate_autoload_indices(&scan);
         {
             let mut idx = self.symbols.fqn_uri_index.write();
@@ -513,7 +534,12 @@ impl Backend {
         self.resolved_class_cache.write().set_laravel(false);
 
         let skip_dirs = HashSet::new();
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+        let scan = classmap_scanner::scan_workspace_fallback_full(
+            root,
+            &skip_dirs,
+            progress,
+            self.config().indexing.follow_links(),
+        );
         self.populate_autoload_indices(&scan);
 
         let symbol_count = scan.classmap.len();
@@ -540,4 +566,18 @@ impl Backend {
         )
         .await;
     }
+}
+
+/// Return `true` when any entry directly under `root` is a symlink to a
+/// directory.  Used only to decide whether the "symlink-following
+/// enabled" startup notice is worth printing; the walks themselves do
+/// the real work.
+fn has_interior_symlink(root: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.file_type().is_ok_and(|ft| ft.is_symlink())
+            && std::fs::metadata(e.path()).is_ok_and(|m| m.is_dir())
+    })
 }

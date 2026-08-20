@@ -81,9 +81,10 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 
 ### `[indexing]`
 
-| Key        | Type   | Default  | Description |
-| ---------- | ------ | -------- | ----------- |
-| `strategy` | string | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+| Key            | Type    | Default  | Description |
+| -------------- | ------- | -------- | ----------- |
+| `strategy`     | string  | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+| `follow-links` | bool    | `false`  | Follow directory symlinks found inside the workspace during the workspace walks. Off by default: a symlinked directory is yielded as the symlink itself and never descended into, so a link to an external framework tree is skipped entirely. When enabled, the walk enters the link target and the symlink spelling is preserved in the index and returned URIs. The Composer pipeline, the Drupal scanner, and the Laravel migration walk are unaffected. Changes on disk *inside* a linked target (a `git pull` into the framework, say) do not trigger a re-index — the client's watchers only cover the workspace root. Files open in the editor re-parse on `didOpen`/`didChange`; anything else needs a window reload or server restart. |
 
 ### `[semantic_tokens]`
 
