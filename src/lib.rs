@@ -716,8 +716,8 @@ pub struct Backend {
     /// when the index holds at least one macro, so the hot class-load path
     /// skips the lock entirely for the common (no-macro) case.
     pub(crate) laravel_has_macros: Arc<std::sync::atomic::AtomicBool>,
-    /// Reverse index mapping a related-model FQN to the pivot type exposed on
-    /// its `$pivot` attribute when reached through a many-to-many relationship.
+    /// Reverse index mapping a related-model FQN to the pivot accessors exposed
+    /// when it is reached through a many-to-many relationship.
     /// Built lazily (and rebuilt when a pivot-bearing file changes) and
     /// consulted at class load; see [`virtual_members::laravel::pivots`].
     pub(crate) laravel_pivots: Arc<RwLock<virtual_members::laravel::LaravelPivotIndex>>,

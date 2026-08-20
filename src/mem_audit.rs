@@ -436,6 +436,7 @@ fn property_source(src: &PropertySource) -> Sz {
         PropertySource::Relationship {
             method,
             kind,
+            pivot_accessor: _,
             pivot_using,
             pivot_columns,
         } => {

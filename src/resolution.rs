@@ -251,7 +251,7 @@ impl Backend {
         // Add any Laravel macros registered on this class.  Gated on a cheap
         // atomic so the hot loader path is untouched when no macros exist.
         loaded = self.inject_laravel_macros(loaded);
-        // Add the `$pivot` attribute when this class is a many-to-many target.
+        // Add pivot accessors when this class is a many-to-many target.
         loaded = self.inject_laravel_pivot(loaded);
         Some(loaded)
     }
@@ -272,8 +272,8 @@ impl Backend {
         crate::virtual_members::laravel::inject_macros(&index, class)
     }
 
-    /// Add the Eloquent `$pivot` attribute to `class` when it is the target of
-    /// a many-to-many relationship somewhere in the project.
+    /// Add Eloquent pivot accessors to `class` when it is the target of a
+    /// many-to-many relationship somewhere in the project.
     ///
     /// The reverse index is rebuilt lazily when a pivot-bearing file has
     /// changed (`laravel_pivots_dirty`), then a cheap atomic gates the lock so

@@ -913,6 +913,54 @@ class User extends Model {
 }
 
 #[tokio::test]
+async fn test_custom_pivot_accessor_from_as_is_synthesized_and_typed() {
+    // `->as('participation')` renames the accessor Laravel hydrates on Role.
+    // The custom name replaces `$pivot` for this relationship and keeps the
+    // pivot model selected by `->using(...)`.
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(): BelongsToMany { return $this->belongsToMany(Role::class)->as('participation')->using(RoleUser::class); }
+    public function test() {
+        $role = new Role();
+        $role->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/RoleUser.php", ROLE_USER_PIVOT_PHP),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
+    let props = property_names(&items);
+    assert!(
+        props.contains(&"participation"),
+        "a custom many-to-many pivot accessor should be offered, got: {:?}",
+        props
+    );
+    assert!(
+        !props.contains(&"pivot"),
+        "a relation renamed with as() should not also synthesize pivot, got: {:?}",
+        props
+    );
+
+    let chained = user_php.replace("$role->\n", "$role->participation->\n");
+    let items = complete_at(&backend, &dir, "src/Models/User.php", &chained, 9, 30).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getAssignedAt"),
+        "the custom accessor should resolve to RoleUser, got methods: {:?}",
+        methods
+    );
+}
+
+#[tokio::test]
 async fn test_pivot_not_attached_to_non_target_model() {
     // User is never the target of a many-to-many relationship, so it gets
     // no `$pivot` attribute.
