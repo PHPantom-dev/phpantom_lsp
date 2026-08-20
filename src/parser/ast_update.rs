@@ -421,7 +421,7 @@ impl Backend {
 
         // Invalidate the reverse pivot index when a background-indexed file
         // declares a many-to-many relationship, so its target models pick up
-        // `$pivot` on the next class load.
+        // its pivot accessors on the next class load.
         if !self
             .laravel_pivots_dirty
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -2050,11 +2050,11 @@ mod tests {
         );
     }
 
-    /// A `belongsToMany` body with `->using(...)` and `->withPivot(...)`
-    /// must populate `belongs_to_many_pivots`, with the pivot class resolved
-    /// to an FQN.
+    /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
+    /// `->withPivot(...)` must populate `belongs_to_many_pivots`, with the
+    /// pivot class resolved to an FQN.
     #[test]
-    fn parses_pivot_using_and_columns_from_relationship_body() {
+    fn parses_pivot_accessor_using_and_columns_from_relationship_body() {
         let backend = Backend::new_test();
         let uri = "file:///app/Models/User.php";
         let content = "<?php
@@ -2064,7 +2064,7 @@ use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
 class User extends Model {
     /** @return BelongsToMany<Role, $this> */
     public function roles(): BelongsToMany {
-        return $this->belongsToMany(Role::class)->using(RoleUser::class)->withPivot('expires_at', 'active');
+        return $this->belongsToMany(Role::class)->as('participation')->using(RoleUser::class)->withPivot('expires_at', 'active');
     }
 }
 ";
@@ -2081,11 +2081,43 @@ class User extends Model {
         assert_eq!(pivots.len(), 1, "one pivot relation, got: {pivots:?}");
         assert_eq!(pivots[0].method, "roles");
         assert_eq!(
+            pivots[0].accessor,
+            crate::types::PivotAccessor::Custom(crate::atom::atom("participation"))
+        );
+        assert_eq!(
             pivots[0].using.as_deref(),
             Some("App\\Models\\RoleUser"),
             "using() class should be resolved to an FQN"
         );
         assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
+    }
+
+    #[test]
+    fn marks_dynamic_pivot_accessor_as_unknown() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Models/User.php";
+        let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(string $accessor): BelongsToMany {
+        return $this->belongsToMany(Role::class)->as($accessor);
+    }
+}
+";
+        backend.update_ast(uri, content);
+        let classes = backend.symbols.uri_classes_index.read();
+        let user = classes
+            .get(uri)
+            .and_then(|c| c.iter().find(|c| c.name == "User"))
+            .expect("User class should be indexed");
+        let pivot = user
+            .laravel()
+            .and_then(|laravel| laravel.belongs_to_many_pivots.first())
+            .expect("dynamic as() should still record pivot metadata");
+        assert_eq!(pivot.accessor, crate::types::PivotAccessor::Unknown);
     }
 
     /// A background/workspace parse batch must not clobber the state of a

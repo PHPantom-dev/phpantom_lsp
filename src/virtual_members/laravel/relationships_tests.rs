@@ -698,6 +698,54 @@ fn count_property_name_camel_case() {
     assert_eq!(count_property_name("headBaker"), "head_baker_count");
 }
 
+// ── pivot accessor extraction ──────────────────────────────────────
+
+#[test]
+fn pivot_accessor_extracts_literal_name() {
+    let body =
+        "{ return $this->belongsToMany(User::class)->as('participation')->withPivot('role'); }";
+    assert_eq!(extract_pivot_accessor(body), Some(atom("participation")));
+}
+
+#[test]
+fn pivot_accessor_accepts_double_quoted_name() {
+    let body = "{ return $this->belongsToMany(User::class)->as(\"membership\"); }";
+    assert_eq!(extract_pivot_accessor(body), Some(atom("membership")));
+}
+
+#[test]
+fn pivot_accessor_skips_dynamic_or_empty_name() {
+    assert_eq!(
+        extract_pivot_accessor("{ return $this->belongsToMany(User::class)->as($name); }"),
+        None
+    );
+    assert_eq!(
+        extract_pivot_accessor("{ return $this->belongsToMany(User::class)->as(''); }"),
+        None
+    );
+}
+
+#[test]
+fn pivot_accessor_extracts_fourth_generic_literal() {
+    let relation = PhpType::parse("BelongsToMany<User, $this, Membership, 'participation'>");
+    assert_eq!(
+        extract_pivot_accessor_typed(&relation),
+        Some(atom("participation"))
+    );
+    assert_eq!(
+        extract_pivot_accessor_typed(&PhpType::parse(
+            "BelongsToMany<User, $this, Membership, string>"
+        )),
+        None
+    );
+    assert_eq!(
+        extract_pivot_accessor_typed(&PhpType::parse(
+            "BelongsToMany<User, $this, Membership, ''>"
+        )),
+        None
+    );
+}
+
 // ── extract_pivot_using ─────────────────────────────────────────────
 
 #[test]
