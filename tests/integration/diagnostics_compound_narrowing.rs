@@ -1472,3 +1472,48 @@ class Controller {{
     let messages = type_error_messages(&backend, uri, &text);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// Regression: property narrowing next to a chained method call must
+/// complete in bounded time.  Before the fix, each `if ($o->a)` triggered
+/// a full-body re-walk for property narrowing, and each of those re-walks
+/// resolved the chained call `$h->getWork()` which re-entered
+/// `apply_property_narrowing` for the call key, creating exponential
+/// fan-out.  With 8 pairs the analysis took over 50 seconds.
+#[test]
+fn property_narrowing_next_to_chained_calls_completes_in_bounded_time() {
+    let backend = create_test_backend();
+    let lib_uri = "file:///repro_lib.php";
+    let lib_text = r#"<?php
+class Work   { public function changed(string $k): bool { return true; } public function run(): void {} }
+class Holder { public function getWork(): Work { return new Work(); } }
+class Ops    { public bool $a = false; }
+"#;
+    backend.update_ast(lib_uri, lib_text);
+
+    let probe_uri = "file:///repro_probe.php";
+    let probe_text = r#"<?php
+function probe(Holder $h): void {
+  $o = new Ops();
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+}
+"#;
+    let mut diags = Vec::new();
+    backend.update_ast(probe_uri, probe_text);
+    backend.collect_slow_diagnostics(probe_uri, probe_text, &mut diags);
+    assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
+}

@@ -1,12 +1,48 @@
 /// Property-path narrowing: applies instanceof / assert / guard-clause
 /// narrowing to a `$this->prop` (or `$obj->prop`) resolution result by
 /// walking the enclosing method body from its start down to the cursor.
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
 
 use super::{Loaders, ResolutionCtx, VarResolutionCtx};
+
+thread_local! {
+    /// Property paths whose narrowing walk is already in progress on
+    /// this thread.
+    ///
+    /// Guard-clause narrowing resolves method-call receivers to decide
+    /// whether a branch unconditionally exits.  Resolving a chained
+    /// call like `$h->getWork()` enters the call-key narrowing path
+    /// (resolver/mod.rs `SubjectExpr::CallExpr`), which calls back
+    /// into `apply_property_narrowing` for the call key.  That nested
+    /// walk re-encounters the same guard clauses, resolves the same
+    /// receivers, and re-enters — creating exponential fan-out (#385).
+    ///
+    /// Keying the guard by property path breaks the cycle at the
+    /// second nesting level: the outer walk for `$o->a` triggers a
+    /// nested walk for `$h->getWork()`, and that walk's guard-clause
+    /// resolution tries to narrow `$h->getWork()` again, which the
+    /// guard blocks.  The outer walk already processes every guard
+    /// clause, so no narrowing is lost.
+    static NARROWING_IN_PROGRESS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+/// RAII guard that removes a property path from [`NARROWING_IN_PROGRESS`]
+/// when the narrowing walk completes (including on panic).
+struct NarrowingGuard {
+    key: String,
+}
+
+impl Drop for NarrowingGuard {
+    fn drop(&mut self) {
+        NARROWING_IN_PROGRESS.with(|set| {
+            set.borrow_mut().remove(&self.key);
+        });
+    }
+}
 
 /// Apply instanceof / assert narrowing for a property-access path.
 ///
@@ -26,6 +62,13 @@ pub(crate) fn apply_property_narrowing(
     results: &mut Vec<Arc<ClassInfo>>, // still operates on Arc<ClassInfo> — called from property chain
 ) -> bool {
     use crate::parser::with_parsed_program;
+
+    let key = property_path.to_string();
+    let newly_inserted = NARROWING_IN_PROGRESS.with(|set| set.borrow_mut().insert(key.clone()));
+    if !newly_inserted {
+        return false;
+    }
+    let _guard = NarrowingGuard { key };
 
     // The narrowing walk functions operate on Vec<ClassInfo>, so unwrap
     // the Arcs, run narrowing, then re-wrap.
