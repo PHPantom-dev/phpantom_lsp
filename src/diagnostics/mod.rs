@@ -104,6 +104,11 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **Member visibility diagnostics** — report a `private` or
+//!   `protected` property, method, or class constant reached from a
+//!   scope PHP does not let see it.  Emitted from the unknown-member
+//!   walk, which has already resolved the subject.  Suppressed when the
+//!   class declares a magic handler that would answer for the member.
 //! - **Readonly write diagnostics** — report writes to a `readonly`
 //!   property from outside the class that declares it, and second
 //!   writes from inside it once the constructor has initialized the
@@ -229,6 +234,7 @@ mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
 mod match_type_errors;
+pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
