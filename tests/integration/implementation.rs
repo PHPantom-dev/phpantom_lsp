@@ -769,6 +769,48 @@ async fn test_implementation_method_only_overriders() {
     );
 }
 
+#[tokio::test]
+async fn test_implementation_method_follows_traits_and_inherited_members() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///impl_inherited.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                           // 0
+        "interface Renderable {\n",                                          // 1
+        "    public function render(): string;\n",                           // 2
+        "}\n",                                                               // 3
+        "trait Renders {\n",                                                 // 4
+        "    public function render(): string { return ''; }\n",             // 5
+        "}\n",                                                               // 6
+        "class TraitView implements Renderable {\n",                         // 7
+        "    use Renders;\n",                                                // 8
+        "}\n",                                                               // 9
+        "class ParentView {\n",                                              // 10
+        "    public function render(): string { return ''; }\n",             // 11
+        "}\n",                                                               // 12
+        "class InheritedView extends ParentView implements Renderable {}\n", // 13
+        "function show(Renderable $view): void {\n",                         // 14
+        "    $view->render();\n",                                            // 15
+        "}\n",                                                               // 16
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let locations = implementation_at(&backend, &uri, 15, 12).await;
+    let lines = locations
+        .iter()
+        .map(|location| location.range.start.line)
+        .collect::<Vec<_>>();
+    assert!(
+        lines.contains(&5),
+        "trait-provided implementation should resolve to the trait method: {lines:?}"
+    );
+    assert!(
+        lines.contains(&11),
+        "inherited implementation should resolve to the parent method: {lines:?}"
+    );
+}
+
 // ─── Server capability test ─────────────────────────────────────────────────
 
 /// The server should advertise `implementationProvider` in its capabilities.
