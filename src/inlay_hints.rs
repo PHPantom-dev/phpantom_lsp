@@ -7,23 +7,19 @@
 //!   parameters when the type can be inferred from the callable context.
 //! - **Closure return type hints** for closures/arrow functions without an
 //!   explicit return type when the callable context specifies one.
-//! - **Implementation counts** beside every interface and abstract class the
-//!   file declares.  Reference counts are the CodeLens' job, which is
-//!   clickable; this is the one declaration annotation with no lens behind it.
 //!
 //! The handler walks precomputed [`CallSite`] entries from the
 //! [`SymbolMap`] within the requested viewport range, resolves each
 //! callable to obtain parameter metadata, and emits [`InlayHint`]
 //! entries for arguments that would benefit from a label.
 
-use std::sync::atomic::Ordering;
 use tower_lsp::jsonrpc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{CallSite, UntypedClosureSite};
 use crate::text_position::{LineIndex, position_to_offset};
-use crate::types::{ClassLikeKind, FileContext};
+use crate::types::FileContext;
 
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.
@@ -109,14 +105,6 @@ impl Backend {
             );
         }
 
-        self.emit_implementation_count_hints(
-            uri,
-            &index,
-            &ctx,
-            (range_start, range_end),
-            &mut hints,
-        );
-
         // Translate hints back to Blade if needed.  A hint anchored in the
         // injected prologue has no template text to attach to.
         if self.is_blade_file(uri) {
@@ -132,53 +120,6 @@ impl Backend {
         }
 
         Some(hints)
-    }
-
-    /// Emit the number of implementations beside every interface and
-    /// abstract class the file declares.
-    ///
-    /// The reference count next to a declaration is a CodeLens, which can
-    /// be clicked to list what it counted; this is the one declaration
-    /// annotation with no lens behind it.
-    fn emit_implementation_count_hints(
-        &self,
-        uri: &str,
-        index: &LineIndex,
-        ctx: &FileContext,
-        range: (u32, u32),
-        hints: &mut Vec<InlayHint>,
-    ) {
-        if !self.workspace_indexed.load(Ordering::Acquire) {
-            return;
-        }
-
-        let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() else {
-            return;
-        };
-        let class_loaders = self.class_loaders(ctx);
-
-        for class in &classes {
-            if class.keyword_offset == 0
-                || !offset_in_range(class.keyword_offset, range)
-                || !(class.kind == ClassLikeKind::Interface || class.is_abstract)
-            {
-                continue;
-            }
-
-            let implementors = self.find_implementors(
-                &class.name,
-                &class.fqn(),
-                class_loaders.at(class.keyword_offset),
-                false,
-                false,
-                true,
-            );
-            push_count_hint(
-                hints,
-                line_end_position(index, class.keyword_offset as usize),
-                implementation_label(implementors.len()),
-            );
-        }
     }
 
     /// Emit parameter-name and by-reference hints for a single call site.
@@ -458,44 +399,6 @@ impl Backend {
     }
 }
 
-fn push_count_hint(hints: &mut Vec<InlayHint>, position: Position, label: String) {
-    hints.push(InlayHint {
-        position,
-        label: InlayHintLabel::String(format!(" {label}")),
-        kind: None,
-        text_edits: None,
-        tooltip: None,
-        padding_left: None,
-        padding_right: None,
-        data: None,
-    });
-}
-
-fn implementation_label(count: usize) -> String {
-    if count == 1 {
-        "1 implementation".to_string()
-    } else {
-        format!("{count} implementations")
-    }
-}
-
-fn offset_in_range(offset: u32, range: (u32, u32)) -> bool {
-    offset >= range.0 && offset <= range.1
-}
-
-fn line_end_position(index: &LineIndex, byte_offset: usize) -> Position {
-    let content = index.content();
-    let line_end = content[byte_offset..]
-        .find('\n')
-        .map(|i| byte_offset + i)
-        .unwrap_or(content.len());
-
-    // Delegate to the canonical converter so the `character` column is
-    // counted in UTF-16 code units (per the LSP spec), consistent with
-    // every other position the server emits.
-    index.position(line_end)
-}
-
 /// Check whether the argument at `arg_offset` is a simple variable whose
 /// name (without `$`) matches the parameter name, making a hint redundant.
 ///
@@ -752,92 +655,6 @@ fn is_obvious_single_param(call_expression: &str, _param_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Open a file and return the hints it carries.
-    fn declaration_hints(backend: &Backend, uri: &str, content: &str) -> Vec<InlayHint> {
-        backend
-            .open_files
-            .write()
-            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
-        backend.update_ast(uri, content);
-        backend.workspace_indexed.store(true, Ordering::Release);
-
-        let range = Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: content.lines().count() as u32,
-                character: 0,
-            },
-        };
-        backend
-            .handle_inlay_hints(uri, content, range)
-            .unwrap_or_default()
-    }
-
-    /// The label of the hint on `line`, if any.
-    fn hint_on_line(hints: &[InlayHint], line: u32) -> Option<String> {
-        hints
-            .iter()
-            .find(|hint| hint.position.line == line)
-            .map(|hint| match &hint.label {
-                InlayHintLabel::String(label) => label.clone(),
-                InlayHintLabel::LabelParts(parts) => {
-                    parts.iter().map(|part| part.value.as_str()).collect()
-                }
-            })
-    }
-
-    #[test]
-    fn an_interface_counts_the_classes_that_implement_it() {
-        let backend = Backend::new_test();
-        backend.update_ast(
-            "file:///Pen.php",
-            "<?php\nclass Pen implements Writer {}\nclass Pencil implements Writer {}\n",
-        );
-
-        let hints = declaration_hints(
-            &backend,
-            "file:///Writer.php",
-            "<?php\ninterface Writer {}\n",
-        );
-
-        assert_eq!(
-            hint_on_line(&hints, 1).as_deref(),
-            Some(" 2 implementations")
-        );
-    }
-
-    #[test]
-    fn a_concrete_class_has_no_implementation_count() {
-        let backend = Backend::new_test();
-
-        let hints = declaration_hints(&backend, "file:///Pen.php", "<?php\nclass Pen {}\n");
-
-        assert_eq!(hint_on_line(&hints, 1), None);
-    }
-
-    #[test]
-    fn implementation_count_hint_column_uses_utf16_units() {
-        let backend = Backend::new_test();
-        // The declaration line ends with a non-BMP character (2 UTF-16
-        // code units, 1 Unicode scalar), so a chars-based column would be
-        // one short of the LSP-mandated UTF-16 column.
-        let hints = declaration_hints(
-            &backend,
-            "file:///Writer.php",
-            "<?php\ninterface Writer {} // \u{1F600}\n",
-        );
-
-        let class_hint = hints
-            .iter()
-            .find(|hint| hint.position.line == 1)
-            .expect("expected an implementation-count hint on the interface declaration line");
-        // "interface Writer {} // " is 23 UTF-16 units; the emoji adds 2 → 25.
-        assert_eq!(class_hint.position.character, 25);
-    }
 
     #[test]
     fn test_should_suppress_simple_variable_match() {

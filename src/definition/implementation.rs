@@ -354,50 +354,47 @@ impl Backend {
             MemberKind::Constant
         };
 
-        let locations = self.member_implementation_locations(
-            uri,
-            content,
+        let providers = member_implementation_providers(
             &target_fqn,
             member_name,
             member_kind,
             &descendants,
             class_loader,
         );
+        let locations = self.member_implementation_locations(
+            uri,
+            content,
+            member_name,
+            member_kind,
+            &providers,
+        );
         (!locations.is_empty()).then_some(locations)
     }
 
-    /// The locations of the declarations that implement `member_name` for
-    /// the `descendants` of the class `target_fqn`.
+    /// The locations of `member_name` in each of the `providers` that
+    /// [`member_implementation_providers`] found.
     pub(crate) fn member_implementation_locations(
         &self,
         uri: &str,
         content: &str,
-        target_fqn: &str,
         member_name: &str,
         member_kind: MemberKind,
-        descendants: &[Arc<ClassInfo>],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        providers: &[Arc<ClassInfo>],
     ) -> Vec<Location> {
-        let mut locations: Vec<Location> = member_implementation_providers(
-            target_fqn,
-            member_name,
-            member_kind,
-            descendants,
-            class_loader,
-        )
-        .into_iter()
-        .filter_map(|provider| {
-            let (class_uri, class_content) =
-                self.find_class_file_content(&provider.fqn(), uri, content)?;
-            let member_pos = Self::find_member_position_in_class(
-                &class_content,
-                member_name,
-                member_kind,
-                &provider,
-            )?;
-            Some(point_location(Url::parse(&class_uri).ok()?, member_pos))
-        })
-        .collect();
+        let mut locations: Vec<Location> = providers
+            .iter()
+            .filter_map(|provider| {
+                let (class_uri, class_content) =
+                    self.find_class_file_content(&provider.fqn(), uri, content)?;
+                let member_pos = Self::find_member_position_in_class(
+                    &class_content,
+                    member_name,
+                    member_kind,
+                    provider,
+                )?;
+                Some(point_location(Url::parse(&class_uri).ok()?, member_pos))
+            })
+            .collect();
         sort_and_dedup_locations(&mut locations);
         locations
     }
@@ -486,14 +483,19 @@ impl Backend {
             let target_fqn = self.implementor_target_fqn(candidate);
             let descendants =
                 self.implementation_descendants(candidate, &target_fqn, &class_loader, false);
-            all_locations.extend(self.member_implementation_locations(
-                uri,
-                content,
+            let providers = member_implementation_providers(
                 &target_fqn,
                 member_name,
                 member_kind,
                 &descendants,
                 &class_loader,
+            );
+            all_locations.extend(self.member_implementation_locations(
+                uri,
+                content,
+                member_name,
+                member_kind,
+                &providers,
             ));
         }
 

@@ -398,6 +398,144 @@ async fn warm_workspace_index(backend: &phpantom_lsp::Backend, uri: &Url, positi
         .unwrap();
 }
 
+/// The implementation lens on `line`, resolved the way a client that
+/// displays it does, as its title and the lines of the locations it lists.
+async fn resolved_implementation_lens(
+    backend: &phpantom_lsp::Backend,
+    lenses: &[CodeLens],
+    line: u32,
+) -> Option<(String, Vec<u32>)> {
+    let lens = lenses.iter().find(|lens| {
+        lens.range.start.line == line
+            && match &lens.command {
+                Some(command) => command.title.contains("implementation"),
+                None => {
+                    lens.data.as_ref().and_then(|data| data.get("kind"))
+                        == Some(&serde_json::json!("phpImplementations"))
+                }
+            }
+    })?;
+    let command = backend
+        .code_lens_resolve(lens.clone())
+        .await
+        .unwrap()
+        .command?;
+    assert_eq!(command.command, "editor.action.showReferences");
+    let locations: Vec<Location> =
+        serde_json::from_value(command.arguments?.get(2)?.clone()).ok()?;
+    Some((
+        command.title,
+        locations
+            .iter()
+            .map(|location| location.range.start.line)
+            .collect(),
+    ))
+}
+
+async fn indexed_lenses(content: &str) -> (phpantom_lsp::Backend, Vec<CodeLens>) {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Shapes.php", content)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/Shapes.php")).unwrap();
+    open_php(&backend, &uri, content).await;
+    warm_workspace_index(&backend, &uri, Position::new(2, 12)).await;
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    (backend, lenses)
+}
+
+#[tokio::test]
+async fn implementation_lenses_list_every_implementation_of_an_interface() {
+    let content = r#"<?php
+namespace App;
+interface Renderable {
+    public function render(): string;
+}
+trait Renders {
+    public function render(): string { return ''; }
+}
+class TraitView implements Renderable {
+    use Renders;
+}
+class ParentView {
+    public function render(): string { return ''; }
+}
+class InheritedView extends ParentView implements Renderable {}
+class OwnView implements Renderable {
+    public function render(): string { return ''; }
+}
+abstract class PendingView implements Renderable {}
+"#;
+    let (backend, lenses) = indexed_lenses(content).await;
+
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 2).await,
+        Some(("3 implementations".to_string(), vec![8, 14, 15])),
+        "the abstract class is not an implementation: {lenses:?}"
+    );
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 3).await,
+        Some(("3 implementations".to_string(), vec![6, 12, 16])),
+        "each implementation is the declaration that supplies the body: {lenses:?}"
+    );
+}
+
+#[tokio::test]
+async fn implementation_lenses_on_an_abstract_class_skip_what_is_not_overridden() {
+    let content = r#"<?php
+namespace App;
+abstract class Shape {
+    abstract public function area(): float;
+    public function describe(): string { return ''; }
+}
+final class Circle extends Shape {
+    public function area(): float { return 3.14; }
+}
+abstract class Polygon extends Shape {
+    abstract public function area(): float;
+}
+final class Square extends Polygon {
+    public function area(): float { return 1.0; }
+}
+interface Unused {}
+class Concrete {}
+final class Sub extends Concrete {}
+"#;
+    let (backend, lenses) = indexed_lenses(content).await;
+
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 2).await,
+        Some(("2 implementations".to_string(), vec![6, 12])),
+    );
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 3).await,
+        Some(("2 implementations".to_string(), vec![7, 13])),
+        "an abstract re-declaration is not an implementation: {lenses:?}"
+    );
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 4).await,
+        None,
+        "a method nothing overrides has no implementation lens: {lenses:?}"
+    );
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 15).await,
+        Some(("0 implementations".to_string(), vec![])),
+    );
+    assert_eq!(
+        resolved_implementation_lens(&backend, &lenses, 16).await,
+        None,
+        "a concrete class has no implementation lens: {lenses:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_function_lens_counts_unqualified_calls_from_a_namespaced_file() {
     let helpers = "<?php\nfunction helper(): void {}\n";
