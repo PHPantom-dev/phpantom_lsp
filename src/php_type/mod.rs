@@ -2228,13 +2228,10 @@ impl PhpType {
 
     /// Return `true` if this type is an array shape (`array{…}`).
     ///
-    /// Also returns `true` for `?array{…}`.
+    /// Also returns `true` for nullable shapes written as either
+    /// `?array{…}` or `array{…}|null`.
     pub fn is_array_shape(&self) -> bool {
-        match self.kind() {
-            TypeKind::ArrayShape(_) => true,
-            TypeKind::Nullable(inner) => inner.is_array_shape(),
-            _ => false,
-        }
+        self.nullable_array_shape_parts().is_some()
     }
 
     /// Return `true` if this type is a list shape (`list{…}`), which an
@@ -2276,23 +2273,50 @@ impl PhpType {
     /// which turns large procedural methods with hundreds of
     /// conditional writes into quadratic-and-worse walks.
     ///
-    /// Handles `?array{…}` on either side (the join is nullable when
-    /// either side is).  Returns `None` when either side is not an
-    /// array shape or contains positional (unkeyed) entries — those are
-    /// list-style shapes where a per-key join is not meaningful.
+    /// Handles nullable shapes written as `?array{…}` or
+    /// `array{…}|null` on either side (the join is nullable when either
+    /// side is). Returns `None` when either side is not an array shape or
+    /// contains positional (unkeyed) entries — those are list-style shapes
+    /// where a per-key join is not meaningful.
     pub fn join_shapes(&self, other: &PhpType) -> Option<PhpType> {
-        match (self.kind(), other.kind()) {
-            (TypeKind::ArrayShape(a), TypeKind::ArrayShape(b)) => {
-                Some(PhpType::array_shape(Self::join_shape_entries(a, b)?))
+        let (left, left_nullable) = self.nullable_array_shape_parts()?;
+        let (right, right_nullable) = other.nullable_array_shape_parts()?;
+        let joined = PhpType::array_shape(Self::join_shape_entries(left, right)?);
+        if left_nullable || right_nullable {
+            Some(PhpType::nullable(joined))
+        } else {
+            Some(joined)
+        }
+    }
+
+    /// Extract one keyed array-shape member plus its nullable flag.
+    ///
+    /// PHPDoc accepts both `?array{…}` and `array{…}|null`. The parser
+    /// preserves those as different type kinds, but branch merging must
+    /// treat them the same or every narrowing of a nullable shape becomes
+    /// a separate alternative.
+    fn nullable_array_shape_parts(&self) -> Option<(&[ShapeEntry], bool)> {
+        match self.kind() {
+            TypeKind::ArrayShape(entries) => Some((entries, false)),
+            TypeKind::Nullable(inner) => {
+                let (entries, _) = inner.nullable_array_shape_parts()?;
+                Some((entries, true))
             }
-            (TypeKind::Nullable(a), TypeKind::Nullable(b)) => {
-                Some(PhpType::nullable(a.join_shapes(b)?))
-            }
-            (TypeKind::Nullable(a), TypeKind::ArrayShape(_)) => {
-                Some(PhpType::nullable(a.join_shapes(other)?))
-            }
-            (TypeKind::ArrayShape(_), TypeKind::Nullable(b)) => {
-                Some(PhpType::nullable(self.join_shapes(b)?))
+            TypeKind::Union(members) => {
+                let mut shape: Option<&[ShapeEntry]> = None;
+                let mut nullable = false;
+                for member in members {
+                    if member.is_null() {
+                        nullable = true;
+                    } else if let TypeKind::ArrayShape(entries) = member.kind() {
+                        if shape.replace(entries).is_some() {
+                            return None;
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                shape.map(|entries| (entries, nullable))
             }
             _ => None,
         }
