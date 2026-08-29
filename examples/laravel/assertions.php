@@ -101,6 +101,15 @@ check(
     'Bakery::masterRecipe() exists',
     method_exists(\App\Models\Bakery::class, 'masterRecipe')
 );
+$masterRecipe = (new \App\Models\Bakery())->masterRecipe();
+check(
+    'Bakery::masterRecipe() uses the ingredient pivot accessor',
+    $masterRecipe->getPivotAccessor() === 'ingredient'
+);
+check(
+    'Bakery::masterRecipe() uses RecipeIngredient as its pivot model',
+    $masterRecipe->getPivotClass() === \App\Models\RecipeIngredient::class
+);
 
 // ─── Accessor methods ───────────────────────────────────────────────────────
 

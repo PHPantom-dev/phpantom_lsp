@@ -18,10 +18,13 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, atom, bytes_to_str, last_segment, literal_bytes_to_str};
 use crate::parser::DocblockCtx;
 use crate::php_type::PhpType;
-use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotRelation};
+use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotAccessor, PivotRelation};
 use crate::util::strip_fqn_prefix;
 
-use super::{extract_pivot_using, extract_with_pivot_columns, infer_relationship_from_body};
+use super::{
+    extract_pivot_accessor, extract_pivot_using, extract_with_pivot_columns,
+    infer_relationship_from_body,
+};
 
 /// Check whether a method has the `#[Scope]` attribute (Laravel 11+).
 ///
@@ -924,9 +927,10 @@ fn parse_string_list(text: &str) -> Vec<String> {
 /// method bodies in a class.
 ///
 /// Scans each concrete method body for a many-to-many builder call chained
-/// with `->using(CustomPivot::class)` and/or `->withPivot('col', …)`, and
-/// returns one [`PivotRelation`] per method that declares either. Methods
-/// without a many-to-many call, or without any pivot chain, are skipped.
+/// with `->as('name')`, `->using(CustomPivot::class)`, and/or
+/// `->withPivot('col', …)`, and returns one [`PivotRelation`] per method that
+/// declares any of them. Methods without a many-to-many call, or without any
+/// pivot configuration, are skipped.
 ///
 /// Works from the method body text (via source offsets), so it covers both
 /// annotated relationships (`@return BelongsToMany<…>`) and un-annotated ones.
@@ -951,7 +955,7 @@ fn extract_pivot_relations<'a>(
         let end = content.floor_char_boundary(end);
         let body = &content[start..end];
 
-        // `using`/`withPivot` only appear on many-to-many relationships;
+        // `as`/`using`/`withPivot` only appear on many-to-many relationships;
         // require the builder call so unrelated methods are not scanned.
         if !body.contains("belongsToMany(")
             && !body.contains("morphToMany(")
@@ -960,14 +964,23 @@ fn extract_pivot_relations<'a>(
             continue;
         }
 
+        let has_accessor_call = body.contains("->as(");
+        let accessor = if has_accessor_call {
+            extract_pivot_accessor(body)
+                .map(PivotAccessor::Custom)
+                .unwrap_or(PivotAccessor::Unknown)
+        } else {
+            PivotAccessor::Default
+        };
         let using = extract_pivot_using(body);
         let columns = extract_with_pivot_columns(body);
-        if using.is_none() && columns.is_empty() {
+        if !has_accessor_call && using.is_none() && columns.is_empty() {
             continue;
         }
 
         relations.push(PivotRelation {
             method: String::from_utf8_lossy(method.name.value).into_owned(),
+            accessor,
             using,
             columns,
         });

@@ -214,10 +214,12 @@ pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
-    RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
+    RelationshipKind, build_property_type, count_property_name, extract_pivot_accessor_typed,
+    extract_related_type_typed,
 };
 pub(crate) use relationships::{
-    class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
+    class_declares_pivot_relationship, extract_pivot_accessor, extract_pivot_using,
+    extract_with_pivot_columns,
 };
 
 pub use scopes::build_scope_methods_for_builder;
@@ -243,7 +245,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PropertyInfo, PropertySource,
+    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -1000,21 +1002,31 @@ impl VirtualMemberProvider for LaravelModelProvider {
 
             if let Some(ref th) = type_hint {
                 // Attach any pivot configuration recovered from the
-                // relationship body (`->using(...)` / `->withPivot(...)`) so
-                // hover can surface the custom pivot class and extra columns.
-                let (pivot_using, pivot_columns) = class
+                // relationship body (`->as(...)` / `->using(...)` /
+                // `->withPivot(...)`) so hover can surface the custom
+                // accessor, pivot class, and extra columns.
+                let generic_pivot_accessor = extract_pivot_accessor_typed(return_type);
+                let (body_pivot_accessor, pivot_using, pivot_columns) = class
                     .laravel()
                     .and_then(|l| {
                         l.belongs_to_many_pivots
                             .iter()
                             .find(|p| p.method == method.name.as_str())
                     })
-                    .map(|p| (p.using.clone(), p.columns.clone()))
+                    .map(|p| {
+                        let accessor = match p.accessor {
+                            PivotAccessor::Custom(name) => Some(name),
+                            PivotAccessor::Default | PivotAccessor::Unknown => None,
+                        };
+                        (accessor, p.using.clone(), p.columns.clone())
+                    })
                     .unwrap_or_default();
+                let pivot_accessor = generic_pivot_accessor.or(body_pivot_accessor);
                 properties.push(PropertyInfo {
                     source: Some(PropertySource::Relationship {
                         method: method.name.to_string(),
                         kind: relationship_kind_name(kind).to_string(),
+                        pivot_accessor,
                         pivot_using,
                         pivot_columns,
                     }),

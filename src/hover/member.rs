@@ -138,10 +138,14 @@ pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
         PropertySource::Relationship {
             method,
             kind,
+            pivot_accessor,
             pivot_using,
             pivot_columns,
         } => {
             let mut lines = vec![format!("source: relationship `{}` ({})", method, kind)];
+            if let Some(accessor) = pivot_accessor {
+                lines.push(format!("pivot accessor: `${}`", accessor));
+            }
             if let Some(using) = pivot_using {
                 lines.push(format!("pivot: `{}`", using));
             }

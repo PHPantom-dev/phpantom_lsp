@@ -471,6 +471,7 @@ fn format_property_source_relationship_plain() {
     let source = PropertySource::Relationship {
         method: "roles".to_string(),
         kind: "collection".to_string(),
+        pivot_accessor: None,
         pivot_using: None,
         pivot_columns: Vec::new(),
     };
@@ -485,6 +486,7 @@ fn format_property_source_relationship_with_pivot() {
     let source = PropertySource::Relationship {
         method: "roles".to_string(),
         kind: "collection".to_string(),
+        pivot_accessor: Some(crate::atom::atom("membership")),
         pivot_using: Some("App\\Models\\RoleUser".to_string()),
         pivot_columns: vec!["expires_at".to_string(), "active".to_string()],
     };
@@ -492,6 +494,7 @@ fn format_property_source_relationship_with_pivot() {
         format_property_source(&source),
         vec![
             "source: relationship `roles` (collection)".to_string(),
+            "pivot accessor: `$membership`".to_string(),
             "pivot: `App\\Models\\RoleUser`".to_string(),
             "pivot columns: expires_at, active".to_string(),
         ]
