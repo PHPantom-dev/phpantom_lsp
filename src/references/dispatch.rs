@@ -27,6 +27,29 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        // Refresh once for the user command so files created without a
+        // watcher event remain discoverable. The per-symbol scanners below
+        // only wait for/reuse that completed index.
+        self.ensure_workspace_indexed_for_request();
+        self.find_references_inner(
+            uri,
+            content,
+            position,
+            include_declaration,
+            ReferenceSearchMode::References,
+        )
+    }
+
+    /// Resolve declaration annotations against the completed index without
+    /// turning every CodeLens item into another workspace refresh.
+    pub(crate) fn find_references_from_workspace_index(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        self.ensure_workspace_index_ready_for_request();
         self.find_references_inner(
             uri,
             content,
@@ -45,6 +68,7 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        self.ensure_workspace_indexed_for_request();
         self.find_references_inner(
             uri,
             content,

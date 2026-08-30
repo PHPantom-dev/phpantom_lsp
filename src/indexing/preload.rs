@@ -122,6 +122,26 @@ impl Backend {
         }
     }
 
+    /// Wait for the initial workspace index when necessary, but reuse a
+    /// completed index without refreshing the filesystem.
+    ///
+    /// Internal consumers such as declaration CodeLens and cached reference
+    /// counts call this once per symbol. Explicit Find References requests use
+    /// [`ensure_workspace_indexed_for_request`](Self::ensure_workspace_indexed_for_request)
+    /// once at their entry point so they retain the existing on-demand refresh
+    /// that discovers files created without a watcher notification.
+    pub(crate) fn ensure_workspace_index_ready_for_request(&self) {
+        match self.request_progress.as_deref() {
+            Some(state) => {
+                let forward = |percentage: u32, message: String| {
+                    state.set_percentage(percentage.min(100) * 4 / 5, message);
+                };
+                self.ensure_workspace_index_ready_with_progress(Some(&forward));
+            }
+            None => self.ensure_workspace_index_ready_with_progress(None),
+        }
+    }
+
     /// Acquire `workspace_index_lock`, mirroring the in-flight index's own
     /// progress into `progress` while another thread holds it.
     ///
@@ -190,7 +210,41 @@ impl Backend {
         &self,
         progress: Option<&(dyn Fn(u32, String) + Sync)>,
     ) {
+        self.ensure_workspace_indexed_with_progress_mode(progress, true);
+    }
+
+    pub(crate) fn ensure_workspace_index_ready_with_progress(
+        &self,
+        progress: Option<&(dyn Fn(u32, String) + Sync)>,
+    ) {
+        self.ensure_workspace_indexed_with_progress_mode(progress, false);
+    }
+
+    fn ensure_workspace_indexed_with_progress_mode(
+        &self,
+        progress: Option<&(dyn Fn(u32, String) + Sync)>,
+        refresh_completed: bool,
+    ) {
+        // Reference counts and CodeLens resolution can ask for the complete
+        // index once per declaration.  Once the initial pass has published
+        // every batch, those requests must reuse it instead of walking the
+        // workspace again.  Watched-file notifications keep the completed
+        // index current after this point.
+        if !refresh_completed && self.workspace_indexed.load(Ordering::Acquire) {
+            return;
+        }
+
         let _workspace_index_guard = self.acquire_workspace_index_lock(progress);
+
+        // Another request may have completed the index while this one was
+        // waiting for the single-flight lock.
+        if !refresh_completed && self.workspace_indexed.load(Ordering::Acquire) {
+            if let Some(progress) = progress {
+                progress(100, "Workspace index ready".to_string());
+            }
+            return;
+        }
+
         let start = std::time::Instant::now();
         self.report_workspace_index_progress(progress, 1, "Preparing workspace index");
         let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
@@ -221,10 +275,11 @@ impl Backend {
 
         // ── Phase 2: workspace directory scan ───────────────────────────
         //
-        // Even after the initial scan, repeat the walk so newly-created PHP
-        // files that are not open in the editor can still be discovered.
-        // The existing-URI filter below keeps this cheap by parsing only files
-        // that are not already in `symbol_maps`.
+        // The initial pass discovers every PHP and resource file. Watched-file
+        // notifications apply later changes incrementally. Explicit reference
+        // requests may still refresh this walk to discover a file created
+        // without a watcher event; per-symbol internal consumers only wait for
+        // the initial pass and reuse it.
         let workspace_root = self.workspace.workspace_root.read().clone();
         let phase1_uri_set: HashSet<&str> = phase1_uris.iter().map(|uri| uri.as_str()).collect();
         let phase2_work = if let Some(root) = workspace_root.clone() {

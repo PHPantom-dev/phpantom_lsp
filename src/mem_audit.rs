@@ -217,6 +217,8 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::IndexAccess(..) => "IndexAccess",
         TypeKind::Literal(_) => "Literal",
         TypeKind::Raw(_) => "Raw",
+        TypeKind::Benevolent(_) => "Benevolent",
+        TypeKind::ListShape(_) => "ListShape",
     }
 }
 
@@ -248,7 +250,12 @@ fn ty(t: &PhpType) -> Sz {
 
     match t.kind() {
         TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_) => {}
-        TypeKind::Nullable(b) | TypeKind::Array(b) | TypeKind::KeyOf(b) | TypeKind::ValueOf(b) => {
+        TypeKind::Nullable(b)
+        | TypeKind::Array(b)
+        | TypeKind::KeyOf(b)
+        | TypeKind::ValueOf(b)
+        | TypeKind::Benevolent(b)
+        | TypeKind::ListShape(b) => {
             z.slot(1);
             z += ty(b);
         }
@@ -1341,11 +1348,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     // count, so there is no per-span duplication left to account for.
     let mut refs = Sz::default();
     let mut n_key_uri_pairs = 0usize;
+    let n_resolved_member_files;
+    let mut n_resolved_member_accesses = 0usize;
     let n_keys;
     let mut distinct_uris: HashSet<*const u8> = HashSet::new();
     {
         let idx = backend.reference_index.read();
-        let (by_key, uri_keys) = idx.audit_maps();
+        let (by_key, uri_keys, resolved_members) = idx.audit_maps();
         n_keys = by_key.len();
         refs += map_buckets::<crate::reference_index::ReferenceIndexKey, HashMap<Arc<str>, u32>>(
             by_key.capacity(),
@@ -1368,14 +1377,39 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 refs.add(k.audit_heap());
             }
         }
+        refs += map_buckets::<Arc<str>, Arc<crate::reference_index::ResolvedMemberFile>>(
+            resolved_members.capacity(),
+        );
+        n_resolved_member_files = resolved_members.len();
+        for (uri, file) in resolved_members {
+            distinct_uris.insert(Arc::as_ptr(uri).cast::<u8>());
+            let (accesses, bytes, allocations) = file.audit_heap();
+            n_resolved_member_accesses += accesses;
+            refs.add(ARC + size_of::<crate::reference_index::ResolvedMemberFile>());
+            refs.add(bytes);
+            refs.allocs += allocations;
+        }
     }
     eprintln!(
-        "── reference_index: {} keys, {} (key, uri) pairs, {} distinct uris, {:.1} MB ({} allocs)",
+        "── reference_index: {} keys, {} (key, uri) pairs, {} exact member accesses in {} files, {} distinct uris, {:.1} MB ({} allocs)",
         n_keys,
         n_key_uri_pairs,
+        n_resolved_member_accesses,
+        n_resolved_member_files,
         distinct_uris.len(),
         mb(refs.bytes),
         refs.allocs,
+    );
+
+    let (member_names, member_entries, member_locations, member_bytes, member_allocations) =
+        backend.member_ref_counts.audit_heap();
+    eprintln!(
+        "── member_reference_cache: {} names, {} declarations, {} locations, {:.1} MB ({} allocs)",
+        member_names,
+        member_entries,
+        member_locations,
+        mb(member_bytes),
+        member_allocations,
     );
 
     // ── 7. Remaining session stores ─────────────────────────────────
@@ -1626,6 +1660,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("member_completion_cache", &mut || {
         backend.member_completion_cache.lock().clear()
+    });
+    probe("member_reference_cache", &mut || {
+        backend.member_ref_counts.clear_cached()
     });
     probe("auth_user_type_cache", &mut || {
         backend.auth_user_type_cache.write().clear()

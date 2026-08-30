@@ -177,6 +177,16 @@ impl LanguageServer for Backend {
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
 
+        let client_supports_code_lens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.code_lens.as_ref())
+            .and_then(|code_lens| code_lens.refresh_support)
+            .unwrap_or(false);
+        self.supports_code_lens_refresh
+            .store(client_supports_code_lens_refresh, Ordering::Release);
+
         // Reference counts on declarations are computed off the request
         // path, so the hints an editor holds are the ones from before the
         // counts landed unless it can be asked to re-pull them.
@@ -274,7 +284,7 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
-                    resolve_provider: Some(false),
+                    resolve_provider: Some(true),
                 }),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -878,6 +888,12 @@ impl LanguageServer for Backend {
                     {
                         let _ = client.inlay_hint_refresh().await;
                     }
+                    if refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    {
+                        let _ = client.code_lens_refresh().await;
+                    }
                 }
             });
         }
@@ -1471,12 +1487,25 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
-        self.coalesced_whole_file("code_lens", &uri, move || {
-            backend.handle_with_uri("code_lens", &u, |content| {
-                backend.handle_code_lens(&u, content)
+        let lenses = self
+            .coalesced_whole_file("code_lens", &uri, move || {
+                backend.handle_with_uri("code_lens", &u, |content| {
+                    backend.handle_code_lens(&u, content)
+                })
             })
+            .await;
+        self.schedule_member_ref_counts();
+        lenses
+    }
+
+    async fn code_lens_resolve(&self, params: CodeLens) -> Result<CodeLens> {
+        let fallback = params.clone();
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("code_lens_resolve", move || {
+            backend.resolve_code_lens_item(params)
         })
         .await
+        .unwrap_or(fallback))
     }
 
     async fn execute_command(
@@ -1908,6 +1937,13 @@ impl Backend {
                 && let Some(ref client) = progress_backend.client
             {
                 let _ = client.inlay_hint_refresh().await;
+            }
+            if progress_backend
+                .supports_code_lens_refresh
+                .load(Ordering::Acquire)
+                && let Some(ref client) = progress_backend.client
+            {
+                let _ = client.code_lens_refresh().await;
             }
 
             // With the whole workspace parsed, eagerly resolve every
