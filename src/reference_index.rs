@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 use crate::Backend;
-use crate::atom::{AtomMap, AtomSet, atom};
+use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
@@ -111,6 +111,80 @@ impl ReferenceIndexKey {
 pub(crate) struct ReferenceIndexInner {
     by_key: HashMap<ReferenceIndexKey, HashMap<Arc<str>, u32>>,
     uri_keys: HashMap<Arc<str>, Vec<ReferenceIndexKey>>,
+    resolved_members: HashMap<Arc<str>, Arc<ResolvedMemberFile>>,
+}
+
+#[derive(Clone, Copy)]
+struct ResolvedMemberAccess {
+    span_index: u32,
+    target_start: u32,
+    target_len: u32,
+}
+
+/// Receiver classes resolved for every member access in one immutable symbol
+/// map.  Targets are packed into one allocation; the access table points into
+/// it and stays sorted by symbol-span index for binary lookup.
+pub(crate) struct ResolvedMemberFile {
+    symbol_map: Arc<SymbolMap>,
+    accesses: Vec<ResolvedMemberAccess>,
+    targets: Vec<Atom>,
+}
+
+impl ResolvedMemberFile {
+    pub(crate) fn new(symbol_map: Arc<SymbolMap>, mut resolved: Vec<(usize, Vec<Atom>)>) -> Self {
+        resolved.sort_unstable_by_key(|(span_index, _)| *span_index);
+        let target_count = resolved.iter().map(|(_, targets)| targets.len()).sum();
+        let mut accesses = Vec::with_capacity(resolved.len());
+        let mut packed_targets = Vec::with_capacity(target_count);
+        for (span_index, mut targets) in resolved {
+            if targets.is_empty() {
+                continue;
+            }
+            targets.sort_unstable();
+            targets.dedup();
+            let target_start = packed_targets.len();
+            packed_targets.extend(targets);
+            accesses.push(ResolvedMemberAccess {
+                span_index: span_index as u32,
+                target_start: target_start as u32,
+                target_len: (packed_targets.len() - target_start) as u32,
+            });
+        }
+        Self {
+            symbol_map,
+            accesses,
+            targets: packed_targets,
+        }
+    }
+
+    pub(crate) fn targets_for_span(&self, span_index: usize) -> &[Atom] {
+        let Ok(span_index) = u32::try_from(span_index) else {
+            return &[];
+        };
+        let Ok(index) = self
+            .accesses
+            .binary_search_by_key(&span_index, |access| access.span_index)
+        else {
+            return &[];
+        };
+        let access = self.accesses[index];
+        let start = access.target_start as usize;
+        &self.targets[start..start + access.target_len as usize]
+    }
+
+    fn matches_symbol_map(&self, symbol_map: &Arc<SymbolMap>) -> bool {
+        Arc::ptr_eq(&self.symbol_map, symbol_map)
+    }
+
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn audit_heap(&self) -> (usize, usize, usize) {
+        (
+            self.accesses.len(),
+            self.accesses.capacity() * std::mem::size_of::<ResolvedMemberAccess>()
+                + self.targets.capacity() * std::mem::size_of::<Atom>(),
+            usize::from(self.accesses.capacity() > 0) + usize::from(self.targets.capacity() > 0),
+        )
+    }
 }
 
 impl ReferenceIndexInner {
@@ -127,8 +201,9 @@ impl ReferenceIndexInner {
     ) -> (
         &HashMap<ReferenceIndexKey, HashMap<Arc<str>, u32>>,
         &HashMap<Arc<str>, Vec<ReferenceIndexKey>>,
+        &HashMap<Arc<str>, Arc<ResolvedMemberFile>>,
     ) {
-        (&self.by_key, &self.uri_keys)
+        (&self.by_key, &self.uri_keys, &self.resolved_members)
     }
 
     #[cfg(test)]
@@ -144,6 +219,62 @@ pub(crate) fn new_reference_index() -> ReferenceIndex {
 }
 
 impl Backend {
+    pub(crate) fn resolved_member_file(
+        &self,
+        uri: &str,
+        symbol_map: &Arc<SymbolMap>,
+    ) -> Option<Arc<ResolvedMemberFile>> {
+        self.reference_index
+            .read()
+            .resolved_members
+            .get(uri)
+            .filter(|file| file.matches_symbol_map(symbol_map))
+            .cloned()
+    }
+
+    pub(crate) fn cache_resolved_member_file(
+        &self,
+        uri: &str,
+        symbol_map: Arc<SymbolMap>,
+        resolved: Vec<(usize, Vec<Atom>)>,
+    ) -> Arc<ResolvedMemberFile> {
+        let built = Arc::new(ResolvedMemberFile::new(Arc::clone(&symbol_map), resolved));
+
+        // A didChange parse may have replaced the symbol map while the
+        // semantic walk was running. The result remains usable by its caller,
+        // which owns the same snapshot, but must not become the current cache.
+        if !self
+            .symbol_maps
+            .read()
+            .get(uri)
+            .is_some_and(|current| Arc::ptr_eq(current, &symbol_map))
+        {
+            return built;
+        }
+
+        let mut index = self.reference_index.write();
+        if let Some(existing) = index
+            .resolved_members
+            .get(uri)
+            .filter(|file| file.matches_symbol_map(&symbol_map))
+        {
+            return Arc::clone(existing);
+        }
+        let interned_uri = index
+            .uri_keys
+            .get_key_value(uri)
+            .map(|(uri, _)| Arc::clone(uri))
+            .unwrap_or_else(|| Arc::from(uri));
+        index
+            .resolved_members
+            .insert(interned_uri, Arc::clone(&built));
+        built
+    }
+
+    pub(crate) fn clear_resolved_member_files(&self) {
+        self.reference_index.write().resolved_members.clear();
+    }
+
     pub(crate) fn evict_reference_index_uri(&self, uri: &str) {
         let track_members = !self.member_ref_counts.is_empty();
         let mut index = self.reference_index.write();
@@ -154,6 +285,9 @@ impl Backend {
         };
         evict_reference_index_uri_locked(&mut index, uri);
         drop(index);
+        if track_members {
+            self.member_ref_counts.invalidate_locations_all();
+        }
         for name in dropped.into_keys() {
             self.member_ref_counts.invalidate_member(name);
         }
@@ -176,6 +310,35 @@ impl Backend {
             }
         }
         Some(uris)
+    }
+
+    /// Number of indexed reference occurrences for `key`.
+    ///
+    /// `None` means the workspace index cannot answer yet.  A returned zero
+    /// is conclusive even for the deliberately coarse member keys: semantic
+    /// filtering can remove name matches, but it cannot create a reference
+    /// that the symbol map did not index.
+    pub(crate) fn indexed_reference_count(&self, key: &ReferenceIndexKey) -> Option<usize> {
+        self.indexed_reference_count_for_keys(std::slice::from_ref(key))
+    }
+
+    /// Number of indexed occurrences across several alternative keys.
+    pub(crate) fn indexed_reference_count_for_keys(
+        &self,
+        keys: &[ReferenceIndexKey],
+    ) -> Option<usize> {
+        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let index = self.reference_index.read();
+        Some(
+            keys.iter()
+                .filter_map(|key| index.get(key))
+                .flat_map(HashMap::values)
+                .map(|&count| count as usize)
+                .sum(),
+        )
     }
 
     /// Narrow `uris` to the files that reference one of `keys`.
@@ -250,6 +413,10 @@ impl Backend {
             .enumerate()
             .filter_map(|(idx, item)| keep[idx].then_some(item))
             .collect();
+
+        if track_members && !rebuilt.is_empty() {
+            self.member_ref_counts.invalidate_locations_all();
+        }
 
         // Which member names each file contributed a reference to, so the
         // counts cached for those members can be marked stale.  Only the
@@ -402,6 +569,12 @@ impl Backend {
     ) -> Vec<(ReferenceIndexKey, bool)> {
         match &span.kind {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
+                if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
+                    return vec![(
+                        ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
+                        true,
+                    )];
+                }
                 let resolved = if *is_fqn {
                     normalize_symbol_name(name)
                 } else if let Some(fqn) = self.resolved_name_at(uri, span.start) {
@@ -618,6 +791,7 @@ fn member_contributions_of_entries(entries: &[(ReferenceIndexKey, bool)]) -> Ato
 }
 
 fn evict_reference_index_uri_locked(index: &mut ReferenceIndexInner, uri: &str) {
+    index.resolved_members.remove(uri);
     let Some(keys) = index.uri_keys.remove(uri) else {
         return;
     };

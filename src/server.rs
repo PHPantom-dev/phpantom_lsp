@@ -177,6 +177,16 @@ impl LanguageServer for Backend {
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
 
+        let client_supports_code_lens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.code_lens.as_ref())
+            .and_then(|code_lens| code_lens.refresh_support)
+            .unwrap_or(false);
+        self.supports_code_lens_refresh
+            .store(client_supports_code_lens_refresh, Ordering::Release);
+
         // Reference counts on declarations are computed off the request
         // path, so the hints an editor holds are the ones from before the
         // counts landed unless it can be asked to re-pull them.
@@ -274,7 +284,7 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
-                    resolve_provider: Some(false),
+                    resolve_provider: Some(true),
                 }),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -565,6 +575,14 @@ impl LanguageServer for Backend {
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
             },
             FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}.dist".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
                 glob_pattern: GlobPattern::String("**/composer.json".to_string()),
                 kind: Some(WatchKind::Change),
             },
@@ -730,6 +748,16 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
+        if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
+            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+                .await;
+            return;
+        }
+
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
@@ -809,6 +837,16 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
+            return;
+        }
+
         // Re-parse in a blocking background task so typing does not
         // monopolize the LSP service loop and delay completion requests.
         //
@@ -878,6 +916,12 @@ impl LanguageServer for Backend {
                     {
                         let _ = client.inlay_hint_refresh().await;
                     }
+                    if refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    {
+                        let _ = client.code_lens_refresh().await;
+                    }
                 }
             });
         }
@@ -908,7 +952,15 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
-        self.clear_file_maps(&uri);
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_resource_symbol_index(&uri, &content);
+            } else {
+                self.clear_file_maps(&uri);
+            }
+        } else {
+            self.clear_file_maps(&uri);
+        }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
@@ -919,13 +971,22 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            self.update_ast(&uri, &text);
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+        }
+
+        if is_resource {
+            return;
         }
 
         // A save is a reliable sync point: re-diagnose the saved file
@@ -979,6 +1040,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 
@@ -996,6 +1062,22 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("goto_definition", move || {
+            // YAML and XML may name PHP classes under any schema. Resolve
+            // fully-qualified class and Class::member tokens before entering
+            // the PHP-only symbol-map path below.
+            if crate::resource_navigation::is_resource_document(&uri_clone) {
+                let location = backend.get_file_content(&uri_clone).and_then(|content| {
+                    crate::util::catch_panic_unwind_safe(
+                        "goto_definition",
+                        &uri_clone,
+                        Some(position),
+                        || backend.resolve_resource_definition(&content, position),
+                    )
+                    .flatten()
+                });
+                return Ok(location.map(GotoDefinitionResponse::Scalar));
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -1471,12 +1553,25 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
-        self.coalesced_whole_file("code_lens", &uri, move || {
-            backend.handle_with_uri("code_lens", &u, |content| {
-                backend.handle_code_lens(&u, content)
+        let lenses = self
+            .coalesced_whole_file("code_lens", &uri, move || {
+                backend.handle_with_uri("code_lens", &u, |content| {
+                    backend.handle_code_lens(&u, content)
+                })
             })
+            .await;
+        self.schedule_member_ref_counts();
+        lenses
+    }
+
+    async fn code_lens_resolve(&self, params: CodeLens) -> Result<CodeLens> {
+        let fallback = params.clone();
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("code_lens_resolve", move || {
+            backend.resolve_code_lens_item(params)
         })
         .await
+        .unwrap_or(fallback))
     }
 
     async fn execute_command(
@@ -1909,6 +2004,13 @@ impl Backend {
             {
                 let _ = client.inlay_hint_refresh().await;
             }
+            if progress_backend
+                .supports_code_lens_refresh
+                .load(Ordering::Acquire)
+                && let Some(ref client) = progress_backend.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
 
             // With the whole workspace parsed, eagerly resolve every
             // class so interactive requests hit a warm cache.  This
@@ -1975,7 +2077,9 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !self.symbol_maps.read().contains_key(uri) {
+        if !crate::resource_navigation::is_resource_document(uri)
+            && !self.symbol_maps.read().contains_key(uri)
+        {
             self.update_ast(uri, &content);
         }
 

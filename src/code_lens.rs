@@ -1,14 +1,16 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows override/implement annotations linking to the prototype declaration.
+//! Shows reference counts plus override/implement annotations.
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
 use crate::definition::member::MemberKind;
+use crate::reference_index::ReferenceIndexKey;
+use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
-use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH};
+use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, Visibility};
 
 fn line_indent(content: &str, byte_offset: usize) -> u32 {
     let line_start = content[..byte_offset]
@@ -36,18 +38,27 @@ struct Prototype {
 impl Backend {
     /// Handle a `textDocument/codeLens` request.
     ///
-    /// Returns a code lens for each method in the file that overrides
-    /// a parent class method or implements an interface method.
+    /// Returns reference lenses for PHP declarations and navigation lenses
+    /// for methods that override or implement an ancestor declaration.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
-            map.get(uri)?.clone()
+            map.get(uri).cloned().unwrap_or_default()
         };
 
         let mut lenses = Vec::new();
 
         for class in &classes {
             let class_fqn = class.fqn();
+
+            if let Some(lens) = self.build_declaration_reference_lens(
+                uri,
+                content,
+                self.class_declaration_name_offset(uri, class),
+                &ReferenceIndexKey::class(&class_fqn),
+            ) {
+                lenses.push(lens);
+            }
 
             if let Some(lens) = self.build_covers_lens(class, uri, content) {
                 lenses.push(lens);
@@ -75,6 +86,19 @@ impl Backend {
                 };
 
                 let proto = self.find_prototype(class, &class_fqn, &method.name, uri, content);
+                if !method.name.starts_with("__")
+                    && proto.is_none()
+                    && let Some(lens) = self.build_member_reference_lens(
+                        uri,
+                        content,
+                        method.name_offset,
+                        class_fqn,
+                        method.name,
+                        method.is_static,
+                    )
+                {
+                    lenses.push(lens);
+                }
                 if let Some(proto) = proto {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
                     let title = format!("{} {}::{}", icon, proto.ancestor_name, method.name);
@@ -93,6 +117,64 @@ impl Backend {
                     });
                 }
             }
+
+            for property in &class.properties {
+                if property.name_offset == 0
+                    || property.is_virtual
+                    || property.visibility == Visibility::Private
+                {
+                    continue;
+                }
+                let member_name = property.name.strip_prefix('$').unwrap_or(&property.name);
+                if let Some(lens) = self.build_member_reference_lens(
+                    uri,
+                    content,
+                    property.name_offset,
+                    class_fqn,
+                    crate::atom::atom(member_name),
+                    property.is_static,
+                ) {
+                    lenses.push(lens);
+                }
+            }
+
+            for constant in &class.constants {
+                if constant.name_offset == 0 || constant.visibility == Visibility::Private {
+                    continue;
+                }
+                if let Some(lens) = self.build_member_reference_lens(
+                    uri,
+                    content,
+                    constant.name_offset,
+                    class_fqn,
+                    constant.name,
+                    true,
+                ) {
+                    lenses.push(lens);
+                }
+            }
+        }
+
+        if let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() {
+            for span in &symbol_map.spans {
+                let key = match &span.kind {
+                    SymbolKind::FunctionCall {
+                        name,
+                        is_definition: true,
+                        ..
+                    } => self.function_reference_key(uri, span.start, name),
+                    SymbolKind::ConstantReference {
+                        name,
+                        is_definition: true,
+                    } => ReferenceIndexKey::Constant(self.constant_fqn_at(uri, span.start, name)),
+                    _ => continue,
+                };
+                if let Some(lens) =
+                    self.build_declaration_reference_lens(uri, content, span.start, &key)
+                {
+                    lenses.push(lens);
+                }
+            }
         }
 
         if lenses.is_empty() {
@@ -100,6 +182,258 @@ impl Backend {
         } else {
             Some(lenses)
         }
+    }
+
+    /// Build a declaration reference lens from the candidate index.
+    ///
+    /// A zero count is returned fully resolved because semantic filtering can
+    /// only remove candidates.  Non-zero declarations take the LSP's lazy
+    /// resolve path, which computes exact locations only when the client asks.
+    fn build_declaration_reference_lens(
+        &self,
+        origin_uri: &str,
+        content: &str,
+        declaration_offset: u32,
+        key: &ReferenceIndexKey,
+    ) -> Option<CodeLens> {
+        if declaration_offset == 0 {
+            return None;
+        }
+
+        let candidate_count = self.indexed_reference_count(key)?;
+        let origin_url = Url::parse(origin_uri).ok()?;
+        let position = offset_to_position(content, declaration_offset as usize);
+        let range = Range::new(
+            Position::new(position.line, 0),
+            Position::new(position.line, 0),
+        );
+        if candidate_count == 0 {
+            return Some(CodeLens {
+                range,
+                command: Some(Self::reference_lens_command(
+                    origin_url,
+                    position,
+                    Vec::new(),
+                )),
+                data: None,
+            });
+        }
+
+        Some(CodeLens {
+            range,
+            command: None,
+            data: Some(serde_json::json!({
+                "kind": "phpReferences",
+                "uri": origin_uri,
+                "position": position,
+            })),
+        })
+    }
+
+    fn build_member_reference_lens(
+        &self,
+        origin_uri: &str,
+        content: &str,
+        declaration_offset: u32,
+        class_fqn: Atom,
+        member: Atom,
+        is_static: bool,
+    ) -> Option<CodeLens> {
+        if declaration_offset == 0 {
+            return None;
+        }
+        let member_name = member.to_string();
+        let candidate_count = self.indexed_reference_count_for_keys(&[
+            ReferenceIndexKey::Member {
+                name: member_name.clone(),
+                is_static,
+            },
+            ReferenceIndexKey::Member {
+                name: member_name,
+                is_static: !is_static,
+            },
+        ])?;
+        let origin_url = Url::parse(origin_uri).ok()?;
+        let position = offset_to_position(content, declaration_offset as usize);
+        let range = Range::new(
+            Position::new(position.line, 0),
+            Position::new(position.line, 0),
+        );
+        if candidate_count == 0 {
+            return Some(CodeLens {
+                range,
+                command: Some(Self::reference_lens_command(
+                    origin_url,
+                    position,
+                    Vec::new(),
+                )),
+                data: None,
+            });
+        }
+
+        let supports_refresh = self
+            .supports_code_lens_refresh
+            .load(std::sync::atomic::Ordering::Acquire);
+        let cached_locations = if supports_refresh {
+            self.member_ref_locations_cached(
+                origin_uri,
+                declaration_offset,
+                class_fqn,
+                member,
+                is_static,
+            )
+        } else {
+            self.member_ref_locations_ready(
+                origin_uri,
+                declaration_offset,
+                class_fqn,
+                member,
+                is_static,
+            )
+        };
+        if let Some(locations) = cached_locations {
+            return Some(CodeLens {
+                range,
+                command: Some(Self::reference_lens_command(
+                    origin_url, position, locations,
+                )),
+                data: None,
+            });
+        }
+
+        // Clients with refresh support can re-pull once the shared background
+        // worker fills the exact cache.  Omitting the cold lens avoids an
+        // eager resolve burst merely to obtain titles for the viewport.
+        if supports_refresh {
+            return None;
+        }
+
+        Some(CodeLens {
+            range,
+            command: None,
+            data: Some(serde_json::json!({
+                "kind": "phpMemberReferences",
+                "uri": origin_uri,
+                "position": position,
+                "offset": declaration_offset,
+                "classFqn": class_fqn.as_str(),
+                "member": member.as_str(),
+                "isStatic": is_static,
+            })),
+        })
+    }
+
+    fn class_declaration_name_offset(&self, uri: &str, class: &ClassInfo) -> u32 {
+        let maps = self.symbol_maps.read();
+        let Some(map) = maps.get(uri) else {
+            return class.keyword_offset;
+        };
+        map.spans
+            .iter()
+            .find(|span| {
+                matches!(
+                    &span.kind,
+                    SymbolKind::ClassDeclaration { name } if *name == class.name
+                ) && span.start >= class.decl_start_offset
+                    && span.start <= class.start_offset
+            })
+            .map(|span| span.start)
+            .unwrap_or(class.keyword_offset)
+    }
+
+    fn reference_lens_command(
+        origin_uri: Url,
+        origin_position: Position,
+        locations: Vec<Location>,
+    ) -> Command {
+        let count = locations.len();
+        Command {
+            title: format!(
+                "{count} {}",
+                if count == 1 {
+                    "reference"
+                } else {
+                    "references"
+                }
+            ),
+            command: "editor.action.showReferences".to_string(),
+            arguments: Some(vec![
+                serde_json::json!(origin_uri),
+                serde_json::json!(origin_position),
+                serde_json::json!(locations),
+            ]),
+        }
+    }
+
+    pub(crate) fn resolve_code_lens_item(&self, mut lens: CodeLens) -> CodeLens {
+        if lens.command.is_some() {
+            return lens;
+        }
+        let Some(data) = lens.data.as_ref() else {
+            return lens;
+        };
+        let Some(kind) = data.get("kind").and_then(serde_json::Value::as_str) else {
+            return lens;
+        };
+        let Some(uri) = data.get("uri").and_then(serde_json::Value::as_str) else {
+            return lens;
+        };
+        let Some(position) = data
+            .get("position")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<Position>(value).ok())
+        else {
+            return lens;
+        };
+        let locations = match kind {
+            "phpReferences" => {
+                let Some(content) = self.get_file_content(uri) else {
+                    return lens;
+                };
+                let Some(locations) =
+                    self.find_references_from_workspace_index(uri, &content, position, false)
+                else {
+                    return lens;
+                };
+                locations
+            }
+            "phpMemberReferences" => {
+                let Some(offset) = data
+                    .get("offset")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|offset| u32::try_from(offset).ok())
+                else {
+                    return lens;
+                };
+                let Some(class_fqn) = data.get("classFqn").and_then(serde_json::Value::as_str)
+                else {
+                    return lens;
+                };
+                let Some(member) = data.get("member").and_then(serde_json::Value::as_str) else {
+                    return lens;
+                };
+                let Some(is_static) = data.get("isStatic").and_then(serde_json::Value::as_bool)
+                else {
+                    return lens;
+                };
+                self.resolve_member_ref_locations(
+                    uri,
+                    offset,
+                    crate::atom::atom(class_fqn),
+                    crate::atom::atom(member),
+                    is_static,
+                )
+            }
+            _ => return lens,
+        };
+        let Ok(origin_uri) = Url::parse(uri) else {
+            return lens;
+        };
+
+        lens.command = Some(Self::reference_lens_command(
+            origin_uri, position, locations,
+        ));
+        lens
     }
 
     /// Build the "which tests cover this class" lens for a class

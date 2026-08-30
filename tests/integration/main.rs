@@ -110,6 +110,7 @@ mod definition_members;
 mod definition_object_shapes;
 mod definition_offsets;
 mod definition_phpunit_covers;
+mod definition_resource_files;
 mod definition_self_static;
 mod definition_type_hints;
 mod definition_unions;

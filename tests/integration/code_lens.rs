@@ -1,4 +1,5 @@
 use crate::common::{create_psr4_workspace, create_test_backend};
+use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// Helper: open a file in the backend and return its code lenses.
@@ -13,6 +14,344 @@ fn lens_titles(lenses: &[CodeLens]) -> Vec<&str> {
         .iter()
         .filter_map(|l| l.command.as_ref().map(|c| c.title.as_str()))
         .collect()
+}
+
+async fn open_doc(backend: &phpantom_lsp::Backend, uri: Url, text: &str) {
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn zero_candidate_reference_lenses_need_no_resolve_requests() {
+    let content = r#"<?php
+namespace App;
+
+final class LargeTestCase {
+    public function case01(): void {}
+    public function case02(): void {}
+    public function case03(): void {}
+    public function case04(): void {}
+    public function case05(): void {}
+    public function case06(): void {}
+    public function case07(): void {}
+    public function case08(): void {}
+    public function case09(): void {}
+    public function case10(): void {}
+    public function case11(): void {}
+    public function case12(): void {}
+    public function case13(): void {}
+    public function case14(): void {}
+    public function case15(): void {}
+    public function case16(): void {}
+    public function case17(): void {}
+    public function case18(): void {}
+    public function case19(): void {}
+    public function case20(): void {}
+    public function case21(): void {}
+    public function case22(): void {}
+    public function case23(): void {}
+    public function case24(): void {}
+    public function case25(): void {}
+    public function case26(): void {}
+    public function case27(): void {}
+    public function case28(): void {}
+    public function case29(): void {}
+    public function case30(): void {}
+    public function case31(): void {}
+    public function case32(): void {}
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/LargeTestCase.php", content)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/LargeTestCase.php")).unwrap();
+    open_doc(&backend, uri.clone(), content).await;
+
+    // Drive workspace indexing through the public LSP path, as a real client
+    // would before requesting lenses from an index reported as ready.
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 12),
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected declaration reference lenses");
+    let reference_lenses: Vec<_> = lenses
+        .iter()
+        .filter(|lens| {
+            lens.command
+                .as_ref()
+                .is_some_and(|command| command.title.ends_with("references"))
+        })
+        .collect();
+
+    assert_eq!(reference_lenses.len(), 33);
+    assert!(reference_lenses.iter().all(|lens| {
+        lens.command
+            .as_ref()
+            .is_some_and(|command| command.title == "0 references")
+            && lens.data.is_none()
+    }));
+}
+
+#[tokio::test]
+async fn member_reference_lens_resolves_only_the_declaring_hierarchy() {
+    let order = r#"<?php
+namespace App;
+final class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+    $order->save();
+}
+"#;
+    let unrelated = r#"<?php
+namespace App;
+final class Unrelated {
+    public function save(): void {}
+}
+function persistUnrelated(Unrelated $value): void {
+    $value->save();
+    $value->save();
+    $value->save();
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Order.php", order), ("src/Unrelated.php", unrelated)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    open_doc(&backend, uri.clone(), order).await;
+
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 20),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected declaration reference lenses");
+    let lens = lenses
+        .into_iter()
+        .find(|lens| lens.range.start.line == 3 && lens.command.is_none())
+        .expect("expected an unresolved reference lens above Order::save");
+
+    let resolved = backend
+        .code_lens_resolve(lens)
+        .await
+        .expect("reference lens should resolve");
+    assert_eq!(
+        resolved
+            .command
+            .as_ref()
+            .map(|command| command.title.as_str()),
+        Some("2 references")
+    );
+    let locations: Vec<Location> = serde_json::from_value(
+        resolved
+            .command
+            .as_ref()
+            .and_then(|command| command.arguments.as_ref())
+            .and_then(|arguments| arguments.get(2))
+            .cloned()
+            .expect("expected reference locations"),
+    )
+    .expect("reference targets should be locations");
+    assert_eq!(locations.len(), 2);
+    assert!(locations.iter().all(|location| location.uri == uri));
+}
+
+#[tokio::test]
+async fn refresh_capable_clients_receive_only_warm_member_reference_lenses() {
+    let content = r#"<?php
+namespace App;
+final class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Order.php", content)],
+    );
+    let initialize = backend
+        .initialize(
+            serde_json::from_value(serde_json::json!({
+                "capabilities": {
+                    "workspace": {
+                        "codeLens": { "refreshSupport": true }
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        initialize.capabilities.code_lens_provider,
+        Some(CodeLensOptions {
+            resolve_provider: Some(true)
+        })
+    ));
+
+    let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    open_doc(&backend, uri.clone(), content).await;
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 20),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let params = CodeLensParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let cold = backend
+        .code_lens(params.clone())
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    assert!(
+        cold.iter().all(|lens| lens.range.start.line != 3),
+        "a cold member lens would make the client resolve it eagerly: {cold:?}"
+    );
+
+    let warm = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let lenses = backend
+                .code_lens(params.clone())
+                .await
+                .unwrap()
+                .unwrap_or_default();
+            if let Some(lens) = lenses.into_iter().find(|lens| {
+                lens.range.start.line == 3
+                    && lens
+                        .command
+                        .as_ref()
+                        .is_some_and(|command| command.title == "1 reference")
+            }) {
+                break lens;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("background member-reference cache did not warm");
+    assert!(warm.data.is_none());
+}
+
+#[tokio::test]
+async fn class_and_function_reference_lenses_resolve_exact_locations() {
+    let content = r#"<?php
+namespace App;
+final class Widget {}
+function makeWidget(): Widget { return new Widget(); }
+makeWidget();
+makeWidget();
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/functions.php", content)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/functions.php")).unwrap();
+    open_doc(&backend, uri.clone(), content).await;
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(2, 12),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected class and function reference lenses");
+
+    for (line, expected_title) in [(2, "2 references"), (3, "2 references")] {
+        let lens = lenses
+            .iter()
+            .find(|lens| lens.range.start.line == line && lens.command.is_none())
+            .unwrap_or_else(|| panic!("expected an unresolved lens on line {line}: {lenses:?}"));
+        let resolved = backend
+            .code_lens_resolve(lens.clone())
+            .await
+            .expect("reference lens should resolve");
+        assert_eq!(
+            resolved
+                .command
+                .as_ref()
+                .map(|command| command.title.as_str()),
+            Some(expected_title)
+        );
+    }
 }
 
 // ─── Basic Override Detection ───────────────────────────────────────────────

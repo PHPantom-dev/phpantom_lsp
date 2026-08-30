@@ -63,7 +63,7 @@ src/
 ├── composer.rs             # composer.json / PSR-4 autoload parsing
 ├── names.rs                # Name resolution (FQN, use-map, namespace)
 ├── reference_index.rs      # Workspace-wide reference index for find-references / rename
-├── reference_counts.rs     # Background-computed member reference counts for the declaration inlay hints
+├── reference_counts.rs     # Bounded exact member-reference cache for declaration hints and lenses
 │
 │   # Class & type resolution
 ├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
@@ -98,6 +98,7 @@ src/
 │   # LSP features (one module each)
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting.rs
@@ -877,11 +878,13 @@ When the user invokes "Find All References", PHPantom scans all user files for o
 Before scanning, `ensure_workspace_indexed` ensures all user files have symbol maps:
 
 1. **Phase 1: fqn_uri_index files (user only)** — files already known from `update_ast` calls. Vendor and stub URIs are skipped.
-2. **Phase 2: `.gitignore`-aware workspace walk** — uses the `ignore` crate's `WalkBuilder` to recursively discover PHP files under the workspace root, respecting `.gitignore` rules (including nested and global gitignore files). This automatically skips generated/cached directories like `storage/framework/views/` (Laravel blade cache), `var/cache/` (Symfony), and `node_modules/`. The vendor directory is always skipped regardless of `.gitignore` content. Hidden directories are skipped by default.
+2. **Phase 2: `.gitignore`-aware workspace walk** — uses the `ignore` crate's `WalkBuilder` to recursively discover PHP plus YAML/XML resource files under the workspace root, respecting `.gitignore` rules (including nested and global gitignore files). This automatically skips generated/cached directories like `storage/framework/views/` (Laravel blade cache), `var/cache/` (Symfony), and `node_modules/`. The vendor directory is always skipped regardless of `.gitignore` content. Hidden directories are skipped by default.
 
-Both phases parse files in parallel using `std::thread::scope`. The work is split into chunks (one per CPU core) and each thread reads a file from disk and calls `update_ast`, which acquires write locks briefly to store results while the expensive parsing step runs without any locks held. Batches of 2 or fewer files skip threading overhead.
+PHP files are parsed in parallel using `std::thread::scope`. The work is split into chunks (one per CPU core) and each thread reads a file from disk and calls `update_ast`, which acquires write locks briefly to store results while the expensive parsing step runs without any locks held. Batches of 2 or fewer files skip threading overhead. YAML/XML files take the lightweight schema-free scanner and publish synthetic class/member symbol maps into the same reference index.
 
 Parsed files stay cached in `uri_classes_index`, `symbol_maps`, `file_imports`, and `file_namespaces` after the scan completes. There is no post-scan eviction; keeping the entries means subsequent operations (a second find-references call, go-to-definition on a cross-file symbol) benefit from the work already done.
+
+The workspace reference index keeps its primary map deliberately coarse: it stores candidate URIs and occurrence counts, not a second copy of every source position. CodeLens can therefore answer a conclusive zero without a semantic scan. The first nonzero member query resolves every member receiver in each candidate file while one forward-walked variable scope is active, packs the target class atoms by symbol-span index, and retains that compact per-file semantic layer for later member names. Candidate files are filled in parallel; edits evict their own layer, and signature changes clear layers whose receiver types may have changed. Exact locations remain bounded behind the 50,000-location annotation cache. Refresh-capable clients receive the lens after the background result is ready; other clients retain lazy `codeLens/resolve` as a compatibility path.
 
 ### Cross-file scanning
 
