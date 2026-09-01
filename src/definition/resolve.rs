@@ -26,17 +26,9 @@ use crate::class_lookup::find_class_at_offset;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, ClassInfo, MAX_INHERITANCE_DEPTH};
+use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
 use crate::virtual_members::laravel;
-
-struct MemberPrototypeSearch<'a> {
-    member_name: &'a str,
-    kind: MemberKind,
-    uri: &'a str,
-    content: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-}
 
 impl Backend {
     /// Handle a "go to definition" request.
@@ -55,7 +47,7 @@ impl Backend {
         let symbol = self.lookup_symbol_at_position(uri, content, position);
         if let Some(ref s) = symbol
             && let Some(resolved) =
-                self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
+            self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
         {
             return resolved;
         }
@@ -63,7 +55,7 @@ impl Backend {
         // Laravel config fallback: declaration sites in config/*.php
         if self.resolved_class_cache.read().is_laravel()
             && let Some(loc) =
-                laravel::resolve_config_key_definition_fallback(self, uri, content, position)
+            laravel::resolve_config_key_definition_fallback(self, uri, content, position)
         {
             return vec![loc];
         }
@@ -316,35 +308,14 @@ impl Backend {
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
                 .map(|loc| vec![loc]),
 
-            SymbolKind::MemberDeclaration { name, is_static } => {
-                // If this method/property overrides a parent or implements
-                // an interface member, jump to the prototype declaration.
-                let ctx = self.file_context(uri);
-                let class_loader = self.class_loader(&ctx);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-                if let Some(cls) = current_class
-                    && let Some(kind) = self.infer_member_declaration_kind(cls, name, *is_static)
-                    && let Some(loc) = self.resolve_member_declaration_prototype(
-                        uri,
-                        content,
-                        cls,
-                        name,
-                        kind,
-                        &class_loader,
-                    )
-                {
-                    return Some(vec![loc]);
-                }
-
-                if let Some(cls) = current_class
-                    && let Some(locs) =
-                        self.resolve_reverse_implementation(uri, content, cls, name, &class_loader)
-                    && !locs.is_empty()
-                {
-                    return Some(locs);
-                }
-
+            SymbolKind::MemberDeclaration { name, .. } => {
+                // Return self-location so editors detect "definition ==
+                // cursor" and offer Find Usages instead of navigating.
+                // Navigating to the interface or abstract prototype from a
+                // declaration site makes the concrete method's usages
+                // unreachable; the `implements`/`extends` clause and the
+                // `textDocument/implementation` command handle prototype
+                // navigation.
                 self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
@@ -451,210 +422,6 @@ impl Backend {
             | SymbolKind::CastType
             | SymbolKind::Comment => None,
         }
-    }
-
-    fn infer_member_declaration_kind(
-        &self,
-        class: &ClassInfo,
-        member_name: &str,
-        is_static: bool,
-    ) -> Option<MemberKind> {
-        if is_static
-            && class
-                .constants
-                .iter()
-                .any(|c| c.name == member_name && c.visibility != crate::types::Visibility::Private)
-        {
-            return Some(MemberKind::Constant);
-        }
-
-        if class.methods.iter().any(|m| {
-            m.name == member_name
-                && m.is_static == is_static
-                && !m.is_virtual
-                && m.visibility != crate::types::Visibility::Private
-        }) {
-            return Some(MemberKind::Method);
-        }
-
-        if class.properties.iter().any(|p| {
-            p.name == member_name
-                && p.is_static == is_static
-                && !p.is_virtual
-                && p.visibility != crate::types::Visibility::Private
-        }) {
-            return Some(MemberKind::Property);
-        }
-
-        None
-    }
-
-    fn resolve_member_declaration_prototype(
-        &self,
-        uri: &str,
-        content: &str,
-        class: &ClassInfo,
-        member_name: &str,
-        kind: MemberKind,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Option<Location> {
-        let search = MemberPrototypeSearch {
-            member_name,
-            kind,
-            uri,
-            content,
-            class_loader,
-        };
-
-        if let Some(loc) = self.find_member_prototype_in_traits(&class.used_traits, &search, 0) {
-            return Some(loc);
-        }
-
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(parent_name) = current.parent_class else {
-                break;
-            };
-            let Some(parent) = class_loader(&parent_name).map(Arc::unwrap_or_clone) else {
-                break;
-            };
-
-            if self.class_declares_member(&parent, &search)
-                && let Some(loc) = self.member_location(&parent_name, &parent, &search)
-            {
-                return Some(loc);
-            }
-
-            if let Some(loc) = self.find_member_prototype_in_traits(&parent.used_traits, &search, 0)
-            {
-                return Some(loc);
-            }
-
-            current = parent;
-        }
-
-        if matches!(search.kind, MemberKind::Method | MemberKind::Constant) {
-            return self.find_member_prototype_in_interfaces(class, &search);
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_traits(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        search: &MemberPrototypeSearch<'_>,
-        depth: usize,
-    ) -> Option<Location> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = (search.class_loader)(trait_name).map(Arc::unwrap_or_clone)
-            else {
-                continue;
-            };
-            if self.class_declares_member(&trait_info, search)
-                && let Some(loc) = self.member_location(trait_name, &trait_info, search)
-            {
-                return Some(loc);
-            }
-            if let Some(loc) =
-                self.find_member_prototype_in_traits(&trait_info.used_traits, search, depth + 1)
-            {
-                return Some(loc);
-            }
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_interfaces(
-        &self,
-        class: &ClassInfo,
-        search: &MemberPrototypeSearch<'_>,
-    ) -> Option<Location> {
-        let mut current = Some(class.clone());
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let cls = current?;
-            for iface_name in &cls.interfaces {
-                if let Some(loc) = self.find_member_prototype_in_interface(iface_name, search, 0) {
-                    return Some(loc);
-                }
-            }
-            current = cls
-                .parent_class
-                .as_deref()
-                .and_then(|parent| (search.class_loader)(parent).map(Arc::unwrap_or_clone));
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_interface(
-        &self,
-        iface_name: &str,
-        search: &MemberPrototypeSearch<'_>,
-        depth: usize,
-    ) -> Option<Location> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-        let iface = (search.class_loader)(iface_name).map(Arc::unwrap_or_clone)?;
-        if self.class_declares_member(&iface, search)
-            && let Some(loc) = self.member_location(iface_name, &iface, search)
-        {
-            return Some(loc);
-        }
-
-        for parent in &iface.interfaces {
-            if let Some(loc) = self.find_member_prototype_in_interface(parent, search, depth + 1) {
-                return Some(loc);
-            }
-        }
-
-        if let Some(parent) = iface.parent_class
-            && let Some(loc) = self.find_member_prototype_in_interface(&parent, search, depth + 1)
-        {
-            return Some(loc);
-        }
-
-        None
-    }
-
-    fn class_declares_member(&self, class: &ClassInfo, search: &MemberPrototypeSearch<'_>) -> bool {
-        match search.kind {
-            MemberKind::Method => class.methods.iter().any(|m| {
-                m.name == search.member_name
-                    && !m.is_virtual
-                    && m.visibility != crate::types::Visibility::Private
-            }),
-            MemberKind::Property => class.properties.iter().any(|p| {
-                p.name == search.member_name
-                    && !p.is_virtual
-                    && p.visibility != crate::types::Visibility::Private
-            }),
-            MemberKind::Constant => class.constants.iter().any(|c| {
-                c.name == search.member_name && c.visibility != crate::types::Visibility::Private
-            }),
-        }
-    }
-
-    fn member_location(
-        &self,
-        class_name: &str,
-        class: &ClassInfo,
-        search: &MemberPrototypeSearch<'_>,
-    ) -> Option<Location> {
-        let offset = class.member_name_offset(search.member_name, search.kind.as_str())?;
-        let (target_uri, target_content) =
-            self.find_class_file_content(class_name, search.uri, search.content)?;
-        let parsed_uri = Url::parse(&target_uri).ok()?;
-        Some(point_location(
-            parsed_uri,
-            crate::text_position::offset_to_position(&target_content, offset as usize),
-        ))
     }
 
     /// Return the declaration's own location for a symbol that has nowhere
@@ -1175,7 +942,7 @@ impl Backend {
             // overridden class definition instead of the lexical class.
             if ssp_kind == SelfStaticParentKind::This
                 && let Some(override_cls) =
-                    self.resolve_closure_this_override(uri, content, cursor_offset)
+                self.resolve_closure_this_override(uri, content, cursor_offset)
             {
                 let fqn = override_cls.fqn();
                 if let Some(loc) =
@@ -1239,8 +1006,8 @@ impl Backend {
             for candidate in &candidates {
                 if let Some(file_uri) = self.symbols.fqn_uri_index.read().get(candidate).cloned()
                     && let Some(file_path) = Url::parse(&file_uri)
-                        .ok()
-                        .and_then(|u| u.to_file_path().ok())
+                    .ok()
+                    .and_then(|u| u.to_file_path().ok())
                     && let Some(location) = self.resolve_class_in_file(&file_path, candidate)
                 {
                     return Some(location);

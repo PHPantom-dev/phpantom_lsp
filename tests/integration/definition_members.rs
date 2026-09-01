@@ -5811,3 +5811,88 @@ async fn definition_of_a_plain_parent_property_named_by_a_hook_call() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+/// Regression for github #412: Ctrl+Click on a method name at its own
+/// declaration site in a class that implements an interface must return the
+/// concrete method's own location, not the interface declaration.
+/// Editors detect "definition == cursor position" as the cue to show
+/// usages; jumping to the interface makes the concrete method's usages
+/// unreachable.  The `implements` clause is the place that navigates to
+/// the interface.
+#[tokio::test]
+async fn test_goto_definition_implements_method_declaration_returns_self_location() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{
+            "autoload": { "psr-4": { "App\\": "src/" } }
+        }"#,
+        &[
+            (
+                "src/LoggerInterface.php",
+                concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "interface LoggerInterface {\n",
+                "    public function log(string $message): void;\n",
+                "}\n",
+                ),
+            ),
+            (
+                "src/FileLogger.php",
+                concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "class FileLogger implements LoggerInterface {\n",
+                "    public function log(string $message): void {}\n",
+                "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let logger_path = dir.path().join("src/FileLogger.php");
+    let logger_uri = Url::from_file_path(&logger_path).unwrap();
+    let logger_content = std::fs::read_to_string(&logger_path).unwrap();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: logger_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: logger_content,
+            },
+        })
+        .await;
+
+    // Click on "log" in `    public function log(` on line 3 (0-indexed).
+    // "    public function " = 20 chars, so `log` starts at character 20.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: logger_uri.clone(),
+            },
+            position: Position {
+                line: 3,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    let locations = match result {
+        Some(GotoDefinitionResponse::Array(locs)) => locs,
+        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+        other => panic!("Expected self-location, got: {other:?}"),
+    };
+    assert_eq!(locations.len(), 1, "should return exactly one location");
+    assert_eq!(
+        locations[0].uri, logger_uri,
+        "should return the concrete method's own location, not the interface declaration"
+    );
+    assert_eq!(
+        locations[0].range.start.line, 3,
+        "should point back to the concrete method declaration line"
+    );
+}
