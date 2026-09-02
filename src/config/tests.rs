@@ -747,6 +747,22 @@ fn formatting_empty_string_disables_tool() {
     assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
     assert_eq!(config.formatting.phpcbf.as_deref(), Some(""));
     assert_eq!(config.formatting.pint.as_deref(), Some(""));
+    assert!(!config.formatting.is_disabled());
+}
+
+#[test]
+fn formatting_disabled_disables_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(
+        &path,
+        "[formatting]\ndisabled = true\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
+    )
+    .unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
+    assert_eq!(config.formatting.phpcbf.as_deref(), Some(""));
+    assert_eq!(config.formatting.pint.as_deref(), Some(""));
     assert!(config.formatting.is_disabled());
 }
 
