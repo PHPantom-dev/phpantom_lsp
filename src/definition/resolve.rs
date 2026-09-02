@@ -47,7 +47,7 @@ impl Backend {
         let symbol = self.lookup_symbol_at_position(uri, content, position);
         if let Some(ref s) = symbol
             && let Some(resolved) =
-            self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
+                self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
         {
             return resolved;
         }
@@ -55,7 +55,7 @@ impl Backend {
         // Laravel config fallback: declaration sites in config/*.php
         if self.resolved_class_cache.read().is_laravel()
             && let Some(loc) =
-            laravel::resolve_config_key_definition_fallback(self, uri, content, position)
+                laravel::resolve_config_key_definition_fallback(self, uri, content, position)
         {
             return vec![loc];
         }
@@ -942,7 +942,7 @@ impl Backend {
             // overridden class definition instead of the lexical class.
             if ssp_kind == SelfStaticParentKind::This
                 && let Some(override_cls) =
-                self.resolve_closure_this_override(uri, content, cursor_offset)
+                    self.resolve_closure_this_override(uri, content, cursor_offset)
             {
                 let fqn = override_cls.fqn();
                 if let Some(loc) =
@@ -1006,8 +1006,8 @@ impl Backend {
             for candidate in &candidates {
                 if let Some(file_uri) = self.symbols.fqn_uri_index.read().get(candidate).cloned()
                     && let Some(file_path) = Url::parse(&file_uri)
-                    .ok()
-                    .and_then(|u| u.to_file_path().ok())
+                        .ok()
+                        .and_then(|u| u.to_file_path().ok())
                     && let Some(location) = self.resolve_class_in_file(&file_path, candidate)
                 {
                     return Some(location);
