@@ -318,6 +318,8 @@ impl DiagnosticsConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FormattingConfig {
+    /// Explicitly disable all formatting
+    pub disabled: Option<bool>,
     /// Command (path or name) to run php-cs-fixer.
     ///
     /// - `None` (default) — check `require-dev` in `composer.json`;
@@ -379,12 +381,9 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is entirely disabled (every tool explicitly
-    /// set to an empty string).
+    /// Whether formatting is explicitly disabled
     pub fn is_disabled(&self) -> bool {
-        crate::formatting::Tool::ALL
-            .into_iter()
-            .all(|tool| tool.configured(self) == Some(""))
+        self.disabled == Some(true)
     }
 }
 
@@ -1536,6 +1535,22 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::write(
             &path,
             "[formatting]\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
+        assert_eq!(config.formatting.phpcbf.as_deref(), Some(""));
+        assert_eq!(config.formatting.pint.as_deref(), Some(""));
+        assert!(!config.formatting.is_disabled());
+    }
+
+    #[test]
+    fn formatting_disabled_disables_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            "[formatting]\ndisabled = true\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
         )
         .unwrap();
         let config = load_config(dir.path()).unwrap();
