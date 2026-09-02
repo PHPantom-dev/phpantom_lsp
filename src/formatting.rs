@@ -792,6 +792,7 @@ mod tests {
     #[test]
     fn strategy_both_disabled() {
         let config = FormattingConfig {
+            disabled: Some(false),
             pint: Some(String::new()),
             php_cs_fixer: Some(String::new()),
             phpcbf: Some(String::new()),
@@ -804,6 +805,7 @@ mod tests {
     #[test]
     fn strategy_explicit_commands() {
         let config = FormattingConfig {
+            disabled: Some(false),
             pint: None,
             php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
             phpcbf: Some("/usr/bin/phpcbf".to_string()),
@@ -825,6 +827,7 @@ mod tests {
     #[test]
     fn strategy_one_explicit_one_disabled() {
         let config = FormattingConfig {
+            disabled: Some(false),
             pint: None,
             php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
             phpcbf: Some(String::new()),
@@ -1131,6 +1134,7 @@ mod tests {
 
         // User explicitly set a different path.
         let config = FormattingConfig {
+            disabled: Some(false),
             pint: None,
             php_cs_fixer: Some("/opt/php-cs-fixer".to_string()),
             phpcbf: Some(String::new()),
@@ -1385,6 +1389,7 @@ mod tests {
     fn execute_disabled_returns_none() {
         let content = "<?php\necho 'hello';\n";
         let config = FormattingConfig {
+            disabled: Some(false),
             pint: None,
             php_cs_fixer: Some(String::new()),
             phpcbf: Some(String::new()),
