@@ -100,6 +100,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=stubs.lock");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_OFFLINE_STUBS");
     // Re-run when HEAD moves (commit, checkout, tag) so the embedded
     // version string stays current.
     println!("cargo:rerun-if-changed=.git/HEAD");
@@ -152,6 +153,15 @@ fn main() {
             // added.  Treat as stale so we re-fetch and create the marker.
             needs_fetch = true;
         }
+    }
+
+    if needs_fetch && env::var_os("CARGO_FEATURE_OFFLINE_STUBS").is_some() {
+        eprintln!(
+            "cargo:warning=Stubs are unavailable or stale; building without them because the offline-stubs feature is enabled."
+        );
+        println!("cargo:rustc-env=PHPANTOM_STUBS_VERSION=none");
+        write_empty_stubs();
+        return;
     }
 
     if needs_fetch {

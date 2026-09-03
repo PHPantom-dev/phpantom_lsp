@@ -281,6 +281,8 @@ pub(crate) mod scope_collector;
 mod selection_range;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod self_update;
+#[cfg(feature = "semantic-export")]
+pub mod semantic_export;
 mod semantic_tokens;
 mod server;
 mod signature_help;

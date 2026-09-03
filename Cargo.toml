@@ -85,6 +85,12 @@ mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys", "dep:libc"]
 # installs a counting global allocator that adds two atomics to every
 # allocation, so it must never be enabled in a shipped build.
 mem-audit = []
+# Owned semantic records for non-LSP consumers. Kept out of default builds so
+# the public surface and its code have zero cost for editor users.
+semantic-export = []
+# Prevent the build script from downloading phpstorm-stubs. Existing local
+# stubs are still embedded; a build without them gets an empty stub index.
+offline-stubs = []
 
 # Download size is what matters in the browser, so the wasm module is built for
 # size rather than speed. A separate profile keeps this away from the native
