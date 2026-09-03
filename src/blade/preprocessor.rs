@@ -7,6 +7,11 @@ use super::source_map::BladeSourceMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Html,
+    /// A Blade echo escaped with `@` (`@{{ ... }}` or `@{!! ... !!}`).
+    /// Laravel removes the leading `@` and leaves the whole echo for the
+    /// frontend template engine, so none of its contents are PHP. The `bool`
+    /// is true for a raw echo, whose terminator is `!!}` instead of `}}`.
+    EscapedEcho(bool),
     /// PHP expression/statement content scanned for the `}}` / `!!}` echo
     /// terminators and `@endphp`. The `bool` is true when the mode was
     /// entered through a raw `{!! … !!}` echo, whose emitted `echo` has no
@@ -454,7 +459,7 @@ pub fn preprocess_with_vars(
                 }
             }
 
-            if mode != Mode::Html && mode != Mode::Comment {
+            if !matches!(mode, Mode::Html | Mode::EscapedEcho(_) | Mode::Comment) {
                 if let Some(quote) = in_string {
                     if is_escaped {
                         is_escaped = false;
@@ -581,6 +586,15 @@ pub fn preprocess_with_vars(
                     match_len = if remaining[0] == '/' { 2 } else { 1 };
                     replacement = open_call.take().expect("call is open").close();
                     in_html_tag = false;
+                } else if remaining.starts_with(&['@', '{', '{'])
+                    || remaining.starts_with(&['@', '{', '!', '!'])
+                {
+                    // The `@` escapes the complete Blade echo for a frontend
+                    // template engine. Mask everything through its closing
+                    // delimiter rather than exposing the expression as PHP.
+                    let raw = remaining[2] == '!';
+                    match_len = if raw { 4 } else { 3 };
+                    next_mode = Mode::EscapedEcho(raw);
                 } else if remaining.starts_with(&['@']) {
                     let rest_str: String = remaining[1..].iter().collect();
                     if let Some(directive) = match_directive(&rest_str) {
@@ -949,6 +963,16 @@ pub fn preprocess_with_vars(
                         }
                     }
                 }
+            } else if let Mode::EscapedEcho(raw) = mode {
+                let closes_echo = if raw {
+                    remaining.starts_with(&['!', '!', '}'])
+                } else {
+                    remaining.starts_with(&['}', '}'])
+                };
+                if closes_echo {
+                    match_len = if raw { 3 } else { 2 };
+                    next_mode = Mode::Html;
+                }
             } else if mode == Mode::Comment {
                 // Inside a comment the only meaningful token is the `--}}`
                 // terminator, which Blade requires to be contiguous. Comment
@@ -1290,8 +1314,9 @@ fn flush_buffer(
     }
     let blade_start = current_utf16_col.saturating_sub(utf16_count(buffer) as u32);
 
-    if mode == Mode::Html {
-        // HTML outside PHP/Directives — mask with spaces to maintain 1:1 utf-16 mapping.
+    if matches!(mode, Mode::Html | Mode::EscapedEcho(_)) {
+        // HTML and frontend-template expressions are not PHP. Mask them with
+        // spaces to maintain 1:1 utf-16 mapping.
         adjustments.push((blade_start, utf16_count(processed) as u32));
 
         for c in buffer.chars() {
@@ -3078,6 +3103,54 @@ mod tests {
             php.contains("echo e( \"}} \" );"),
             "Failed to parse braces inside string: {}",
             php
+        );
+    }
+
+    /// An `@` before `{{ ... }}` leaves the expression untouched for a
+    /// frontend template engine, even when the expression is not valid PHP.
+    #[test]
+    fn test_preprocess_at_escaped_echo_is_masked() {
+        let content = "@{{.Image}} and {{ $serverValue }}";
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains(".Image"),
+            "the frontend expression must stay out of virtual PHP: {php}"
+        );
+        assert!(
+            php.contains("echo e( $serverValue );"),
+            "a real Blade echo after it must still compile: {php}"
+        );
+    }
+
+    /// Laravel's escaped-echo pattern spans lines and does not interpret
+    /// quotes inside the frontend expression as PHP string delimiters.
+    #[test]
+    fn test_preprocess_at_escaped_echo_spans_lines() {
+        let content = "@{{\n    frontend['unterminated]\n}}\n{{ $after }}";
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("frontend"),
+            "the whole multiline frontend expression must be masked: {php}"
+        );
+        assert!(
+            php.contains("echo e( $after );"),
+            "processing must return to Blade after the escaped echo: {php}"
+        );
+    }
+
+    /// Escaping a raw echo leaves its contents as frontend template text and
+    /// resumes Blade processing after the raw `!!}` terminator.
+    #[test]
+    fn test_preprocess_at_escaped_raw_echo_is_masked() {
+        let content = "@{!! $frontendName !!} and {!! $serverValue !!}";
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("$frontendName"),
+            "the escaped raw expression must stay out of virtual PHP: {php}"
+        );
+        assert!(
+            php.contains("echo  $serverValue ;"),
+            "a real raw Blade echo after it must still compile: {php}"
         );
     }
 

@@ -1318,6 +1318,19 @@ check(
     )
 );
 
+// ─── Escaped Blade echoes ───────────────────────────────────────────────────
+
+// A leading @ makes either echo form literal template text. PHPantom must
+// keep their frontend-only contents out of the virtual PHP for the same reason.
+check(
+    'an @-escaped Blade echo stays literal',
+    $compiler->compileString('@{{.Image}}') === '{{.Image}}'
+);
+check(
+    'an @-escaped raw Blade echo stays literal',
+    $compiler->compileString('@{!! $name !!}') === '{!! $name !!}'
+);
+
 // ─── @each item and key variables ────────────────────────────────────────────
 
 // `@each('partial', $rows, 'row')` compiles to Factory::renderEach(), which
