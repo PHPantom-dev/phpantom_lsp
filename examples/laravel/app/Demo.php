@@ -1155,12 +1155,17 @@ class Demo
 
     // ── Storage::fake() resolves to the concrete adapter ────────────────
 
-    public function storageFake(): void
+    public function storageFake(
+        #[\Illuminate\Container\Attributes\Storage(disk: 'avatars')] mixed $avatarsDisk,
+    ): void
     {
         // fake() declares the Filesystem contract but always builds a
         // FilesystemAdapter, so the adapter-only assertion helpers resolve.
-        Storage::fake('avatars')->assertExists('me.png');
-        Storage::persistentFake('logs')->assertMissing('old.log');
+        // Disk names complete from config/filesystems.php, hover as their full
+        // config keys, and navigate back to their declarations.
+        Storage::fake(disk: 'avatars')->assertExists('me.png');
+        Storage::persistentFake(disk: 'logs')->assertMissing('old.log');
+        Storage::forgetDisk(disk: ['avatars', 'logs']);
     }
 
 
@@ -1172,7 +1177,7 @@ class Demo
         // disk config/filesystems.php configures ('local', 's3') builds a
         // FilesystemAdapter, so adapter-only methods like download()
         // resolve on every configured disk, not just a faked one.
-        Storage::disk('s3')->download('report.pdf');
+        Storage::disk(name: 's3')->download('report.pdf');
         Storage::cloud()->assertExists('logo.png');
 
         // The 'pantry' disk uses a driver the framework does not ship.  Its

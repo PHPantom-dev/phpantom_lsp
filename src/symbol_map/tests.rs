@@ -4601,7 +4601,232 @@ fn real_member_access_is_not_marked_as_array_callable() {
     }
 }
 
-// ── Container binding key spans ─────────────────────────────────────
+// ── Storage disk config-key spans ───────────────────────────────────
+
+/// Every config-key span whose canonical path names a filesystem disk, with
+/// its access flags, in source order.
+fn storage_disk_keys(map: &SymbolMap) -> Vec<(String, bool, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::Config,
+                key,
+                is_write,
+                is_optional,
+            } if key.starts_with("filesystems.disks.") => {
+                Some((key.clone(), *is_write, *is_optional))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_storage_disk_method_records_a_canonical_config_key() {
+    for (method, is_write, is_optional) in [
+        ("disk", false, false),
+        ("fake", true, false),
+        ("persistentFake", true, false),
+        ("forgetDisk", false, true),
+    ] {
+        let php = format!("<?php\nStorage::{method}('archive');\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(
+            storage_disk_keys(&map),
+            vec![(
+                "filesystems.disks.archive".to_string(),
+                is_write,
+                is_optional,
+            )],
+            "Storage::{method}() should name the configured disk"
+        );
+
+        let offset = php.find("archive").unwrap() as u32;
+        let span = map.lookup(offset).expect("disk name should have a span");
+        assert_eq!(span.start, offset);
+        assert_eq!(span.end, offset + "archive".len() as u32);
+    }
+}
+
+#[test]
+fn storage_disk_methods_select_reordered_named_arguments() {
+    let php = r#"<?php
+Storage::disk(name: 'archive');
+Storage::fake(config: ['visibility' => 'private'], disk: 'testing');
+Storage::persistentFake(config: [], disk: 'persistent');
+Storage::forgetDisk(disk: 'forgotten');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.archive".to_string(), false, false),
+            ("filesystems.disks.testing".to_string(), true, false),
+            ("filesystems.disks.persistent".to_string(), true, false,),
+            ("filesystems.disks.forgotten".to_string(), false, true),
+        ]
+    );
+}
+
+#[test]
+fn forget_disk_accepts_scalar_and_both_array_spellings() {
+    let php = r#"<?php
+Storage::forgetDisk('scalar');
+Storage::forgetDisk(['archive', 'label' => 'backup', $dynamic, ...$more]);
+Storage::forgetDisk(array('legacy', 'label' => 'cold', $dynamic));
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.scalar".to_string(), false, true),
+            ("filesystems.disks.archive".to_string(), false, true),
+            ("filesystems.disks.backup".to_string(), false, true),
+            ("filesystems.disks.legacy".to_string(), false, true),
+            ("filesystems.disks.cold".to_string(), false, true),
+        ]
+    );
+}
+
+#[test]
+fn fully_qualified_storage_facade_records_a_disk_key() {
+    let php = r#"<?php
+\Illuminate\Support\Facades\Storage::fake('archive');
+\ILLUMINATE\SUPPORT\FACADES\STORAGE::DISK('backup');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.archive".to_string(), true, false),
+            ("filesystems.disks.backup".to_string(), false, false),
+        ]
+    );
+}
+
+#[test]
+fn imported_storage_facade_names_work_without_matching_a_local_homonym() {
+    let imported = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Storage;
+Storage::disk('archive');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(imported)),
+        vec![("filesystems.disks.archive".to_string(), false, false,)]
+    );
+
+    let aliased = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Storage as LaravelStorage;
+LaravelStorage::fake('testing');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(aliased)),
+        vec![("filesystems.disks.testing".to_string(), true, false,)]
+    );
+
+    let homonym = r#"<?php
+namespace App;
+class Storage {}
+Storage::disk('local');
+"#;
+    assert!(storage_disk_keys(&parse_and_extract(homonym)).is_empty());
+
+    let root_qualified = r#"<?php
+namespace App;
+\Storage::disk('root-alias');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(root_qualified)),
+        vec![("filesystems.disks.root-alias".to_string(), false, false,)]
+    );
+}
+
+#[test]
+fn unrelated_storage_classes_receivers_and_methods_name_no_disk() {
+    for call in [
+        "OtherStorage::disk('archive')",
+        "StorageManager::disk('archive')",
+        "\\Acme\\Storage::disk('archive')",
+        "Storage::extend('archive', fn () => null)",
+        "$storage->disk('archive')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            storage_disk_keys(&map).is_empty(),
+            "`{call}` should not name a Laravel storage disk"
+        );
+    }
+}
+
+#[test]
+fn unreadable_storage_disk_arguments_name_no_disk() {
+    for call in [
+        "Storage::disk()",
+        "Storage::disk('')",
+        "Storage::disk($disk)",
+        "Storage::disk('arch' . 'ive')",
+        "Storage::disk(\"disk-{$id}\")",
+        "Storage::fake(config: [], disk: $disk)",
+        "Storage::forgetDisk([$disk, ...$more])",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            storage_disk_keys(&map).is_empty(),
+            "`{call}` should not record a runtime-only disk name"
+        );
+    }
+}
+
+#[test]
+fn storage_container_attribute_records_a_canonical_config_key() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Storage;
+#[Storage(disk: 'archive')]
+class ImportedStorage {}
+#[\Illuminate\Container\Attributes\Storage('backup')]
+class QualifiedStorage {}
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.archive".to_string(), false, false),
+            ("filesystems.disks.backup".to_string(), false, false),
+        ]
+    );
+}
+
+#[test]
+fn unrelated_storage_attributes_name_no_disk() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Config;
+#[Storage(disk: 'local')]
+class LocalHomonym {}
+#[\Acme\Storage(disk: 'acme')]
+class OtherNamespace {}
+"#;
+    assert!(storage_disk_keys(&parse_and_extract(php)).is_empty());
+}
+
+#[test]
+fn generic_config_container_attribute_behavior_is_preserved() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Config;
+#[Config('app.name')]
+class Service {}
+"#;
+    let map = parse_and_extract(php);
+    assert!(map.spans.iter().any(|span| matches!(
+        &span.kind,
+        SymbolKind::LaravelStringKey {
+            kind: LaravelStringKind::Config,
+            key,
+            is_write: false,
+            is_optional: false,
+        } if key == "app.name"
+    )));
+}
+
+// ── Container binding key spans ────────────────────────────────────
 
 /// Every `ContainerBinding` key the map records, with whether the call
 /// registers it, in source order.

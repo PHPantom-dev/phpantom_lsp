@@ -616,18 +616,6 @@ still partially lack:
   empty string as the value). No fix when the group file itself doesn't
   exist yet; that case still just diagnoses.
 
-#### L25. Storage disk name strings
-
-**Impact: Low-Medium · Complexity: Low**
-
-`Storage::disk('...')` and the `#[Storage]` container attribute already
-complete against `filesystems.disks.*`, navigate to the disk's entry in
-`config/filesystems.php`, and flag an unknown disk. `Storage::fake()`,
-`persistentFake()`, and `forgetDisk()` still name a disk with none of
-that: their return type is patched to `FilesystemAdapter`, but the
-disk-name argument itself gets no completion, go-to-definition, or
-diagnostic.
-
 #### L27. Legacy `Controller@method` action strings
 
 **Impact: Low · Complexity: Low**
@@ -688,12 +676,13 @@ moving the Blade file — defer that one until the rest is in place.
 
 **Impact: Medium · Complexity: Medium**
 
-L25 (storage disks) is one instance of a general pattern: a method
-argument names an entry under a known config subtree, and the config
-scanner already parses those files. Auth guards (`auth('...')`,
+Storage disks are one instance of a general pattern: a method argument
+names an entry under a known config subtree, and the config scanner
+already parses those files. Auth guards (`auth('...')`,
 `Auth::guard()`, `->middleware('auth:web')`), cache stores
 (`Cache::store()`), log channels (`Log::channel()`), and storage disks
-(L25) already complete against their config subtree — but all of them
+(`Storage::disk()`, test fakes, disk eviction, and `#[Storage]`) already
+complete against their config subtree — but all of them
 route through the generic `LaravelStringKind::Config` kind rather than
 a dedicated one, so they get completion plus the shared config
 diagnostics/go-to-definition and nothing family-specific (a "cache
