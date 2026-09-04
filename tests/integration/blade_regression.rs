@@ -13,6 +13,31 @@ mod tests {
         out
     }
 
+    /// An `@` before a Blade echo leaves the expression for the frontend
+    /// template engine, so JavaScript-only syntax must never reach PHP's
+    /// parser as an echo expression.
+    #[test]
+    fn at_escaped_echo_has_no_php_syntax_diagnostic() {
+        let blade_text = "@{{.Image}}\n";
+        let diags = blade_syntax_errors("file:///escaped-echo.blade.php", blade_text);
+        assert!(
+            diags.is_empty(),
+            "an escaped frontend interpolation is literal Blade text: {diags:?}"
+        );
+    }
+
+    /// Escaped raw echoes are frontend text too, even when their contents
+    /// use syntax that PHP cannot parse.
+    #[test]
+    fn at_escaped_raw_echo_has_no_php_syntax_diagnostic() {
+        let blade_text = "@{!! .Image !!}\n";
+        let diags = blade_syntax_errors("file:///escaped-raw-echo.blade.php", blade_text);
+        assert!(
+            diags.is_empty(),
+            "an escaped raw interpolation is literal Blade text: {diags:?}"
+        );
+    }
+
     #[tokio::test]
     async fn test_blade_regression_sentry() {
         let backend = create_test_backend();

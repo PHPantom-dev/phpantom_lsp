@@ -202,6 +202,11 @@
         <p>This {{ $blade }} syntax is not processed</p>
     @endverbatim
 
+    {{-- A leading @ escapes one interpolation without entering a whole
+         @verbatim block. Frontend-only syntax inside remains literal text. --}}
+    <p>@{{.Image}}</p>
+    <p>@{!! $name !!}</p>
+
     {{-- Conditional rendering with config --}}
     @if(config('app.debug'))
         <pre>Debug mode is on (env: {{ config('app.env') }})</pre>
