@@ -14,6 +14,8 @@
 //!   line and the block isn't already sorted, offer to re-sort it
 //!   alphabetically within each blank-line-separated group and import
 //!   kind (plain `use` / `use function` / `use const`).
+//! - **Import qualified symbol** — replace qualified class, function, or
+//!   constant usages with an import and short name, aliasing conflicts.
 //! - **Implement missing methods** — when the cursor is inside a
 //!   concrete class that extends an abstract class or implements an
 //!   interface with unimplemented methods, offer to generate stubs.
@@ -263,7 +265,7 @@ impl Backend {
         // ── Import class ────────────────────────────────────────────────
         self.collect_import_class_actions(uri, content, params, &mut actions);
 
-        // ── Replace FQCN with import ────────────────────────────────────
+        // ── Import qualified symbol and shorten usages ─────────────────
         self.collect_replace_fqcn_actions(uri, content, params, &mut actions);
 
         // ── Import all missing classes (bulk) ───────────────────────────

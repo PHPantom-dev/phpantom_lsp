@@ -809,7 +809,7 @@ fn no_import_action_when_already_imported() {
     let import_actions: Vec<_> = actions
         .iter()
         .filter(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import"),
+            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import `"),
             _ => false,
         })
         .collect();
@@ -857,7 +857,7 @@ fn no_import_action_for_fqn_reference() {
     let import_actions: Vec<_> = actions
         .iter()
         .filter(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import"),
+            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import `"),
             _ => false,
         })
         .collect();

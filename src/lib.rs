@@ -50,6 +50,8 @@
 //!     statement for unresolved class names)
 //!   - `code_actions::remove_unused_import` — Remove unused import quick-fix
 //!     (delete individual or all unused `use` statements)
+//!   - `code_actions::replace_fqcn` — Import qualified classes, functions,
+//!     and constants and replace their file-local usages with short names
 //!   - `code_actions::generate_constructor` — Generate a constructor from
 //!     non-static properties
 //!   - `code_actions::generate_getter_setter` — Generate `getX()`/`setX()`

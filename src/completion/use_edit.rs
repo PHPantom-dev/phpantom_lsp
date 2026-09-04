@@ -133,12 +133,6 @@ impl UseBlockInfo {
         }
     }
 
-    /// Check whether the existing use block contains any `use function`
-    /// imports.
-    pub(crate) fn has_function_imports(&self) -> bool {
-        self.existing.iter().any(|(_, k)| Self::key_group(k) == 2)
-    }
-
     /// Check whether the existing use block contains any class (plain
     /// `use`) imports — i.e. imports that are neither `use function`
     /// nor `use const`.
@@ -416,14 +410,22 @@ pub(crate) fn build_use_function_edit(
     fqn: &str,
     use_block: &UseBlockInfo,
 ) -> Option<Vec<TextEdit>> {
+    build_aliased_typed_use_edit(fqn, None, "function", use_block)
+}
+
+/// Build a `use function` or `use const` edit, optionally under an alias.
+pub(crate) fn build_aliased_typed_use_edit(
+    fqn: &str,
+    alias: Option<&str>,
+    kind: &str,
+    use_block: &UseBlockInfo,
+) -> Option<Vec<TextEdit>> {
     // Global functions (no namespace separator) never need importing.
     if !fqn.contains('\\') {
         return None;
     }
 
-    // Use a prefixed sort key so function imports sort after class
-    // imports and sit among other function imports.
-    let sort_key = format!("function {}", fqn.to_lowercase());
+    let sort_key = format!("{} {}", kind, fqn.to_lowercase());
 
     // Skip if this exact function is already imported.
     if use_block.existing.iter().any(|(_, k)| k == &sort_key) {
@@ -436,8 +438,12 @@ pub(crate) fn build_use_function_edit(
     //   namespace (separate namespace from the use block), or
     // - This is the first function import and there are already class
     //   imports (group separator).
+    let has_kind_imports = use_block
+        .existing
+        .iter()
+        .any(|(_, key)| key.starts_with(kind));
     let separator = if (use_block.existing.is_empty() && use_block.has_namespace)
-        || (!use_block.has_function_imports() && use_block.has_class_imports())
+        || (!has_kind_imports && use_block.has_class_imports())
     {
         "\n"
     } else {
@@ -449,7 +455,10 @@ pub(crate) fn build_use_function_edit(
             start: insert_pos,
             end: insert_pos,
         },
-        new_text: format!("{}use function {};\n", separator, fqn),
+        new_text: match alias {
+            Some(alias) => format!("{}use {} {} as {};\n", separator, kind, fqn, alias),
+            None => format!("{}use {} {};\n", separator, kind, fqn),
+        },
     }])
 }
 
