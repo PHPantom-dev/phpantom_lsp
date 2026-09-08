@@ -1773,7 +1773,7 @@ $item)</code>) would silently retype it for the rest of the block.</p>
 <p>The right shape is the one the backing class already uses: the slot
 names a template's tags fill are part of what the <em>component's</em> template
 receives, alongside <code>$slot</code> and <code>$attributes</code> (<code>COMPONENT_VARS</code> in
-<code>src/blade/preprocessor.rs</code>, fed from <code>super::backing_class</code>). That
+<code>src/blade/preprocessor/mod.rs</code>, fed from <code>super::backing_class</code>). That
 means scanning the tags that render a component for their <code>&lt;x-slot:…&gt;</code>
 children and declaring those names in the component template's prologue
 as <code>\Illuminate\View\ComponentSlot</code>, the same way
@@ -1790,13 +1790,13 @@ template's variables.</p>
 <hr />
 <h2 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<p><code>formatting.rs</code> has no Blade awareness. <code>mago</code>'s formatter runs against
+<p><code>src/formatting/</code> has no Blade awareness. <code>mago</code>'s formatter runs against
 the virtual PHP buffer generated for <code>.blade.php</code> files, and its output
 has no fixed relationship to the original directive/HTML structure —
 there is no path today that safely reformats the original Blade
 markup.</p>
 <ul>
-<li>Medium term: extend <code>formatting.rs</code>'s existing external-tool
+<li>Medium term: extend <code>src/formatting/</code>'s existing external-tool
   resolution (currently php-cs-fixer/Pint/phpcbf via Composer
   <code>require-dev</code>) to also detect a project-installed <code>blade-formatter</code>
   (npm, via <code>package.json</code>/<code>node_modules/.bin</code>) and proxy it over
@@ -1815,7 +1815,7 @@ markup.</p>
 <p>Investigated <code>blade-formatter</code> (the <code>shufo/blade-formatter</code> npm
 package) as a possible thing to shell out to.</p>
 <p><strong>Proxying it fits the existing external-tool pattern.</strong>
-<code>formatting.rs</code> already resolves php-cs-fixer/Pint/phpcbf by detecting
+<code>src/formatting/</code> already resolves php-cs-fixer/Pint/phpcbf by detecting
 them in the project (<code>composer.json</code> <code>require-dev</code>, resolved via
 Composer's bin-dir) and falls back to the built-in mago-formatter when
 absent — the same "use the project's own tool if it's there, otherwise
@@ -1915,12 +1915,12 @@ tool or built-in) is trustworthy enough to enforce, projects want a
 non-editor way to verify a PR ran it, the same role <code>blade-formatter
 -c</code>/<code>--check-formatted</code> plays today. <code>main.rs</code> currently only exposes
 <code>analyse</code> and <code>fix</code> as CLI subcommands; there is no way to invoke
-<code>textDocument/formatting</code>'s resolution logic (<code>formatting.rs</code>) outside
+<code>textDocument/formatting</code>'s resolution logic (<code>src/formatting/</code>) outside
 the LSP connection at all.</p>
 <ul>
 <li>Add a <code>format</code> subcommand (<code>phpantom_lsp format --project-root
   &lt;DIR&gt; [--check]</code>) that walks project PHP/Blade files, runs the same
-  <code>resolve_strategy</code> external-tool-or-built-in logic <code>formatting.rs</code>
+  <code>resolve_strategy</code> external-tool-or-built-in logic <code>src/formatting/</code>
   already uses, and either writes the formatted result back or (with
   <code>--check</code>) exits non-zero and lists files that would change, without
   writing them — mirroring <code>blade-formatter -c -d</code> and <code>phpcs
