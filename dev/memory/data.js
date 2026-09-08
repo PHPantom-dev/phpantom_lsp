@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788902551522,
+  "lastUpdate": 1788905530368,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -27092,6 +27092,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bb627c4339fcae17bcb2a13ebad2ac5a3b9cffde",
+          "message": "Echo-delimiter hover and go-to-definition no longer fire on a `{{`/`}}`\nlookalike",
+          "timestamp": "2026-09-08T23:54:35+02:00",
+          "tree_id": "8c91d7967adb6b41104925c2f9a5e1ff071bb9c7",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/bb627c4339fcae17bcb2a13ebad2ac5a3b9cffde"
+        },
+        "date": 1788905521940,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
             "unit": "MiB"
           },
           {
