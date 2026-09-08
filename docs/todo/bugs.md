@@ -54,25 +54,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B321. Echo-delimiter hover fires on `{{` that is not an echo
-
-**Impact: Low · Complexity: Low**
-
-`blade_echo_delimiter_col` decides whether the cursor is on an echo
-delimiter from the characters around it and nothing else, so any `{{`
-or `}}` on the line answers. Hovering one inside a `@verbatim` block,
-inside a `{{-- --}}` comment, or inside an `@`-escaped `@{{ … }}`
-reports "Blade escaped echo. Output is passed through `e()`" and
-go-to-definition jumps to `e()`, none of which the template compiles
-to: all three spans are literal output.
-
-The preprocessor already knows which of them is which, and
-`directive_completion::is_html_position` is a second scanner that
-answers a neighbouring question without modelling the escape either.
-Both callers want one answer to "what does the compiler make of this
-offset?", which should come from a single place rather than from a
-third round of character peeking.
-
-**Where to look:** `src/blade/mod.rs` (`blade_echo_delimiter_col`,
-`blade_echo_delimiter_hover`, `blade_echo_delimiter_definition`),
-`src/blade/directive_completion.rs` (`is_html_position`).
+No outstanding items.

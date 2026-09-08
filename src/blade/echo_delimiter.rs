@@ -5,41 +5,33 @@ use tower_lsp::lsp_types::{
     Hover, HoverContents, Location, MarkupContent, MarkupKind, Position, Range,
 };
 
-/// Column of the `{{`/`}}` escaped-echo delimiter the cursor is on, if any.
+use super::directive_completion::{Mode, mode_at};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
+
+/// Byte offset of the `{{`/`}}` escaped-echo delimiter the cursor is on, if
+/// any.
 ///
 /// Shared by [`Backend::blade_echo_delimiter_hover`] and
 /// [`Backend::blade_echo_delimiter_definition`] so the two features agree on
-/// exactly which cursor positions count as "on the delimiter".
-fn blade_echo_delimiter_col(line: &str, col: usize) -> Option<usize> {
-    // Check if cursor is on `{{` (escaped echo open)
-    if col < line.len()
-        && line.get(col..col + 2) == Some("{{")
-        && line.get(col..col + 3) != Some("{!!")
-    {
-        return Some(col);
-    }
-    // Also match if cursor is on the second `{` of `{{`
-    if col > 0
-        && line.get(col - 1..col + 1) == Some("{{")
-        && (col < 2 || line.get(col - 1..col + 2) != Some("{!!"))
-    {
-        return Some(col - 1);
-    }
-    // `}}` closing delimiter
-    if col < line.len()
-        && line.get(col..col + 2) == Some("}}")
-        && (col == 0 || line.as_bytes().get(col - 1) != Some(&b'!'))
-    {
-        return Some(col);
-    }
-    if col > 0
-        && line.get(col - 1..col + 1) == Some("}}")
-        && (col < 2 || line.as_bytes().get(col - 2) != Some(&b'!'))
-    {
-        return Some(col - 1);
-    }
+/// exactly which cursor positions count as "on the delimiter". Reads
+/// [`mode_at`] rather than peeking at surrounding characters, so a `{{`/`}}`
+/// inside a `{{-- --}}` comment, a `@verbatim` block, or an `@`-escaped
+/// `@{{ … }}` — none of which compile to an echo — is correctly excluded.
+fn blade_echo_delimiter_offset(content: &str, offset: usize) -> Option<usize> {
+    let candidates = if offset > 0 {
+        [Some(offset), Some(offset - 1)]
+    } else {
+        [Some(offset), None]
+    };
 
-    None
+    candidates.into_iter().flatten().find(|&start| {
+        (content.get(start..start + 2) == Some("{{")
+            && content.get(start..start + 3) != Some("{!!")
+            && content.get(start..start + 4) != Some("{{--")
+            && mode_at(content, start) == Mode::Html)
+            || (content.get(start..start + 2) == Some("}}")
+                && mode_at(content, start) == Mode::UntilMarkerInCode("}}"))
+    })
 }
 
 impl crate::Backend {
@@ -51,15 +43,9 @@ impl crate::Backend {
         position: Position,
     ) -> Option<Hover> {
         let content = self.get_file_content(uri)?;
-        let line = content.lines().nth(position.line as usize)?;
-        let start_col = blade_echo_delimiter_col(line, position.character as usize)?;
-        Some(self.blade_e_hover(
-            Position {
-                line: position.line,
-                character: start_col as u32,
-            },
-            2,
-        ))
+        let offset = position_to_byte_offset(&content, position);
+        let start_offset = blade_echo_delimiter_offset(&content, offset)?;
+        Some(self.blade_e_hover(offset_to_position(&content, start_offset), 2))
     }
 
     /// If the cursor is on a `{{` or `}}` Blade echo delimiter, return the
@@ -80,8 +66,8 @@ impl crate::Backend {
         position: Position,
     ) -> Option<Option<Location>> {
         let content = self.get_file_content(uri)?;
-        let line = content.lines().nth(position.line as usize)?;
-        blade_echo_delimiter_col(line, position.character as usize)?;
+        let offset = position_to_byte_offset(&content, position);
+        blade_echo_delimiter_offset(&content, offset)?;
         Some(self.resolve_function_definition(&["e".to_string()]))
     }
 
