@@ -1411,17 +1411,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l52-create-missing-view-quick-fix-for-an-unresolved-view-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L52. "Create missing view" quick-fix for an unresolved view name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2108,17 +2097,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L50. "Create route" quick-fix for an unresolved route name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l52-create-missing-view-quick-fix-for-an-unresolved-view-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L52. "Create missing view" quick-fix for an unresolved view name
       </span>
     </span>
   </a>
@@ -2990,21 +2968,6 @@ where possible and otherwise leaving placeholders.</p>
 pattern used by other "declare the missing thing" fixes;
 <code>virtual_members/laravel/route_names.rs</code> for the existing scanner
 this reuses for the diagnostic and the insertion point.</p>
-<h4 id="l52-create-missing-view-quick-fix-for-an-unresolved-view-name">L52. "Create missing view" quick-fix for an unresolved view name<a class="headerlink" href="#l52-create-missing-view-quick-fix-for-an-unresolved-view-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>The <code>invalid_laravel_view</code> diagnostic (<code>diagnostics/mod.rs</code>, fed by the
-same view-key set completion and go-to-definition already resolve
-against) has no accompanying fix, the same gap L50 fixes for route
-names. The official <code>laravel/lsp</code> already ships this exact action:
-on an unresolved <code>view('name')</code>/<code>View::make('name')</code> string it offers
-"Create missing view", which creates
-<code>resources/views/{name with dots as slashes}.blade.php</code> (respecting a
-project's configured view paths, not just the default) via a
-<code>workspace/applyEdit</code> document-create change, then opens the new file.</p>
-<p><strong>Where to look:</strong> <code>code_actions/</code> for the code-action registration
-pattern used by other "declare the missing thing" fixes; wherever the
-view-key set backing <code>invalid_laravel_view</code> and view-name completion
-is built, for the configured view roots to create the file under.</p>
 <h4 id="l51-convert-facade-call-to-dependency-injection-refactor">L51. "Convert facade call to dependency injection" refactor<a class="headerlink" href="#l51-convert-facade-call-to-dependency-injection-refactor" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A code action on a facade call inside a class method (<code>Cache::get(...)</code>,
