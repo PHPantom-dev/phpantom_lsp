@@ -23,6 +23,7 @@ mod code_action_add_throws;
 mod code_action_change_visibility;
 mod code_action_convert_switch_to_match;
 mod code_action_convert_to_interpolation;
+mod code_action_create_missing_view;
 mod code_action_extract_function;
 mod code_action_extract_interface;
 mod code_action_fix_return_type;

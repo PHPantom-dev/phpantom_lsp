@@ -67,6 +67,11 @@
 //!   `self::CONSTANT_NAME` and a new constant declaration is inserted at
 //!   the top of the class (after any existing constants).  Offers both
 //!   single-occurrence and all-occurrences variants when duplicates exist.
+//! - **Create missing view** — when a `view('name')`-style call names a
+//!   template that resolves to nothing on disk (the `invalid_laravel_view`
+//!   diagnostic), offer to create the `.blade.php` file under the
+//!   project's configured view root (or the matching package namespace's
+//!   own view directory) and open it.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -89,6 +94,7 @@ mod convert_to_arrow_function;
 mod convert_to_closure;
 mod convert_to_instance_variable;
 mod convert_to_interpolation;
+mod create_missing_view;
 pub(crate) mod cursor_context;
 mod extract_constant;
 mod extract_function;
@@ -347,6 +353,9 @@ impl Backend {
 
         // ── Extract interface ────────────────────────────────────────────
         self.collect_extract_interface_actions(uri, content, params, &mut actions);
+
+        // ── Create missing view ─────────────────────────────────────────
+        self.collect_create_missing_view_actions(uri, content, params, &mut actions);
 
         actions
     }

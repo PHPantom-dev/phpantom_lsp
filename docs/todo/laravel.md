@@ -829,25 +829,6 @@ pattern used by other "declare the missing thing" fixes;
 `virtual_members/laravel/route_names.rs` for the existing scanner
 this reuses for the diagnostic and the insertion point.
 
-#### L52. "Create missing view" quick-fix for an unresolved view name
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The `invalid_laravel_view` diagnostic (`diagnostics/mod.rs`, fed by the
-same view-key set completion and go-to-definition already resolve
-against) has no accompanying fix, the same gap L50 fixes for route
-names. The official `laravel/lsp` already ships this exact action:
-on an unresolved `view('name')`/`View::make('name')` string it offers
-"Create missing view", which creates
-`resources/views/{name with dots as slashes}.blade.php` (respecting a
-project's configured view paths, not just the default) via a
-`workspace/applyEdit` document-create change, then opens the new file.
-
-**Where to look:** `code_actions/` for the code-action registration
-pattern used by other "declare the missing thing" fixes; wherever the
-view-key set backing `invalid_laravel_view` and view-name completion
-is built, for the configured view roots to create the file under.
-
 #### L51. "Convert facade call to dependency injection" refactor
 
 **Impact: Low · Complexity: Medium**

@@ -738,8 +738,8 @@ impl Backend {
         None
     }
 
-    /// Build the LSP `Command` for a code lens that navigates to a target
-    /// location.
+    /// Build the LSP `Command` that navigates to (or opens) a target
+    /// location, for a code lens or a resolved code action alike.
     ///
     /// LSP has no standard "go to this location" command, so the client
     /// decides which of the two shapes it can act on:
@@ -753,7 +753,12 @@ impl Backend {
     ///   established, which such clients resolve on their own without a
     ///   round trip.  Zed is the notable one: it recognises the command
     ///   name but never answers `window/showDocument`.
-    fn build_code_lens_command(&self, title: String, uri: Url, position: Position) -> Command {
+    pub(crate) fn build_code_lens_command(
+        &self,
+        title: String,
+        uri: Url,
+        position: Position,
+    ) -> Command {
         if self
             .supports_show_document
             .load(std::sync::atomic::Ordering::Acquire)
