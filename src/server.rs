@@ -138,18 +138,26 @@ impl LanguageServer for Backend {
         self.supports_pull_diagnostics
             .store(client_supports_pull, Ordering::Release);
 
-        // Detect whether the client supports file rename operations in
-        // workspace edits.  Used by the rename handler to include a
-        // `RenameFile` operation when a class rename matches PSR-4 naming.
-        let client_supports_file_rename = params
+        // Detect which resource operations the client accepts in workspace
+        // edits: the rename handler includes a `RenameFile` operation when a
+        // class rename matches PSR-4 naming, and the code actions that
+        // create a file (extract interface, create a missing view) are only
+        // offered when `CreateFile` is accepted.
+        let resource_operations = params
             .capabilities
             .workspace
             .as_ref()
             .and_then(|ws| ws.workspace_edit.as_ref())
-            .and_then(|we| we.resource_operations.as_ref())
-            .is_some_and(|ops| ops.contains(&ResourceOperationKind::Rename));
-        self.supports_file_rename
-            .store(client_supports_file_rename, Ordering::Release);
+            .and_then(|we| we.resource_operations.as_deref())
+            .unwrap_or_default();
+        self.supports_file_rename.store(
+            resource_operations.contains(&ResourceOperationKind::Rename),
+            Ordering::Release,
+        );
+        self.supports_file_create.store(
+            resource_operations.contains(&ResourceOperationKind::Create),
+            Ordering::Release,
+        );
 
         // Detect whether the client supports server-initiated work-done
         // progress (window/workDoneProgress/create).  Per the LSP spec,
@@ -1911,6 +1919,7 @@ impl LanguageServer for Backend {
         // Execute the resolved formatting strategy on a blocking thread
         // to avoid stalling the async runtime while external tools run.
         let formatting_config = config.formatting.clone();
+        let shutdown_flag = Arc::clone(&self.shutdown_flag);
         let result = run_blocking_cancel_safe("formatting", move || {
             formatting::execute_strategy(
                 &strategy,
@@ -1918,6 +1927,7 @@ impl LanguageServer for Backend {
                 &file_path,
                 &formatting_config,
                 php_version,
+                &shutdown_flag,
             )
         })
         .await;

@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -33,16 +33,7 @@ class CurrencyHelper {\n\
         );
         let root = backend.workspace_root().read().clone().unwrap();
         let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: view.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &uri, "blade", view).await;
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
             .expect("blade virtual content");
@@ -126,16 +117,7 @@ class CurrencyHelper {\n\
         );
         let root = backend.workspace_root().read().clone().unwrap();
         let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: view.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &uri, "blade", view).await;
 
         let hover = backend
             .hover(HoverParams {
@@ -180,16 +162,7 @@ class CurrencyHelper {\n\
             );
             let root = backend.workspace_root().read().clone().unwrap();
             let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: uri.clone(),
-                        language_id: "blade".to_string(),
-                        version: 1,
-                        text: view.to_string(),
-                    },
-                })
-                .await;
+            open_document(&backend, &uri, "blade", view).await;
             let virtual_php = backend.blade_virtual_php(uri.as_str()).unwrap();
             let mut diags = Vec::new();
             backend.collect_unused_import_diagnostics(uri.as_str(), &virtual_php, &mut diags);
@@ -215,16 +188,7 @@ class CurrencyHelper {\n\
         );
         let root = backend.workspace_root().read().clone().unwrap();
         let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: view.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &uri, "blade", view).await;
         let virtual_php = backend.blade_virtual_php(uri.as_str()).unwrap();
         let mut diags = Vec::new();
         backend.collect_unused_import_diagnostics(uri.as_str(), &virtual_php, &mut diags);

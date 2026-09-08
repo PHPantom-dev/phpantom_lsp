@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
+    use crate::common::{create_test_backend, open_document, open_php};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -33,16 +33,7 @@ class Carbon {
             ("file:///app/Models/BlogAuthor.php", BLOG_AUTHOR_PHP),
             ("file:///vendor/Carbon.php", CARBON_PHP),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(backend, &Url::parse(uri).unwrap(), text).await;
         }
     }
 
@@ -86,31 +77,13 @@ echo e( config('app.name') ); echo e( date('Y') );
 
     async fn open_blade(backend: &phpantom_lsp::Backend) -> String {
         let uri = "file:///resources/views/email.blade.php";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: BLADE_TEMPLATE.to_string(),
-                },
-            })
-            .await;
+        open_document(backend, &Url::parse(uri).unwrap(), "blade", BLADE_TEMPLATE).await;
         uri.to_string()
     }
 
     async fn open_php_equivalent(backend: &phpantom_lsp::Backend) -> String {
         let uri = "file:///equivalent.php";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri).unwrap(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: PHP_EQUIVALENT.to_string(),
-                },
-            })
-            .await;
+        open_php(backend, &Url::parse(uri).unwrap(), PHP_EQUIVALENT).await;
         uri.to_string()
     }
 
@@ -254,16 +227,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         let uri_str = "file:///equiv_completion.php";
         let text =
             "<?php\n/**\n * @var \\App\\Models\\BlogAuthor $author\n */\necho e( $author-> );";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri_str).unwrap(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &Url::parse(uri_str).unwrap(), text).await;
         // "echo e( $author-> );" — line 4, col 17
         let labels = completion_labels(&backend, uri_str, 4, 17).await;
         assert!(
@@ -279,16 +243,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         open_scaffolding(&backend).await;
         let uri_str = "file:///resources/views/comp.blade.php";
         let text = "@php\n/**\n * @var \\App\\Models\\BlogAuthor $author\n */\n@endphp\n\n<p>{{ $author-> }}</p>";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri_str).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &Url::parse(uri_str).unwrap(), "blade", text).await;
         // "<p>{{ $author-> }}</p>" — line 6, col 15
         let labels = completion_labels(&backend, uri_str, 6, 15).await;
         assert!(
@@ -437,16 +392,7 @@ class BlogAuthor {
                 AUTHOR_COLLECTION_PHP,
             ),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(&backend, &Url::parse(uri).unwrap(), text).await;
         }
 
         let php_uri = "file:///foreach_test.php";
@@ -456,16 +402,7 @@ foreach ($users->active()->byName() as $user) {
     echo $user->name;
 }
 "#;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(php_uri).unwrap(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &Url::parse(php_uri).unwrap(), php_text).await;
 
         // Hover on $user (line 3, col 9)
         let text = hover_text(&backend, php_uri, 3, 9).await;
@@ -486,16 +423,7 @@ foreach ($users->active()->byName() as $user) {
                 AUTHOR_COLLECTION_PHP,
             ),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(&backend, &Url::parse(uri).unwrap(), text).await;
         }
 
         let blade_uri = "file:///views/users.blade.php";
@@ -509,16 +437,13 @@ foreach ($users->active()->byName() as $user) {
     <p>{{ $user->name }}</p>
 @endforeach
 "#;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(blade_uri).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(
+            &backend,
+            &Url::parse(blade_uri).unwrap(),
+            "blade",
+            blade_text,
+        )
+        .await;
 
         // Hover on $user (line 7: "    <p>{{ $user->name }}</p>")
         let text = hover_text(&backend, blade_uri, 7, 14).await;
@@ -539,16 +464,7 @@ foreach ($users->active()->byName() as $user) {
                 AUTHOR_COLLECTION_PHP,
             ),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(&backend, &Url::parse(uri).unwrap(), text).await;
         }
 
         // This matches the exact real index.blade.php
@@ -590,16 +506,13 @@ foreach ($users->active()->byName() as $user) {
     @endif
 @endsection
 "#;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(blade_uri).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(
+            &backend,
+            &Url::parse(blade_uri).unwrap(),
+            "blade",
+            blade_text,
+        )
+        .await;
 
         // Hover on $user on line 24 ("                    <td>{{ $user->name }}</td>")
         // $user starts at col 28

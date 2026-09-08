@@ -578,20 +578,6 @@ fn detect_laravel_string_key_context(
 // ─── Enumeration ────────────────────────────────────────────────────────────
 
 impl Backend {
-    /// The configured Blade view root directories.
-    ///
-    /// Reads the `paths` array from `config/view.php` (falling back to
-    /// the conventional `resources/views`) so that projects with custom
-    /// view directories resolve `view()` names correctly. Only existing
-    /// directories are returned. Read from disk, so unsaved edits to
-    /// `config/view.php` are not reflected until saved.
-    pub(crate) fn laravel_view_roots(&self) -> Vec<std::path::PathBuf> {
-        match self.workspace.workspace_root.read().clone() {
-            Some(root) => crate::blade::discover_view_paths(&root),
-            None => Vec::new(),
-        }
-    }
-
     /// Enumerate all config keys by scanning `config/` files and
     /// package config files discovered from service providers.
     fn enumerate_all_config_keys(&self) -> Vec<String> {

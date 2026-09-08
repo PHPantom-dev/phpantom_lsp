@@ -6,7 +6,7 @@
 //! `route()` the same way a conventional `->name()` declaration does:
 //! completion, hover, diagnostics, and go-to-definition.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -61,19 +61,6 @@ fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
     )
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
 /// Position of the cursor immediately after the first occurrence of `needle`.
 fn position_after(content: &str, needle: &str) -> Position {
     let idx = content.find(needle).expect("needle not found") + needle.len();
@@ -115,7 +102,7 @@ async fn a_named_folio_page_is_not_reported_as_an_unknown_route() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, SERVICE_PHP).await;
+    open_php(&backend, &uri, SERVICE_PHP).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), SERVICE_PHP, &mut diags);
@@ -146,7 +133,7 @@ async fn goto_definition_on_a_folio_route_name_lands_on_the_page() {
     backend.initialized(InitializedParams {}).await;
 
     let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &service_uri, SERVICE_PHP).await;
+    open_php(&backend, &service_uri, SERVICE_PHP).await;
 
     let params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -180,7 +167,7 @@ async fn hover_on_a_folio_route_name_names_the_page() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, SERVICE_PHP).await;
+    open_php(&backend, &uri, SERVICE_PHP).await;
 
     let hover = backend
         .hover(HoverParams {
@@ -210,7 +197,7 @@ async fn completion_inside_route_offers_the_folio_page_name() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, SERVICE_PHP).await;
+    open_php(&backend, &uri, SERVICE_PHP).await;
 
     let result = backend
         .completion(CompletionParams {

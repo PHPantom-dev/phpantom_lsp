@@ -11,8 +11,7 @@
 //! `Application::make()`/`makeWith()` declarations to recover the narrowed
 //! type.
 
-use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
@@ -137,16 +136,7 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
 }
 
 async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(backend, &Url::parse(uri).unwrap(), text).await;
 }
 
 fn hover_text(hover: &Hover) -> &str {

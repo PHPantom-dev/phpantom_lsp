@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
 use std::fs;
@@ -37,19 +37,6 @@ async fn implementation_at(
     }
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
 // ─── Interface name → implementing classes ──────────────────────────────────
 
 /// Cursor on an interface name → jumps to all classes that implement it.
@@ -74,16 +61,7 @@ async fn test_implementation_interface_name() {
         "}\n",                                                   // 12
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Renderable" on line 1 (the interface declaration)
     let locations = implementation_at(&backend, &uri, 1, 12).await;
@@ -134,16 +112,7 @@ async fn test_implementation_abstract_class_name() {
         "}\n",                                                  // 9
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Shape" on line 1
     let locations = implementation_at(&backend, &uri, 1, 18).await;
@@ -194,16 +163,7 @@ async fn test_implementation_method_on_interface() {
         "}\n",                                                   // 14
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "render" on line 12 (`$view->render()`)
     let locations = implementation_at(&backend, &uri, 12, 16).await;
@@ -252,16 +212,7 @@ async fn test_implementation_method_on_abstract_class() {
         "}\n",                                                  // 12
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "area" on line 11 (`$s->area()`)
     let locations = implementation_at(&backend, &uri, 11, 10).await;
@@ -303,16 +254,7 @@ async fn test_implementation_concrete_class_returns_subclasses() {
         "}\n",                          // 6
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" on line 1 — User is concrete but not final,
     // so Admin (which extends it) should be returned.
@@ -338,16 +280,7 @@ async fn test_implementation_final_class_returns_none() {
         "}\n",                       // 3
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Singleton" on line 1 — Singleton is final, so no implementations.
     let locations = implementation_at(&backend, &uri, 1, 14).await;
@@ -377,16 +310,7 @@ async fn test_implementation_concrete_class_includes_abstract_subclass() {
         "}\n",                                    // 7
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Base" on line 1 — Base is concrete, so both Middle
     // (abstract) and Leaf (concrete) should be included.
@@ -426,16 +350,7 @@ async fn test_implementation_transitive_via_parent() {
         "}\n",                                                   // 9
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Renderable" on line 1
     let locations = implementation_at(&backend, &uri, 1, 12).await;
@@ -482,16 +397,7 @@ async fn test_implementation_multiple_interfaces() {
         "}\n",                                                      // 10
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Serializable" on line 1
     let locs_serial = implementation_at(&backend, &uri, 1, 12).await;
@@ -541,16 +447,7 @@ async fn test_implementation_enum_implements_interface() {
         "}\n",                                        // 9
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "HasLabel" on line 1
     let locations = implementation_at(&backend, &uri, 1, 12).await;
@@ -630,16 +527,16 @@ async fn test_implementation_cross_file_psr4() {
 
     // Open all files so they are in the ast_map.
     let iface_uri = Url::parse("file:///logger_iface.php").unwrap();
-    open(&backend, &iface_uri, interface_php).await;
+    open_php(&backend, &iface_uri, interface_php).await;
 
     let file_logger_uri = Url::parse("file:///file_logger.php").unwrap();
-    open(&backend, &file_logger_uri, file_logger_php).await;
+    open_php(&backend, &file_logger_uri, file_logger_php).await;
 
     let db_logger_uri = Url::parse("file:///db_logger.php").unwrap();
-    open(&backend, &db_logger_uri, db_logger_php).await;
+    open_php(&backend, &db_logger_uri, db_logger_php).await;
 
     let service_uri = Url::parse("file:///service.php").unwrap();
-    open(&backend, &service_uri, service_php).await;
+    open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on "Logger" on line 2 of interface file (interface Logger)
     let locations = implementation_at(&backend, &iface_uri, 2, 12).await;
@@ -713,16 +610,16 @@ async fn test_implementation_method_cross_file() {
 
     // Open all files
     let iface_uri = Url::parse("file:///formatter_iface.php").unwrap();
-    open(&backend, &iface_uri, interface_php).await;
+    open_php(&backend, &iface_uri, interface_php).await;
 
     let html_uri = Url::parse("file:///html_formatter.php").unwrap();
-    open(&backend, &html_uri, html_formatter_php).await;
+    open_php(&backend, &html_uri, html_formatter_php).await;
 
     let json_uri = Url::parse("file:///json_formatter.php").unwrap();
-    open(&backend, &json_uri, json_formatter_php).await;
+    open_php(&backend, &json_uri, json_formatter_php).await;
 
     let service_uri = Url::parse("file:///render_service.php").unwrap();
-    open(&backend, &service_uri, service_php).await;
+    open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on "format" on line 5 of service file (`$f->format('hello')`)
     let locations = implementation_at(&backend, &service_uri, 5, 14).await;
@@ -749,16 +646,7 @@ async fn test_implementation_no_implementors() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     let locations = implementation_at(&backend, &uri, 1, 12).await;
     assert!(
@@ -778,16 +666,7 @@ async fn test_implementation_on_variable_no_crash() {
     let uri = Url::parse("file:///impl_var.php").unwrap();
     let text = concat!("<?php\n", "$x = 42;\n", "$x;\n",);
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Should not panic, just return empty.
     let locations = implementation_at(&backend, &uri, 2, 1).await;
@@ -817,16 +696,7 @@ async fn test_implementation_skips_abstract_subclasses() {
         "}\n",                                                      // 11
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Animal" on line 1
     let locations = implementation_at(&backend, &uri, 1, 18).await;
@@ -880,16 +750,7 @@ async fn test_implementation_method_only_overriders() {
         "}\n",                                                   // 12
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "render" on line 11 (`$v->render()`)
     let locations = implementation_at(&backend, &uri, 11, 10).await;
@@ -1010,7 +871,7 @@ async fn test_implementation_classmap_file_scan() {
 
     // Only open the interface file — implementors stay on disk only.
     let iface_uri = Url::from_file_path(src.join("Contracts/Cacheable.php")).unwrap();
-    open(&backend, &iface_uri, interface_php).await;
+    open_php(&backend, &iface_uri, interface_php).await;
 
     // Go-to-implementation on "Cacheable" (line 2, col 12)
     let locations = implementation_at(&backend, &iface_uri, 2, 12).await;
@@ -1078,7 +939,7 @@ async fn test_implementation_psr4_directory_scan() {
 
     // Only open the interface file.
     let iface_uri = Url::from_file_path(src.join("Contracts/Notifier.php")).unwrap();
-    open(&backend, &iface_uri, interface_php).await;
+    open_php(&backend, &iface_uri, interface_php).await;
 
     // Go-to-implementation on "Notifier" (line 2, col 12)
     let locations = implementation_at(&backend, &iface_uri, 2, 12).await;
@@ -1162,7 +1023,7 @@ async fn test_implementation_psr4_scan_skips_classmap_files() {
 
     // Only open the interface.
     let iface_uri = Url::from_file_path(src.join("Contracts/Serializable.php")).unwrap();
-    open(&backend, &iface_uri, interface_php).await;
+    open_php(&backend, &iface_uri, interface_php).await;
 
     let locations = implementation_at(&backend, &iface_uri, 2, 12).await;
 
@@ -1212,7 +1073,7 @@ async fn test_implementation_psr4_scan_abstract_class() {
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
     let iface_uri = Url::from_file_path(src.join("Base/Handler.php")).unwrap();
-    open(&backend, &iface_uri, abstract_php).await;
+    open_php(&backend, &iface_uri, abstract_php).await;
 
     let locations = implementation_at(&backend, &iface_uri, 2, 18).await;
 
@@ -1275,10 +1136,10 @@ async fn test_implementation_method_via_psr4_scan() {
 
     // Open the interface and the service file (but NOT the implementor).
     let iface_uri = Url::from_file_path(src.join("Contracts/Repository.php")).unwrap();
-    open(&backend, &iface_uri, interface_php).await;
+    open_php(&backend, &iface_uri, interface_php).await;
 
     let svc_uri = Url::from_file_path(src.join("Services/UserService.php")).unwrap();
-    open(&backend, &svc_uri, service_php).await;
+    open_php(&backend, &svc_uri, service_php).await;
 
     // Cursor on "find" in `$repo->find(1);` — line 5, col 16
     let locations = implementation_at(&backend, &svc_uri, 5, 16).await;
@@ -1315,7 +1176,7 @@ async fn test_implementation_transitive_interface_extends() {
         "}\n",                                         // 13
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "InterfaceA" on line 1
     let locations = implementation_at(&backend, &uri, 1, 12).await;
@@ -1358,7 +1219,7 @@ async fn test_implementation_deeply_transitive_interface() {
         "}\n",                                               // 14
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "BaseContract" on line 1
     let locations = implementation_at(&backend, &uri, 1, 12).await;
@@ -1394,7 +1255,7 @@ async fn test_implementation_multi_extends_interface() {
         "}\n",                                                   // 12
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Go-to-implementation on "Readable" (line 1) should find FileStream.
     let locations_readable = implementation_at(&backend, &uri, 1, 12).await;
@@ -1445,7 +1306,7 @@ async fn test_implementation_transitive_interface_via_parent_class() {
         "}\n",                                            // 12
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "InterfaceBase" on line 1
     let locations = implementation_at(&backend, &uri, 1, 12).await;
@@ -1479,7 +1340,7 @@ async fn test_implementation_reverse_jump_to_interface_method() {
         "}\n",                                          // 6
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "handle" at the declaration site in ConcreteHandler (line 5).
     // "    public function handle(): void {}"
@@ -1520,7 +1381,7 @@ async fn test_implementation_forward_jump_from_interface_declaration() {
         "}\n",                                         // 9
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "process" at the declaration site in Processor (line 2).
     // "    public function process(): void;"
@@ -1566,7 +1427,7 @@ async fn test_implementation_forward_jump_from_abstract_declaration() {
         "}\n",                                                  // 9
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "area" at the declaration site in Shape (line 2).
     // "    abstract public function area(): float;"
@@ -1609,7 +1470,7 @@ async fn test_implementation_reverse_jump_to_abstract_method() {
         "}\n",                                                    // 6
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "log" at the declaration site in FileLogger (line 5).
     // "    public function log(string $msg): void {}"
@@ -1648,7 +1509,7 @@ async fn test_implementation_reverse_jump_transitive_interface() {
         "}\n",                                                      // 8
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "serialize" at the declaration site in User (line 7).
     // "    public function serialize(): string { return ''; }"
@@ -1682,7 +1543,7 @@ async fn test_implementation_reverse_jump_no_interface_returns_none() {
         "}\n",                                      // 3
     );
 
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "doStuff" at the declaration site (line 2).
     // "    public function doStuff(): void {}"
@@ -1726,8 +1587,8 @@ async fn test_implementation_fqn_dedup_different_namespaces() {
         "}\n",                                       // 7
     );
 
-    open(&backend, &uri, text).await;
-    open(&backend, &uri2, text2).await;
+    open_php(&backend, &uri, text).await;
+    open_php(&backend, &uri2, text2).await;
 
     // Go-to-implementation on App\Logger (line 2 of file 1).
     let locations = implementation_at(&backend, &uri, 2, 12).await;
@@ -1798,7 +1659,7 @@ async fn test_implementation_transitive_interface_cross_file() {
     let loggable_uri = Url::from_file_path(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
     let loggable_text =
         std::fs::read_to_string(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
-    open(&backend, &loggable_uri, &loggable_text).await;
+    open_php(&backend, &loggable_uri, &loggable_text).await;
 
     // Also open the intermediate interface and concrete class so they
     // are in ast_map.
@@ -1806,13 +1667,13 @@ async fn test_implementation_transitive_interface_cross_file() {
         Url::from_file_path(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
     let audit_loggable_text =
         std::fs::read_to_string(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
-    open(&backend, &audit_loggable_uri, &audit_loggable_text).await;
+    open_php(&backend, &audit_loggable_uri, &audit_loggable_text).await;
 
     let service_uri =
         Url::from_file_path(_dir.path().join("src/Services/AuditService.php")).unwrap();
     let service_text =
         std::fs::read_to_string(_dir.path().join("src/Services/AuditService.php")).unwrap();
-    open(&backend, &service_uri, &service_text).await;
+    open_php(&backend, &service_uri, &service_text).await;
 
     // Cursor on "Loggable" on line 2 of Loggable.php
     let locations = implementation_at(&backend, &loggable_uri, 2, 12).await;
@@ -1885,13 +1746,13 @@ async fn test_implementation_excludes_loaded_vendor_implementor() {
         .expect("vendor uri");
     let acme_text =
         std::fs::read_to_string(dir.path().join("vendor/acme/cache/src/AcmeCache.php")).unwrap();
-    open(&backend, &acme_uri, &acme_text).await;
+    open_php(&backend, &acme_uri, &acme_text).await;
 
     let iface_uri =
         Url::from_file_path(dir.path().join("src/Contracts/Cacheable.php")).expect("iface uri");
     let iface_text =
         std::fs::read_to_string(dir.path().join("src/Contracts/Cacheable.php")).unwrap();
-    open(&backend, &iface_uri, &iface_text).await;
+    open_php(&backend, &iface_uri, &iface_text).await;
 
     // Cursor on "Cacheable" (line 2). The first request builds the workspace
     // index (which parses only project files) and then uses the index-ready

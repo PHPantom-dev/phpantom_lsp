@@ -3,24 +3,11 @@
 //! Tests go-to-definition, completion, and references for method-name
 //! strings inside `Route::controller(X::class)->group(fn(){…})`.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-async fn open_file(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 async fn goto_def(
     backend: &phpantom_lsp::Backend,
@@ -46,7 +33,7 @@ async fn complete_at(
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
-    open_file(backend, uri, text).await;
+    open_php(backend, uri, text).await;
     let params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -88,7 +75,7 @@ async fn goto_definition_controller_method_in_group() {
         "    Route::patch('cancel', 'cancel');\n",                             // 7
         "});\n",                                                               // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on 'cancel' (the method name) on line 7.
     let line_text = text.lines().nth(7).unwrap();
@@ -124,7 +111,7 @@ async fn goto_definition_chained_route_with_name() {
         "    Route::post('store', 'store')->name('store');\n",           // 6
         "});\n",                                                         // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let line_text = text.lines().nth(6).unwrap();
     let store_pos = line_text.find("'store')->name").unwrap() as u32 + 1;
@@ -155,7 +142,7 @@ async fn goto_definition_controller_after_prefix() {
         "    Route::get('/{id}', 'show');\n",                                               // 6
         "});\n",                                                                            // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let line_text = text.lines().nth(6).unwrap();
     let show_pos = line_text.find("show").unwrap() as u32;

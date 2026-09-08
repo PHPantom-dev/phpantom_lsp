@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -132,21 +132,8 @@ mod tests {
     ) -> Url {
         let uri = Url::from_file_path(root.join(relative)).unwrap();
         let text = std::fs::read_to_string(root.join(relative)).unwrap();
-        open(backend, &uri, &text).await;
+        open_document(backend, &uri, "blade", &text).await;
         uri
-    }
-
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
     }
 
     async fn hover_text(
@@ -220,7 +207,7 @@ mod tests {
     async fn a_bound_attribute_expression_stays_where_it_is_written() {
         let template = "@php $kind = 'danger'; @endphp\n<x-alert :type=\"$kind\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         // Column 18 is inside the `$kind` in the attribute value.
         let hover = hover_text(&backend, &uri, 1, 18).await;
@@ -236,7 +223,7 @@ mod tests {
     async fn a_component_tag_puts_its_class_behind_component() {
         let template = "<x-alert type=\"danger\">\n{{ $component-> }}\n</x-alert>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let labels = completion_labels(&backend, &uri, 1, 15).await;
         assert!(
@@ -253,7 +240,7 @@ mod tests {
         for (tag, member) in [("forms.input", "placeholder"), ("card", "heading")] {
             let template = format!("<x-{tag}>\n{{{{ $component-> }}}}\n</x-{tag}>\n");
             let (backend, _dir, uri) = workspace(&template);
-            open(&backend, &uri, &template).await;
+            open_document(&backend, &uri, "blade", &template).await;
 
             let labels = completion_labels(&backend, &uri, 1, 15).await;
             assert!(
@@ -268,7 +255,7 @@ mod tests {
     async fn a_livewire_tag_puts_its_class_behind_component() {
         let template = "<livewire:counter :count=\"$n\" />\n{{ $component-> }}\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let labels = completion_labels(&backend, &uri, 1, 15).await;
         assert!(
@@ -283,7 +270,7 @@ mod tests {
     async fn an_anonymous_component_resolves_to_the_framework_class() {
         let template = "<x-banner>\n{{ $component-> }}\n</x-banner>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let labels = completion_labels(&backend, &uri, 1, 15).await;
         assert!(
@@ -301,7 +288,7 @@ mod tests {
              <x-dynamic-component :component=\"$name\" :type=\"$kind\" />\n\
              <p>{{ $kind }}</p>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -328,7 +315,7 @@ mod tests {
     async fn an_unknown_component_reports_nothing() {
         let template = "<x-not-a-component foo=\"bar\">\n<p>hi</p>\n</x-not-a-component>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -347,7 +334,7 @@ mod tests {
     async fn the_component_variable_is_never_reported_unused() {
         let template = "<x-alert type=\"danger\">hi</x-alert>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -384,7 +371,7 @@ mod tests {
         let template =
             "<x-alert type=\"danger\" class=\"m-2\" wire:model=\"x\" data-id=\"3\" disabled />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert!(
             diagnostics(&backend, &uri).is_empty(),
@@ -400,7 +387,7 @@ mod tests {
     async fn a_bound_attribute_is_checked_against_the_parameter() {
         let template = "@php $name = 'oops'; @endphp\n<x-forms.input :service=\"$name\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let diags = diagnostics(&backend, &uri);
         assert!(
@@ -417,7 +404,7 @@ mod tests {
     async fn a_required_attribute_that_is_missing_is_reported() {
         let template = "<x-alert class=\"m-2\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let diags = diagnostics(&backend, &uri);
         assert!(
@@ -432,7 +419,7 @@ mod tests {
     async fn a_livewire_attribute_is_checked_against_mount() {
         let template = "@php $label = 'x'; @endphp\n<livewire:counter :start=\"$label\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let diags = diagnostics(&backend, &uri);
         assert!(
@@ -459,7 +446,7 @@ mod tests {
              <x-alert :type=\"$kind\" />\n\
              <x-banner :headline=\"$head\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let root = backend.workspace_root().read().clone().unwrap();
         let banner = open_view(
@@ -485,7 +472,7 @@ mod tests {
     async fn parameters_the_container_fills_are_not_reported_missing() {
         let template = "<x-forms.input />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert!(
             diagnostics(&backend, &uri).is_empty(),

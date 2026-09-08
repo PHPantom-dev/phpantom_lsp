@@ -6,7 +6,7 @@
 //! find-references links every usage, and — when the project calls
 //! `enforceMorphMap()` — an unregistered alias is flagged.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -80,16 +80,7 @@ class AppServiceProvider extends ServiceProvider
 }
 
 async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(backend, &Url::parse(uri).unwrap(), text).await;
 }
 
 /// Position of the cursor immediately after the first occurrence of `needle`.

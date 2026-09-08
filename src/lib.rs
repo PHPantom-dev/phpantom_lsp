@@ -247,7 +247,7 @@ mod document_links;
 mod document_symbols;
 pub mod fix;
 mod folding;
-mod formatting;
+pub mod formatting;
 mod highlight;
 mod hover;
 mod indexing;
@@ -885,6 +885,11 @@ pub struct Backend {
     /// the rename response includes a `RenameFile` operation alongside the
     /// text edits so the file is renamed to match the new class name.
     pub(crate) supports_file_rename: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports file creation in workspace edits
+    /// (`workspace.workspaceEdit.resourceOperations` includes `create`).
+    /// The code actions that create a file (extract interface, create a
+    /// missing view) are only offered when it does.
+    pub(crate) supports_file_create: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports server-initiated work-done progress.
     ///
     /// Set during `initialize` based on the client's
@@ -1195,6 +1200,7 @@ impl Backend {
 
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
@@ -1309,6 +1315,9 @@ impl Backend {
             mago_analyze_tool: ExternalToolWorker::new(),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Tests drive the backend without an `initialize` round-trip; a
+            // real client advertises this capability there.
+            supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
@@ -1965,6 +1974,7 @@ impl Backend {
             mago_analyze_tool: self.mago_analyze_tool.clone(),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
+            supports_file_create: Arc::clone(&self.supports_file_create),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
@@ -2289,5 +2299,63 @@ impl Backend {
                 None => false,
             },
         );
+    }
+
+    /// Move every template edit in a workspace edit from the virtual PHP it
+    /// was planned against back into the template's own coordinates, the
+    /// way [`Self::translate_template_edits`] does for one file's edits.
+    ///
+    /// Edits to files that are not templates are left alone, and an edit
+    /// that targets a template's injected prologue is dropped, whichever
+    /// shape (`changes` or `document_changes`) carries it.
+    pub(crate) fn translate_workspace_edit(&self, edit: &mut tower_lsp::lsp_types::WorkspaceEdit) {
+        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
+
+        if let Some(changes) = edit.changes.as_mut() {
+            for (uri, edits) in changes.iter_mut() {
+                self.translate_template_edits(uri.as_str(), edits);
+            }
+        }
+        let Some(document_changes) = edit.document_changes.as_mut() else {
+            return;
+        };
+        match document_changes {
+            DocumentChanges::Edits(edits) => {
+                for document in edits {
+                    self.translate_document_edit(document);
+                }
+            }
+            DocumentChanges::Operations(operations) => {
+                for operation in operations {
+                    if let DocumentChangeOperation::Edit(document) = operation {
+                        self.translate_document_edit(document);
+                    }
+                }
+            }
+        }
+    }
+
+    /// [`Self::translate_template_edits`] for the edits of one
+    /// `TextDocumentEdit`, whichever of the two edit shapes each carries.
+    fn translate_document_edit(&self, document: &mut tower_lsp::lsp_types::TextDocumentEdit) {
+        use tower_lsp::lsp_types::OneOf;
+
+        let uri = document.text_document.uri.as_str();
+        if !self.is_blade_file(uri) {
+            return;
+        }
+        document.edits.retain_mut(|edit| {
+            let range = match edit {
+                OneOf::Left(edit) => &mut edit.range,
+                OneOf::Right(edit) => &mut edit.text_edit.range,
+            };
+            match self.try_translate_blade_range(uri, *range) {
+                Some(translated) => {
+                    *range = translated;
+                    true
+                }
+                None => false,
+            }
+        });
     }
 }

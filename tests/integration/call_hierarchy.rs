@@ -1,22 +1,9 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-async fn open(backend: &Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 async fn prepare_at(
     backend: &Backend,
@@ -80,7 +67,7 @@ async fn prepare_answers_on_a_method_declaration() {
         "    public function run(): void {}\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 2, 22).await;
     assert_eq!(items.len(), 1);
@@ -101,7 +88,7 @@ async fn prepare_answers_from_a_call_site() {
         "    public function run(): void { $this->leaf(); }\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on `leaf` inside `$this->leaf()`; the enclosing method wins
     // because the cursor is inside `run`'s body.
@@ -120,7 +107,7 @@ async fn prepare_declines_outside_any_callable() {
         "    public string $name = 'x';\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     assert!(prepare_at(&backend, &uri, 2, 20).await.is_empty());
 }
@@ -146,7 +133,7 @@ async fn outgoing_calls_cross_a_psr4_file_boundary() {
         "    }\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 3, 22).await;
     assert_eq!(items.len(), 1, "should prepare on notify()");
@@ -174,7 +161,7 @@ async fn incoming_calls_cross_a_file_boundary() {
     let mailer_uri = Url::parse("file:///Mailer.php").unwrap();
     let service_uri = Url::parse("file:///Service.php").unwrap();
 
-    open(
+    open_php(
         &backend,
         &mailer_uri,
         concat!(
@@ -185,7 +172,7 @@ async fn incoming_calls_cross_a_file_boundary() {
         ),
     )
     .await;
-    open(
+    open_php(
         &backend,
         &service_uri,
         concat!(
@@ -225,7 +212,7 @@ async fn an_item_from_a_previous_answer_can_be_expanded_again() {
         "    public function top(): void { $this->middle(); }\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let top = prepare_at(&backend, &uri, 4, 22).await.remove(0);
     let from_top = outgoing(&backend, &top).await;
@@ -247,7 +234,7 @@ async fn an_item_from_a_previous_answer_can_be_expanded_again() {
 async fn a_foreign_item_is_declined_rather_than_guessed_at() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///foreign.php").unwrap();
-    open(
+    open_php(
         &backend,
         &uri,
         "<?php\nclass Worker {\n    public function run(): void {}\n}\n",
@@ -281,7 +268,7 @@ async fn a_recursive_function_is_its_own_caller() {
         "    if ($n > 0) { countdown($n - 1); }\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let item = prepare_at(&backend, &uri, 1, 12).await.remove(0);
     assert_eq!(item.kind, SymbolKind::FUNCTION);

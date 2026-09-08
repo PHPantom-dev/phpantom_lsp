@@ -137,7 +137,7 @@ $item)`) would silently retype it for the rest of the block.
 The right shape is the one the backing class already uses: the slot
 names a template's tags fill are part of what the *component's* template
 receives, alongside `$slot` and `$attributes` (`COMPONENT_VARS` in
-`src/blade/preprocessor.rs`, fed from `super::backing_class`). That
+`src/blade/preprocessor/mod.rs`, fed from `super::backing_class`). That
 means scanning the tags that render a component for their `<x-slot:…>`
 children and declaring those names in the component template's prologue
 as `\Illuminate\View\ComponentSlot`, the same way
@@ -158,13 +158,13 @@ template's variables.
 
 **Impact: Low-Medium · Complexity: High**
 
-`formatting.rs` has no Blade awareness. `mago`'s formatter runs against
+`src/formatting/` has no Blade awareness. `mago`'s formatter runs against
 the virtual PHP buffer generated for `.blade.php` files, and its output
 has no fixed relationship to the original directive/HTML structure —
 there is no path today that safely reformats the original Blade
 markup.
 
-- Medium term: extend `formatting.rs`'s existing external-tool
+- Medium term: extend `src/formatting/`'s existing external-tool
   resolution (currently php-cs-fixer/Pint/phpcbf via Composer
   `require-dev`) to also detect a project-installed `blade-formatter`
   (npm, via `package.json`/`node_modules/.bin`) and proxy it over
@@ -185,7 +185,7 @@ Investigated `blade-formatter` (the `shufo/blade-formatter` npm
 package) as a possible thing to shell out to.
 
 **Proxying it fits the existing external-tool pattern.**
-`formatting.rs` already resolves php-cs-fixer/Pint/phpcbf by detecting
+`src/formatting/` already resolves php-cs-fixer/Pint/phpcbf by detecting
 them in the project (`composer.json` `require-dev`, resolved via
 Composer's bin-dir) and falls back to the built-in mago-formatter when
 absent — the same "use the project's own tool if it's there, otherwise
@@ -293,12 +293,12 @@ tool or built-in) is trustworthy enough to enforce, projects want a
 non-editor way to verify a PR ran it, the same role `blade-formatter
 -c`/`--check-formatted` plays today. `main.rs` currently only exposes
 `analyse` and `fix` as CLI subcommands; there is no way to invoke
-`textDocument/formatting`'s resolution logic (`formatting.rs`) outside
+`textDocument/formatting`'s resolution logic (`src/formatting/`) outside
 the LSP connection at all.
 
 - Add a `format` subcommand (`phpantom_lsp format --project-root
   <DIR> [--check]`) that walks project PHP/Blade files, runs the same
-  `resolve_strategy` external-tool-or-built-in logic `formatting.rs`
+  `resolve_strategy` external-tool-or-built-in logic `src/formatting/`
   already uses, and either writes the formatted result back or (with
   `--check`) exits non-zero and lists files that would change, without
   writing them — mirroring `blade-formatter -c -d` and `phpcs

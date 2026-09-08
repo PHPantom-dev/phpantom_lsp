@@ -159,6 +159,53 @@ pub(crate) fn single_edit(uri: Url, range: Range, new_text: String) -> Workspace
     single_file_edit(uri, vec![TextEdit { range, new_text }])
 }
 
+/// Build a `WorkspaceEdit` that creates `uri` holding `content`, followed
+/// by `edits` to files that already exist.
+///
+/// A file creation is a resource operation, which only `document_changes`
+/// can carry, so the accompanying edits travel in the same list rather than
+/// in `changes`. Offer an action built this way only when the client has
+/// advertised `create` among its resource operations
+/// (`Backend::supports_file_create`); one that has not ignores the whole
+/// edit.
+pub(crate) fn create_file_edit(
+    uri: Url,
+    content: String,
+    edits: Vec<(Url, Vec<TextEdit>)>,
+) -> WorkspaceEdit {
+    let mut operations = vec![DocumentChangeOperation::Op(ResourceOp::Create(
+        CreateFile {
+            uri: uri.clone(),
+            options: Some(CreateFileOptions {
+                overwrite: Some(false),
+                ignore_if_exists: Some(true),
+            }),
+            annotation_id: None,
+        },
+    ))];
+    // An empty file is complete once created; only content needs an edit.
+    if !content.is_empty() {
+        operations.push(DocumentChangeOperation::Edit(TextDocumentEdit {
+            text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
+            edits: vec![OneOf::Left(TextEdit {
+                range: Range::default(),
+                new_text: content,
+            })],
+        }));
+    }
+    operations.extend(edits.into_iter().map(|(uri, edits)| {
+        DocumentChangeOperation::Edit(TextDocumentEdit {
+            text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
+            edits: edits.into_iter().map(OneOf::Left).collect(),
+        })
+    }));
+    WorkspaceEdit {
+        changes: None,
+        document_changes: Some(DocumentChanges::Operations(operations)),
+        change_annotations: None,
+    }
+}
+
 // ─── Indentation helpers ──────────────────────────────────────────────────────
 
 /// Return the leading whitespace of the line containing `offset`.
@@ -357,6 +404,17 @@ impl Backend {
         // ── Create missing view ─────────────────────────────────────────
         self.collect_create_missing_view_actions(uri, content, params, &mut actions);
 
+        // Every collector plans its edits against the PHP a template lowers
+        // to; the editor applies them to the template itself.
+        for action in &mut actions {
+            if let CodeActionOrCommand::CodeAction(CodeAction {
+                edit: Some(edit), ..
+            }) = action
+            {
+                self.translate_workspace_edit(edit);
+            }
+        }
+
         actions
     }
 
@@ -471,7 +529,8 @@ impl Backend {
             _ => None,
         };
 
-        if let Some(edit) = result {
+        if let Some(mut edit) = result {
+            self.translate_workspace_edit(&mut edit);
             action.edit = Some(edit);
         }
 

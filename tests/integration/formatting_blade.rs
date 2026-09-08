@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
+    use crate::common::{create_test_backend, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -10,16 +10,7 @@ mod tests {
         language_id: &str,
         text: &str,
     ) -> Option<Vec<TextEdit>> {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: language_id.to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_document(backend, &uri, language_id, text).await;
 
         backend
             .formatting(DocumentFormattingParams {

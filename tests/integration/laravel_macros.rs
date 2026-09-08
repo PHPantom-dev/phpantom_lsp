@@ -4,7 +4,7 @@
 //! the target class: it appears in completion, resolves for member access,
 //! and is not flagged as an unknown member.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -64,16 +64,7 @@ fn workspace_files(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir)
 }
 
 async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(backend, &Url::parse(uri).unwrap(), text).await;
 }
 
 #[tokio::test]

@@ -292,6 +292,12 @@ impl TagKind {
             TagKind::Livewire => "<livewire:",
         }
     }
+
+    /// The prefix a tag of this kind carries before the component name,
+    /// without the `<`: `x-`, `livewire:`.
+    pub(crate) fn prefix(self) -> &'static str {
+        &self.opening()[1..]
+    }
 }
 
 /// Which part of a component tag the cursor sits in.
@@ -341,7 +347,7 @@ pub(crate) fn tag_context_at(content: &str, offset: usize) -> Option<TagContext>
     let bytes = content.as_bytes();
     let name_start = start + kind.opening().len();
     let mut name_end = name_start;
-    while name_end < bytes.len() && is_tag_name_char(bytes[name_end]) {
+    while name_end < bytes.len() && is_tag_name_char(bytes[name_end] as char) {
         name_end += 1;
     }
     let name = content[name_start..name_end].to_string();
@@ -375,7 +381,7 @@ pub(crate) fn tag_context_at(content: &str, offset: usize) -> Option<TagContext>
     }
 
     let mut token_start = offset;
-    while token_start > name_end && is_attr_name_char(bytes[token_start - 1]) {
+    while token_start > name_end && is_attr_name_char(bytes[token_start - 1] as char) {
         token_start -= 1;
     }
     // An attribute name follows whitespace. Anything else before it means
@@ -415,7 +421,7 @@ pub(crate) fn referenced_tags(content: &str) -> Vec<String> {
         };
         let name_start = i + prefix.len();
         let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j]) {
+        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
             j += 1;
         }
         if j > name_start {
@@ -512,7 +518,7 @@ pub(crate) fn scan_component_tag_calls(
         }
         let name_start = i + 1;
         let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j]) {
+        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
             j += 1;
         }
         let tag_name = &masked[name_start..j];
@@ -581,7 +587,7 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
             };
             let name_start = i + 2 + (prefix.len() - 1);
             let mut j = name_start;
-            while j < bytes.len() && is_tag_name_char(bytes[j]) {
+            while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
                 j += 1;
             }
             let Some(close) = find_byte(&masked, j, b'>') else {
@@ -613,18 +619,15 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
         };
         let name_start = i + prefix.len();
         let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j]) {
+        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
             j += 1;
         }
         if j == name_start {
             i += 1;
             continue;
         }
-        let mut bound_index = 0usize;
-        let (end, _) = scan_tag_attributes(&masked, j, &[], &mut bound_index);
-        // `scan_tag_attributes` only breaks on a standalone `/` right
-        // before `>`, so this is the same self-closing test it applies.
-        let self_closing = end >= 2 && bytes[end - 2] == b'/';
+        let lexed = lex_tag_attributes(&masked, j);
+        let (end, self_closing) = (lexed.end, lexed.self_closing);
         let tag = TagSpan {
             kind: if *prefix == TagKind::Livewire.opening() {
                 TagKind::Livewire
@@ -663,15 +666,184 @@ fn find_byte(content: &str, from: usize, needle: u8) -> Option<usize> {
         .map(|pos| from + pos)
 }
 
-fn is_tag_name_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b':' | b'_')
+/// The characters a component tag name is spelled with. Dots separate
+/// directories (`forms.input`), a double colon a package namespace
+/// (`pkg::calendar`), and `<x-slot:title>` names a slot the same way.
+pub(crate) fn is_tag_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.' | ':' | '_')
 }
 
-fn is_attr_name_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b':' | b'_' | b'@')
+/// The characters an HTML attribute name is spelled with, which is a
+/// wider set than a tag name's: `wire:model.live`, `x-on:keydown`, and
+/// `@click` are all legal there.
+pub(crate) fn is_attr_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.' | ':' | '_' | '@')
 }
 
-/// Parse the attribute list of a tag starting right after its name, up to
+/// One attribute of a component tag, as its attribute list spells it.
+///
+/// Ranges index the text the list was lexed from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TagAttribute {
+    /// The name, without a bound attribute's leading `:` and without the
+    /// `$` of the `:$name` shorthand. A `::` escape keeps the colon it
+    /// protects (`::class` is named `:class`).
+    pub(crate) name: Range<usize>,
+    /// `:name="…"` or `:$name`: the value is a PHP expression, not text.
+    pub(crate) bound: bool,
+    /// The `:$name` shorthand, which passes the variable it names.
+    pub(crate) shorthand: bool,
+    /// The value text, between the quotes when quoted, or `None` for a
+    /// bare attribute (`disabled`).
+    pub(crate) value: Option<Range<usize>>,
+    /// Whether the value was written between `"` or `'`.
+    pub(crate) quoted: bool,
+}
+
+/// A component tag's attribute list, from just past the tag name to the
+/// `>` or `/>` that ends the opening tag.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct TagAttributes {
+    pub(crate) attributes: Vec<TagAttribute>,
+    /// The offset just past the `>`/`/>`, or the end of the text when the
+    /// tag never closes.
+    pub(crate) end: usize,
+    /// Whether the opening tag ended with `/>`.
+    pub(crate) self_closing: bool,
+    /// Whether the tag's `>` was found at all. A quoted value that never
+    /// closes swallows the rest of the text, so the tag is unclosed too.
+    pub(crate) closed: bool,
+}
+
+/// Lex the attribute list of a component tag whose name ends at `start`.
+///
+/// This is the one reading of a tag's attributes both the preprocessor
+/// (which turns them into the arguments of the call the tag makes) and
+/// the call-site scan (which turns them into the component template's
+/// variables) work from, so the two cannot disagree about what a tag
+/// passes. An attribute value may hold a `>` (`:items="$a > $b"`), so the
+/// tag ends at the first `>` outside a quoted value, not the first one.
+///
+/// The lexer is tolerant of malformed markup in one direction only: a
+/// byte that starts no attribute is stepped over, so a broken tag cannot
+/// spin the scan, but nothing is guessed at.
+pub(crate) fn lex_tag_attributes(text: &str, start: usize) -> TagAttributes {
+    let bytes = text.as_bytes();
+    let mut lexed = TagAttributes::default();
+    let mut i = start;
+
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        match bytes.get(i) {
+            None => break,
+            Some(b'>') => {
+                i += 1;
+                lexed.closed = true;
+                break;
+            }
+            Some(b'/') if bytes.get(i + 1) == Some(&b'>') => {
+                i += 2;
+                lexed.closed = true;
+                lexed.self_closing = true;
+                break;
+            }
+            Some(b'/') => {
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        // `:$name` passes the variable it names.
+        if bytes[i] == b':'
+            && bytes.get(i + 1) == Some(&b'$')
+            && bytes
+                .get(i + 2)
+                .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_')
+        {
+            let name_start = i + 2;
+            let mut j = name_start;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            lexed.attributes.push(TagAttribute {
+                name: name_start..j,
+                bound: true,
+                shorthand: true,
+                value: None,
+                quoted: false,
+            });
+            i = j;
+            continue;
+        }
+
+        // A single leading `:` marks a bound attribute; `::` is an
+        // escaped literal colon (e.g. `::class`), and the attribute name
+        // drops just the escape, not the real colon it protects.
+        let bound = bytes[i] == b':' && bytes.get(i + 1) != Some(&b':');
+        let name_start = if bytes[i] == b':' { i + 1 } else { i };
+        let mut j = name_start;
+        while j < bytes.len() && is_attr_name_char(bytes[j] as char) {
+            j += 1;
+        }
+        if j == name_start {
+            // Not an attribute token (e.g. a stray `<`); skip one byte so
+            // a malformed tag cannot spin this loop forever.
+            i += 1;
+            continue;
+        }
+        let name = name_start..j;
+        i = j;
+
+        if bytes.get(i) != Some(&b'=') {
+            lexed.attributes.push(TagAttribute {
+                name,
+                bound,
+                shorthand: false,
+                value: None,
+                quoted: false,
+            });
+            continue;
+        }
+        i += 1;
+
+        let quote = bytes.get(i).copied().filter(|b| *b == b'"' || *b == b'\'');
+        let value_start = i + usize::from(quote.is_some());
+        let mut k = value_start;
+        match quote {
+            Some(quote) => {
+                while k < bytes.len() && bytes[k] != quote {
+                    k += 1;
+                }
+            }
+            None => {
+                while k < bytes.len() && !bytes[k].is_ascii_whitespace() && bytes[k] != b'>' {
+                    k += 1;
+                }
+            }
+        }
+        lexed.attributes.push(TagAttribute {
+            name,
+            bound,
+            shorthand: false,
+            value: Some(value_start..k),
+            quoted: quote.is_some(),
+        });
+        // Past the closing quote, when there is one to be past.
+        i = if quote.is_some() {
+            (k + 1).min(bytes.len())
+        } else {
+            k
+        };
+    }
+
+    lexed.end = i;
+    lexed
+}
+
+/// Read the attribute list of a tag starting right after its name, up to
 /// (and past) the tag's closing `>` or self-closing `/>`. Returns the
 /// offset just past the close, plus the literal and bound attributes
 /// found; `bound_index` is threaded through and bumped for every bound
@@ -683,14 +855,11 @@ fn scan_tag_attributes(
     consumed: &[String],
     bound_index: &mut usize,
 ) -> (usize, ComponentTagCall) {
-    let bytes = masked.as_bytes();
-    let mut i = start;
+    let lexed = lex_tag_attributes(masked, start);
     let mut call = ComponentTagCall::default();
-    let literal = &mut call.literal;
-    let bound = &mut call.bound;
     // A parameter can only be filled once, so a name an earlier attribute
     // of this tag already claimed is back to being ordinary markup — the
-    // same rule `OpenComponentCall::take` applies on the emitting side.
+    // same rule the preprocessor applies on the emitting side.
     let mut unclaimed: Vec<&str> = consumed.iter().map(String::as_str).collect();
     let mut is_argument = |name: &str| match unclaimed.iter().position(|param| *param == name) {
         Some(index) => {
@@ -700,123 +869,53 @@ fn scan_tag_attributes(
         None => false,
     };
 
-    loop {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        match bytes.get(i) {
-            None => break,
-            Some(b'>') => {
-                i += 1;
-                break;
+    for attr in &lexed.attributes {
+        let written = &masked[attr.name.clone()];
+        if attr.shorthand {
+            // Bound, named after the variable. One the tag's own call
+            // carries is not in the `blade_bound_attr_directive`
+            // sequence at all.
+            if !is_argument(written) {
+                call.bound.push((written.to_string(), *bound_index));
+                *bound_index += 1;
             }
-            Some(b'/') if bytes.get(i + 1) == Some(&b'>') => {
-                i += 2;
-                break;
-            }
-            Some(b'/') => {
-                i += 1;
-                continue;
-            }
-            _ => {}
-        }
-
-        // `:$var` shorthand: bound, named after the variable.
-        if bytes[i] == b':' && bytes.get(i + 1) == Some(&b'$') {
-            let name_start = i + 2;
-            let mut j = name_start;
-            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
-                j += 1;
-            }
-            if j > name_start {
-                let name = masked[name_start..j].to_string();
-                if is_argument(&name) {
-                    // The tag's own call carries this one, so it is not in
-                    // the `blade_bound_attr_directive` sequence at all.
-                    i = j;
-                    continue;
-                }
-                bound.push((name, *bound_index));
-            }
-            *bound_index += 1;
-            i = j;
             continue;
         }
-
-        // A single leading `:` marks a bound attribute; `::` is an
-        // escaped literal colon (e.g. `::class`), and the attribute name
-        // drops just the escape, not the real colon it protects.
-        let is_bound = bytes[i] == b':' && bytes.get(i + 1) != Some(&b':');
-        let name_start = if bytes[i] == b':' { i + 1 } else { i };
-        let mut j = name_start;
-        while j < bytes.len() && is_attr_name_char(bytes[j]) {
-            j += 1;
-        }
-        if j == name_start {
-            // Not an attribute token (e.g. a stray `<`); skip one byte so
-            // a malformed tag cannot spin this loop forever.
-            i += 1;
-            continue;
-        }
-        let name = camel_case_attr_name(&masked[name_start..j]);
-        i = j;
-
-        if bytes.get(i) != Some(&b'=') {
+        let name = camel_case_attr_name(written);
+        let Some(value) = &attr.value else {
             // A bare attribute (`disabled`) is `true`. A bare *bound*
             // attribute (`:disabled`, no `=`) never reaches the
             // preprocessor's `blade_bound_attr_directive` emission (it
             // requires a quoted value), so there is nothing to correlate
             // for it.
-            if !is_bound {
-                literal.push((name, PhpType::bool()));
+            if !attr.bound {
+                call.literal.push((name, PhpType::bool()));
             }
             continue;
-        }
-        i += 1;
-
-        let value_start = i;
-        let quoted = matches!(bytes.get(i), Some(b'"') | Some(b'\''));
-        let value_end = if quoted {
-            let q = bytes[i];
-            let mut k = i + 1;
-            while k < bytes.len() && bytes[k] != q {
-                k += 1;
-            }
-            k
-        } else {
-            let mut k = i;
-            while k < bytes.len() && !bytes[k].is_ascii_whitespace() && bytes[k] != b'>' {
-                k += 1;
-            }
-            k
         };
-
-        if is_bound {
+        if attr.bound {
             // An unquoted bound value is never recognised by the
             // preprocessor either; only a quoted one produced a
             // `blade_bound_attr_directive` call to correlate against.
-            if quoted && !is_argument(&name) {
-                bound.push((name, *bound_index));
+            if attr.quoted && !is_argument(&name) {
+                call.bound.push((name, *bound_index));
                 *bound_index += 1;
             }
-        } else {
-            let raw = &masked[value_start + usize::from(quoted)..value_end];
-            let ty = if raw.contains("{{") || raw.contains("{!!") {
-                // A literal attribute embedding a Blade echo is not a
-                // constant string; fall back to a generic type rather
-                // than reporting the raw `{{ $expr }}` text as the value.
-                PhpType::string()
-            } else {
-                PhpType::literal_string_value(raw)
-            };
-            literal.push((name, ty));
+            continue;
         }
-
-        i = if quoted { value_end + 1 } else { value_end };
+        let raw = &masked[value.clone()];
+        let ty = if raw.contains("{{") || raw.contains("{!!") {
+            // A literal attribute embedding a Blade echo is not a
+            // constant string; fall back to a generic type rather
+            // than reporting the raw `{{ $expr }}` text as the value.
+            PhpType::string()
+        } else {
+            PhpType::literal_string_value(raw)
+        };
+        call.literal.push((name, ty));
     }
 
-    let end = i;
-    (end, call)
+    (lexed.end, call)
 }
 
 /// Convert a kebab-case attribute name to the camelCase variable name
@@ -1143,6 +1242,54 @@ mod tests {
             &no_arguments,
         );
         assert!(calls.is_empty());
+    }
+
+    /// The lexed attributes as `(name, bound, shorthand, value)` for
+    /// readable assertions.
+    fn lexed(tag: &str) -> Vec<(&str, bool, bool, Option<&str>)> {
+        lex_tag_attributes(tag, 0)
+            .attributes
+            .into_iter()
+            .map(|attr| {
+                (
+                    &tag[attr.name],
+                    attr.bound,
+                    attr.shorthand,
+                    attr.value.map(|value| &tag[value]),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn lexes_every_attribute_shape() {
+        assert_eq!(
+            lexed(r#" type="info" disabled :items="$a > $b" :$user data-x=1 ::class="a">"#),
+            [
+                ("type", false, false, Some("info")),
+                ("disabled", false, false, None),
+                ("items", true, false, Some("$a > $b")),
+                ("user", true, true, None),
+                ("data-x", false, false, Some("1")),
+                (":class", false, false, Some("a")),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_tag_ends_at_the_first_close_outside_a_value() {
+        let tag = r#" :when="$a > $b" /> tail"#;
+        let lexed = lex_tag_attributes(tag, 0);
+        assert!(lexed.closed);
+        assert!(lexed.self_closing);
+        assert_eq!(&tag[lexed.end..], " tail");
+    }
+
+    #[test]
+    fn a_value_that_never_closes_leaves_the_tag_unclosed() {
+        let lexed = lex_tag_attributes(r#" title="oops>"#, 0);
+        assert!(!lexed.closed);
+        assert_eq!(lexed.attributes.len(), 1);
     }
 
     #[test]

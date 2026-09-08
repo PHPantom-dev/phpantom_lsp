@@ -10,7 +10,7 @@
 //! non-trivial PHP files containing classes, inheritance, generics,
 //! docblocks, and cross-method calls.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -41,30 +41,14 @@ async fn open_with_cursor(
 ) -> (Url, u32, u32) {
     let (content, line, character) = strip_cursor(src_with_cursor);
     let uri = Url::parse(uri_str).unwrap();
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-    backend.did_open(params).await;
+    open_php(backend, &uri, &content).await;
     (uri, line, character)
 }
 
 /// Open a PHP file on the backend (no cursor) and return its URI.
 async fn open_file(backend: &phpantom_lsp::Backend, uri_str: &str, content: &str) -> Url {
     let uri = Url::parse(uri_str).unwrap();
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    backend.did_open(params).await;
+    open_php(backend, &uri, content).await;
     uri
 }
 
@@ -1168,15 +1152,7 @@ class Service {
         Url::from_file_path(_tmp.path().join("src/Service.php").canonicalize().unwrap()).unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Service.php")).unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &content).await;
 
     // Cursor right after `$repo->` on line 4 (0-based), character 15
     let labels = complete_at(&backend, &uri, 4, 15).await;
@@ -1233,15 +1209,7 @@ class Controller {
     .unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Controller.php")).unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &content).await;
 
     // Click on "toArray" in `$model->toArray()` — line 4, around character 17
     let locations = definition_at(&backend, &uri, 4, 17).await;
@@ -1597,22 +1565,18 @@ async fn smoke_regression_did_change_updates_completion() {
     let uri = Url::parse("file:///smoke_change.php").unwrap();
 
     // Open with one method
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: r#"<?php
+    open_php(
+        &backend,
+        &uri,
+        r#"<?php
 class Evolving {
     public function alpha(): void {}
 }
 $e = new Evolving();
 $e->
-"#
-            .to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+"#,
+    )
+    .await;
 
     // Cursor right after `$e->` on line 5, character 4
     let labels = complete_at(&backend, &uri, 5, 4).await;

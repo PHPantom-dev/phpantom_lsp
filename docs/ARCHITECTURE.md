@@ -101,7 +101,7 @@ src/
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
-├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting.rs
+├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
 ├── selection_range.rs, type_hierarchy.rs
 │
 │   # Diagnostics

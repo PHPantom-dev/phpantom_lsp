@@ -28,6 +28,15 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
+        // The fix creates a file, which only a client that accepts the
+        // `create` resource operation can apply.
+        if !self
+            .supports_file_create
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return;
+        }
+
         let symbol_map = match self.symbol_maps.read().get(uri).cloned() {
             Some(sm) => sm,
             None => return,
@@ -89,20 +98,11 @@ impl Backend {
                 title: format!("Create missing view '{}'", key),
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![diagnostic]),
-                edit: Some(WorkspaceEdit {
-                    changes: None,
-                    document_changes: Some(DocumentChanges::Operations(vec![
-                        DocumentChangeOperation::Op(ResourceOp::Create(CreateFile {
-                            uri: new_file_uri.clone(),
-                            options: Some(CreateFileOptions {
-                                overwrite: Some(false),
-                                ignore_if_exists: Some(true),
-                            }),
-                            annotation_id: None,
-                        })),
-                    ])),
-                    change_annotations: None,
-                }),
+                edit: Some(super::create_file_edit(
+                    new_file_uri.clone(),
+                    String::new(),
+                    Vec::new(),
+                )),
                 command: Some(self.build_code_lens_command(
                     "Open new view".to_string(),
                     new_file_uri,

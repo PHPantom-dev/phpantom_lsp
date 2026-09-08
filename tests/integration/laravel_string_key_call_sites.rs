@@ -7,7 +7,7 @@
 //! `hasForLocale()`, a config key inside `getMany()`, and an environment
 //! variable behind `Env::get()`.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -15,19 +15,6 @@ const COMPOSER: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
     "autoload": { "psr-4": { "App\\": "app/" } }
 }"#;
-
-async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 /// The Markdown a hover at `line`/`character` of an already-open `uri` holds.
 async fn hover_text(
@@ -65,7 +52,7 @@ async fn definitions(
     let path = dir.path().join(relative);
     let text = std::fs::read_to_string(&path).unwrap();
     let uri = Url::from_file_path(&path).unwrap();
-    open(backend, &uri, &text).await;
+    open_php(backend, &uri, &text).await;
 
     let response = backend
         .goto_definition(GotoDefinitionParams {
@@ -170,7 +157,7 @@ async fn a_route_pattern_is_judged_by_what_it_matches() {
     let (backend, dir) = route_workspace(caller);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), caller, &mut diagnostics);
@@ -279,7 +266,7 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
     for relative in ["app/Demo.php", "config/mail.php"] {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        open(&backend, &Url::from_file_path(&path).unwrap(), &text).await;
+        open_php(&backend, &Url::from_file_path(&path).unwrap(), &text).await;
     }
 
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
@@ -332,7 +319,7 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
     let declared = hover_text(&backend, &uri, 4, 16).await;
     assert!(
@@ -367,7 +354,7 @@ async fn the_env_helper_completes_the_projects_variables() {
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
     let items = match backend
         .completion(CompletionParams {
@@ -411,7 +398,7 @@ async fn translation_hover_shows_the_translated_line() {
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
     let leaf = hover_text(&backend, &uri, 4, 16).await;
     assert!(

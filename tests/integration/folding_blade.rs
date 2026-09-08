@@ -1,20 +1,11 @@
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, open_document};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 async fn folding_ranges_for(text: &str) -> Vec<FoldingRange> {
     let backend = create_test_backend();
     let uri = Url::parse("file:///view.blade.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "blade".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_document(&backend, &uri, "blade", text).await;
 
     backend
         .folding_range(FoldingRangeParams {

@@ -4,10 +4,31 @@ use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
+use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 pub fn create_test_backend() -> Backend {
     Backend::new_test()
+}
+
+/// Open `text` in the backend as `uri` with the given LSP language id,
+/// the way an editor's `textDocument/didOpen` would.
+pub async fn open_document(backend: &Backend, uri: &Url, language_id: &str, text: &str) {
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: language_id.to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+}
+
+/// [`open_document`] for a PHP file.
+pub async fn open_php(backend: &Backend, uri: &Url, text: &str) {
+    open_document(backend, uri, "php", text).await;
 }
 
 /// Run an async LSP request on a thread sized like the server's own

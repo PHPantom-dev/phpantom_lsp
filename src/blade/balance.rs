@@ -282,18 +282,34 @@ const BLOCKS: &[Block] = &[
     },
 ];
 
-/// Every block directive in `content` that does not pair up.
-pub(crate) fn check(content: &str) -> Vec<Imbalance> {
+/// What one walk of a template's directive stream finds.
+#[derive(Debug, Default)]
+pub(crate) struct Balance {
+    /// Every well-nested block pair, opener through closer.
+    pub(crate) pairs: Vec<BlockPair>,
+    /// Every place the block structure does not add up, in source order.
+    pub(crate) imbalances: Vec<Imbalance>,
+}
+
+/// Walk the directive stream once with a stack of open blocks, collecting
+/// both the blocks that pair up and the ones that do not.
+///
+/// Pairing and reporting have to agree on what a closer closes, so both
+/// come out of this one walk: a closer that does not match the innermost
+/// open block ends that block anyway (with a report, and without a pair),
+/// so that no later closer can pair with an opener a stray closer already
+/// consumed.
+pub(crate) fn walk(content: &str) -> Balance {
+    let mut balance = Balance::default();
     if !content.contains('@') {
-        return Vec::new();
+        return balance;
     }
 
     let regions = inert_regions(content, true);
     let masked = mask_regions(content, &regions);
     let bytes = masked.as_bytes();
 
-    let mut out: Vec<Imbalance> = Vec::new();
-    let mut stack: Vec<(&Block, Span)> = Vec::new();
+    let mut stack: Vec<(&Block, Span, Option<Span>)> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] != b'@' {
@@ -312,7 +328,7 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
 
         if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
             if opens_block(block, &masked, args.as_ref()) {
-                stack.push((block, span));
+                stack.push((block, span, args));
             }
             continue;
         }
@@ -321,15 +337,27 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
         };
         match stack
             .iter()
-            .rposition(|(open, _)| open.closers.contains(&name))
+            .rposition(|(open, ..)| open.closers.contains(&name))
         {
-            // The closer belongs to a block that is open. Anything opened
+            // The closer belongs to the innermost open block: a clean pair.
+            Some(index) if index + 1 == stack.len() => {
+                if let Some((_, opener, args)) = stack.pop() {
+                    balance.pairs.push(BlockPair {
+                        opener,
+                        args,
+                        closer: span,
+                    });
+                }
+            }
+            // The closer belongs to a block further out. Anything opened
             // inside it was never closed, and nothing later can close it
             // now, so the innermost of those is reported here and the
-            // whole run comes off the stack.
+            // whole run comes off the stack. Neither side pairs: the
+            // closer is not the skipped block's, and the block it does
+            // close has an unclosed block inside it.
             Some(index) => {
-                if let Some((skipped, skipped_span)) = stack.get(index + 1) {
-                    out.push(Imbalance::Mismatched {
+                if let Some((skipped, skipped_span, _)) = stack.get(index + 1) {
+                    balance.imbalances.push(Imbalance::Mismatched {
                         closer: span,
                         found: name,
                         expected: skipped.closers[0],
@@ -343,14 +371,14 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
             // named the wrong end for it; outside every block, the closer
             // stands alone.
             None => match stack.pop() {
-                Some((open, open_span)) => out.push(Imbalance::Mismatched {
+                Some((open, open_span, _)) => balance.imbalances.push(Imbalance::Mismatched {
                     closer: span,
                     found: name,
                     expected: open.closers[0],
                     opener: open.opener,
                     opener_span: open_span,
                 }),
-                None => out.push(Imbalance::Unexpected {
+                None => balance.imbalances.push(Imbalance::Unexpected {
                     closer: span,
                     found: name,
                     opener: block.opener,
@@ -371,14 +399,14 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
             InertOpener::Verbatim => ("verbatim", "endverbatim"),
             _ => ("php", "endphp"),
         };
-        out.push(Imbalance::Unclosed {
+        balance.imbalances.push(Imbalance::Unclosed {
             opener_span: region.span.start..region.span.start + 1 + opener.len(),
             opener,
             expected,
         });
     } else {
-        for (block, span) in stack {
-            out.push(Imbalance::Unclosed {
+        for (block, span, _) in stack {
+            balance.imbalances.push(Imbalance::Unclosed {
                 opener_span: span,
                 opener: block.opener,
                 expected: block.closers[0],
@@ -386,8 +414,15 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
         }
     }
 
-    out.sort_by_key(|imbalance| imbalance.span().start);
-    out
+    balance
+        .imbalances
+        .sort_by_key(|imbalance| imbalance.span().start);
+    balance
+}
+
+/// Every block directive in `content` that does not pair up.
+pub(crate) fn check(content: &str) -> Vec<Imbalance> {
+    walk(content).imbalances
 }
 
 /// A block directive and the closer that ends it.
@@ -404,65 +439,11 @@ pub(crate) struct BlockPair {
 /// Every well-nested block-directive pair in `content`, covering
 /// `@directive(...)` through its matching `@enddirective`.
 ///
-/// Mirrors [`check`]'s tolerance for malformed input: a closer that does
-/// not match the innermost open block is left alone rather than guessed
-/// at, so mismatched or unclosed blocks (already reported by [`check`])
-/// are simply not paired.
+/// Read from the same walk as [`check`], so the two agree on what a
+/// closer closes: a closer that does not match the innermost open
+/// block (already reported by [`check`]) pairs with nothing.
 pub(crate) fn block_pairs(content: &str) -> Vec<BlockPair> {
-    if !content.contains('@') {
-        return Vec::new();
-    }
-
-    let regions = inert_regions(content, true);
-    let masked = mask_regions(content, &regions);
-    let bytes = masked.as_bytes();
-
-    let mut out: Vec<BlockPair> = Vec::new();
-    let mut stack: Vec<(&Block, Span, Option<Span>)> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'@' {
-            i += 1;
-            continue;
-        }
-        let Some((name, args)) = directive_at(&masked, i) else {
-            i += 1;
-            continue;
-        };
-        let span = i..i + 1 + name.len();
-        i = args.as_ref().map_or(span.end, |args| args.end);
-
-        if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
-            if opens_block(block, &masked, args.as_ref()) {
-                stack.push((block, span, args));
-            }
-            continue;
-        }
-        if BLOCKS.iter().all(|block| !block.closers.contains(&name)) {
-            continue;
-        }
-        match stack
-            .iter()
-            .rposition(|(open, ..)| open.closers.contains(&name))
-        {
-            // A closer for the innermost open block pairs cleanly.
-            Some(index) if index + 1 == stack.len() => {
-                let (_, opener, args) = stack.pop().unwrap();
-                out.push(BlockPair {
-                    opener,
-                    args,
-                    closer: span,
-                });
-            }
-            // A closer for a block further out means everything opened
-            // after it was never closed; there is nothing sensible to
-            // pair for either side, so just unwind past it.
-            Some(index) => stack.truncate(index),
-            None => {}
-        }
-    }
-
-    out
+    walk(content).pairs
 }
 
 /// Whether an occurrence of `block`'s opener with `args` opens a block.
@@ -719,6 +700,19 @@ mod tests {
     #[test]
     fn a_mismatched_closer_pairs_neither_side() {
         assert!(pairs("@foreach ($rows as $row)\n@endif\n").is_empty());
+    }
+
+    /// A stray closer ends the block it sits in for pairing as well as for
+    /// reporting, so the block's own closer, coming later, pairs with
+    /// nothing rather than reaching back past the stray one.
+    #[test]
+    fn a_stray_closer_consumes_the_block_for_pairing_too() {
+        let blade = "@foreach ($rows as $row)\n@endif\n@endforeach\n";
+        assert!(pairs(blade).is_empty());
+        assert_eq!(
+            report(blade),
+            ["mismatched endif/endforeach", "unexpected endforeach"]
+        );
     }
 
     #[test]
