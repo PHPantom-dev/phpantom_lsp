@@ -862,34 +862,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL24. Named slot variables scoped to the component that receives them
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL24. Named slot variables scoped to the component that receives them">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl16-blade-aware-formatting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -913,7 +885,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tests_2" class="md-nav__link">
+  <a href="#tests_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -941,7 +913,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_3" class="md-nav__link">
+  <a href="#tests_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1512,34 +1484,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL24. Named slot variables scoped to the component that receives them
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL24. Named slot variables scoped to the component that receives them">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl16-blade-aware-formatting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1563,7 +1507,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tests_2" class="md-nav__link">
+  <a href="#tests_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1591,7 +1535,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_3" class="md-nav__link">
+  <a href="#tests_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1758,36 +1702,6 @@ reported today.</p>
   nothing</li>
 </ul>
 <hr />
-<h2 id="bl24-named-slot-variables-scoped-to-the-component-that-receives-them">BL24. Named slot variables scoped to the component that receives them<a class="headerlink" href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Deferred from the component-tag work: <code>&lt;x-slot:title&gt;</code> and its legacy
-<code>&lt;x-slot name="title"&gt;</code> form become a comment in the virtual PHP, so
-nothing declares <code>$title</code>.</p>
-<p>Declaring it where the tag is written would be wrong. A named slot is a
-variable of the <em>component's</em> template, not of the template that fills
-it, and the filling template is where the tag sits. Emitting <code>$title =
-new \Illuminate\View\ComponentSlot();</code> there would put a name in the
-caller's scope that Blade never binds, and a slot named after a variable
-the caller already holds (<code>&lt;x-slot:item&gt;</code> inside <code>@foreach ($items as
-$item)</code>) would silently retype it for the rest of the block.</p>
-<p>The right shape is the one the backing class already uses: the slot
-names a template's tags fill are part of what the <em>component's</em> template
-receives, alongside <code>$slot</code> and <code>$attributes</code> (<code>COMPONENT_VARS</code> in
-<code>src/blade/preprocessor/mod.rs</code>, fed from <code>super::backing_class</code>). That
-means scanning the tags that render a component for their <code>&lt;x-slot:…&gt;</code>
-children and declaring those names in the component template's prologue
-as <code>\Illuminate\View\ComponentSlot</code>, the same way
-<code>scan_component_tag_calls</code> already turns a tag's attributes into that
-template's variables.</p>
-<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>&lt;x-slot:title&gt;</code> in a caller declares <code>$title</code> in the component's
-  template, not in the caller's.</li>
-<li><code>&lt;x-slot name="title"&gt;</code> (the legacy form) does the same.</li>
-<li>A slot name that collides with a caller variable leaves the caller's
-  variable alone.</li>
-</ul>
-<hr />
 <h2 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p><code>src/formatting/</code> has no Blade awareness. <code>mago</code>'s formatter runs against
@@ -1900,7 +1814,7 @@ real possibility, given we skip the regex/placeholder round-tripping
 entirely), it can become the default rather than staying a fallback.
 See BL17 below for exposing it as a standalone CI check once it
 reaches that bar.</p>
-<h3 id="tests_2">Tests<a class="headerlink" href="#tests_2" title="Permanent link">&para;</a></h3>
+<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>formatting</code> on a <code>.blade.php</code> file returns no edits (short-term
   behaviour) rather than corrupting the file, until the long-term
@@ -1934,7 +1848,7 @@ the LSP connection at all.</p>
   external tool, which <code>--check</code> should honour identically to
   <code>format</code> without <code>--check</code>).</li>
 </ul>
-<h3 id="tests_3">Tests<a class="headerlink" href="#tests_3" title="Permanent link">&para;</a></h3>
+<h3 id="tests_2">Tests<a class="headerlink" href="#tests_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>format --check</code> on an already-formatted project exits 0 with no
   output.</li>
