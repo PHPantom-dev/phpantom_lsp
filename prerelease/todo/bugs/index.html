@@ -935,23 +935,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b321-echo-delimiter-hover-fires-on-that-is-not-an-echo" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B321. Echo-delimiter hover fires on <code>{{</code> that is not an echo
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1529,23 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b321-echo-delimiter-hover-fires-on-that-is-not-an-echo" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B321. Echo-delimiter hover fires on <code>{{</code> that is not an echo
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1604,24 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b321-echo-delimiter-hover-fires-on-that-is-not-an-echo">B321. Echo-delimiter hover fires on <code>{{</code> that is not an echo<a class="headerlink" href="#b321-echo-delimiter-hover-fires-on-that-is-not-an-echo" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>blade_echo_delimiter_col</code> decides whether the cursor is on an echo
-delimiter from the characters around it and nothing else, so any <code>{{</code>
-or <code>}}</code> on the line answers. Hovering one inside a <code>@verbatim</code> block,
-inside a <code>{{-- --}}</code> comment, or inside an <code>@</code>-escaped <code>@{{ … }}</code>
-reports "Blade escaped echo. Output is passed through <code>e()</code>" and
-go-to-definition jumps to <code>e()</code>, none of which the template compiles
-to: all three spans are literal output.</p>
-<p>The preprocessor already knows which of them is which, and
-<code>directive_completion::is_html_position</code> is a second scanner that
-answers a neighbouring question without modelling the escape either.
-Both callers want one answer to "what does the compiler make of this
-offset?", which should come from a single place rather than from a
-third round of character peeking.</p>
-<p><strong>Where to look:</strong> <code>src/blade/mod.rs</code> (<code>blade_echo_delimiter_col</code>,
-<code>blade_echo_delimiter_hover</code>, <code>blade_echo_delimiter_definition</code>),
-<code>src/blade/directive_completion.rs</code> (<code>is_html_position</code>).</p>
+<p>No outstanding items.</p>
 
 
 
