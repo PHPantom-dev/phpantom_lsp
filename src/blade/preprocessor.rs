@@ -406,6 +406,20 @@ pub fn preprocess_with_vars(
     // survives the line that opened it.
     let mut echo_closes_at_eol;
 
+    // A directive appearing while an echo or escaped echo is still open
+    // ends it. Blade's statement compiler runs before the echo compiler, so
+    // by the time echo compilation would see a directive, Blade has already
+    // turned it into real PHP (or, for an escaped echo, the directive was
+    // never part of the frontend-only text to begin with). Absorbing the
+    // directive as part of the echo instead leaves whatever block it closes
+    // (`@endif`, `@endforeach`, ...) unclosed in the emitted PHP.
+    let directive_boundary = |remaining: &[char]| -> bool {
+        remaining.first() == Some(&'@') && {
+            let rest: String = remaining[1..].iter().collect();
+            match_directive(&rest).is_some() || custom_directives.match_directive(&rest).is_some()
+        }
+    };
+
     for (line_idx, line) in lines.iter().enumerate() {
         let mut processed = String::new();
         let mut adjustments = vec![(0, 0)]; // (blade_utf16_col, php_utf16_col)
@@ -982,6 +996,8 @@ pub fn preprocess_with_vars(
                 if closes_echo {
                     match_len = if raw { 3 } else { 2 };
                     next_mode = Mode::Html;
+                } else if directive_boundary(remaining) {
+                    next_mode = Mode::Html;
                 }
             } else if mode == Mode::Comment {
                 // Inside a comment the only meaningful token is the `--}}`
@@ -1017,6 +1033,13 @@ pub fn preprocess_with_vars(
                     next_mode = Mode::Html;
                     match_len = 7;
                     replacement = "".to_string();
+                } else if !in_php_directive_block && directive_boundary(remaining) {
+                    replacement = if raw_echo {
+                        "; ".to_string()
+                    } else {
+                        "); ".to_string()
+                    };
+                    next_mode = Mode::Html;
                 }
             } else if let Mode::RawPhp(needs_semicolon) = mode {
                 if remaining.starts_with(&['?', '>']) {
@@ -3280,6 +3303,61 @@ mod tests {
         assert!(
             php.contains("->name );"),
             "the multi-line echo must close at its own terminator: {}",
+            php
+        );
+    }
+
+    /// An echo left open across lines must not swallow the `@end…` that
+    /// closes the block it sits inside, even when some later line has a
+    /// `}}` that belongs to a different echo (which would otherwise make
+    /// the unpaired-opener safety net think this echo is still closable).
+    /// A directive seen while the echo is open ends the echo instead of
+    /// being absorbed into it, matching Blade's own compile order
+    /// (statements before echoes).
+    #[test]
+    fn test_preprocess_directive_ends_an_echo_left_open_across_lines() {
+        let content = "@if($showName)\n    <p>{{ $user->name\n@endif\n{{ $footer }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("if ($showName):"),
+            "the if block should open normally: {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "the @endif must still close the if block rather than being \
+             swallowed by the still-open echo: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $footer )"),
+            "the later, unrelated echo must still compile normally: {}",
+            php
+        );
+    }
+
+    /// The same swallowing bug affects the raw echo and the `@`-escaped
+    /// echo forms: a directive must end them too.
+    #[test]
+    fn test_preprocess_directive_ends_a_raw_or_escaped_echo_left_open() {
+        let raw = "@if($a)\n{!! $x\n@endif\n{!! $y !!}\n";
+        let (php, _) = preprocess(raw);
+        assert!(
+            php.contains("endif;"),
+            "@endif must close the if even though a later {{!! !!}} exists: {}",
+            php
+        );
+
+        let escaped = "@if($a)\n<p>@{{ mess\n@endif\n{{ $after }}\n";
+        let (php, _) = preprocess(escaped);
+        assert!(
+            php.contains("endif;"),
+            "@endif must close the if even though a later escaped echo exists: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after )"),
+            "the later real echo must still compile: {}",
             php
         );
     }

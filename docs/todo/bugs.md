@@ -54,46 +54,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B320. An unclosed echo swallows the `@end…` of the block it sits in
-
-**Impact: Low-Medium · Complexity: Medium**
-
-An echo opener whose terminator lies further down the file keeps the
-preprocessor in echo mode across every line in between, and any
-directive it passes over is consumed as part of the expression rather
-than compiled. When one of those is the `@endif`/`@endforeach` closing
-a block the echo sits inside, the emitted `if (…):` never closes and
-the whole template comes back as a run of syntax errors, so nothing in
-it resolves:
-
-```blade
-@if($showName)
-    <p>{{ $user->name
-@endif
-{{ $footer }}
-```
-
-`preprocess_with_vars` already has the safety net for the case where
-nothing in the file could close the echo at all: `echo_closes_at_eol`
-ends it at the end of its line so only that line degrades. The net does
-not fire here, because a later line does contain `}}` — it just belongs
-to a different echo.
-
-Blade itself does not have this problem: `compileString` runs the
-statement compiler before the echo compiler, so the directives are
-already `<?php endif; ?>` by the time the echo regex reads across them
-and the emitted PHP stays balanced whatever the regex swallows. The fix
-is to give the preprocessor the same ordering: a directive token ends
-the echo it appears inside rather than being absorbed by it.
-
-All three echo forms are affected: `{{ … }}`, `{!! … !!}`, and the
-`@`-escaped `@{{ … }}` (which reports fewer errors only because it
-emits no PHP of its own).
-
-**Where to look:** `src/blade/preprocessor.rs`
-(`preprocess_with_vars`, the `Mode::Php`/`Mode::EscapedEcho` arms and
-the `echo_closes_at_eol` end-of-line recovery).
-
 ### B321. Echo-delimiter hover fires on `{{` that is not an echo
 
 **Impact: Low · Complexity: Low**

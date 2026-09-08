@@ -96,7 +96,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B320 | [An unclosed echo swallows the `@end…` of the block it sits in](todo/bugs.md#b320-an-unclosed-echo-swallows-the-end-of-the-block-it-sits-in)                                | Low-Medium  | Medium      |
 | B321 | [Echo-delimiter hover fires on `{{` that is not an echo](todo/bugs.md#b321-echo-delimiter-hover-fires-on--that-is-not-an-echo)                                              | Low         | Low         |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
