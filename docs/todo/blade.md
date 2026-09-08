@@ -88,36 +88,6 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 
 ---
 
-## BL23. Unbalanced component tag diagnostics
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`src/blade/balance.rs` pairs up block *directives*, but a component tag
-body is a block too: `<x-alert>` … `</x-alert>`, `<x-slot:title>` …
-`</x-slot>`. A tag nobody closes renders the rest of the template inside
-it, and a stray closing tag renders nothing at all, neither of which is
-reported today.
-
-- Extend the block stack with component tags, reusing the raw-text tag
-  scan in `src/blade/component_tags.rs` rather than a second parser.
-- A self-closing `<x-alert />` opens nothing, and an attribute value may
-  hold a `>` (`<x-alert :items="$a > $b">`), so the scan has to read the
-  whole tag rather than stop at the first `>`.
-- Report against the tag, in the same three shapes the directive check
-  uses: a closing tag for another component, a closing tag with nothing
-  open, and a tag the template never closes.
-
-### Tests
-
-In `tests/integration/diagnostics_blade.rs`:
-
-- `<x-alert>` closed by `</x-card>` → mismatched-tag diagnostic
-- `<x-alert>` with no closing tag → unclosed-tag diagnostic
-- self-closing tags, and tags whose attributes contain `>`, report
-  nothing
-
----
-
 ## BL16. Blade-aware formatting
 
 **Impact: Low-Medium · Complexity: High**

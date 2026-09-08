@@ -218,6 +218,7 @@
 
 mod argument_count;
 mod blade_call_site;
+mod blade_component_tags;
 mod blade_directives;
 mod blade_sections;
 mod blade_signature;
@@ -583,6 +584,10 @@ impl Backend {
             step!(
                 "blade_directive_balance",
                 self.collect_blade_directive_diagnostics(uri_str, out)
+            );
+            step!(
+                "blade_component_tag_balance",
+                self.collect_blade_component_tag_diagnostics(uri_str, out)
             );
             step!(
                 "blade_section",

@@ -594,12 +594,18 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
                 break;
             };
             let name = &masked[name_start..j];
-            if stack.last().is_some_and(|open| open.name == name) {
+            if stack
+                .last()
+                .is_some_and(|open| closer_matches(open.kind, &open.name, name))
+            {
                 let mut open = stack.pop().unwrap();
                 open.span.end = close + 1;
                 open.closed = true;
                 out.push(open);
-            } else if let Some(idx) = stack.iter().rposition(|open| open.name == name) {
+            } else if let Some(idx) = stack
+                .iter()
+                .rposition(|open| closer_matches(open.kind, &open.name, name))
+            {
                 // A closer for a tag further out means everything opened
                 // after it was never closed; those keep the opening tag as
                 // their extent.
@@ -657,6 +663,224 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
             .then(b.span.end.cmp(&a.span.end))
     });
     out
+}
+
+/// Whether a closing tag spelled `closer_name` ends an opener of kind
+/// `kind` named `name`.
+///
+/// Every tag closes under its own name, with one exception Blade's own
+/// compiler carves out: a named slot (`<x-slot:title>`, or the legacy
+/// `<x-slot name="title">`) still closes with the bare `</x-slot>`, never
+/// repeating the slot's own name in the closing tag.
+fn closer_matches(kind: TagKind, name: &str, closer_name: &str) -> bool {
+    if kind == TagKind::Blade && is_slot_tag_name(name) {
+        closer_name == "slot"
+    } else {
+        name == closer_name
+    }
+}
+
+/// A place a component tag's block structure does not add up: the same
+/// three shapes [`super::balance::Imbalance`] reports for a directive,
+/// since a tag's body is a block too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TagImbalance {
+    /// A closing tag that closes something other than the tag it sits in.
+    Mismatched {
+        closer: Range<usize>,
+        found_kind: TagKind,
+        found: String,
+        opener_kind: TagKind,
+        opener: String,
+        opener_span: Range<usize>,
+    },
+    /// A closing tag with no open tag to close.
+    Unexpected {
+        closer: Range<usize>,
+        found_kind: TagKind,
+        found: String,
+    },
+    /// A tag the template never closes.
+    Unclosed {
+        opener_span: Range<usize>,
+        opener_kind: TagKind,
+        opener: String,
+    },
+}
+
+impl TagImbalance {
+    /// The range the report is anchored on: the offending tag itself.
+    pub(crate) fn span(&self) -> &Range<usize> {
+        match self {
+            TagImbalance::Mismatched { closer, .. } | TagImbalance::Unexpected { closer, .. } => {
+                closer
+            }
+            TagImbalance::Unclosed { opener_span, .. } => opener_span,
+        }
+    }
+}
+
+/// Every place a component tag's block structure does not add up, walked
+/// with the same stack-of-open-blocks approach
+/// [`super::balance::check`] uses for directives: a closing tag for a
+/// component further out, a closing tag with nothing open, or a tag the
+/// template never closes.
+///
+/// Reuses the tag/attribute scan [`tag_spans`] is built from
+/// (`TAG_PREFIXES`, [`is_tag_name_char`], [`lex_tag_attributes`]) rather
+/// than a second reader of the tag syntax. The two differ only in what
+/// they do with a crossed close: `tag_spans` is tolerant of it (a caller
+/// that only wants call-site data has nothing useful to say about which
+/// side is wrong), so it folds everything the crossing skipped into
+/// "unclosed" with no report for the stray closer at all; this instead
+/// reports the crossing itself, because naming the mistake is the whole
+/// point of a diagnostic.
+pub(crate) fn tag_imbalances(content: &str) -> Vec<TagImbalance> {
+    let mut imbalances = Vec::new();
+    // Unlike `tag_spans`, a lone stray closer with no opening tag anywhere
+    // in the file is exactly one of the shapes this reports, so an opening
+    // prefix alone is not enough to skip the scan.
+    let has_tag = TAG_PREFIXES
+        .iter()
+        .any(|prefix| content.contains(prefix) || content.contains(&format!("</{}", &prefix[1..])));
+    if !has_tag {
+        return imbalances;
+    }
+    let masked = mask_inert_regions(content, true);
+    let bytes = masked.as_bytes();
+
+    struct Open {
+        kind: TagKind,
+        name: String,
+        span: Range<usize>,
+    }
+    let mut stack: Vec<Open> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+
+        // Closing tag: `</x-…>` or `</livewire:…>`.
+        if bytes.get(i + 1) == Some(&b'/') {
+            let Some(prefix) = TAG_PREFIXES
+                .iter()
+                .find(|prefix| masked[i + 2..].starts_with(&prefix[1..]))
+            else {
+                i += 1;
+                continue;
+            };
+            let name_start = i + 2 + (prefix.len() - 1);
+            let mut j = name_start;
+            while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
+                j += 1;
+            }
+            let Some(close) = find_byte(&masked, j, b'>') else {
+                break;
+            };
+            let name = &masked[name_start..j];
+            let found_kind = if *prefix == TagKind::Livewire.opening() {
+                TagKind::Livewire
+            } else {
+                TagKind::Blade
+            };
+            let closer = i..close + 1;
+            match stack
+                .iter()
+                .rposition(|open| closer_matches(open.kind, &open.name, name))
+            {
+                // The closer belongs to the innermost open tag: a clean
+                // pair, nothing to report.
+                Some(index) if index + 1 == stack.len() => {
+                    stack.pop();
+                }
+                // The closer belongs to a tag further out. Everything
+                // opened inside it was never closed; only the innermost
+                // of those is reported, the same way a directive closer
+                // that skips past open blocks reports only what it
+                // skipped rather than every level in between.
+                Some(index) => {
+                    if let Some(skipped) = stack.get(index + 1) {
+                        imbalances.push(TagImbalance::Mismatched {
+                            closer: closer.clone(),
+                            found_kind,
+                            found: name.to_string(),
+                            opener_kind: skipped.kind,
+                            opener: skipped.name.clone(),
+                            opener_span: skipped.span.clone(),
+                        });
+                    }
+                    stack.truncate(index);
+                }
+                // No open tag takes this closer by name. Inside one, the
+                // author named the wrong tag for it — the innermost open
+                // tag is what this closer actually ends, so it is that
+                // tag's opener the report names; outside every tag, the
+                // closer stands alone.
+                None => match stack.pop() {
+                    Some(open) => imbalances.push(TagImbalance::Mismatched {
+                        closer,
+                        found_kind,
+                        found: name.to_string(),
+                        opener_kind: open.kind,
+                        opener: open.name,
+                        opener_span: open.span,
+                    }),
+                    None => imbalances.push(TagImbalance::Unexpected {
+                        closer,
+                        found_kind,
+                        found: name.to_string(),
+                    }),
+                },
+            }
+            i = close + 1;
+            continue;
+        }
+
+        // Opening tag: `<x-…>` or `<livewire:…>`.
+        let Some(prefix) = TAG_PREFIXES
+            .iter()
+            .find(|prefix| masked[i..].starts_with(**prefix))
+        else {
+            i += 1;
+            continue;
+        };
+        let name_start = i + prefix.len();
+        let mut j = name_start;
+        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
+            j += 1;
+        }
+        if j == name_start {
+            i += 1;
+            continue;
+        }
+        let lexed = lex_tag_attributes(&masked, j);
+        if !lexed.self_closing {
+            stack.push(Open {
+                kind: if *prefix == TagKind::Livewire.opening() {
+                    TagKind::Livewire
+                } else {
+                    TagKind::Blade
+                },
+                name: masked[name_start..j].to_string(),
+                span: i..j,
+            });
+        }
+        i = lexed.end;
+    }
+
+    // Whatever is still open never got a closing tag at all.
+    for open in stack {
+        imbalances.push(TagImbalance::Unclosed {
+            opener_span: open.span,
+            opener_kind: open.kind,
+            opener: open.name,
+        });
+    }
+
+    imbalances.sort_by_key(|imbalance| imbalance.span().start);
+    imbalances
 }
 
 fn find_byte(content: &str, from: usize, needle: u8) -> Option<usize> {
@@ -1663,5 +1887,94 @@ mod tests {
         let blade = "<x-card>\n<x-alert />\n</x-card>\n<x-note />\n";
         let names: Vec<String> = tag_spans(blade).into_iter().map(|tag| tag.name).collect();
         assert_eq!(names, ["card", "alert", "note"]);
+    }
+
+    /// A named inline slot closes with the bare `</x-slot>`, not
+    /// `</x-slot:title>`; `tag_spans` has to know that too or every named
+    /// slot in the file comes back unclosed.
+    #[test]
+    fn a_named_slot_closes_with_the_bare_tag() {
+        let blade = "<x-card>\n<x-slot:title>\nHi\n</x-slot>\n</x-card>\n";
+        assert_eq!(tag_bodies(blade).len(), 2);
+    }
+
+    /// The imbalances [`tag_imbalances`] finds, as short strings for
+    /// readable assertions: `"mismatched </x-card>/<x-alert>"`,
+    /// `"unexpected </x-card>"`, `"unclosed <x-alert>"`.
+    fn tag_report(content: &str) -> Vec<String> {
+        tag_imbalances(content)
+            .into_iter()
+            .map(|imbalance| match imbalance {
+                TagImbalance::Mismatched { found, opener, .. } => {
+                    format!("mismatched </x-{found}>/<x-{opener}>")
+                }
+                TagImbalance::Unexpected { found, .. } => format!("unexpected </x-{found}>"),
+                TagImbalance::Unclosed { opener, .. } => format!("unclosed <x-{opener}>"),
+            })
+            .collect()
+    }
+
+    /// `<x-alert>` closed by `</x-card>` is a mismatched-tag diagnostic:
+    /// the innermost open tag is what a wrongly-named closer actually
+    /// ends.
+    #[test]
+    fn a_tag_closed_by_another_components_name_is_mismatched() {
+        assert_eq!(
+            tag_report("<x-alert>\n<p>hi</p>\n</x-card>\n"),
+            ["mismatched </x-card>/<x-alert>"]
+        );
+    }
+
+    /// `<x-alert>` with no closing tag anywhere is an unclosed-tag
+    /// diagnostic.
+    #[test]
+    fn a_tag_with_no_closing_tag_is_unclosed() {
+        assert_eq!(tag_report("<x-alert>\n<p>hi</p>\n"), ["unclosed <x-alert>"]);
+    }
+
+    /// A closing tag with nothing open at all closes nothing.
+    #[test]
+    fn a_closing_tag_with_nothing_open_is_unexpected() {
+        assert_eq!(
+            tag_report("<p>hi</p>\n</x-alert>\n"),
+            ["unexpected </x-alert>"]
+        );
+    }
+
+    /// Self-closing tags, and tags whose attributes hold a `>`, report
+    /// nothing.
+    #[test]
+    fn self_closing_and_bracket_bearing_tags_report_nothing() {
+        assert!(tag_report("<x-alert />\n<p>after</p>\n").is_empty());
+        assert!(tag_report("<x-alert :items=\"$a > $b\">\n<p>hi</p>\n</x-alert>\n").is_empty());
+    }
+
+    /// A closer for a tag further out reports only the innermost tag it
+    /// skipped past, the same as a directive closer that skips open
+    /// blocks.
+    #[test]
+    fn a_closer_matching_a_shallower_tag_reports_what_it_skipped() {
+        assert_eq!(
+            tag_report("<x-card>\n<x-alert>\n<p>hi</p>\n</x-card>\n"),
+            ["mismatched </x-card>/<x-alert>"]
+        );
+    }
+
+    /// Properly nested and paired tags report nothing.
+    #[test]
+    fn balanced_tags_report_nothing() {
+        assert!(
+            tag_report(
+                "<x-card>\n<x-alert>\n<p>hi</p>\n</x-alert>\n</x-card>\n<livewire:counter></livewire:counter>\n"
+            )
+            .is_empty()
+        );
+    }
+
+    /// A named inline slot that is properly closed reports nothing, even
+    /// though its closing tag never repeats the slot's own name.
+    #[test]
+    fn a_properly_closed_named_slot_reports_nothing() {
+        assert!(tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot>\n</x-card>\n").is_empty());
     }
 }

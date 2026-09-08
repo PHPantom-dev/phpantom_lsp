@@ -127,4 +127,116 @@ mod tests {
 
         assert!(reported.is_empty(), "nothing is unbalanced: {reported:?}");
     }
+
+    /// The component-tag-balance diagnostics for one template, as
+    /// `(code, message, line)` in report order.
+    async fn tag_balance_diagnostics(template: &str) -> Vec<(String, String, u32)> {
+        let relative = "resources/views/page.blade.php";
+        let (backend, dir) = create_psr4_workspace(COMPOSER, &[(relative, template)]);
+        backend.initialized(InitializedParams {}).await;
+
+        let path = dir.path().join(relative);
+        let uri = Url::from_file_path(&path).unwrap();
+        open_document(&backend, &uri, "blade", template).await;
+
+        let effective = backend
+            .blade_virtual_php(uri.as_str())
+            .unwrap_or_else(|| template.to_string());
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &effective, &mut diags);
+        diags
+            .into_iter()
+            .filter_map(|d| match &d.code {
+                Some(NumberOrString::String(code)) if code.ends_with("_blade_component_tag") => {
+                    Some((code.clone(), d.message, d.range.start.line))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A component tag closed by a different component's closing tag is a
+    /// mismatched-tag diagnostic.
+    #[tokio::test]
+    async fn a_component_closed_by_another_components_tag_is_reported() {
+        let reported = tag_balance_diagnostics(
+            "<x-alert>\n\
+             <p>hi</p>\n\
+             </x-card>\n",
+        )
+        .await;
+
+        assert_eq!(reported.len(), 1, "one mismatch, one report: {reported:?}");
+        assert_eq!(reported[0].0, "mismatched_blade_component_tag");
+        assert!(
+            reported[0].1.contains("<x-alert>") && reported[0].1.contains("</x-card>"),
+            "the report names both tags: {}",
+            reported[0].1
+        );
+        assert_eq!(reported[0].2, 2, "reported on the closing tag");
+    }
+
+    /// A component tag nobody closes renders the rest of the template
+    /// inside it.
+    #[tokio::test]
+    async fn a_component_tag_never_closed_is_reported() {
+        let reported = tag_balance_diagnostics(
+            "<x-alert>\n\
+             <p>hi</p>\n",
+        )
+        .await;
+
+        assert_eq!(reported.len(), 1, "one unclosed tag: {reported:?}");
+        assert_eq!(reported[0].0, "unclosed_blade_component_tag");
+        assert!(
+            reported[0].1.contains("<x-alert>"),
+            "the report names the tag that is missing a close: {}",
+            reported[0].1
+        );
+        assert_eq!(reported[0].2, 0, "reported on the opening tag");
+    }
+
+    /// A closing tag with nothing open at all closes nothing.
+    #[tokio::test]
+    async fn a_component_closing_tag_with_no_open_tag_is_reported() {
+        let reported = tag_balance_diagnostics("<p>hi</p>\n</x-alert>\n").await;
+
+        assert_eq!(reported.len(), 1, "one stray closer: {reported:?}");
+        assert_eq!(reported[0].0, "unexpected_blade_component_tag");
+        assert_eq!(reported[0].2, 1);
+    }
+
+    /// Self-closing tags, and tags whose attributes contain a `>`, report
+    /// nothing.
+    #[tokio::test]
+    async fn self_closing_and_bracket_bearing_component_tags_are_not_reported() {
+        let reported = tag_balance_diagnostics(
+            "<x-alert />\n\
+             <x-card :items=\"$a > $b\">\n\
+             <p>hi</p>\n\
+             </x-card>\n",
+        )
+        .await;
+
+        assert!(reported.is_empty(), "nothing is unbalanced: {reported:?}");
+    }
+
+    /// Properly nested and closed component tags, including a named
+    /// inline slot whose closing tag never repeats the slot's own name,
+    /// report nothing.
+    #[tokio::test]
+    async fn balanced_component_tags_are_not_reported() {
+        let reported = tag_balance_diagnostics(
+            "<x-card>\n\
+             <x-slot:title>Title</x-slot>\n\
+             <x-alert>\n\
+             <p>hi</p>\n\
+             </x-alert>\n\
+             </x-card>\n\
+             <livewire:counter></livewire:counter>\n",
+        )
+        .await;
+
+        assert!(reported.is_empty(), "nothing is unbalanced: {reported:?}");
+    }
 }
