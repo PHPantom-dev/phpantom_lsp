@@ -1700,16 +1700,24 @@ are self-closing when given a second argument, <code>@hasSection</code> is
 edge cases, not a formal grammar.</p>
 <p>The directive-nesting indent pass is the one part of this design that
 translates cleanly to PHPantom, and we are better positioned to do it
-than blade-formatter was: <code>src/blade/directives.rs</code> already has the
-full directive table blade-formatter hardcodes in <code>indent.ts</code>, and
-unlike blade-formatter (which had to pull in a TextMate grammar +
-oniguruma WASM just to find directive tokens on a line), our
-preprocessor already tokenizes Blade source precisely. What's missing
-is (a) classifying each directive as indent-start / indent-end / else
-(mechanical, from the existing table) and (b) an HTML tag-depth
-counter interleaved with directive depth on the same line (open/close/
-void/self-closing elements) — new code, but a single self-contained
-pass, not a full HTML parser. Embedded <code>@php</code>/<code>{{ }}</code> expression
+than blade-formatter was. Unlike blade-formatter (which had to pull in
+a TextMate grammar + oniguruma WASM just to find directive tokens on a
+line), we already scan raw Blade source: <code>blade::balance::directives</code>
+yields every directive with its span and argument list,
+<code>blade::balance::BLOCKS</code> already pairs each opener with the closers
+Blade accepts for it (the same table blade-formatter hardcodes in
+<code>indent.ts</code>), <code>blade::signature::inert_regions</code> masks comments,
+<code>@verbatim</code>, and <code>@php</code> blocks, and <code>blade::component_tags::tag_spans</code>
+/ <code>lex_tag_attributes</code> read tags. Build on those. Do not build on the
+preprocessor: <code>preprocess_with_vars</code> is one 1,100-line lowering that
+emits PHP as it scans, not a tokenizer, and it is not to be refactored
+for this. What's missing is (a) marking the else-like directives
+(<code>@else</code>, <code>@elseif</code>, <code>@empty</code> inside <code>@forelse</code>, <code>@case</code>/<code>@default</code>)
+that dedent without closing, on top of the open/close pairing <code>BLOCKS</code>
+gives, and (b) an HTML tag-depth counter for plain elements
+(open/close/void/self-closing) interleaved with directive depth on the
+same line — new code, but a single self-contained pass, not a full HTML
+parser. Embedded <code>@php</code>/<code>{{ }}</code> expression
 formatting can reuse <code>mago</code>'s formatter on isolated snippets the same
 way diagnostics already isolate virtual-PHP buffers, rather than
 needing a second PHP formatter dependency like blade-formatter does.</p>
