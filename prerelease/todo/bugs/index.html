@@ -935,6 +935,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-the-pint-formatting-proxy-inherits-the-servers-working-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. The Pint formatting proxy inherits the server's working directory
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1512,6 +1529,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-the-pint-formatting-proxy-inherits-the-servers-working-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. The Pint formatting proxy inherits the server's working directory
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1570,7 +1604,24 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b1-the-pint-formatting-proxy-inherits-the-servers-working-directory">B1. The Pint formatting proxy inherits the server's working directory<a class="headerlink" href="#b1-the-pint-formatting-proxy-inherits-the-servers-working-directory" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p><code>run_pint</code> in <code>src/formatting/external.rs</code> spawns
+<code>pint --stdin-filename=&lt;path&gt;</code> without <code>current_dir</code>, so the child
+inherits whatever directory the language server was started in. Pint
+resolves <code>pint.json</code> from <code>getcwd()</code> (<code>Project::path()</code>), not by walking
+up from the stdin filename, so in an editor that does not start the
+server in the workspace root (Neovim launched from a subdirectory, a
+multi-root workspace) the project's preset and rules are silently
+ignored and the <code>laravel</code> preset is applied instead. The PHPStan and
+PHPCS proxies already pass <code>current_dir(workspace_root)</code>; Pint should
+too. This also gates the Blade path in
+<a href="../blade/#bl16-blade-aware-formatting">BL16</a>: with the
+<code>Pint/laravel_blade</code> rule enabled Pint resolves the project's
+<code>node_modules</code> from the same directory.</p>
+<p>Fix: pass the workspace root as the child's working directory in
+<code>run_pint</code>, and add a test that a <code>pint.json</code> at the workspace root is
+honoured when the server's cwd is elsewhere.</p>
 
 
 
