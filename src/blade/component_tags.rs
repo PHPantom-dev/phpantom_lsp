@@ -918,6 +918,131 @@ fn scan_tag_attributes(
     (lexed.end, call)
 }
 
+/// The named slots (`<x-slot:title>` or the legacy `<x-slot
+/// name="title">`) written as a direct child of one of `tag_names`'s
+/// component tags, anywhere in `content`.
+///
+/// A slot's receiving component is its *nearest* enclosing `<x-…>` tag,
+/// the same scoping Blade's own compiler applies: `ComponentTagCompiler`
+/// lowers `<x-slot…>`/`</x-slot>` to `@slot(...)`/`@endslot` in a pass
+/// that runs before component tags are compiled, and the runtime
+/// `slot()`/`endSlot()` pair (`Illuminate\View\Concerns\ManagesComponents`)
+/// files the slot under whichever component is innermost on the render
+/// stack at that point. A plain HTML tag between a component and its
+/// slot does not change that (Blade never tracks HTML nesting), but
+/// another component tag in between does: its own slots are its own.
+///
+/// A name is returned once per distinct value, regardless of how many
+/// occurrences across the file (or however many times a caller repeats
+/// the same slot name) declare it: a component template cannot know at
+/// preprocessing time which specific occurrence it is rendering for, so
+/// every name any occurrence could pass has to be declared.
+pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> Vec<String> {
+    if tag_names.is_empty() || !content.contains("<x-slot") {
+        return Vec::new();
+    }
+    let masked = mask_inert_regions(content, true);
+    let bytes = masked.as_bytes();
+    // Currently open `<x-…>` component tags, nearest last. `<x-slot…>`
+    // itself is never pushed here: it is not a component boundary, so a
+    // slot cannot receive another slot.
+    let mut stack: Vec<(&str, bool)> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if bytes.get(i + 1) == Some(&b'/') {
+            if !masked[i + 2..].starts_with("x-") {
+                i += 1;
+                continue;
+            }
+            let name_start = i + 2 + "x-".len();
+            let mut j = name_start;
+            while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
+                j += 1;
+            }
+            let Some(close) = find_byte(&masked, j, b'>') else {
+                break;
+            };
+            let name = &masked[name_start..j];
+            if !is_slot_tag_name(name)
+                && let Some(pos) = stack.iter().rposition(|(open, _)| *open == name)
+            {
+                stack.truncate(pos);
+            }
+            i = close + 1;
+            continue;
+        }
+        if !bytes.get(i + 1).is_some_and(|b| b.is_ascii_alphabetic()) {
+            i += 1;
+            continue;
+        }
+        if !masked[i + 1..].starts_with("x-") {
+            i += 1;
+            continue;
+        }
+        let name_start = i + 1 + "x-".len();
+        let mut j = name_start;
+        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
+            j += 1;
+        }
+        let tag_name = &masked[name_start..j];
+        let lexed = lex_tag_attributes(&masked, j);
+        if is_slot_tag_name(tag_name) {
+            if let Some((_, true)) = stack.last()
+                && let Some(slot_name) = slot_tag_name(&masked, tag_name, &lexed)
+                && !names.contains(&slot_name)
+            {
+                names.push(slot_name);
+            }
+        } else if lexed.closed && !lexed.self_closing {
+            let is_match = tag_names.iter().any(|n| n == tag_name);
+            stack.push((tag_name, is_match));
+        }
+        i = lexed.end;
+    }
+    names
+}
+
+/// Whether an `<x-…>` tag's bare name (after the `x-` prefix) opens a
+/// slot: `slot` (the legacy `name="…"` form) or `slot:title` (the
+/// inline form).
+fn is_slot_tag_name(name: &str) -> bool {
+    name == "slot" || name.starts_with("slot:")
+}
+
+/// The name a `<x-slot…>` tag declares, or `None` when neither the
+/// inline form nor a `name="…"` attribute names one (a `:name="$expr"`
+/// bound name is dynamic and cannot be resolved here).
+///
+/// The inline form wins when both are written, matching
+/// `ComponentTagCompiler::compileSlots`'s `$matches['inlineName'] ?:
+/// $matches['name']`. It is also the only one ever camel-cased: Blade's
+/// `Str::camel` runs on the inline name when it contains a hyphen (a
+/// PHP variable cannot spell one), but an attribute-form name is used
+/// verbatim, hyphens and all, so a hyphenated one is written down as a
+/// slot key `extract()` can never bind to a variable — the same fate an
+/// unbindable component-tag attribute name has (the preprocessor's
+/// `is_php_variable_name` skips declaring either).
+fn slot_tag_name(masked: &str, tag_name: &str, lexed: &TagAttributes) -> Option<String> {
+    if let Some(inline) = tag_name.strip_prefix("slot:") {
+        return Some(if inline.contains('-') {
+            camel_case_attr_name(inline)
+        } else {
+            inline.to_string()
+        });
+    }
+    lexed.attributes.iter().find_map(|attr| {
+        (!attr.bound && &masked[attr.name.clone()] == "name")
+            .then(|| attr.value.clone())
+            .flatten()
+            .map(|value| masked[value].to_string())
+    })
+}
+
 /// Convert a kebab-case attribute name to the camelCase variable name
 /// Blade exposes it as (`Illuminate\Support\Str::camel`). A PHP variable
 /// name cannot contain a hyphen, so only the camelCase form of a
@@ -1242,6 +1367,88 @@ mod tests {
             &no_arguments,
         );
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn scans_an_inline_named_slot() {
+        let names = scan_component_tag_slots(
+            "<x-card><x-slot:title>Hello</x-slot></x-card>",
+            &["card".to_string()],
+        );
+        assert_eq!(names, vec!["title"]);
+    }
+
+    #[test]
+    fn scans_the_legacy_name_attribute_form() {
+        let names = scan_component_tag_slots(
+            r#"<x-card><x-slot name="title">Hello</x-slot></x-card>"#,
+            &["card".to_string()],
+        );
+        assert_eq!(names, vec!["title"]);
+    }
+
+    #[test]
+    fn camel_cases_a_hyphenated_inline_slot_name() {
+        let names = scan_component_tag_slots(
+            "<x-card><x-slot:hair-analysis>x</x-slot></x-card>",
+            &["card".to_string()],
+        );
+        assert_eq!(names, vec!["hairAnalysis"]);
+    }
+
+    /// Blade's own `Str::camel` transform only fires on the inline form:
+    /// a hyphenated `name="…"` attribute is used verbatim, which is not a
+    /// legal PHP variable name and so is never actually bound.
+    #[test]
+    fn a_hyphenated_legacy_name_is_not_camel_cased() {
+        let names = scan_component_tag_slots(
+            r#"<x-card><x-slot name="hair-analysis">x</x-slot></x-card>"#,
+            &["card".to_string()],
+        );
+        assert_eq!(names, vec!["hair-analysis"]);
+    }
+
+    /// A plain HTML tag between the component and its slot does not
+    /// change which component receives the slot.
+    #[test]
+    fn html_nesting_does_not_block_slot_scoping() {
+        let names = scan_component_tag_slots(
+            "<x-card><div><x-slot:title>Hello</x-slot></div></x-card>",
+            &["card".to_string()],
+        );
+        assert_eq!(names, vec!["title"]);
+    }
+
+    /// A slot inside a *different* nested component belongs to that
+    /// component, not the outer one.
+    #[test]
+    fn a_nested_components_own_slot_is_not_the_outer_ones() {
+        let names = scan_component_tag_slots(
+            "<x-card><x-alert><x-slot:title>Hello</x-slot></x-alert></x-card>",
+            &["card".to_string()],
+        );
+        assert!(names.is_empty());
+
+        let names = scan_component_tag_slots(
+            "<x-card><x-alert><x-slot:title>Hello</x-slot></x-alert></x-card>",
+            &["alert".to_string()],
+        );
+        assert_eq!(names, vec!["title"]);
+    }
+
+    #[test]
+    fn the_same_slot_name_is_reported_once() {
+        let names = scan_component_tag_slots(
+            "<x-card><x-slot:title>A</x-slot></x-card><x-card><x-slot:title>B</x-slot></x-card>",
+            &["card".to_string()],
+        );
+        assert_eq!(names, vec!["title"]);
+    }
+
+    #[test]
+    fn a_slot_outside_any_matching_tag_contributes_nothing() {
+        let names = scan_component_tag_slots("<x-slot:title>Hello</x-slot>", &["card".to_string()]);
+        assert!(names.is_empty());
     }
 
     /// The lexed attributes as `(name, bound, shorthand, value)` for

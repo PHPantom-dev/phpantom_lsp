@@ -122,8 +122,15 @@
          for a class-backed component, the template for an anonymous one. --}}
 
     {{-- The <x-alert> component view is where $attributes and $slot come
-         from: resources/views/components/alert.blade.php --}}
-    <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>
+         from: resources/views/components/alert.blade.php
+
+         <x-slot:title> is scoped to the component it fills, not to this
+         template: $title only exists inside alert.blade.php, never here.
+         Ctrl+Click alert.blade.php's own $title to see it declared there. --}}
+    <x-alert class="mt-4">
+        <x-slot:title>Latest update</x-slot:title>
+        {{ __('messages.welcome') }}
+    </x-alert>
 
     {{-- A bound attribute whose expression is wrapped over several lines
          (what a formatter does to a long array) is still read as one PHP

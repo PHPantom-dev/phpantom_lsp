@@ -1075,6 +1075,29 @@ check(
     (new \Illuminate\View\ComponentSlot('<b>hi</b>'))->toHtml() === '<b>hi</b>'
 );
 
+// A named slot (`<x-slot:title>`) files under the component it is written
+// inside, via ManagesComponents::slot()/endSlot(), and lands in the data
+// componentData() hands the view keyed by exactly the name given — the
+// same variable the LSP declares in the receiving component's template,
+// never in the caller that writes the tag.
+$factory = (new ReflectionClass(\Illuminate\View\Factory::class))->newInstanceWithoutConstructor();
+$factory->startComponent('components.alert');
+$factory->slot('title');
+echo 'Latest update';
+$factory->endSlot();
+// `renderComponent()` pops the component off the stack before reading
+// `componentData()`, which indexes by the stack's count; mimic that pop
+// without going through `renderComponent()` itself, which would try to
+// actually render the (unregistered) view.
+(new ReflectionProperty(\Illuminate\View\Factory::class, 'componentStack'))->setValue($factory, []);
+$componentData = new ReflectionMethod(\Illuminate\View\Factory::class, 'componentData');
+$data = $componentData->invoke($factory);
+check(
+    'a named slot is handed to the component view as a ComponentSlot keyed by its name',
+    $data['title'] instanceof \Illuminate\View\ComponentSlot
+        && (string) $data['title'] === 'Latest update'
+);
+
 // `AnonymousComponent::data()` merges every tag attribute into the view
 // data, whether or not `@props` names it — this is the runtime fact the
 // LSP's call-site inference for `<x-…>` tags relies on: a component with

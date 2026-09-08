@@ -423,6 +423,22 @@ impl Backend {
                 if occurrences.is_empty() {
                     continue;
                 }
+                // A named slot (`<x-slot:title>` / the legacy `<x-slot
+                // name="title">`) is part of the *component's* template,
+                // not the caller's — see `component_tags::scan_component_tag_slots`.
+                // No bound-attribute correlation is needed here (a slot's
+                // body is not a `blade_bound_attr_directive` argument), so
+                // this reads straight off the caller's raw source.
+                for slot_name in
+                    crate::blade::component_tags::scan_component_tag_slots(content, &tag_names)
+                {
+                    merged
+                        .entry(slot_name)
+                        .or_default()
+                        .push(PhpType::named(crate::atom::atom(
+                            "\\Illuminate\\View\\ComponentSlot",
+                        )));
+                }
                 let Some(virtual_php) = self.blade_virtual_content.read().get(file_uri).cloned()
                 else {
                     continue;

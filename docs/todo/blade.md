@@ -118,42 +118,6 @@ In `tests/integration/diagnostics_blade.rs`:
 
 ---
 
-## BL24. Named slot variables scoped to the component that receives them
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Deferred from the component-tag work: `<x-slot:title>` and its legacy
-`<x-slot name="title">` form become a comment in the virtual PHP, so
-nothing declares `$title`.
-
-Declaring it where the tag is written would be wrong. A named slot is a
-variable of the *component's* template, not of the template that fills
-it, and the filling template is where the tag sits. Emitting `$title =
-new \Illuminate\View\ComponentSlot();` there would put a name in the
-caller's scope that Blade never binds, and a slot named after a variable
-the caller already holds (`<x-slot:item>` inside `@foreach ($items as
-$item)`) would silently retype it for the rest of the block.
-
-The right shape is the one the backing class already uses: the slot
-names a template's tags fill are part of what the *component's* template
-receives, alongside `$slot` and `$attributes` (`COMPONENT_VARS` in
-`src/blade/preprocessor/mod.rs`, fed from `super::backing_class`). That
-means scanning the tags that render a component for their `<x-slot:…>`
-children and declaring those names in the component template's prologue
-as `\Illuminate\View\ComponentSlot`, the same way
-`scan_component_tag_calls` already turns a tag's attributes into that
-template's variables.
-
-### Tests
-
-- `<x-slot:title>` in a caller declares `$title` in the component's
-  template, not in the caller's.
-- `<x-slot name="title">` (the legacy form) does the same.
-- A slot name that collides with a caller variable leaves the caller's
-  variable alone.
-
----
-
 ## BL16. Blade-aware formatting
 
 **Impact: Low-Medium · Complexity: High**

@@ -418,6 +418,143 @@ mod tests {
         );
     }
 
+    /// A `<x-slot:title>` a caller fills declares `$title` in the
+    /// *component's* template, typed as `ComponentSlot` — not in the
+    /// caller's, where the tag is written.
+    #[tokio::test]
+    async fn named_slot_types_the_component_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes><x-slot:title>Latest</x-slot></x-brand.boxes>\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $title }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        open_document(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+        open_document(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("ComponentSlot"),
+            "$title should be typed ComponentSlot from the caller's named slot, got: {}",
+            hover
+        );
+    }
+
+    /// A slot named after a variable the *caller* already holds
+    /// (`<x-slot:item>` inside a `@foreach ($items as $item)`) must not
+    /// retype that variable in the caller: the slot only ever declares a
+    /// variable in the component it is scoped to.
+    #[tokio::test]
+    async fn a_slot_name_colliding_with_a_callers_variable_leaves_it_alone() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "resources/views/page.blade.php",
+                    "@php\n/** @var \\App\\Item[] $items */\n@endphp\n@foreach ($items as $item)\n<x-brand.boxes><x-slot:item>{{ $item->name }}</x-slot></x-brand.boxes>\n@endforeach\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $item }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+
+        open_document(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &page_uri, 4, 32).await;
+        assert!(
+            hover.contains("Item") && !hover.contains("ComponentSlot"),
+            "the caller's own $item must stay Item, not be retyped by the slot named after it, got: {}",
+            hover
+        );
+    }
+
+    /// The legacy `<x-slot name="title">` form types the same variable
+    /// the same way.
+    #[tokio::test]
+    async fn legacy_named_slot_attribute_types_the_component_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes><x-slot name=\"title\">Latest</x-slot></x-brand.boxes>\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $title }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        open_document(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+        open_document(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("ComponentSlot"),
+            "$title should be typed ComponentSlot from the caller's legacy named slot, got: {}",
+            hover
+        );
+    }
+
     /// `@class(...)` compiles to the same generic marker call as a bound
     /// attribute that names no parameter, so one written before a
     /// component tag must not shift the index the tag's own bound
