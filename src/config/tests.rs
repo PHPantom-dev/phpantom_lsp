@@ -756,7 +756,7 @@ fn formatting_disabled_disables_tool() {
     let path = dir.path().join(CONFIG_FILE_NAME);
     std::fs::write(
         &path,
-        "[formatting]\ndisabled = true\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
+        "[formatting]\nenabled = false\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
     )
     .unwrap();
     let config = load_config(dir.path()).unwrap();

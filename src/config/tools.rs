@@ -19,7 +19,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct FormattingConfig {
     /// Explicitly disable all formatting
-    pub disabled: Option<bool>,
+    pub enabled: Option<bool>,
     /// Command (path or name) to run php-cs-fixer.
     ///
     /// - `None` (default) — check `require-dev` in `composer.json`;
@@ -94,7 +94,7 @@ impl FormattingConfig {
 
     /// Whether formatting is explicitly disabled
     pub fn is_disabled(&self) -> bool {
-        self.disabled == Some(true)
+        self.enabled == Some(false)
     }
 }
 
