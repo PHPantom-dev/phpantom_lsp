@@ -834,34 +834,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl23-unbalanced-component-tag-diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL23. Unbalanced component tag diagnostics
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL23. Unbalanced component tag diagnostics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl16-blade-aware-formatting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -885,7 +857,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
+  <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -913,7 +885,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_2" class="md-nav__link">
+  <a href="#tests_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1456,34 +1428,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl23-unbalanced-component-tag-diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL23. Unbalanced component tag diagnostics
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL23. Unbalanced component tag diagnostics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl16-blade-aware-formatting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1507,7 +1451,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
+  <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1535,7 +1479,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_2" class="md-nav__link">
+  <a href="#tests_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1676,32 +1620,6 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 </ul>
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
 <hr />
-<h2 id="bl23-unbalanced-component-tag-diagnostics">BL23. Unbalanced component tag diagnostics<a class="headerlink" href="#bl23-unbalanced-component-tag-diagnostics" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>src/blade/balance.rs</code> pairs up block <em>directives</em>, but a component tag
-body is a block too: <code>&lt;x-alert&gt;</code> … <code>&lt;/x-alert&gt;</code>, <code>&lt;x-slot:title&gt;</code> …
-<code>&lt;/x-slot&gt;</code>. A tag nobody closes renders the rest of the template inside
-it, and a stray closing tag renders nothing at all, neither of which is
-reported today.</p>
-<ul>
-<li>Extend the block stack with component tags, reusing the raw-text tag
-  scan in <code>src/blade/component_tags.rs</code> rather than a second parser.</li>
-<li>A self-closing <code>&lt;x-alert /&gt;</code> opens nothing, and an attribute value may
-  hold a <code>&gt;</code> (<code>&lt;x-alert :items="$a &gt; $b"&gt;</code>), so the scan has to read the
-  whole tag rather than stop at the first <code>&gt;</code>.</li>
-<li>Report against the tag, in the same three shapes the directive check
-  uses: a closing tag for another component, a closing tag with nothing
-  open, and a tag the template never closes.</li>
-</ul>
-<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
-<p>In <code>tests/integration/diagnostics_blade.rs</code>:</p>
-<ul>
-<li><code>&lt;x-alert&gt;</code> closed by <code>&lt;/x-card&gt;</code> → mismatched-tag diagnostic</li>
-<li><code>&lt;x-alert&gt;</code> with no closing tag → unclosed-tag diagnostic</li>
-<li>self-closing tags, and tags whose attributes contain <code>&gt;</code>, report
-  nothing</li>
-</ul>
-<hr />
 <h2 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p><code>src/formatting/</code> has no Blade awareness. <code>mago</code>'s formatter runs against
@@ -1814,7 +1732,7 @@ real possibility, given we skip the regex/placeholder round-tripping
 entirely), it can become the default rather than staying a fallback.
 See BL17 below for exposing it as a standalone CI check once it
 reaches that bar.</p>
-<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
+<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>formatting</code> on a <code>.blade.php</code> file returns no edits (short-term
   behaviour) rather than corrupting the file, until the long-term
@@ -1848,7 +1766,7 @@ the LSP connection at all.</p>
   external tool, which <code>--check</code> should honour identically to
   <code>format</code> without <code>--check</code>).</li>
 </ul>
-<h3 id="tests_2">Tests<a class="headerlink" href="#tests_2" title="Permanent link">&para;</a></h3>
+<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>format --check</code> on an already-formatted project exits 0 with no
   output.</li>
