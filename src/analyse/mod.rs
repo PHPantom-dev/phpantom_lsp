@@ -52,8 +52,10 @@ mod output;
 mod project;
 mod run;
 
-pub(crate) use output::{format_github_message, json_escape};
-pub(crate) use project::{load_config_or_default, open_headless_project};
+pub(crate) use output::{format_github_message, json_escape, print_success_box, progress_bar};
+pub(crate) use project::{
+    discover_laravel_resources, load_config_or_default, open_headless_project, parse_user_files,
+};
 pub(crate) use run::discover_user_files;
 pub use run::run;
 

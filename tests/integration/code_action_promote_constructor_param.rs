@@ -5,7 +5,7 @@
 //! the `WorkspaceEdit` that removes the property declaration, removes
 //! the assignment, and adds a visibility modifier to the parameter.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, lsp_pos_to_offset};
 use tower_lsp::lsp_types::*;
 
 /// Helper: send a code action request at the given line/character and
@@ -71,23 +71,11 @@ fn apply_edit(content: &str, edit: &WorkspaceEdit) -> String {
 
     let mut result = content.to_string();
     for edit in sorted {
-        let start = position_to_offset(&result, edit.range.start);
-        let end = position_to_offset(&result, edit.range.end);
+        let start = lsp_pos_to_offset(&result, edit.range.start);
+        let end = lsp_pos_to_offset(&result, edit.range.end);
         result.replace_range(start..end, &edit.new_text);
     }
     result
-}
-
-/// Convert an LSP Position to a byte offset.
-fn position_to_offset(content: &str, pos: Position) -> usize {
-    let mut offset = 0;
-    for (i, line) in content.lines().enumerate() {
-        if i == pos.line as usize {
-            return offset + pos.character as usize;
-        }
-        offset += line.len() + 1; // +1 for '\n'
-    }
-    offset
 }
 
 // ── Basic promotion ─────────────────────────────────────────────────────────

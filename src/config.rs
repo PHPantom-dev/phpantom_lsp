@@ -354,12 +354,12 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is entirely disabled (all tools explicitly
-    /// set to empty strings).
+    /// Whether formatting is entirely disabled (every tool explicitly
+    /// set to an empty string).
     pub fn is_disabled(&self) -> bool {
-        self.php_cs_fixer.as_deref() == Some("")
-            && self.phpcbf.as_deref() == Some("")
-            && self.pint.as_deref() == Some("")
+        crate::formatting::Tool::ALL
+            .into_iter()
+            .all(|tool| tool.configured(self) == Some(""))
     }
 }
 

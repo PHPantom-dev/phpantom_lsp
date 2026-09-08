@@ -5,7 +5,7 @@ use crate::config::FormattingConfig;
 
 use super::external::write_sibling_temp_file;
 use super::mago::{format_with_mago, load_mago_format_settings, to_mago_php_version};
-use super::{FormattingStrategy, compute_edits, execute_strategy, resolve_strategy};
+use super::{FormattingStrategy, Tool, compute_edits, execute_strategy, resolve_strategy};
 
 // ── compute_edits ───────────────────────────────────────────────
 
@@ -150,9 +150,9 @@ fn strategy_explicit_commands() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 2);
-            assert_eq!(tools[0].name, "php-cs-fixer");
+            assert_eq!(tools[0].tool, Tool::PhpCsFixer);
             assert_eq!(tools[0].path, PathBuf::from("/usr/bin/php-cs-fixer"));
-            assert_eq!(tools[1].name, "phpcbf");
+            assert_eq!(tools[1].tool, Tool::Phpcbf);
             assert_eq!(tools[1].path, PathBuf::from("/usr/bin/phpcbf"));
         }
         other => panic!("Expected External, got {:?}", other),
@@ -171,7 +171,7 @@ fn strategy_one_explicit_one_disabled() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
-            assert_eq!(tools[0].name, "php-cs-fixer");
+            assert_eq!(tools[0].tool, Tool::PhpCsFixer);
         }
         other => panic!("Expected External, got {:?}", other),
     }
@@ -203,7 +203,7 @@ fn strategy_require_dev_php_cs_fixer() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
-            assert_eq!(tools[0].name, "php-cs-fixer");
+            assert_eq!(tools[0].tool, Tool::PhpCsFixer);
             assert_eq!(tools[0].path, vendor_bin.join("php-cs-fixer"));
         }
         other => panic!("Expected External, got {:?}", other),
@@ -236,7 +236,7 @@ fn strategy_require_dev_phpcodesniffer() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
-            assert_eq!(tools[0].name, "phpcbf");
+            assert_eq!(tools[0].tool, Tool::Phpcbf);
             assert_eq!(tools[0].path, vendor_bin.join("phpcbf"));
         }
         other => panic!("Expected External, got {:?}", other),
@@ -268,7 +268,7 @@ fn strategy_phpcs_config_file_without_composer_dependency() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
-            assert_eq!(tools[0].name, "phpcbf");
+            assert_eq!(tools[0].tool, Tool::Phpcbf);
             assert_eq!(tools[0].path, vendor_bin.join("phpcbf"));
         }
         other => panic!("Expected External, got {:?}", other),
@@ -305,7 +305,7 @@ fn strategy_phpcs_xml_dist_certifies_phpcbf_over_transitive_dependency() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
-            assert_eq!(tools[0].name, "phpcbf");
+            assert_eq!(tools[0].tool, Tool::Phpcbf);
         }
         other => panic!("Expected External, got {:?}", other),
     }
@@ -373,7 +373,7 @@ fn strategy_mago_toml_without_formatter_table_leaves_phpcbf_in_charge() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 1);
-            assert_eq!(tools[0].name, "phpcbf");
+            assert_eq!(tools[0].tool, Tool::Phpcbf);
         }
         other => panic!("Expected External, got {:?}", other),
     }
@@ -408,8 +408,8 @@ fn strategy_require_dev_both_tools() {
     match &strategy {
         FormattingStrategy::External(tools) => {
             assert_eq!(tools.len(), 2);
-            assert_eq!(tools[0].name, "php-cs-fixer");
-            assert_eq!(tools[1].name, "phpcbf");
+            assert_eq!(tools[0].tool, Tool::PhpCsFixer);
+            assert_eq!(tools[1].tool, Tool::Phpcbf);
         }
         other => panic!("Expected External, got {:?}", other),
     }

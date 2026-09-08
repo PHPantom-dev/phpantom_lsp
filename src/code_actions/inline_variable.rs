@@ -766,6 +766,7 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::apply_edits;
 
     /// Helper: given PHP source with a cursor marker `/*|*/`, run the
     /// inline variable action and return the resulting edits (if offered).
@@ -828,28 +829,6 @@ mod tests {
         let parsed_uri = Url::parse(uri).unwrap();
         let edits = changes.get(&parsed_uri)?;
         Some(edits.clone())
-    }
-
-    /// Apply TextEdits to content (edits are assumed to be non-overlapping
-    /// and will be applied from bottom to top to preserve positions).
-    fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
-        let mut result = content.to_string();
-        // Sort edits in reverse document order so earlier edits don't
-        // shift positions of later ones.
-        let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-        sorted.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-        for edit in sorted {
-            let start = position_to_byte_offset(&result, edit.range.start);
-            let end = position_to_byte_offset(&result, edit.range.end);
-            result.replace_range(start..end, &edit.new_text);
-        }
-        result
     }
 
     // ── Basic inline ────────────────────────────────────────────────

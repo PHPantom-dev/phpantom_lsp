@@ -56,6 +56,8 @@ use std::sync::atomic::AtomicBool;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
+use crate::Backend;
+use crate::composer::{self, ComposerPackage};
 use crate::config::FormattingConfig;
 
 mod external;
@@ -67,11 +69,86 @@ const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 
 // ── Tool resolution ─────────────────────────────────────────────────
 
+/// An external formatter PHPantom knows how to detect and drive.
+///
+/// Everything tool-specific hangs off this enum: the `.phpantom.toml`
+/// key, the Composer package that certifies it, the binary name, and how
+/// it is invoked.  Adding a formatter means adding a variant and filling
+/// in each method; the resolution and execution code never lists tools
+/// by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tool {
+    Pint,
+    PhpCsFixer,
+    Phpcbf,
+}
+
+impl Tool {
+    /// Every tool, in the order a pipeline runs them.
+    pub const ALL: [Tool; 3] = [Tool::Pint, Tool::PhpCsFixer, Tool::Phpcbf];
+
+    /// The binary's name, which is also the name used in logs.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tool::Pint => "pint",
+            Tool::PhpCsFixer => "php-cs-fixer",
+            Tool::Phpcbf => "phpcbf",
+        }
+    }
+
+    /// The Composer package whose presence in `require-dev` selects the
+    /// tool.
+    fn composer_package(self) -> &'static str {
+        match self {
+            Tool::Pint => "laravel/pint",
+            Tool::PhpCsFixer => "friendsofphp/php-cs-fixer",
+            Tool::Phpcbf => "squizlabs/php_codesniffer",
+        }
+    }
+
+    /// The tool's `.phpantom.toml` entry: `None` when unset, `Some("")`
+    /// when disabled, otherwise the command to run.
+    pub fn configured(self, config: &FormattingConfig) -> Option<&str> {
+        match self {
+            Tool::Pint => config.pint.as_deref(),
+            Tool::PhpCsFixer => config.php_cs_fixer.as_deref(),
+            Tool::Phpcbf => config.phpcbf.as_deref(),
+        }
+    }
+
+    /// Whether the project's own metadata says it formats with this tool.
+    fn detected(
+        self,
+        workspace_root: Option<&Path>,
+        composer_json: Option<&ComposerPackage>,
+    ) -> bool {
+        let in_require_dev = composer_json
+            .is_some_and(|package| composer::has_require_dev(package, self.composer_package()));
+        match self {
+            // A phpcs config file certifies phpcbf on its own: a project
+            // that pulls squizlabs/php_codesniffer in only transitively
+            // (e.g. through slevomat/coding-standard) never lists it in
+            // require-dev directly, but a phpcs.xml is still deliberate
+            // evidence the project uses it.
+            //
+            // Unless the project also says what it formats with.
+            // PHP_CodeSniffer is a linter that happens to ship a fixer, so
+            // its ruleset is evidence of linting first; a `[formatter]`
+            // table in `mago.toml` is evidence of nothing else.  A project
+            // carrying both lints with PHPCS and formats with Mago.
+            Tool::Phpcbf => {
+                (in_require_dev || workspace_root.is_some_and(crate::phpcs::has_project_config))
+                    && !workspace_root.is_some_and(crate::mago::formats_with_mago)
+            }
+            Tool::Pint | Tool::PhpCsFixer => in_require_dev,
+        }
+    }
+}
+
 /// A resolved formatting tool ready to invoke.
 #[derive(Debug, Clone)]
 pub struct ResolvedTool {
-    /// Human-readable name for logging.
-    pub name: &'static str,
+    pub tool: Tool,
     /// Absolute or relative path to the binary.
     pub path: PathBuf,
 }
@@ -92,124 +169,50 @@ pub enum FormattingStrategy {
 /// the workspace root.
 ///
 /// Resolution rules:
-/// - If `config.is_disabled()` (both tools set to `""`) → `Disabled`.
-/// - If either tool has an explicit non-empty path in config →
+/// - If `config.is_disabled()` (every tool set to `""`) → `Disabled`.
+/// - If any tool has an explicit non-empty path in config →
 ///   `External` with those tools.
-/// - If `composer_json` has `laravel/pint`, `friendsofphp/php-cs-fixer`,
-///   or `squizlabs/php_codesniffer` in `require-dev`, or the workspace
-///   root has a `phpcs.xml`/`.phpcs.xml`/`phpcs.xml.dist`/
-///   `.phpcs.xml.dist` config file (which certifies phpcbf even when
-///   PHP_CodeSniffer is pulled in only transitively) → `External`,
-///   resolving paths via the Composer bin-dir.  A `[formatter]` table in
-///   the workspace `mago.toml` takes phpcbf back out of that set: it says
-///   what the project formats with, where PHPCS says what it lints with.
+/// - Otherwise every tool the project's metadata selects (see
+///   [`Tool::detected`]) and whose binary the Composer bin-dir holds →
+///   `External`.
 /// - Otherwise → `BuiltIn`.
 pub fn resolve_strategy(
     workspace_root: Option<&Path>,
     config: &FormattingConfig,
-    composer_json: Option<&crate::composer::ComposerPackage>,
+    composer_json: Option<&ComposerPackage>,
     bin_dir: Option<&str>,
 ) -> FormattingStrategy {
     if config.is_disabled() {
         return FormattingStrategy::Disabled;
     }
 
-    let fixer_explicit = matches!(config.php_cs_fixer.as_deref(), Some(s) if !s.is_empty());
-    let phpcbf_explicit = matches!(config.phpcbf.as_deref(), Some(s) if !s.is_empty());
-    let pint_explicit = matches!(config.pint.as_deref(), Some(s) if !s.is_empty());
-
-    if fixer_explicit || phpcbf_explicit || pint_explicit {
-        let mut tools = Vec::new();
-        if let Some(cmd) = config.pint.as_deref()
-            && !cmd.is_empty()
-        {
-            tools.push(ResolvedTool {
-                name: "pint",
-                path: PathBuf::from(cmd),
-            });
-        }
-        if let Some(cmd) = config.php_cs_fixer.as_deref()
-            && !cmd.is_empty()
-        {
-            tools.push(ResolvedTool {
-                name: "php-cs-fixer",
-                path: PathBuf::from(cmd),
-            });
-        }
-        if let Some(cmd) = config.phpcbf.as_deref()
-            && !cmd.is_empty()
-        {
-            tools.push(ResolvedTool {
-                name: "phpcbf",
-                path: PathBuf::from(cmd),
-            });
-        }
-        if tools.is_empty() {
-            return FormattingStrategy::Disabled;
-        }
-        return FormattingStrategy::External(tools);
-    }
-
-    // No explicit config — check composer.json require-dev, or a
-    // hand-authored phpcs config file for phpcbf.
-    let has_phpcs_config = workspace_root.is_some_and(crate::phpcs::has_project_config);
-    let formats_with_mago = workspace_root.is_some_and(crate::mago::formats_with_mago);
-
-    if composer_json.is_some() || has_phpcs_config {
-        let mut tools = Vec::new();
-        let bin = bin_dir.unwrap_or("vendor/bin");
-
-        // Only one of the config values can be Some("") here (disabling
-        // one tool while leaving the other to auto-detect).
-        let fixer_disabled = config.php_cs_fixer.as_deref() == Some("");
-        let phpcbf_disabled = config.phpcbf.as_deref() == Some("");
-        let pint_disabled = config.pint.as_deref() == Some("");
-
-        if !pint_disabled
-            && composer_json
-                .is_some_and(|package| crate::composer::has_require_dev(package, "laravel/pint"))
-            && let Some(tool) = resolve_from_bin_dir("pint", workspace_root, bin)
-        {
-            tools.push(tool);
-        }
-
-        if !fixer_disabled
-            && composer_json.is_some_and(|package| {
-                crate::composer::has_require_dev(package, "friendsofphp/php-cs-fixer")
+    // Explicit config wins, and skips detection entirely.
+    let explicit: Vec<ResolvedTool> = Tool::ALL
+        .into_iter()
+        .filter_map(|tool| {
+            let command = tool.configured(config)?;
+            (!command.is_empty()).then(|| ResolvedTool {
+                tool,
+                path: PathBuf::from(command),
             })
-            && let Some(tool) = resolve_from_bin_dir("php-cs-fixer", workspace_root, bin)
-        {
-            tools.push(tool);
-        }
-
-        // A phpcs config file certifies phpcbf on its own: a project
-        // that pulls squizlabs/php_codesniffer in only transitively
-        // (e.g. through slevomat/coding-standard) never lists it in
-        // require-dev directly, but a phpcs.xml is still deliberate
-        // evidence the project uses it.
-        //
-        // Unless the project also says what it formats with.  PHP_CodeSniffer
-        // is a linter that happens to ship a fixer, so its ruleset is
-        // evidence of linting first; a `[formatter]` table in `mago.toml` is
-        // evidence of nothing else.  A project carrying both lints with
-        // PHPCS and formats with Mago.
-        if !phpcbf_disabled
-            && !formats_with_mago
-            && (has_phpcs_config
-                || composer_json.is_some_and(|package| {
-                    crate::composer::has_require_dev(package, "squizlabs/php_codesniffer")
-                }))
-            && let Some(tool) = resolve_from_bin_dir("phpcbf", workspace_root, bin)
-        {
-            tools.push(tool);
-        }
-
-        if !tools.is_empty() {
-            return FormattingStrategy::External(tools);
-        }
+        })
+        .collect();
+    if !explicit.is_empty() {
+        return FormattingStrategy::External(explicit);
     }
 
-    // No external tools configured or detected — use built-in.
+    // A tool set to `""` is disabled even when the project would select it.
+    let bin = bin_dir.unwrap_or("vendor/bin");
+    let detected: Vec<ResolvedTool> = Tool::ALL
+        .into_iter()
+        .filter(|tool| tool.configured(config) != Some(""))
+        .filter(|tool| tool.detected(workspace_root, composer_json))
+        .filter_map(|tool| resolve_from_bin_dir(tool, workspace_root, bin))
+        .collect();
+    if !detected.is_empty() {
+        return FormattingStrategy::External(detected);
+    }
+
     let config_path = workspace_root
         .filter(|root| crate::mago::has_mago_config(root))
         .map(|root| root.join("mago.toml"));
@@ -218,29 +221,94 @@ pub fn resolve_strategy(
 
 /// Resolve a tool binary from the Composer bin directory.
 fn resolve_from_bin_dir(
-    binary_name: &'static str,
+    tool: Tool,
     workspace_root: Option<&Path>,
     bin_dir: &str,
 ) -> Option<ResolvedTool> {
-    let root = workspace_root?;
-    let candidate = root.join(bin_dir).join(binary_name);
-    if candidate.is_file() {
-        Some(ResolvedTool {
-            name: binary_name,
-            path: candidate,
-        })
-    } else {
-        None
+    let candidate = workspace_root?.join(bin_dir).join(tool.name());
+    candidate.is_file().then_some(ResolvedTool {
+        tool,
+        path: candidate,
+    })
+}
+
+impl Backend {
+    /// Resolve the workspace's formatting strategy from `.phpantom.toml`,
+    /// the root `composer.json`, and the workspace root.
+    ///
+    /// Reads `composer.json` from disk, so call it once per request (or
+    /// once per run), not per file.
+    pub(crate) fn resolve_formatting_strategy(&self) -> FormattingStrategy {
+        let config = self.config();
+        let workspace_root = self.workspace.workspace_root.read().clone();
+        let composer_json = workspace_root
+            .as_deref()
+            .and_then(composer::read_composer_package);
+        let bin_dir = composer_json.as_ref().map(composer::get_bin_dir);
+        resolve_strategy(
+            workspace_root.as_deref(),
+            &config.formatting,
+            composer_json.as_ref(),
+            bin_dir.as_deref(),
+        )
+    }
+
+    /// Format one file's `content` with `strategy`.
+    ///
+    /// `file_path` is the file's real location, which external tools use
+    /// to discover their project config.  Returns the formatted text, or
+    /// `None` when formatting is disabled or the content is already
+    /// formatted.  `cancelled` aborts a running external tool when set.
+    pub(crate) fn format_content(
+        &self,
+        strategy: &FormattingStrategy,
+        file_path: &Path,
+        content: &str,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<String>, String> {
+        let config = self.config();
+        format_content(
+            strategy,
+            content,
+            file_path,
+            &config.formatting,
+            self.php_version(),
+            cancelled,
+        )
     }
 }
 
 // ── Execution ───────────────────────────────────────────────────────
 
-/// Execute the resolved formatting strategy and return `TextEdit`s.
-///
-/// This is the main entry point called by the `formatting()` handler.
-/// `cancelled` aborts any running external tool when set (the server's
-/// shutdown flag).
+/// Run `strategy` on `content` and return the formatted text, or `None`
+/// when formatting is disabled or nothing changed.
+pub fn format_content(
+    strategy: &FormattingStrategy,
+    content: &str,
+    file_path: &Path,
+    config: &FormattingConfig,
+    php_version: crate::types::PhpVersion,
+    cancelled: &AtomicBool,
+) -> Result<Option<String>, String> {
+    let formatted = match strategy {
+        FormattingStrategy::Disabled => return Ok(None),
+        FormattingStrategy::External(tools) => {
+            external::run_external_pipeline(tools, content, file_path, config, cancelled)?
+        }
+        FormattingStrategy::BuiltIn(config_path) => {
+            let mago_version = mago::to_mago_php_version(php_version);
+            let settings = match config_path {
+                Some(config_path) => mago::load_mago_format_settings(config_path)?,
+                None => mago_formatter::settings::FormatSettings::default(),
+            };
+            mago::format_with_mago(content, mago_version, settings)?
+        }
+    };
+    Ok((formatted != content).then_some(formatted))
+}
+
+/// Run `strategy` on `content` and return the `TextEdit`s that turn it
+/// into the formatted text, or `None` when there is nothing to change.
 pub fn execute_strategy(
     strategy: &FormattingStrategy,
     content: &str,
@@ -249,46 +317,26 @@ pub fn execute_strategy(
     php_version: crate::types::PhpVersion,
     cancelled: &AtomicBool,
 ) -> Result<Option<Vec<TextEdit>>, String> {
-    match strategy {
-        FormattingStrategy::Disabled => Ok(None),
-        FormattingStrategy::External(tools) => {
-            let edits =
-                external::run_external_pipeline(tools, content, file_path, config, cancelled)?;
-            if edits.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(edits))
-            }
-        }
-        FormattingStrategy::BuiltIn(config_path) => {
-            let mago_version = mago::to_mago_php_version(php_version);
-            let settings = match config_path {
-                Some(config_path) => mago::load_mago_format_settings(config_path)?,
-                None => mago_formatter::settings::FormatSettings::default(),
-            };
-            let formatted = mago::format_with_mago(content, mago_version, settings)?;
-            let edits = compute_edits(content, &formatted);
-            if edits.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(edits))
-            }
-        }
-    }
+    let formatted = format_content(strategy, content, file_path, config, php_version, cancelled)?;
+    Ok(formatted.map(|formatted| compute_edits(content, &formatted)))
 }
 
 /// Compute the `TextEdit`s needed to transform `original` into `formatted`.
 ///
 /// Returns a single `TextEdit` that replaces the entire document.  Only
 /// returns edits if the content actually changed.
-fn compute_edits(original: &str, formatted: &str) -> Vec<TextEdit> {
+pub(crate) fn compute_edits(original: &str, formatted: &str) -> Vec<TextEdit> {
     if original == formatted {
         return Vec::new();
     }
 
     let line_count = original.lines().count();
     let last_line_idx = if line_count == 0 { 0 } else { line_count - 1 };
-    let last_line_len = original.lines().last().map_or(0, |l| l.len());
+    // LSP columns are UTF-16 code units, not bytes.
+    let last_line_len = original
+        .lines()
+        .last()
+        .map_or(0, |l| l.encode_utf16().count());
 
     let (end_line, end_char) = if original.ends_with('\n') {
         (last_line_idx + 1, 0)

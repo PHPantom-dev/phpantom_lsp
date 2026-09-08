@@ -7,7 +7,8 @@
 //! written once, so a new subcommand cannot drift from the others in
 //! which version it analyses against or what it indexes.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::types::PhpVersion;
 use crate::{Backend, composer, config};
@@ -54,4 +55,93 @@ pub(crate) async fn open_headless_project(backend: &Backend, root: &Path, cfg: c
     backend
         .init_single_project(root, php_version, composer_package, None)
         .await;
+}
+
+/// Parse every file in `files` on parallel workers, populating the
+/// backend's per-file indexes, and hand back each file's URI and content
+/// at the same index so the caller's next phase can reuse them without
+/// re-reading.  A file that cannot be read is `None`.
+///
+/// The workers get [`crate::PARSE_WORKER_STACK_SIZE`]: the parser is
+/// recursive and overflows the 2 MB default a spawned thread otherwise
+/// has.  With `trace`, each file is named on stderr as it is parsed.
+pub(crate) fn parse_user_files(
+    backend: &Backend,
+    root: &Path,
+    files: &[PathBuf],
+    trace: bool,
+) -> Vec<Option<(String, String)>> {
+    let file_count = files.len();
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let next_idx = AtomicUsize::new(0);
+
+    std::thread::scope(|s| {
+        let handles: Vec<_> = (0..n_threads)
+            .map(|worker| {
+                let next_idx = &next_idx;
+                std::thread::Builder::new()
+                    .name("index-worker".into())
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                    .spawn_scoped(s, move || {
+                        let mut entries: Vec<(usize, String, String)> = Vec::new();
+                        loop {
+                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
+                            if i >= file_count {
+                                break;
+                            }
+                            let file_path = &files[i];
+                            if trace {
+                                let display =
+                                    file_path.strip_prefix(root).unwrap_or(file_path).display();
+                                eprintln!("[w{worker:02}] parse {display}");
+                            }
+                            let Ok(content) = std::fs::read_to_string(file_path) else {
+                                continue;
+                            };
+                            let uri = crate::util::path_to_uri(file_path);
+                            backend.update_ast(&uri, &content);
+                            entries.push((i, uri, content));
+                        }
+                        entries
+                    })
+                    .expect("failed to spawn index-worker thread")
+            })
+            .collect();
+
+        let mut indexed: Vec<Option<(String, String)>> = (0..file_count).map(|_| None).collect();
+        for handle in handles {
+            for (i, uri, content) in handle.join().unwrap_or_default() {
+                indexed[i] = Some((uri, content));
+            }
+        }
+        indexed
+    })
+}
+
+/// Discover what a Laravel project registers through its service
+/// providers, the way the LSP's `initialized` handler does once the
+/// workspace is indexed.
+///
+/// Must run after [`parse_user_files`]: discovery reads the project's own
+/// providers.  Without it the `now()`/`today()` helpers and the Date
+/// facade resolve to nothing, `config()`/`view()`/`trans()`/`route()`
+/// string keys are all unknown, and morph aliases, gate abilities, Artisan
+/// command names, and vendor-registered macros read as invalid, so a run
+/// would report (or fix against) false positives.  A project that is not
+/// Laravel has nothing to discover.
+pub(crate) fn discover_laravel_resources(backend: &Backend) {
+    if !backend.resolved_class_cache.read().is_laravel() {
+        return;
+    }
+    backend.build_laravel_date_class();
+    backend.build_provider_resources();
+    backend.build_laravel_morph_map_index();
+    backend.build_laravel_gate_index();
+    // `update_ast` only refreshes these from the files it parses, which
+    // here is the project's own source, so without a scan of the whole
+    // FQN index the vendor entries are missing.
+    backend.build_laravel_command_index();
+    backend.build_laravel_macro_index();
 }

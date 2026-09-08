@@ -68,18 +68,8 @@ enum Command {
         #[arg(long, default_value = "all")]
         severity: SeverityArg,
 
-        /// Disable coloured output.
-        #[arg(long)]
-        no_colour: bool,
-
-        /// Project root directory. Defaults to the current working directory.
-        #[arg(long, value_name = "DIR")]
-        project_root: Option<std::path::PathBuf>,
-
-        /// Output format. When running in GitHub Actions the default
-        /// automatically includes workflow annotations alongside the table.
-        #[arg(long, value_name = "FORMAT")]
-        format: Option<FormatArg>,
+        #[command(flatten)]
+        project: ProjectArgs,
 
         /// Print each file path as it is analyzed and disable the progress
         /// bar. Combine with -v/-vv/-vvv for timing and memory detail.
@@ -118,18 +108,8 @@ enum Command {
         #[arg(long)]
         with_phpstan: bool,
 
-        /// Disable coloured output.
-        #[arg(long)]
-        no_colour: bool,
-
-        /// Project root directory. Defaults to the current working directory.
-        #[arg(long, value_name = "DIR")]
-        project_root: Option<std::path::PathBuf>,
-
-        /// Output format. When running in GitHub Actions the default
-        /// automatically includes workflow annotations alongside the table.
-        #[arg(long, value_name = "FORMAT")]
-        format: Option<FormatArg>,
+        #[command(flatten)]
+        project: ProjectArgs,
     },
 
     /// Move a class, namespace, PHP file, or PSR-4 directory.
@@ -146,18 +126,8 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
 
-        /// Disable coloured output.
-        #[arg(long)]
-        no_colour: bool,
-
-        /// Project root directory. Defaults to the current working directory.
-        #[arg(long, value_name = "DIR")]
-        project_root: Option<std::path::PathBuf>,
-
-        /// Output format. When running in GitHub Actions the default
-        /// automatically includes workflow annotations alongside the summary.
-        #[arg(long, value_name = "FORMAT")]
-        format: Option<FormatArg>,
+        #[command(flatten)]
+        project: ProjectArgs,
     },
 
     /// Create a default .phpantom.toml configuration file.
@@ -193,6 +163,52 @@ enum Command {
         #[arg(long)]
         no_confirm: bool,
     },
+}
+
+/// The options every project-wide subcommand takes.
+#[derive(clap::Args)]
+struct ProjectArgs {
+    /// Disable coloured output.
+    #[arg(long)]
+    no_colour: bool,
+
+    /// Project root directory. Defaults to the current working directory.
+    #[arg(long, value_name = "DIR")]
+    project_root: Option<std::path::PathBuf>,
+
+    /// Output format. When running in GitHub Actions the default
+    /// automatically includes workflow annotations alongside the
+    /// human-readable output.
+    #[arg(long, value_name = "FORMAT")]
+    format: Option<FormatArg>,
+}
+
+/// The settled form of [`ProjectArgs`].
+struct ProjectOptions {
+    workspace_root: std::path::PathBuf,
+    use_colour: bool,
+    output_format: phpantom_lsp::analyse::OutputFormat,
+}
+
+impl ProjectArgs {
+    /// Settle the root (exiting when the current directory is unknown),
+    /// the colour choice, and the output format.
+    fn resolve(self) -> ProjectOptions {
+        let workspace_root = self
+            .project_root
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| {
+                eprintln!("Error: cannot determine project root directory");
+                std::process::exit(1);
+            });
+        ProjectOptions {
+            workspace_root,
+            use_colour: !self.no_colour && atty_stdout(),
+            output_format: self
+                .format
+                .map_or(phpantom_lsp::analyse::OutputFormat::Table, Into::into),
+        }
+    }
 }
 
 /// Minimum severity level for the analyze command.
@@ -327,24 +343,15 @@ async fn async_main() {
         Some(Command::Analyze {
             paths,
             severity,
-            no_colour,
-            project_root,
-            format,
+            project,
             debug,
             verbose,
         }) => {
-            let workspace_root = project_root
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_else(|| {
-                    eprintln!("Error: cannot determine project root directory");
-                    std::process::exit(1);
-                });
-            let use_colour = !no_colour && atty_stdout();
-
-            let output_format = match format {
-                Some(f) => f.into(),
-                None => phpantom_lsp::analyse::OutputFormat::Table,
-            };
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
 
             let options = phpantom_lsp::analyse::AnalyseOptions {
                 workspace_root,
@@ -368,22 +375,13 @@ async fn async_main() {
             rules,
             dry_run,
             with_phpstan,
-            no_colour,
-            project_root,
-            format,
+            project,
         }) => {
-            let workspace_root = project_root
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_else(|| {
-                    eprintln!("Error: cannot determine project root directory");
-                    std::process::exit(1);
-                });
-            let use_colour = !no_colour && atty_stdout();
-
-            let output_format = match format {
-                Some(f) => f.into(),
-                None => phpantom_lsp::analyse::OutputFormat::Table,
-            };
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
 
             let options = phpantom_lsp::fix::FixOptions {
                 workspace_root,
@@ -403,26 +401,20 @@ async fn async_main() {
             from,
             to,
             dry_run,
-            no_colour,
-            project_root,
-            format,
+            project,
         }) => {
-            let workspace_root = project_root
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_else(|| {
-                    eprintln!("Error: cannot determine project root directory");
-                    std::process::exit(1);
-                });
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
             let options = phpantom_lsp::move_cli::MoveOptions {
                 from,
                 to,
                 workspace_root,
                 dry_run,
-                use_colour: !no_colour && atty_stdout(),
-                output_format: match format {
-                    Some(f) => f.into(),
-                    None => phpantom_lsp::analyse::OutputFormat::Table,
-                },
+                use_colour,
+                output_format,
                 global_config: phpantom_lsp::config::global_config_path(),
             };
             let exit_code = phpantom_lsp::move_cli::run(options).await;

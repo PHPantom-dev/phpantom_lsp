@@ -95,97 +95,20 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         .unwrap_or(4);
 
     // ── Phase 1: Parse all files (parallel) ─────────────────────────
-    // Read each file from disk and call `update_ast`.  Store the
-    // (uri, content) pairs so Phase 2 can reuse them without re-reading.
+    // Keep the (uri, content) pairs so Phase 2 can reuse them without
+    // re-reading.
     //
     // Parsing is fast, so the progress bar is drawn at 0% before Phase 1
     // and only advances during Phase 2 (the expensive diagnostic pass).
     if show_progress {
-        eprint!("\r\x1b[2K {}", progress_bar(0, file_count));
+        eprint!("\r\x1b[2K {}", progress_bar(0, file_count, ""));
     }
     let parse_t0 = Instant::now();
-    let next_idx = AtomicUsize::new(0);
-
-    let file_data: Vec<Option<(String, String)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|worker| {
-                let backend = &backend;
-                let next_idx = &next_idx;
-                let files = &files;
-                std::thread::Builder::new()
-                    .name("index-worker".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let mut entries: Vec<(usize, String, String)> = Vec::new();
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-
-                            let file_path = &files[i];
-                            if debug && verbosity >= 2 {
-                                let display =
-                                    file_path.strip_prefix(root).unwrap_or(file_path).display();
-                                eprintln!("[w{worker:02}] parse {display}");
-                            }
-                            let content = match std::fs::read_to_string(file_path) {
-                                Ok(c) => c,
-                                Err(_) => continue,
-                            };
-
-                            let uri = crate::util::path_to_uri(file_path);
-                            backend.update_ast(&uri, &content);
-                            entries.push((i, uri, content));
-                        }
-                        entries
-                    })
-                    .expect("failed to spawn index-worker thread")
-            })
-            .collect();
-
-        // Collect into an indexed vec so Phase 2 can iterate in the
-        // same order as `files`.
-        let mut indexed: Vec<Option<(String, String)>> = (0..file_count).map(|_| None).collect();
-        for handle in handles {
-            for (i, uri, content) in handle.join().unwrap_or_default() {
-                indexed[i] = Some((uri, content));
-            }
-        }
-        indexed
-    });
+    let file_data = super::parse_user_files(&backend, root, &files, debug && verbosity >= 2);
     let parse_elapsed = parse_t0.elapsed();
     let populate_t0 = Instant::now();
 
-    // ── Discover the configured Laravel date class ──────────────────
-    // The `now()`/`today()` helpers and the Date facade / DateFactory
-    // resolve to the class selected by `Date::use()` (defaulting to
-    // `Illuminate\Support\Carbon`).  Discovery reads project service
-    // providers, so it must run after Phase 1 has parsed every user file.
-    // The LSP does the equivalent in its `initialized` handler; without
-    // this call the helpers would resolve to nothing here, producing
-    // false-positive return-type diagnostics.
-    if backend.resolved_class_cache.read().is_laravel() {
-        backend.build_laravel_date_class();
-        // Discover config files, view/translation directories, and route
-        // files registered by service providers so that config(), view(),
-        // trans(), and route() string keys resolve the same way they do in
-        // the LSP (which builds these in its `initialized` handler).
-        backend.build_provider_resources();
-        // Discover the Eloquent morph map so alias strings are validated the
-        // same way here as in the LSP.
-        backend.build_laravel_morph_map_index();
-        // Discover the gate abilities and policy map so authorization strings
-        // are validated the same way here as in the LSP.
-        backend.build_laravel_gate_index();
-        // Scan the whole FQN → URI index for Artisan commands and for macro
-        // registrations.  `update_ast` only refreshes these from the files it
-        // parses, which here is the project's own source, so without a full
-        // scan the indexes hold no vendor entries and every framework command
-        // name and vendor-registered macro reads as unknown.
-        backend.build_laravel_command_index();
-        backend.build_laravel_macro_index();
-    }
+    super::discover_laravel_resources(&backend);
 
     // ── Phase 1.5: Eager class population ───────────────────────────
     // Pre-populate the resolved_class_cache by resolving every known
@@ -487,7 +410,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // not work that has merely been started.
                         let completed = done_count.fetch_add(1, Ordering::Relaxed) + 1;
                         if show_progress {
-                            eprint!("\r\x1b[2K {}", progress_bar(completed, file_count));
+                            eprint!("\r\x1b[2K {}", progress_bar(completed, file_count, ""));
                         }
                         if debug && verbosity >= 1 {
                             let display =
@@ -544,7 +467,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     });
 
     if show_progress {
-        eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count));
+        eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count, ""));
     }
     if verbosity >= 1 {
         // Every phase is listed, including the class population between
@@ -582,7 +505,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // ── 5. Render output ────────────────────────────────────────────
     if all_file_diagnostics.is_empty() {
         match output_format {
-            OutputFormat::Table => print_success_box(file_count, options.use_colour),
+            OutputFormat::Table => print_success_box(" [OK] No errors ", options.use_colour),
             OutputFormat::Github => {} // no output on success
             OutputFormat::Json => print_json_output(&[], 0),
         }

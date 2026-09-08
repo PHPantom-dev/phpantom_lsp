@@ -326,25 +326,9 @@ pub(crate) fn walk(content: &str) -> Balance {
 
     let regions = inert_regions(content, true);
     let masked = mask_regions(content, &regions);
-    let bytes = masked.as_bytes();
 
     let mut tokens: Vec<Token<Opened, Closer>> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'@' {
-            i += 1;
-            continue;
-        }
-        let Some((name, args)) = directive_at(&masked, i) else {
-            i += 1;
-            continue;
-        };
-        let span = i..i + 1 + name.len();
-        // Continue past the argument list, so a directive name written
-        // inside one (`@include('partials.@endif')`) is not read as a
-        // directive of its own.
-        i = args.as_ref().map_or(span.end, |args| args.end);
-
+    for Directive { name, span, args } in directives(&masked) {
         if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
             if opens_block(block, &masked, args.as_ref()) {
                 tokens.push(Token::Open(Opened { block, span, args }));
@@ -465,6 +449,40 @@ pub(crate) fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
         .unwrap_or_default()
 }
 
+/// One directive of a template, as [`directives`] yields it.
+pub(crate) struct Directive {
+    pub(crate) name: &'static str,
+    /// The `@` and the name, without the argument list.
+    pub(crate) span: Span,
+    /// The argument list, parentheses included, when it has one.
+    pub(crate) args: Option<Span>,
+}
+
+/// Every directive in `masked`, in document order.
+///
+/// `masked` is the template with its inert regions blanked out by
+/// [`mask_regions`], so nothing written in a comment, a `@verbatim`, or a
+/// `@php` block is yielded. The scan resumes past each directive's
+/// argument list, so a name written inside one
+/// (`@include('partials.@endif')`) is not read as a directive of its own.
+pub(crate) fn directives(masked: &str) -> impl Iterator<Item = Directive> + '_ {
+    let bytes = masked.as_bytes();
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        while let Some(at) = bytes[i..].iter().position(|byte| *byte == b'@') {
+            i += at;
+            let Some((name, args)) = directive_at(masked, i) else {
+                i += 1;
+                continue;
+            };
+            let span = i..i + 1 + name.len();
+            i = args.as_ref().map_or(span.end, |args| args.end);
+            return Some(Directive { name, span, args });
+        }
+        None
+    })
+}
+
 /// The directive at `at` (which is on an `@`), and the byte range of its
 /// argument list, parentheses included, when it has one.
 ///
@@ -472,7 +490,7 @@ pub(crate) fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
 /// glued to a preceding word is not a directive: an `@production` in
 /// `admin@production.example` compiles to nothing, and `@@if` is the escape
 /// for a literal `@if`.
-pub(crate) fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
+fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
     let bytes = content.as_bytes();
     if at > 0 && (bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1])) {
         return None;
@@ -652,6 +670,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The stream resumes past each argument list, so a directive name
+    /// written inside one belongs to that argument list rather than
+    /// being a directive of its own.
+    #[test]
+    fn a_directive_name_inside_an_argument_list_is_not_yielded() {
+        let blade = "@include('partials.@endif')\n@if ($ok)\n@endif\n";
+        let found: Vec<_> = directives(blade)
+            .map(|directive| {
+                (
+                    directive.name,
+                    &blade[directive.span],
+                    directive.args.map(|args| &blade[args]),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("include", "@include", Some("('partials.@endif')")),
+                ("if", "@if", Some("($ok)")),
+                ("endif", "@endif", None),
+            ]
+        );
     }
 
     /// `block_pairs` spans as `(name, opener_start, closer_end)` triples,

@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use crate::Backend;
+use crate::test_fixtures::apply_edits;
 use crate::virtual_members::laravel::extract_macro_registrations;
 use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
@@ -111,42 +112,6 @@ fn edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
             OneOf::Right(e) => e.text_edit.clone(),
         })
         .collect()
-}
-
-/// Apply a set of text edits to source text and return the result.
-/// Edits must not overlap; they are applied from last to first.
-fn apply_edits(source: &str, edits: &[TextEdit]) -> String {
-    let mut sorted: Vec<_> = edits.to_vec();
-    // Sort by start position descending so we can apply from the end.
-    sorted.sort_by(|a, b| {
-        b.range
-            .start
-            .line
-            .cmp(&a.range.start.line)
-            .then(b.range.start.character.cmp(&a.range.start.character))
-    });
-
-    let lines: Vec<&str> = source.lines().collect();
-    let mut result = source.to_string();
-
-    for edit in &sorted {
-        let start_offset = line_col_to_offset(&lines, edit.range.start);
-        let end_offset = line_col_to_offset(&lines, edit.range.end);
-        result.replace_range(start_offset..end_offset, &edit.new_text);
-    }
-
-    result
-}
-
-fn line_col_to_offset(lines: &[&str], pos: Position) -> usize {
-    let mut offset = 0;
-    for (i, line) in lines.iter().enumerate() {
-        if i == pos.line as usize {
-            return offset + pos.character as usize;
-        }
-        offset += line.len() + 1; // +1 for newline
-    }
-    offset
 }
 
 // ─── Variable Rename ────────────────────────────────────────────────────────

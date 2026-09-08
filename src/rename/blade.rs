@@ -7,10 +7,14 @@
 //! import is only valid at the top level and the template body is wrapped
 //! in a function.  The prologue it lands in has no template text behind
 //! it, so the reference recorded there translates back to no position at
-//! all.  The directive is scanned in the template's own text instead.
+//! all.  The directive is scanned in the template's own text instead, with
+//! the scanner in [`crate::blade::use_directive`].
 
 use tower_lsp::lsp_types::{Range, TextEdit};
 
+use crate::blade::use_directive::{
+    first_string_literal, group_members, imported_name, use_directive_arguments,
+};
 use crate::text_position::offset_to_position;
 
 /// Collect the edits that rewrite the names a template's `@use(...)`
@@ -67,94 +71,6 @@ pub(super) fn collect_use_directive_edits(
             );
         }
     }
-}
-
-/// Every `@use(...)` directive in `content`, as the byte offset of its
-/// argument list and the text of it (the parentheses excluded).
-fn use_directive_arguments(content: &str) -> impl Iterator<Item = (usize, &str)> {
-    let mut searched = 0;
-    std::iter::from_fn(move || {
-        loop {
-            let at = searched + content[searched..].find("@use")?;
-            searched = at + "@use".len();
-            // `@@use` is an escaped directive Blade prints verbatim, and
-            // `@used` is a different word entirely.
-            if content[..at].ends_with('@') {
-                continue;
-            }
-            let rest = &content[searched..];
-            let trimmed = rest.trim_start();
-            if !trimmed.starts_with('(') {
-                continue;
-            }
-            let open = searched + (rest.len() - trimmed.len());
-            let Some(close) = content[open..].find(')') else {
-                continue;
-            };
-            searched = open + close;
-            return Some((open + 1, &content[open + 1..open + close]));
-        }
-    })
-}
-
-/// The first quoted string in an argument list, as its byte offset within
-/// the list and its text with the quotes stripped.
-///
-/// `@use` takes the imported name first and an optional alias second, so
-/// the first string is the only one that names a class.
-fn first_string_literal(arguments: &str) -> Option<(usize, &str)> {
-    let open = arguments.find(['\'', '"'])?;
-    let quote = arguments.as_bytes()[open];
-    let close = open + 1 + arguments[open + 1..].find(quote as char)?;
-    Some((open + 1, &arguments[open + 1..close]))
-}
-
-/// The name a `@use` literal imports, as its byte offset within the
-/// literal and its text.
-///
-/// Strips the `function` / `const` modifier and an inline `as` alias, and
-/// for a group import answers the shared prefix rather than the braces.
-fn imported_name(literal: &str) -> Option<(usize, &str)> {
-    let mut at = literal.len() - literal.trim_start().len();
-    let mut rest = &literal[at..];
-
-    for modifier in ["function ", "const "] {
-        if let Some(stripped) = rest.strip_prefix(modifier) {
-            let trimmed = stripped.trim_start();
-            at += modifier.len() + (stripped.len() - trimmed.len());
-            rest = trimmed;
-            break;
-        }
-    }
-
-    let end = rest
-        .find(" as ")
-        .or_else(|| rest.find('{'))
-        .unwrap_or(rest.len());
-    let name = rest[..end].trim_end().trim_end_matches('\\');
-    (!name.is_empty()).then_some((at, name))
-}
-
-/// The members of a group import (`'App\Models\{Post, Comment}'`), as the
-/// byte offset of the braced list within the literal and each member's
-/// offset within that list.
-///
-/// `None` when the literal is not a group import.
-fn group_members(literal: &str) -> Option<(usize, Vec<(usize, &str)>)> {
-    let open = literal.find('{')?;
-    let close = open + literal[open..].find('}')?;
-    let list = &literal[open + 1..close];
-
-    let mut members = Vec::new();
-    let mut at = 0;
-    for member in list.split(',') {
-        let name = member.trim();
-        if !name.is_empty() {
-            members.push((at + (member.len() - member.trim_start().len()), name));
-        }
-        at += member.len() + 1;
-    }
-    Some((open + 1, members))
 }
 
 fn push_edit(content: &str, at: usize, from: &str, to: &str, edits: &mut Vec<TextEdit>) {

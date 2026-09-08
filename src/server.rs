@@ -1885,50 +1885,22 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let config = self.config();
-
-        // Read Composer metadata for require-dev detection and bin-dir.
-        let workspace_root = self.workspace.workspace_root.read().clone();
-        let composer_json: Option<composer::ComposerPackage> = workspace_root
-            .as_deref()
-            .and_then(composer::read_composer_package);
-        let bin_dir: Option<String> = composer_json.as_ref().map(composer::get_bin_dir);
-
-        // Resolve the formatting strategy: external tools, built-in, or disabled.
-        let strategy = formatting::resolve_strategy(
-            workspace_root.as_deref(),
-            &config.formatting,
-            composer_json.as_ref(),
-            bin_dir.as_deref(),
-        );
-
-        // Resolve the file path from the URI for config discovery.
-        let file_path = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok());
-        let file_path = match file_path {
-            Some(p) => p,
-            None => return Ok(None),
+        // External tools discover their config from the file's real path.
+        let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
+            return Ok(None);
+        };
+        let Some(content) = self.get_file_content(&uri) else {
+            return Ok(None);
         };
 
-        let content = match self.get_file_content(&uri) {
-            Some(c) => c,
-            None => return Ok(None),
-        };
-
-        let php_version = self.php_version();
-
-        // Execute the resolved formatting strategy on a blocking thread
-        // to avoid stalling the async runtime while external tools run.
-        let formatting_config = config.formatting.clone();
-        let shutdown_flag = Arc::clone(&self.shutdown_flag);
+        // Resolving the strategy reads composer.json and running it may
+        // spawn an external tool, so all of it stays off the async runtime.
+        let backend = self.clone_for_blocking();
         let result = run_blocking_cancel_safe("formatting", move || {
-            formatting::execute_strategy(
-                &strategy,
-                &content,
-                &file_path,
-                &formatting_config,
-                php_version,
-                &shutdown_flag,
-            )
+            let strategy = backend.resolve_formatting_strategy();
+            backend
+                .format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+                .map(|formatted| formatted.map(|text| formatting::compute_edits(&content, &text)))
         })
         .await;
 

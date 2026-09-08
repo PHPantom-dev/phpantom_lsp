@@ -175,16 +175,24 @@ edge cases, not a formal grammar.
 
 The directive-nesting indent pass is the one part of this design that
 translates cleanly to PHPantom, and we are better positioned to do it
-than blade-formatter was: `src/blade/directives.rs` already has the
-full directive table blade-formatter hardcodes in `indent.ts`, and
-unlike blade-formatter (which had to pull in a TextMate grammar +
-oniguruma WASM just to find directive tokens on a line), our
-preprocessor already tokenizes Blade source precisely. What's missing
-is (a) classifying each directive as indent-start / indent-end / else
-(mechanical, from the existing table) and (b) an HTML tag-depth
-counter interleaved with directive depth on the same line (open/close/
-void/self-closing elements) — new code, but a single self-contained
-pass, not a full HTML parser. Embedded `@php`/`{{ }}` expression
+than blade-formatter was. Unlike blade-formatter (which had to pull in
+a TextMate grammar + oniguruma WASM just to find directive tokens on a
+line), we already scan raw Blade source: `blade::balance::directives`
+yields every directive with its span and argument list,
+`blade::balance::BLOCKS` already pairs each opener with the closers
+Blade accepts for it (the same table blade-formatter hardcodes in
+`indent.ts`), `blade::signature::inert_regions` masks comments,
+`@verbatim`, and `@php` blocks, and `blade::component_tags::tag_spans`
+/ `lex_tag_attributes` read tags. Build on those. Do not build on the
+preprocessor: `preprocess_with_vars` is one 1,100-line lowering that
+emits PHP as it scans, not a tokenizer, and it is not to be refactored
+for this. What's missing is (a) marking the else-like directives
+(`@else`, `@elseif`, `@empty` inside `@forelse`, `@case`/`@default`)
+that dedent without closing, on top of the open/close pairing `BLOCKS`
+gives, and (b) an HTML tag-depth counter for plain elements
+(open/close/void/self-closing) interleaved with directive depth on the
+same line — new code, but a single self-contained pass, not a full HTML
+parser. Embedded `@php`/`{{ }}` expression
 formatting can reuse `mago`'s formatter on isolated snippets the same
 way diagnostics already isolate virtual-PHP buffers, rather than
 needing a second PHP formatter dependency like blade-formatter does.

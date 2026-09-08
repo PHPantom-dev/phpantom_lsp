@@ -3,10 +3,12 @@
 //! Every tool runs through [`crate::process::run_command_with_timeout`],
 //! which never inherits the server's stdin (so a child cannot steal bytes
 //! from the JSON-RPC pipe) and drains stdout/stderr while the child is
-//! alive.  File-based tools (php-cs-fixer, phpcbf) work on a sibling
-//! temp file so their config discovery finds the project rules; Pint is
-//! fed through stdin with `--stdin-filename`.
+//! alive.  A tool that rewrites its argument in place (php-cs-fixer,
+//! phpcbf) works on a sibling temp file so its config discovery finds the
+//! project rules; a tool that formats stdin (Pint) is told the real path
+//! with `--stdin-filename` for the same reason.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -14,17 +16,71 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use tempfile::NamedTempFile;
-use tower_lsp::lsp_types::TextEdit;
 
 use crate::config::FormattingConfig;
 
-use super::{DEFAULT_TIMEOUT_MS, ResolvedTool, compute_edits};
+use super::{DEFAULT_TIMEOUT_MS, ResolvedTool, Tool};
 
-/// Run the external tool pipeline on `content` and return `TextEdit`s.
+/// How a tool takes its input and hands back the result.
+enum Invocation {
+    /// Reads the content from stdin and writes the formatted result to
+    /// stdout.
+    Stdin,
+    /// Rewrites the file it is given in place, so it runs on a sibling
+    /// temp file that is read back afterwards.
+    SiblingFile,
+}
+
+impl Tool {
+    fn invocation(self) -> Invocation {
+        match self {
+            Tool::Pint => Invocation::Stdin,
+            Tool::PhpCsFixer | Tool::Phpcbf => Invocation::SiblingFile,
+        }
+    }
+
+    /// The command-line arguments, given the path of the file being
+    /// formatted: the real path for a stdin tool, the sibling temp file
+    /// for one that rewrites in place.
+    fn arguments(self, file_path: &Path) -> Vec<OsString> {
+        match self {
+            Tool::Pint => vec![format!("--stdin-filename={}", file_path.display()).into()],
+            Tool::PhpCsFixer => vec![
+                "fix".into(),
+                "--using-cache=no".into(),
+                "--quiet".into(),
+                "--no-interaction".into(),
+                file_path.into(),
+            ],
+            Tool::Phpcbf => vec!["--no-colors".into(), "-q".into(), file_path.into()],
+        }
+    }
+
+    /// Whether `code` is an exit code the tool uses for a successful run.
+    fn succeeded(self, code: i32) -> bool {
+        match self {
+            Tool::Pint => code == 0,
+            // php-cs-fixer exit codes (bitmask):
+            //   0 = OK
+            //   1 = general error / PHP version issue
+            //  16 = configuration error
+            //  32 = fixer configuration error
+            //  64 = exception
+            Tool::PhpCsFixer => code == 0,
+            // phpcbf exit codes:
+            //   0 = no fixes needed
+            //   1 = fixes applied (success)
+            //   2 = could not fix all errors
+            //   3+ = operational error
+            Tool::Phpcbf => matches!(code, 0 | 1),
+        }
+    }
+}
+
+/// Run the external tool pipeline on `content` and return the result.
 ///
 /// Each tool in the pipeline runs in sequence.  The output of one tool
-/// becomes the input for the next.  The final result is diffed against
-/// the original content to produce edits.
+/// becomes the input for the next.
 ///
 /// `file_path` is the real path of the file on disk, used so that
 /// sibling temp files land in the correct directory for tool config
@@ -35,17 +91,14 @@ pub(super) fn run_external_pipeline(
     file_path: &Path,
     config: &FormattingConfig,
     cancelled: &AtomicBool,
-) -> Result<Vec<TextEdit>, String> {
-    let timeout_ms = config.timeout.unwrap_or(DEFAULT_TIMEOUT_MS);
-    let timeout = Duration::from_millis(timeout_ms);
+) -> Result<String, String> {
+    let timeout = Duration::from_millis(config.timeout.unwrap_or(DEFAULT_TIMEOUT_MS));
 
     let mut current = content.to_string();
-
     for tool in tools {
         current = run_tool(tool, &current, file_path, timeout, cancelled)?;
     }
-
-    Ok(compute_edits(content, &current))
+    Ok(current)
 }
 
 fn run_tool(
@@ -55,143 +108,59 @@ fn run_tool(
     timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<String, String> {
-    match tool.name {
-        "php-cs-fixer" => run_php_cs_fixer(&tool.path, content, file_path, timeout, cancelled),
-        "phpcbf" => run_phpcbf(&tool.path, content, file_path, timeout, cancelled),
-        "pint" => run_pint(&tool.path, content, file_path, timeout, cancelled),
-        _ => Err(format!("Unknown formatting tool: {}", tool.name)),
-    }
-}
-
-/// Run php-cs-fixer on a sibling temp file and return the formatted content.
-///
-/// Command: `<tool> fix --using-cache=no --quiet --no-interaction <tempfile>`
-///
-/// php-cs-fixer modifies the file in-place.  Exit code 0 means success.
-fn run_php_cs_fixer(
-    tool_path: &Path,
-    content: &str,
-    file_path: &Path,
-    timeout: Duration,
-    cancelled: &AtomicBool,
-) -> Result<String, String> {
-    let temp = write_sibling_temp_file(file_path, content)?;
-
-    let result = crate::process::run_command_with_timeout(
-        Command::new(tool_path)
-            .arg("fix")
-            .arg("--using-cache=no")
-            .arg("--quiet")
-            .arg("--no-interaction")
-            .arg(temp.path()),
-        timeout,
-        cancelled,
-        "php-cs-fixer",
-        None,
-    );
-
-    let formatted = std::fs::read_to_string(temp.path())
-        .map_err(|e| format!("Failed to read formatted output: {}", e))?;
-
-    match result {
-        Ok(output) => {
-            // php-cs-fixer exit codes (bitmask):
-            //   0 = OK
-            //   1 = general error / PHP version issue
-            //  16 = configuration error
-            //  32 = fixer configuration error
-            //  64 = exception
-            if output.code == 0 {
-                Ok(formatted)
-            } else {
-                Err(format!(
-                    "php-cs-fixer exited with code {} (stderr: {})",
-                    output.code,
-                    output.stderr.trim()
-                ))
-            }
+    match tool.tool.invocation() {
+        Invocation::Stdin => {
+            let output = run(
+                tool,
+                &tool.tool.arguments(file_path),
+                Some(content),
+                timeout,
+                cancelled,
+            )?;
+            Ok(output.stdout)
         }
-        Err(e) => Err(e),
+        Invocation::SiblingFile => {
+            let temp = write_sibling_temp_file(file_path, content)?;
+            let result = run(
+                tool,
+                &tool.tool.arguments(temp.path()),
+                None,
+                timeout,
+                cancelled,
+            );
+            // Read back before checking the outcome: phpcbf reports partial
+            // fixes through a non-zero code and the file is what it wrote.
+            let formatted = std::fs::read_to_string(temp.path())
+                .map_err(|e| format!("Failed to read formatted output: {}", e))?;
+            result.map(|_| formatted)
+        }
     }
 }
 
-/// Run Pint via stdin and return the formatted content.
-///
-/// Command: `<tool> --stdin-filename=<file_path>`
-///
-/// Pint reads from stdin and writes the formatted output to stdout
-/// when `--stdin-filename` is provided.
-fn run_pint(
-    tool_path: &Path,
-    content: &str,
-    file_path: &Path,
+/// Run one tool and check its exit code.
+fn run(
+    tool: &ResolvedTool,
+    arguments: &[OsString],
+    stdin: Option<&str>,
     timeout: Duration,
     cancelled: &AtomicBool,
-) -> Result<String, String> {
+) -> Result<crate::process::CommandOutput, String> {
     let output = crate::process::run_command_with_timeout(
-        Command::new(tool_path).arg(format!("--stdin-filename={}", file_path.display())),
+        Command::new(&tool.path).args(arguments),
         timeout,
         cancelled,
-        "pint",
-        Some(content),
+        tool.tool.name(),
+        stdin,
     )?;
-
-    if output.code == 0 {
-        Ok(output.stdout)
+    if tool.tool.succeeded(output.code) {
+        Ok(output)
     } else {
         Err(format!(
-            "pint exited with code {} (stderr: {})",
+            "{} exited with code {} (stderr: {})",
+            tool.tool.name(),
             output.code,
             output.stderr.trim()
         ))
-    }
-}
-
-/// Run phpcbf on a sibling temp file and return the formatted content.
-///
-/// Command: `<tool> --no-colors -q <tempfile>`
-///
-/// phpcbf modifies the file in-place.
-fn run_phpcbf(
-    tool_path: &Path,
-    content: &str,
-    file_path: &Path,
-    timeout: Duration,
-    cancelled: &AtomicBool,
-) -> Result<String, String> {
-    let temp = write_sibling_temp_file(file_path, content)?;
-
-    let result = crate::process::run_command_with_timeout(
-        Command::new(tool_path)
-            .arg("--no-colors")
-            .arg("-q")
-            .arg(temp.path()),
-        timeout,
-        cancelled,
-        "phpcbf",
-        None,
-    );
-
-    let formatted = std::fs::read_to_string(temp.path())
-        .map_err(|e| format!("Failed to read formatted output: {}", e))?;
-
-    match result {
-        Ok(output) => {
-            // phpcbf exit codes:
-            //   0 = no fixes needed
-            //   1 = fixes applied (success)
-            //   2 = could not fix all errors
-            //   3+ = operational error
-            match output.code {
-                0 | 1 => Ok(formatted),
-                _ => Err(format!(
-                    "phpcbf exited with code {} (stderr: {})",
-                    output.code,
-                    output.stderr.trim()
-                )),
-            }
-        }
-        Err(e) => Err(e),
     }
 }
 

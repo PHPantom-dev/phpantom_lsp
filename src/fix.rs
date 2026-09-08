@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::analyse::OutputFormat;
+use crate::analyse::{OutputFormat, print_success_box, progress_bar};
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
 use crate::text_position::position_to_byte_offset;
@@ -263,47 +263,7 @@ pub async fn run(options: FixOptions) -> i32 {
     if use_colour && output_format == OutputFormat::Table {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Parsing"));
     }
-    let next_idx = AtomicUsize::new(0);
-
-    let file_data: Vec<Option<(String, String, PathBuf)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|_| {
-                let backend = &backend;
-                let next_idx = &next_idx;
-                let files = &files;
-                s.spawn(move || {
-                    let mut entries: Vec<(usize, String, String, PathBuf)> = Vec::new();
-                    loop {
-                        let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                        if i >= file_count {
-                            break;
-                        }
-
-                        let file_path = &files[i];
-                        let content = match std::fs::read_to_string(file_path) {
-                            Ok(c) => c,
-                            Err(_) => continue,
-                        };
-
-                        let uri = crate::util::path_to_uri(file_path);
-                        backend.update_ast(&uri, &content);
-                        entries.push((i, uri, content, file_path.clone()));
-                    }
-                    entries
-                })
-            })
-            .collect();
-
-        let mut indexed: Vec<Option<(String, String, PathBuf)>> =
-            (0..file_count).map(|_| None).collect();
-        for handle in handles {
-            for (i, uri, content, path) in handle.join().unwrap_or_default() {
-                indexed[i] = Some((uri, content, path));
-            }
-        }
-        indexed
-    });
-
+    let file_data = crate::analyse::parse_user_files(&backend, root, &files, false);
     if use_colour && output_format == OutputFormat::Table {
         eprint!(
             "\r\x1b[2K {}\n",
@@ -311,14 +271,9 @@ pub async fn run(options: FixOptions) -> i32 {
         );
     }
 
-    // Discover the configured Laravel date class now that every user file
-    // is parsed, so the `now()`/`today()` helpers and the Date facade
-    // resolve to a concrete class instead of nothing.  Matches the LSP
-    // `initialized` handler and the `analyze` pipeline; without it, fixes
-    // could be driven by false-positive return-type diagnostics.
-    if backend.resolved_class_cache.read().is_laravel() {
-        backend.build_laravel_date_class();
-    }
+    // Without the discovery the LSP does on `initialized`, fixes could be
+    // driven by false-positive diagnostics.
+    crate::analyse::discover_laravel_resources(&backend);
 
     // ── Phase 2: Fix files (parallel) ───────────────────────────────
     if use_colour && output_format == OutputFormat::Table {
@@ -335,64 +290,69 @@ pub async fn run(options: FixOptions) -> i32 {
                 let file_data = &file_data;
                 let files = &files;
                 let native_rules = &native_rules;
-                s.spawn(move || {
-                    let mut results: Vec<FileFixResult> = Vec::new();
-                    loop {
-                        let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                        if i >= file_count {
-                            break;
-                        }
-                        if use_colour
-                            && output_format == OutputFormat::Table
-                            && i.is_multiple_of(20)
-                        {
-                            eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count, "Fixing"));
-                        }
+                // The collectors walk types, which nests deeply enough to
+                // overflow a spawned thread's default stack.
+                std::thread::Builder::new()
+                    .name("fix-worker".into())
+                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                    .spawn_scoped(s, move || {
+                        let mut results: Vec<FileFixResult> = Vec::new();
+                        loop {
+                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
+                            if i >= file_count {
+                                break;
+                            }
+                            if use_colour
+                                && output_format == OutputFormat::Table
+                                && i.is_multiple_of(20)
+                            {
+                                eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count, "Fixing"));
+                            }
 
-                        let (uri, content, abs_path) = match &file_data[i] {
-                            Some(tuple) => (&tuple.0, &tuple.1, &tuple.2),
-                            None => continue,
-                        };
+                            let Some((uri, content)) = &file_data[i] else {
+                                continue;
+                            };
 
-                        let _parse_guard = with_parse_cache(content);
-                        let _cache_guard =
-                            with_active_resolved_class_cache(&backend.resolved_class_cache);
+                            let _parse_guard = with_parse_cache(content);
+                            let _cache_guard =
+                                with_active_resolved_class_cache(&backend.resolved_class_cache);
 
-                        let mut current_content = content.clone();
-                        let mut all_fixes: Vec<AppliedFix> = Vec::new();
+                            let mut current_content = content.clone();
+                            let mut all_fixes: Vec<AppliedFix> = Vec::new();
 
-                        for rule in native_rules.iter() {
-                            match *rule {
-                                "unused_import" => {
-                                    let (new_content, fixes) =
-                                        fix_unused_imports(backend, uri, &current_content);
-                                    current_content = new_content;
-                                    all_fixes.extend(fixes);
-                                }
-                                _ => {
-                                    // Future rules go here.
+                            for rule in native_rules.iter() {
+                                match *rule {
+                                    "unused_import" => {
+                                        let (new_content, fixes) =
+                                            fix_unused_imports(backend, uri, &current_content);
+                                        current_content = new_content;
+                                        all_fixes.extend(fixes);
+                                    }
+                                    _ => {
+                                        // Future rules go here.
+                                    }
                                 }
                             }
-                        }
 
-                        let changed = current_content != *content;
-                        if changed {
-                            let display_path = files[i]
-                                .strip_prefix(root)
-                                .unwrap_or(&files[i])
-                                .to_string_lossy()
-                                .to_string();
-                            results.push(FileFixResult {
-                                display_path,
-                                abs_path: abs_path.clone(),
-                                new_content: current_content,
-                                changed,
-                                fixes: all_fixes,
-                            });
+                            let changed = current_content != *content;
+                            if changed {
+                                let display_path = files[i]
+                                    .strip_prefix(root)
+                                    .unwrap_or(&files[i])
+                                    .to_string_lossy()
+                                    .to_string();
+                                results.push(FileFixResult {
+                                    display_path,
+                                    abs_path: files[i].clone(),
+                                    new_content: current_content,
+                                    changed,
+                                    fixes: all_fixes,
+                                });
+                            }
                         }
-                    }
-                    results
-                })
+                        results
+                    })
+                    .expect("failed to spawn fix-worker thread")
             })
             .collect();
 
@@ -417,7 +377,7 @@ pub async fn run(options: FixOptions) -> i32 {
 
     if sorted_results.is_empty() {
         match output_format {
-            OutputFormat::Table => print_success_box(use_colour),
+            OutputFormat::Table => print_success_box(" [OK] No fixable issues found ", use_colour),
             OutputFormat::Github => {} // no output on success
             OutputFormat::Json => print_fix_json(&[], 0, dry_run),
         }
@@ -523,21 +483,6 @@ fn print_fix_table(path: &str, fixes: &[AppliedFix], use_colour: bool) {
 
     println!("{sep}");
     println!();
-}
-
-/// Print the success box (nothing to fix).
-fn print_success_box(use_colour: bool) {
-    let text = " [OK] No fixable issues found ";
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!(" \x1b[30;42m{text}\x1b[0m");
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
 }
 
 /// Print the dry-run summary box.
@@ -655,22 +600,6 @@ fn print_fix_json(results: &[FileFixResult], total_fixes: usize, dry_run: bool) 
 
     out.push('}');
     println!("{out}");
-}
-
-const BAR_WIDTH: usize = 28;
-
-/// Render a progress bar with a phase label.
-fn progress_bar(done: usize, total: usize, label: &str) -> String {
-    let pct = (done * 100).checked_div(total).unwrap_or(100);
-    let filled = (done * BAR_WIDTH).checked_div(total).unwrap_or(BAR_WIDTH);
-    let empty = BAR_WIDTH - filled;
-
-    format!(
-        " {done:>width$}/{total} [{bar_fill}{bar_empty}] {pct:>3}% {label}",
-        width = total.to_string().len(),
-        bar_fill = "\u{2593}".repeat(filled),
-        bar_empty = "\u{2591}".repeat(empty),
-    )
 }
 
 #[cfg(test)]

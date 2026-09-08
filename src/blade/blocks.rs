@@ -9,9 +9,9 @@
 //!
 //! This scan reads the raw Blade source and records every such name with
 //! the span it occupies, so the two halves can be paired across files. It
-//! walks the directive stream the way [`super::balance`] does — the same
-//! masked-region scan, the same `@`-anchored walk — because a name written
-//! in a comment, a `@verbatim` block, or a `@php` block names nothing.
+//! reads the same directive stream [`super::balance`] does, from the same
+//! masked-region scan, because a name written in a comment, a `@verbatim`
+//! block, or a `@php` block names nothing.
 //!
 //! Alongside the names it records what else the template renders
 //! (`@extends`, the `@include` family), since a section's other half is
@@ -22,7 +22,7 @@
 
 use std::ops::Range;
 
-use super::balance::{directive_at, inside};
+use super::balance::{Directive, directives, inside};
 use super::signature::{inert_regions, mask_regions, split_top_level_args};
 
 /// A byte range of the original Blade source.
@@ -301,26 +301,16 @@ pub(crate) fn analyse(content: &str) -> TemplateBlocks {
     }
 
     let masked = mask_regions(content, &inert_regions(content, true));
-    let bytes = masked.as_bytes();
     // The `@section`s that are open, so the `@show` that closes one can go
     // back and mark it as rendering itself.
     let mut open_sections: Vec<Option<usize>> = Vec::new();
 
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'@' {
-            i += 1;
-            continue;
-        }
-        let Some((directive, args)) = directive_at(&masked, i) else {
-            i += 1;
-            continue;
-        };
-        let directive_span = i..i + 1 + directive.len();
-        // Continue past the argument list so a directive name written
-        // inside one is not read as a directive of its own.
-        i = args.as_ref().map_or(directive_span.end, |args| args.end);
-
+    for Directive {
+        name: directive,
+        span: directive_span,
+        args,
+    } in directives(&masked)
+    {
         if let Some((_, renders)) = SECTION_CLOSERS
             .iter()
             .find(|(closer, _)| *closer == directive)
