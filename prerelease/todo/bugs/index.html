@@ -939,17 +939,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b320-an-unclosed-echo-swallows-the-end-of-the-block-it-sits-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B320. An unclosed echo swallows the <code>@end…</code> of the block it sits in
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b321-echo-delimiter-hover-fires-on-that-is-not-an-echo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1544,17 +1533,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b320-an-unclosed-echo-swallows-the-end-of-the-block-it-sits-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B320. An unclosed echo swallows the <code>@end…</code> of the block it sits in
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b321-echo-delimiter-hover-fires-on-that-is-not-an-echo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1626,37 +1604,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b320-an-unclosed-echo-swallows-the-end-of-the-block-it-sits-in">B320. An unclosed echo swallows the <code>@end…</code> of the block it sits in<a class="headerlink" href="#b320-an-unclosed-echo-swallows-the-end-of-the-block-it-sits-in" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>An echo opener whose terminator lies further down the file keeps the
-preprocessor in echo mode across every line in between, and any
-directive it passes over is consumed as part of the expression rather
-than compiled. When one of those is the <code>@endif</code>/<code>@endforeach</code> closing
-a block the echo sits inside, the emitted <code>if (…):</code> never closes and
-the whole template comes back as a run of syntax errors, so nothing in
-it resolves:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@if($showName)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    &lt;p&gt;{{ $user-&gt;name
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>@endif
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>{{ $footer }}
-</code></pre></div>
-<p><code>preprocess_with_vars</code> already has the safety net for the case where
-nothing in the file could close the echo at all: <code>echo_closes_at_eol</code>
-ends it at the end of its line so only that line degrades. The net does
-not fire here, because a later line does contain <code>}}</code> — it just belongs
-to a different echo.</p>
-<p>Blade itself does not have this problem: <code>compileString</code> runs the
-statement compiler before the echo compiler, so the directives are
-already <code>&lt;?php endif; ?&gt;</code> by the time the echo regex reads across them
-and the emitted PHP stays balanced whatever the regex swallows. The fix
-is to give the preprocessor the same ordering: a directive token ends
-the echo it appears inside rather than being absorbed by it.</p>
-<p>All three echo forms are affected: <code>{{ … }}</code>, <code>{!! … !!}</code>, and the
-<code>@</code>-escaped <code>@{{ … }}</code> (which reports fewer errors only because it
-emits no PHP of its own).</p>
-<p><strong>Where to look:</strong> <code>src/blade/preprocessor.rs</code>
-(<code>preprocess_with_vars</code>, the <code>Mode::Php</code>/<code>Mode::EscapedEcho</code> arms and
-the <code>echo_closes_at_eol</code> end-of-line recovery).</p>
 <h3 id="b321-echo-delimiter-hover-fires-on-that-is-not-an-echo">B321. Echo-delimiter hover fires on <code>{{</code> that is not an echo<a class="headerlink" href="#b321-echo-delimiter-hover-fires-on-that-is-not-an-echo" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p><code>blade_echo_delimiter_col</code> decides whether the cursor is on an echo
