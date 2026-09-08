@@ -319,7 +319,7 @@ impl DiagnosticsConfig {
 #[serde(default)]
 pub struct FormattingConfig {
     /// Explicitly disable all formatting
-    pub disabled: Option<bool>,
+    pub enabled: Option<bool>,
     /// Command (path or name) to run php-cs-fixer.
     ///
     /// - `None` (default) — check `require-dev` in `composer.json`;
@@ -358,7 +358,7 @@ impl FormattingConfig {
 
     /// Whether formatting is explicitly disabled
     pub fn is_disabled(&self) -> bool {
-        self.disabled == Some(true)
+        self.enabled == Some(false)
     }
 }
 
@@ -1515,7 +1515,7 @@ paths = ["database/schema", "extra/schema.sql"]
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(
             &path,
-            "[formatting]\ndisabled = true\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
+            "[formatting]\nenabled = false\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
         )
         .unwrap();
         let config = load_config(dir.path()).unwrap();
