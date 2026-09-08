@@ -10,23 +10,13 @@
 //! string attribute never appear in it at all. This module scans the
 //! original Blade source directly instead.
 
+use std::borrow::Cow;
 use std::ops::Range;
-use std::path::PathBuf;
 
-use crate::Backend;
 use crate::php_type::PhpType;
 
+use super::pairing::{self, Pair, Pairing, Stray, Token};
 use super::signature::mask_inert_regions;
-
-/// One anonymous-component registration in effect: the tag prefix it is
-/// addressed under, and the view directory (dot notation) its templates
-/// live in.
-///
-/// `Blade::anonymousComponentNamespace('components', 'webshop')` is
-/// `("webshop", "components")`.  An empty prefix is the prefix-less
-/// `Blade::anonymousComponentPath()` registration, whose templates every
-/// un-namespaced tag can address.
-pub(crate) type AnonymousNamespace = (String, String);
 
 /// One `<x-…>` tag occurrence whose tag name matched one of the requested
 /// component names.
@@ -49,228 +39,6 @@ pub(crate) struct ComponentTagCall {
     /// generic `blade_directive` marker elsewhere in the file cannot shift
     /// this sequence out of sync.
     pub(crate) bound: Vec<(String, usize)>,
-}
-
-impl Backend {
-    /// The anonymous-component registrations in effect, as
-    /// [`AnonymousNamespace`] pairs — what
-    /// `ComponentTagCompiler::guessAnonymousComponentUsingNamespaces` and
-    /// its path-keyed twin read before falling back to `components.`.
-    ///
-    /// A path registration names a directory on disk rather than a view
-    /// prefix, so it is rewritten as the view directory that directory sits
-    /// in.  One outside every configured view root is dropped: no template
-    /// under it has a view name to be matched against in the first place.
-    pub(crate) fn anonymous_component_namespaces(&self) -> Vec<AnonymousNamespace> {
-        let (mut namespaces, paths) = {
-            let resources = self.laravel_provider_resources.read();
-            (
-                resources.anonymous_component_namespaces.clone(),
-                resources.anonymous_component_paths.clone(),
-            )
-        };
-        if paths.is_empty() {
-            return namespaces;
-        }
-        let roots: Vec<PathBuf> = self
-            .laravel_view_roots()
-            .into_iter()
-            .map(|root| root.canonicalize().unwrap_or(root))
-            .collect();
-        for (prefix, path) in paths {
-            let path = path.canonicalize().unwrap_or(path);
-            let directory = roots.iter().find_map(|root| {
-                let rel = path.strip_prefix(root).ok()?;
-                Some(rel.to_string_lossy().replace(['/', '\\'], "."))
-            });
-            if let Some(directory) = directory {
-                namespaces.push((prefix, directory));
-            }
-        }
-        namespaces
-    }
-
-    /// The view an `<x-…>` tag with no class behind it renders: an
-    /// anonymous component is a template, so its name is the closest
-    /// thing it has to a class name.
-    ///
-    /// The first candidate the project ships wins, in the order
-    /// [`view_names_for_component_tag`] tries them.
-    ///
-    /// `anonymous` is passed in rather than read here because resolving
-    /// the registrations touches the filesystem, and a caller asking
-    /// about every tag in a file only has to do that once.
-    pub(crate) fn anonymous_component_view(
-        &self,
-        tag: &str,
-        anonymous: &[AnonymousNamespace],
-    ) -> Option<String> {
-        let discovery = self.blade_discovery();
-        view_names_for_component_tag(tag, anonymous)
-            .into_iter()
-            .find(|name| discovery.views.contains_key(name))
-    }
-}
-
-/// The bare tag names (without the `x-` prefix) a Blade file's own view
-/// names make it addressable by: `components.brand.boxes` becomes
-/// `brand.boxes` (so `<x-brand.boxes>` matches it), and a namespaced name
-/// drops the `components.` segment after the namespace the same way
-/// Laravel's `ComponentTagCompiler::guessViewName` inserts it —
-/// `webshop::components.brand.boxes` is what `<x-webshop::brand.boxes>`
-/// compiles to.
-///
-/// `anonymous` adds the directories a project registered a tag prefix for,
-/// under which a view is addressed without the `components.` convention at
-/// all: with `('webshop', 'components')` registered,
-/// `components.pages.boxes` is also what `<x-webshop::pages.boxes>` names.
-///
-/// A view name that no rule makes a tag of contributes nothing.
-pub(crate) fn component_tag_names(
-    view_names: &[String],
-    anonymous: &[AnonymousNamespace],
-) -> Vec<String> {
-    let mut tags = Vec::new();
-    for name in view_names {
-        if let Some(tag) = component_tag_for_view_name(name) {
-            push_tag(tag, &mut tags);
-        }
-        for (prefix, directory) in anonymous {
-            let Some(rest) = strip_view_directory(name, directory) else {
-                continue;
-            };
-            push_tag(
-                if prefix.is_empty() {
-                    rest.to_string()
-                } else {
-                    format!("{prefix}::{rest}")
-                },
-                &mut tags,
-            );
-        }
-    }
-    tags
-}
-
-/// Add a tag and, for the view of an index component, the shorter tag it
-/// also answers to.
-///
-/// Laravel falls back to `{view}.index` and to `{view}.{last segment}` when
-/// a component's own view name does not exist, so `components.card.index`
-/// and `components.card.card` are both what `<x-card>` reaches.
-fn push_tag(tag: String, tags: &mut Vec<String>) {
-    if let Some(shorter) = index_component_tag(&tag)
-        && !tags.contains(&shorter)
-    {
-        tags.push(shorter);
-    }
-    if !tags.contains(&tag) {
-        tags.push(tag);
-    }
-}
-
-/// The tag an index component's view name is *also* addressable by:
-/// `card.index` and `card.card` both answer to `<x-card>`.
-fn index_component_tag(tag: &str) -> Option<String> {
-    let (head, last) = tag.rsplit_once('.')?;
-    if head.is_empty() || head.ends_with("::") {
-        return None;
-    }
-    let previous = head.rsplit_once('.').map_or(head, |(_, seg)| seg);
-    let previous = previous.rsplit_once("::").map_or(previous, |(_, seg)| seg);
-    (last == "index" || last == previous).then(|| head.to_string())
-}
-
-/// The component name a view under a registered directory is addressed by,
-/// or `None` for a view that does not sit under it.
-fn strip_view_directory<'a>(view_name: &'a str, directory: &str) -> Option<&'a str> {
-    if directory.is_empty() {
-        return Some(view_name);
-    }
-    view_name.strip_prefix(directory)?.strip_prefix('.')
-}
-
-/// The tag name a view makes a component addressable by, or `None` for a
-/// view outside the `components.` namespace, which no `<x-…>` tag names.
-///
-/// A namespaced view keeps its namespace (`nightshade::calendar`), and
-/// drops a `components.` segment a package puts its component views under,
-/// since the class behind them sits directly in the registered namespace.
-pub(crate) fn component_tag_for_view_name(view_name: &str) -> Option<String> {
-    match view_name.split_once("::") {
-        Some((namespace, rest)) => {
-            let bare = rest.strip_prefix("components.").unwrap_or(rest);
-            Some(format!("{namespace}::{bare}"))
-        }
-        None => view_name.strip_prefix("components.").map(str::to_string),
-    }
-}
-
-/// The inverse of [`component_tag_names`]: the view names a tag written as
-/// `<x-{tag}>` can resolve to, in the order Laravel's
-/// `ComponentTagCompiler::componentClass` tries them — the `components.`
-/// convention first (with the `components.` prefix going after the
-/// namespace when the tag has one), then each registered anonymous
-/// directory whose prefix the tag is written under.
-///
-/// Each of those is tried as itself, then as its `.index` and repeated-last
-/// segment forms, which is how an index component is addressed by its
-/// directory alone.
-pub(crate) fn view_names_for_component_tag(
-    tag: &str,
-    anonymous: &[AnonymousNamespace],
-) -> Vec<String> {
-    let mut names = Vec::new();
-    push_view_name(guess_view_name(tag, "components"), tag, &mut names);
-    for (prefix, directory) in anonymous {
-        let Some(rest) = strip_tag_prefix(tag, prefix) else {
-            continue;
-        };
-        push_view_name(guess_view_name(rest, directory), rest, &mut names);
-    }
-    names
-}
-
-/// Laravel's `ComponentTagCompiler::guessViewName`: the directory becomes
-/// the view's prefix, and goes after the namespace when the component name
-/// carries one.
-fn guess_view_name(component: &str, directory: &str) -> String {
-    if directory.is_empty() {
-        return component.to_string();
-    }
-    match component.split_once("::") {
-        Some((namespace, rest)) => format!("{namespace}::{directory}.{rest}"),
-        None => format!("{directory}.{component}"),
-    }
-}
-
-/// Add a candidate view name and the two an index component also answers
-/// to, skipping the ones already recorded.
-fn push_view_name(view_name: String, component: &str, names: &mut Vec<String>) {
-    let last = component.rsplit(['.', ':']).next().unwrap_or(component);
-    let mut candidates = vec![format!("{view_name}.index")];
-    if !last.is_empty() {
-        candidates.push(format!("{view_name}.{last}"));
-    }
-    candidates.insert(0, view_name);
-    for candidate in candidates {
-        if !names.contains(&candidate) {
-            names.push(candidate);
-        }
-    }
-}
-
-/// The component name a tag addresses under a registered prefix, or `None`
-/// for a tag written under a different one.
-///
-/// A prefix-less registration is reached by every tag that names no
-/// namespace of its own; one written under some other namespace belongs to
-/// that namespace instead.
-fn strip_tag_prefix<'a>(tag: &'a str, prefix: &str) -> Option<&'a str> {
-    if prefix.is_empty() {
-        return (!tag.contains("::")).then_some(tag);
-    }
-    tag.strip_prefix(prefix)?.strip_prefix("::")
 }
 
 /// The prefixes a component tag is written under, longest first so
@@ -552,23 +320,52 @@ pub(crate) struct TagSpan {
     pub(crate) closed: bool,
 }
 
-/// Every component tag in `content`, in document order:
-/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`, self-closing and
-/// unclosed ones included.
+/// A closing tag, `</x-…>` or `</livewire:…>`.
+struct TagCloser {
+    kind: TagKind,
+    /// The name's own bytes, indexing the masked source it was read from.
+    name: Range<usize>,
+    /// The whole closing tag, `</` through `>`.
+    span: Range<usize>,
+}
+
+/// The closing prefixes a component tag is written under, the closing
+/// counterparts of [`TAG_PREFIXES`].
+const CLOSING_TAG_PREFIXES: [&str; 2] = ["</livewire:", "</x-"];
+
+/// The component tags of a template, read once and paired up.
+struct PairedTags<'a> {
+    /// The source with its inert regions blanked, which the closers'
+    /// name ranges index.
+    masked: Cow<'a, str>,
+    /// Tags that open nothing: `<x-alert />`.
+    self_closing: Vec<TagSpan>,
+    /// Every other tag, paired with [`pairing::pair`].
+    pairing: Pairing<TagSpan, TagCloser>,
+}
+
+/// Read every component tag in `content` and pair the opening tags with
+/// their closers through [`super::pairing`], the same walk the directive
+/// check uses, so a closing tag that does not match the innermost open
+/// tag does to it what Blade does: ends it.
 ///
-/// Mirrors [`super::balance::check`]'s tolerance for malformed input: a
-/// closing tag that does not match the innermost open tag is left alone
-/// rather than guessed at, so a crossed or unclosed tag is reported
-/// unclosed rather than paired with a closer that is not its own.
-pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
-    if !TAG_PREFIXES.iter().any(|prefix| content.contains(prefix)) {
-        return Vec::new();
+/// A closer matches by name, with the one exception Blade's compiler
+/// carves out for named slots ([`closer_matches`]). `None` when the
+/// template holds no tag at all; a lone stray closer counts, since it is
+/// one of the shapes [`tag_imbalances`] reports.
+fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
+    if !TAG_PREFIXES
+        .iter()
+        .chain(CLOSING_TAG_PREFIXES.iter())
+        .any(|prefix| content.contains(prefix))
+    {
+        return None;
     }
     let masked = mask_inert_regions(content, true);
     let bytes = masked.as_bytes();
 
-    let mut out: Vec<TagSpan> = Vec::new();
-    let mut stack: Vec<TagSpan> = Vec::new();
+    let mut self_closing: Vec<TagSpan> = Vec::new();
+    let mut tokens: Vec<Token<TagSpan, TagCloser>> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] != b'<' {
@@ -593,24 +390,11 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
             let Some(close) = find_byte(&masked, j, b'>') else {
                 break;
             };
-            let name = &masked[name_start..j];
-            if stack
-                .last()
-                .is_some_and(|open| closer_matches(open.kind, &open.name, name))
-            {
-                let mut open = stack.pop().unwrap();
-                open.span.end = close + 1;
-                open.closed = true;
-                out.push(open);
-            } else if let Some(idx) = stack
-                .iter()
-                .rposition(|open| closer_matches(open.kind, &open.name, name))
-            {
-                // A closer for a tag further out means everything opened
-                // after it was never closed; those keep the opening tag as
-                // their extent.
-                out.extend(stack.drain(idx..));
-            }
+            tokens.push(Token::Close(TagCloser {
+                kind: tag_kind_of(prefix),
+                name: name_start..j,
+                span: i..close + 1,
+            }));
             i = close + 1;
             continue;
         }
@@ -633,29 +417,71 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
             continue;
         }
         let lexed = lex_tag_attributes(&masked, j);
-        let (end, self_closing) = (lexed.end, lexed.self_closing);
         let tag = TagSpan {
-            kind: if *prefix == TagKind::Livewire.opening() {
-                TagKind::Livewire
-            } else {
-                TagKind::Blade
-            },
+            kind: tag_kind_of(prefix),
             name: masked[name_start..j].to_string(),
             name_span: name_start..j,
-            span: i..end,
+            span: i..lexed.end,
             closed: false,
         };
-        if self_closing {
-            out.push(tag);
+        if lexed.self_closing {
+            self_closing.push(tag);
         } else {
-            stack.push(tag);
+            tokens.push(Token::Open(tag));
         }
-        i = end;
+        i = lexed.end;
     }
 
-    // Whatever is still open closed nothing, and stands for its opening
-    // tag alone.
-    out.append(&mut stack);
+    let pairing = pairing::pair(tokens, |open: &TagSpan, closer: &TagCloser| {
+        closer_matches(open.kind, &open.name, &masked[closer.name.clone()])
+    });
+    Some(PairedTags {
+        masked,
+        self_closing,
+        pairing,
+    })
+}
+
+/// Which kind of tag one of [`TAG_PREFIXES`] opens.
+fn tag_kind_of(prefix: &str) -> TagKind {
+    if prefix == TagKind::Livewire.opening() {
+        TagKind::Livewire
+    } else {
+        TagKind::Blade
+    }
+}
+
+/// Every component tag in `content`, in document order:
+/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`, self-closing and
+/// unclosed ones included.
+///
+/// A tag ended by a closer that is not its own, or never ended at all,
+/// stands for its opening tag alone rather than being paired with a
+/// closer that is not its own; [`tag_imbalances`] is where those are
+/// reported.
+pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
+    let Some(PairedTags {
+        self_closing,
+        pairing,
+        ..
+    }) = pair_tags(content)
+    else {
+        return Vec::new();
+    };
+
+    let mut out = self_closing;
+    out.extend(
+        pairing
+            .pairs
+            .into_iter()
+            .map(|Pair { mut opener, closer }| {
+                opener.span.end = closer.span.end;
+                opener.closed = true;
+                opener
+            }),
+    );
+    out.extend(pairing.consumed);
+    out.extend(pairing.open);
     out.sort_by(|a, b| {
         a.span
             .start
@@ -720,164 +546,50 @@ impl TagImbalance {
     }
 }
 
-/// Every place a component tag's block structure does not add up, walked
-/// with the same stack-of-open-blocks approach
-/// [`super::balance::check`] uses for directives: a closing tag for a
-/// component further out, a closing tag with nothing open, or a tag the
-/// template never closes.
+/// Every place a component tag's block structure does not add up: a
+/// closing tag for a component further out, a closing tag with nothing
+/// open, or a tag the template never closes.
 ///
-/// Reuses the tag/attribute scan [`tag_spans`] is built from
-/// (`TAG_PREFIXES`, [`is_tag_name_char`], [`lex_tag_attributes`]) rather
-/// than a second reader of the tag syntax. The two differ only in what
-/// they do with a crossed close: `tag_spans` is tolerant of it (a caller
-/// that only wants call-site data has nothing useful to say about which
-/// side is wrong), so it folds everything the crossing skipped into
-/// "unclosed" with no report for the stray closer at all; this instead
-/// reports the crossing itself, because naming the mistake is the whole
-/// point of a diagnostic.
+/// Read from the same walk as [`tag_spans`], so the two agree on what a
+/// closer closes: a tag that comes back from `tag_spans` with its opening
+/// tag alone as its extent is one of the tags reported here (or one a
+/// reported closer ended on its way out). An opener is anchored on its
+/// `<x-name` rather than the whole opening tag, so a long attribute list
+/// does not light up.
 pub(crate) fn tag_imbalances(content: &str) -> Vec<TagImbalance> {
-    let mut imbalances = Vec::new();
-    // Unlike `tag_spans`, a lone stray closer with no opening tag anywhere
-    // in the file is exactly one of the shapes this reports, so an opening
-    // prefix alone is not enough to skip the scan.
-    let has_tag = TAG_PREFIXES
-        .iter()
-        .any(|prefix| content.contains(prefix) || content.contains(&format!("</{}", &prefix[1..])));
-    if !has_tag {
-        return imbalances;
-    }
-    let masked = mask_inert_regions(content, true);
-    let bytes = masked.as_bytes();
+    let Some(PairedTags {
+        masked, pairing, ..
+    }) = pair_tags(content)
+    else {
+        return Vec::new();
+    };
+    let found = |closer: &TagCloser| masked[closer.name.clone()].to_string();
+    let anchor = |tag: &TagSpan| tag.span.start..tag.name_span.end;
 
-    struct Open {
-        kind: TagKind,
-        name: String,
-        span: Range<usize>,
-    }
-    let mut stack: Vec<Open> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'<' {
-            i += 1;
-            continue;
-        }
-
-        // Closing tag: `</x-…>` or `</livewire:…>`.
-        if bytes.get(i + 1) == Some(&b'/') {
-            let Some(prefix) = TAG_PREFIXES
-                .iter()
-                .find(|prefix| masked[i + 2..].starts_with(&prefix[1..]))
-            else {
-                i += 1;
-                continue;
-            };
-            let name_start = i + 2 + (prefix.len() - 1);
-            let mut j = name_start;
-            while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-                j += 1;
-            }
-            let Some(close) = find_byte(&masked, j, b'>') else {
-                break;
-            };
-            let name = &masked[name_start..j];
-            let found_kind = if *prefix == TagKind::Livewire.opening() {
-                TagKind::Livewire
-            } else {
-                TagKind::Blade
-            };
-            let closer = i..close + 1;
-            match stack
-                .iter()
-                .rposition(|open| closer_matches(open.kind, &open.name, name))
-            {
-                // The closer belongs to the innermost open tag: a clean
-                // pair, nothing to report.
-                Some(index) if index + 1 == stack.len() => {
-                    stack.pop();
-                }
-                // The closer belongs to a tag further out. Everything
-                // opened inside it was never closed; only the innermost
-                // of those is reported, the same way a directive closer
-                // that skips past open blocks reports only what it
-                // skipped rather than every level in between.
-                Some(index) => {
-                    if let Some(skipped) = stack.get(index + 1) {
-                        imbalances.push(TagImbalance::Mismatched {
-                            closer: closer.clone(),
-                            found_kind,
-                            found: name.to_string(),
-                            opener_kind: skipped.kind,
-                            opener: skipped.name.clone(),
-                            opener_span: skipped.span.clone(),
-                        });
-                    }
-                    stack.truncate(index);
-                }
-                // No open tag takes this closer by name. Inside one, the
-                // author named the wrong tag for it — the innermost open
-                // tag is what this closer actually ends, so it is that
-                // tag's opener the report names; outside every tag, the
-                // closer stands alone.
-                None => match stack.pop() {
-                    Some(open) => imbalances.push(TagImbalance::Mismatched {
-                        closer,
-                        found_kind,
-                        found: name.to_string(),
-                        opener_kind: open.kind,
-                        opener: open.name,
-                        opener_span: open.span,
-                    }),
-                    None => imbalances.push(TagImbalance::Unexpected {
-                        closer,
-                        found_kind,
-                        found: name.to_string(),
-                    }),
-                },
-            }
-            i = close + 1;
-            continue;
-        }
-
-        // Opening tag: `<x-…>` or `<livewire:…>`.
-        let Some(prefix) = TAG_PREFIXES
-            .iter()
-            .find(|prefix| masked[i..].starts_with(**prefix))
-        else {
-            i += 1;
-            continue;
-        };
-        let name_start = i + prefix.len();
-        let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-            j += 1;
-        }
-        if j == name_start {
-            i += 1;
-            continue;
-        }
-        let lexed = lex_tag_attributes(&masked, j);
-        if !lexed.self_closing {
-            stack.push(Open {
-                kind: if *prefix == TagKind::Livewire.opening() {
-                    TagKind::Livewire
-                } else {
-                    TagKind::Blade
-                },
-                name: masked[name_start..j].to_string(),
-                span: i..j,
-            });
-        }
-        i = lexed.end;
-    }
-
-    // Whatever is still open never got a closing tag at all.
-    for open in stack {
-        imbalances.push(TagImbalance::Unclosed {
-            opener_span: open.span,
-            opener_kind: open.kind,
-            opener: open.name,
-        });
-    }
+    let mut imbalances: Vec<TagImbalance> = pairing
+        .strays
+        .into_iter()
+        .map(|stray| match stray {
+            Stray::Mismatched { closer, skipped } => TagImbalance::Mismatched {
+                found: found(&closer),
+                found_kind: closer.kind,
+                closer: closer.span,
+                opener_kind: skipped.kind,
+                opener_span: anchor(&skipped),
+                opener: skipped.name,
+            },
+            Stray::Unexpected { closer } => TagImbalance::Unexpected {
+                found: found(&closer),
+                found_kind: closer.kind,
+                closer: closer.span,
+            },
+        })
+        .collect();
+    imbalances.extend(pairing.open.into_iter().map(|open| TagImbalance::Unclosed {
+        opener_span: anchor(&open),
+        opener_kind: open.kind,
+        opener: open.name,
+    }));
 
     imbalances.sort_by_key(|imbalance| imbalance.span().start);
     imbalances
@@ -1322,149 +1034,6 @@ mod tests {
         None
     }
 
-    /// The registrations a project with no `anonymousComponent…` call has.
-    const NONE: &[AnonymousNamespace] = &[];
-
-    fn registered(prefix: &str, directory: &str) -> Vec<AnonymousNamespace> {
-        vec![(prefix.to_string(), directory.to_string())]
-    }
-
-    #[test]
-    fn component_tag_names_strips_the_components_prefix() {
-        assert_eq!(
-            component_tag_names(&["components.brand.boxes".to_string()], NONE),
-            vec!["brand.boxes"]
-        );
-    }
-
-    #[test]
-    fn component_tag_names_strips_components_after_a_namespace() {
-        assert_eq!(
-            component_tag_names(&["webshop::components.brand.boxes".to_string()], NONE),
-            vec!["webshop::brand.boxes"]
-        );
-        assert_eq!(
-            component_tag_names(&["mail::message".to_string()], NONE),
-            vec!["mail::message"]
-        );
-    }
-
-    #[test]
-    fn component_tag_names_skips_a_bare_non_component_view() {
-        assert!(component_tag_names(&["emails.welcome".to_string()], NONE).is_empty());
-    }
-
-    /// `Blade::anonymousComponentNamespace('components', 'webshop')` makes
-    /// the same template addressable under the registered prefix as well as
-    /// by the un-registered `components.` convention.
-    #[test]
-    fn a_registered_prefix_adds_a_tag_for_the_directory_it_names() {
-        assert_eq!(
-            component_tag_names(
-                &["components.pages.boxes".to_string()],
-                &registered("webshop", "components"),
-            ),
-            vec!["pages.boxes", "webshop::pages.boxes"]
-        );
-    }
-
-    /// A registration whose directory the view does not sit under names
-    /// nothing about it.
-    #[test]
-    fn a_registration_for_another_directory_adds_no_tag() {
-        assert_eq!(
-            component_tag_names(
-                &["components.pages.boxes".to_string()],
-                &registered("webshop", "theme.components"),
-            ),
-            vec!["pages.boxes"]
-        );
-    }
-
-    /// A prefix-less `anonymousComponentPath()` registration puts its whole
-    /// directory behind bare tag names.
-    #[test]
-    fn a_prefix_less_registration_addresses_its_directory_bare() {
-        assert_eq!(
-            component_tag_names(&["ui.alert".to_string()], &registered("", "ui")),
-            vec!["alert"]
-        );
-    }
-
-    /// Laravel falls back to `{view}.index` and to the repeated-directory
-    /// form, so both are what the directory's own tag reaches.
-    #[test]
-    fn an_index_component_answers_to_its_directory_alone() {
-        assert_eq!(
-            component_tag_names(&["components.card.index".to_string()], NONE),
-            vec!["card", "card.index"]
-        );
-        assert_eq!(
-            component_tag_names(&["components.card.card".to_string()], NONE),
-            vec!["card", "card.card"]
-        );
-        assert_eq!(
-            component_tag_names(&["components.index".to_string()], NONE),
-            vec!["index"],
-            "a component named `index` is not the index of anything"
-        );
-    }
-
-    #[test]
-    fn view_names_for_component_tag_round_trips() {
-        assert_eq!(
-            view_names_for_component_tag("brand.boxes", NONE),
-            vec![
-                "components.brand.boxes",
-                "components.brand.boxes.index",
-                "components.brand.boxes.boxes"
-            ]
-        );
-        assert_eq!(
-            view_names_for_component_tag("webshop::brand.boxes", NONE),
-            vec![
-                "webshop::components.brand.boxes",
-                "webshop::components.brand.boxes.index",
-                "webshop::components.brand.boxes.boxes"
-            ]
-        );
-    }
-
-    /// A tag written under a registered prefix names the view in the
-    /// registered directory on top of the un-registered fallback, which is
-    /// the one Laravel tries first.
-    #[test]
-    fn a_registered_prefix_adds_the_view_it_names() {
-        assert_eq!(
-            view_names_for_component_tag(
-                "webshop::pages.boxes",
-                &registered("webshop", "components")
-            ),
-            vec![
-                "webshop::components.pages.boxes",
-                "webshop::components.pages.boxes.index",
-                "webshop::components.pages.boxes.boxes",
-                "components.pages.boxes",
-                "components.pages.boxes.index",
-                "components.pages.boxes.boxes",
-            ]
-        );
-    }
-
-    /// A namespaced tag belongs to its own namespace, so a prefix-less path
-    /// registration does not claim it.
-    #[test]
-    fn a_prefix_less_registration_ignores_a_namespaced_tag() {
-        assert_eq!(
-            view_names_for_component_tag("mail::message", &registered("", "ui")),
-            vec![
-                "mail::components.message",
-                "mail::components.message.index",
-                "mail::components.message.message"
-            ]
-        );
-    }
-
     #[test]
     fn referenced_component_tags_collects_distinct_names() {
         let content = r#"<x-brand.boxes /><x-brand.boxes /><x-alert type="danger" />"#;
@@ -1855,6 +1424,16 @@ mod tests {
     #[test]
     fn a_mismatched_closing_tag_closes_nothing() {
         assert!(tag_bodies("<x-alert>\n<p>hi</p>\n</x-card>\n").is_empty());
+    }
+
+    /// A stray closing tag ends the innermost open tag, the way Blade
+    /// compiles it, so the tag's own closer later closes nothing.
+    #[test]
+    fn a_stray_closing_tag_ends_the_innermost_tag() {
+        let blade = "<x-card>\n<x-alert>\n</x-foo>\n</x-alert>\n</x-card>\n";
+        assert!(tag_bodies(blade).is_empty());
+        let names: Vec<String> = tag_spans(blade).into_iter().map(|tag| tag.name).collect();
+        assert_eq!(names, ["card", "alert"]);
     }
 
     #[test]

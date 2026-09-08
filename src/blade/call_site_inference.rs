@@ -384,7 +384,7 @@ impl Backend {
         // addressable as a component tag (`components.*`, a namespaced
         // view name, or a directory a provider registered a tag prefix
         // for — see `component_tags::component_tag_names`).
-        let tag_names = crate::blade::component_tags::component_tag_names(
+        let tag_names = crate::blade::component_names::component_tag_names(
             &view_names,
             &self.anonymous_component_namespaces(),
         );
@@ -586,7 +586,7 @@ impl Backend {
     fn blade_rendered_view_names(
         &self,
         uri: &str,
-        anonymous: &[crate::blade::component_tags::AnonymousNamespace],
+        anonymous: &[crate::blade::component_names::AnonymousNamespace],
     ) -> Vec<String> {
         let mut names: Vec<String> = self
             .symbol_maps
@@ -608,7 +608,7 @@ impl Backend {
             .unwrap_or_default();
         if let Some(content) = self.get_file_content_arc(uri) {
             for tag in crate::blade::component_tags::referenced_component_tags(&content) {
-                names.extend(crate::blade::component_tags::view_names_for_component_tag(
+                names.extend(crate::blade::component_names::view_names_for_component_tag(
                     &tag, anonymous,
                 ));
             }

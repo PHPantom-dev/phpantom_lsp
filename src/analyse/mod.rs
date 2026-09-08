@@ -40,16 +40,20 @@
 //! ```
 //!
 //! The driver and file discovery live in [`run`]; output formatting
-//! (table, GitHub annotations, JSON) lives in [`output`].
+//! (table, GitHub annotations, JSON) lives in [`output`]; opening the
+//! project on a headless `Backend`, which `fix` and `move` share, lives
+//! in [`project`].
 
 use std::path::PathBuf;
 
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
 mod output;
+mod project;
 mod run;
 
 pub(crate) use output::{format_github_message, json_escape};
+pub(crate) use project::{load_config_or_default, open_headless_project};
 pub(crate) use run::discover_user_files;
 pub use run::run;
 

@@ -38,12 +38,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tower_lsp::lsp_types::*;
 
+use crate::Backend;
 use crate::analyse::OutputFormat;
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
 use crate::text_position::position_to_byte_offset;
 use crate::virtual_members::with_active_resolved_class_cache;
-use crate::{Backend, composer, config};
 
 /// Options for the fix command.
 #[derive(Debug)]
@@ -74,13 +74,14 @@ pub struct FixOptions {
 }
 
 /// A single fix applied to a file.
-struct AppliedFix {
+#[derive(Debug)]
+pub struct AppliedFix {
     /// The rule that produced this fix (diagnostic code).
-    rule: String,
+    pub rule: String,
     /// 1-based line number where the fix was applied.
-    line: u32,
+    pub line: u32,
     /// Human-readable description of what was fixed.
-    description: String,
+    pub description: String,
 }
 
 /// Summary of fixes for one file.
@@ -140,10 +141,15 @@ fn effective_native_rules(rules: &[String]) -> Vec<&'static str> {
     }
 }
 
-/// Apply unused-import fixes to a single file.
+/// Apply unused-import fixes to a single file, which `backend` has
+/// already parsed.
 ///
 /// Returns the modified content and a list of fixes applied.
-fn fix_unused_imports(backend: &Backend, uri: &str, content: &str) -> (String, Vec<AppliedFix>) {
+pub fn fix_unused_imports(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+) -> (String, Vec<AppliedFix>) {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     backend.collect_unused_import_diagnostics(uri, content, &mut diagnostics);
 
@@ -232,37 +238,11 @@ pub async fn run(options: FixOptions) -> i32 {
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
-    let cfg = match config::load_config_from(root, options.global_config.as_deref()) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Warning: failed to load .phpantom.toml: {e}");
-            config::Config::default()
-        }
-    };
+    let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
 
     // ── 2. Index project ────────────────────────────────────────────
     let backend = Backend::new_headless();
-    *backend.workspace_root().write() = Some(root.to_path_buf());
-    backend.set_config(cfg.clone());
-
-    let composer_package = composer::read_composer_package(root);
-
-    let php_version = cfg
-        .php
-        .version
-        .as_deref()
-        .and_then(crate::types::PhpVersion::from_composer_constraint)
-        .unwrap_or_else(|| {
-            composer_package
-                .as_ref()
-                .and_then(composer::detect_php_version_from_package)
-                .unwrap_or_default()
-        });
-    backend.set_php_version(php_version);
-
-    backend
-        .init_single_project(root, php_version, composer_package, None)
-        .await;
+    crate::analyse::open_headless_project(&backend, root, cfg).await;
 
     // ── 3. Discover files ───────────────────────────────────────────
     let files = crate::analyse::discover_user_files(&backend, root, options.path_filter.as_slice());
@@ -806,131 +786,5 @@ mod tests {
     fn is_phpstan_rule_without_prefix() {
         assert!(!is_phpstan_rule("unused_import"));
         assert!(!is_phpstan_rule("deprecated_usage"));
-    }
-
-    // ── End-to-end through fix_unused_imports ────────────────────────
-
-    #[test]
-    fn fix_removes_middle_import_without_blank_line() {
-        // Reproduces the user-reported bug: removing `use PHPMD\Rule;`
-        // from a contiguous block left a blank line between survivors.
-        let backend = crate::Backend::new_test();
-        let content = "\
-<?php
-namespace Test;
-
-use PHPMD\\Node\\AbstractCallableNode;
-use PHPMD\\Node\\MethodNode;
-use PHPMD\\Rule;
-use PHPMD\\Rule\\Design\\CouplingBetweenObjects;
-
-class Foo extends AbstractCallableNode {
-    public function bar(MethodNode $m, CouplingBetweenObjects $c): void {}
-}
-";
-        let uri = "file:///test.php";
-        backend.update_ast(uri, content);
-        let (result, fixes) = fix_unused_imports(&backend, uri, content);
-
-        assert_eq!(fixes.len(), 1, "should fix exactly one unused import");
-        assert!(
-            fixes[0].description.contains("Rule"),
-            "should fix the Rule import"
-        );
-
-        let expected = "\
-<?php
-namespace Test;
-
-use PHPMD\\Node\\AbstractCallableNode;
-use PHPMD\\Node\\MethodNode;
-use PHPMD\\Rule\\Design\\CouplingBetweenObjects;
-
-class Foo extends AbstractCallableNode {
-    public function bar(MethodNode $m, CouplingBetweenObjects $c): void {}
-}
-";
-        assert_eq!(
-            result, expected,
-            "Removing a middle import should not leave a blank line"
-        );
-    }
-
-    #[test]
-    fn fix_removes_first_import_without_blank_line() {
-        let backend = crate::Backend::new_test();
-        let content = "\
-<?php
-namespace Test;
-
-use PHPMD\\Node\\AbstractCallableNode;
-use PHPMD\\Node\\MethodNode;
-use PHPMD\\Rule;
-
-class Foo {
-    public function bar(MethodNode $m, Rule $r): void {}
-}
-";
-        let uri = "file:///test.php";
-        backend.update_ast(uri, content);
-        let (result, fixes) = fix_unused_imports(&backend, uri, content);
-
-        assert_eq!(fixes.len(), 1);
-        assert!(fixes[0].description.contains("AbstractCallableNode"));
-
-        let expected = "\
-<?php
-namespace Test;
-
-use PHPMD\\Node\\MethodNode;
-use PHPMD\\Rule;
-
-class Foo {
-    public function bar(MethodNode $m, Rule $r): void {}
-}
-";
-        assert_eq!(
-            result, expected,
-            "Removing the first import should not leave a blank line"
-        );
-    }
-
-    #[test]
-    fn fix_removes_last_import_without_blank_line() {
-        let backend = crate::Backend::new_test();
-        let content = "\
-<?php
-namespace Test;
-
-use PHPMD\\Node\\AbstractCallableNode;
-use PHPMD\\Node\\MethodNode;
-use PHPMD\\Rule;
-
-class Foo {
-    public function bar(AbstractCallableNode $a, MethodNode $m): void {}
-}
-";
-        let uri = "file:///test.php";
-        backend.update_ast(uri, content);
-        let (result, fixes) = fix_unused_imports(&backend, uri, content);
-
-        assert_eq!(fixes.len(), 1);
-        assert!(fixes[0].description.contains("Rule"));
-
-        let expected = "\
-<?php
-namespace Test;
-
-use PHPMD\\Node\\AbstractCallableNode;
-use PHPMD\\Node\\MethodNode;
-
-class Foo {
-    public function bar(AbstractCallableNode $a, MethodNode $m): void {}
-}
-";
-        assert_eq!(
-            result, expected,
-            "Removing the last import should not leave a blank line"
-        );
     }
 }

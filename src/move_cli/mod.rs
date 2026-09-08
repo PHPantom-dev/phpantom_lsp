@@ -117,26 +117,9 @@ async fn run_inner(options: &MoveOptions) -> Result<MoveSummary, String> {
         .map_err(|e| format!("cannot resolve project root: {e}"))?;
     let cfg = config::load_config_from(&root, options.global_config.as_deref())
         .unwrap_or_else(|_| config::Config::default());
-    let composer_package = composer::read_composer_package(&root);
-    let php_version = cfg
-        .php
-        .version
-        .as_deref()
-        .and_then(crate::types::PhpVersion::from_composer_constraint)
-        .or_else(|| {
-            composer_package
-                .as_ref()
-                .and_then(composer::detect_php_version_from_package)
-        })
-        .unwrap_or_default();
 
     let backend = Backend::new_headless_refactoring();
-    *backend.workspace_root().write() = Some(root.clone());
-    backend.set_config(cfg);
-    backend.set_php_version(php_version);
-    backend
-        .init_single_project(&root, php_version, composer_package, None)
-        .await;
+    crate::analyse::open_headless_project(&backend, &root, cfg).await;
     backend.supports_file_rename.store(true, Ordering::Release);
     backend.ensure_workspace_indexed();
 

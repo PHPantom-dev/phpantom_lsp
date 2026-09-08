@@ -18,6 +18,7 @@
 use std::ops::Range;
 
 use super::directives::match_directive;
+use super::pairing::{self, Pair, Stray, Token};
 use super::signature::{
     InertOpener, inert_regions, mask_regions, matching_paren, split_top_level_args,
 };
@@ -291,8 +292,26 @@ pub(crate) struct Balance {
     pub(crate) imbalances: Vec<Imbalance>,
 }
 
-/// Walk the directive stream once with a stack of open blocks, collecting
-/// both the blocks that pair up and the ones that do not.
+/// A directive that opened a block, waiting for its closer.
+#[derive(Clone)]
+struct Opened {
+    block: &'static Block,
+    span: Span,
+    args: Option<Span>,
+}
+
+/// A closing directive: the name it was written as, and the block whose
+/// closer it is (the first, when several blocks share it), which names
+/// the opener a stray closer is missing.
+struct Closer {
+    name: &'static str,
+    block: &'static Block,
+    span: Span,
+}
+
+/// Read the directive stream once and pair it up with
+/// [`pairing::pair`], collecting both the blocks that pair and the ones
+/// that do not.
 ///
 /// Pairing and reporting have to agree on what a closer closes, so both
 /// come out of this one walk: a closer that does not match the innermost
@@ -309,7 +328,7 @@ pub(crate) fn walk(content: &str) -> Balance {
     let masked = mask_regions(content, &regions);
     let bytes = masked.as_bytes();
 
-    let mut stack: Vec<(&Block, Span, Option<Span>)> = Vec::new();
+    let mut tokens: Vec<Token<Opened, Closer>> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] != b'@' {
@@ -328,69 +347,49 @@ pub(crate) fn walk(content: &str) -> Balance {
 
         if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
             if opens_block(block, &masked, args.as_ref()) {
-                stack.push((block, span, args));
+                tokens.push(Token::Open(Opened { block, span, args }));
             }
             continue;
         }
-        let Some(block) = BLOCKS.iter().find(|block| block.closers.contains(&name)) else {
-            continue;
-        };
-        match stack
-            .iter()
-            .rposition(|(open, ..)| open.closers.contains(&name))
-        {
-            // The closer belongs to the innermost open block: a clean pair.
-            Some(index) if index + 1 == stack.len() => {
-                if let Some((_, opener, args)) = stack.pop() {
-                    balance.pairs.push(BlockPair {
-                        opener,
-                        args,
-                        closer: span,
-                    });
-                }
-            }
-            // The closer belongs to a block further out. Anything opened
-            // inside it was never closed, and nothing later can close it
-            // now, so the innermost of those is reported here and the
-            // whole run comes off the stack. Neither side pairs: the
-            // closer is not the skipped block's, and the block it does
-            // close has an unclosed block inside it.
-            Some(index) => {
-                if let Some((skipped, skipped_span, _)) = stack.get(index + 1) {
-                    balance.imbalances.push(Imbalance::Mismatched {
-                        closer: span,
-                        found: name,
-                        expected: skipped.closers[0],
-                        opener: skipped.opener,
-                        opener_span: skipped_span.clone(),
-                    });
-                }
-                stack.truncate(index);
-            }
-            // No open block takes this closer: inside one, the author
-            // named the wrong end for it; outside every block, the closer
-            // stands alone.
-            None => match stack.pop() {
-                Some((open, open_span, _)) => balance.imbalances.push(Imbalance::Mismatched {
-                    closer: span,
-                    found: name,
-                    expected: open.closers[0],
-                    opener: open.opener,
-                    opener_span: open_span,
-                }),
-                None => balance.imbalances.push(Imbalance::Unexpected {
-                    closer: span,
-                    found: name,
-                    opener: block.opener,
-                }),
+        if let Some(block) = BLOCKS.iter().find(|block| block.closers.contains(&name)) {
+            tokens.push(Token::Close(Closer { name, block, span }));
+        }
+    }
+
+    let pairing = pairing::pair(tokens, |open: &Opened, closer: &Closer| {
+        open.block.closers.contains(&closer.name)
+    });
+
+    balance.pairs = pairing
+        .pairs
+        .into_iter()
+        .map(|Pair { opener, closer }| BlockPair {
+            opener: opener.span,
+            args: opener.args,
+            closer: closer.span,
+        })
+        .collect();
+    for stray in pairing.strays {
+        balance.imbalances.push(match stray {
+            Stray::Mismatched { closer, skipped } => Imbalance::Mismatched {
+                closer: closer.span,
+                found: closer.name,
+                expected: skipped.block.closers[0],
+                opener: skipped.block.opener,
+                opener_span: skipped.span,
             },
-        }
+            Stray::Unexpected { closer } => Imbalance::Unexpected {
+                closer: closer.span,
+                found: closer.name,
+                opener: closer.block.opener,
+            },
+        });
     }
 
     // An unterminated `@verbatim` or `@php` swallows the rest of the
     // template, so everything still open at this point is open only
     // because its closer was eaten. Report the region that ate them and
-    // leave the stack alone.
+    // leave the open blocks alone.
     let unterminated = regions
         .iter()
         .find(|region| !region.terminated && region.opener != InertOpener::Comment);
@@ -405,11 +404,11 @@ pub(crate) fn walk(content: &str) -> Balance {
             expected,
         });
     } else {
-        for (block, span, _) in stack {
+        for opened in pairing.open {
             balance.imbalances.push(Imbalance::Unclosed {
-                opener_span: span,
-                opener: block.opener,
-                expected: block.closers[0],
+                opener_span: opened.span,
+                opener: opened.block.opener,
+                expected: opened.block.closers[0],
             });
         }
     }

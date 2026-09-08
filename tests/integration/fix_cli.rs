@@ -7,75 +7,11 @@
 use crate::common::create_test_backend;
 use phpantom_lsp::Backend;
 
-/// Helper: parse a PHP file into the backend and run the unused-import
-/// fixer, returning the fixed content.
+/// Parse a PHP file into the backend and run the unused-import fixer,
+/// returning the fixed content.
 fn fix_unused_imports(backend: &Backend, uri: &str, content: &str) -> String {
     backend.update_ast(uri, content);
-
-    let mut diagnostics = Vec::new();
-    backend.collect_unused_import_diagnostics(uri, content, &mut diagnostics);
-
-    if diagnostics.is_empty() {
-        return content.to_string();
-    }
-
-    use std::collections::HashSet;
-    use tower_lsp::lsp_types::*;
-
-    let removed_import_lines: HashSet<usize> = diagnostics
-        .iter()
-        .map(|d| d.range.start.line as usize)
-        .collect();
-
-    let mut edits: Vec<TextEdit> = diagnostics
-        .iter()
-        .map(|d| {
-            phpantom_lsp::code_actions::build_line_deletion_edit(
-                content,
-                &d.range,
-                &removed_import_lines,
-            )
-        })
-        .collect();
-
-    edits.sort_by(|a, b| b.range.start.cmp(&a.range.start));
-
-    apply_text_edits(content, &edits)
-}
-
-/// Apply reverse-sorted text edits to content.
-fn apply_text_edits(content: &str, edits: &[tower_lsp::lsp_types::TextEdit]) -> String {
-    let mut result = content.to_string();
-
-    for edit in edits {
-        let start = lsp_position_to_byte_offset(&result, edit.range.start);
-        let end = lsp_position_to_byte_offset(&result, edit.range.end);
-
-        if start <= end && end <= result.len() {
-            result.replace_range(start..end, &edit.new_text);
-        }
-    }
-
-    result
-}
-
-/// Convert LSP Position to byte offset.
-fn lsp_position_to_byte_offset(content: &str, pos: tower_lsp::lsp_types::Position) -> usize {
-    let mut offset = 0;
-    for (i, line) in content.lines().enumerate() {
-        if i == pos.line as usize {
-            let mut utf16_units = 0u32;
-            for (byte_idx, ch) in line.char_indices() {
-                if utf16_units >= pos.character {
-                    return offset + byte_idx;
-                }
-                utf16_units += ch.len_utf16() as u32;
-            }
-            return offset + line.len();
-        }
-        offset += line.len() + 1;
-    }
-    content.len()
+    phpantom_lsp::fix::fix_unused_imports(backend, uri, content).0
 }
 
 // ── Single unused import ────────────────────────────────────────────────────
@@ -475,5 +411,131 @@ class Foo {
     assert_eq!(
         first_pass, second_pass,
         "Running fix twice should produce the same result"
+    );
+}
+
+// ── Blank lines around a removed import ─────────────────────────────────────
+
+/// Removing an import from the middle of a contiguous block must not leave
+/// a blank line between the survivors.
+#[test]
+fn removes_middle_import_without_blank_line() {
+    let backend = create_test_backend();
+    let content = "\
+<?php
+namespace Test;
+
+use PHPMD\\Node\\AbstractCallableNode;
+use PHPMD\\Node\\MethodNode;
+use PHPMD\\Rule;
+use PHPMD\\Rule\\Design\\CouplingBetweenObjects;
+
+class Foo extends AbstractCallableNode {
+    public function bar(MethodNode $m, CouplingBetweenObjects $c): void {}
+}
+";
+    let uri = "file:///test.php";
+    backend.update_ast(uri, content);
+    let (result, fixes) = phpantom_lsp::fix::fix_unused_imports(&backend, uri, content);
+
+    assert_eq!(fixes.len(), 1, "should fix exactly one unused import");
+    assert!(
+        fixes[0].description.contains("Rule"),
+        "should fix the Rule import"
+    );
+
+    let expected = "\
+<?php
+namespace Test;
+
+use PHPMD\\Node\\AbstractCallableNode;
+use PHPMD\\Node\\MethodNode;
+use PHPMD\\Rule\\Design\\CouplingBetweenObjects;
+
+class Foo extends AbstractCallableNode {
+    public function bar(MethodNode $m, CouplingBetweenObjects $c): void {}
+}
+";
+    assert_eq!(
+        result, expected,
+        "Removing a middle import should not leave a blank line"
+    );
+}
+
+#[test]
+fn removes_first_import_without_blank_line() {
+    let backend = create_test_backend();
+    let content = "\
+<?php
+namespace Test;
+
+use PHPMD\\Node\\AbstractCallableNode;
+use PHPMD\\Node\\MethodNode;
+use PHPMD\\Rule;
+
+class Foo {
+    public function bar(MethodNode $m, Rule $r): void {}
+}
+";
+    let uri = "file:///test.php";
+    backend.update_ast(uri, content);
+    let (result, fixes) = phpantom_lsp::fix::fix_unused_imports(&backend, uri, content);
+
+    assert_eq!(fixes.len(), 1);
+    assert!(fixes[0].description.contains("AbstractCallableNode"));
+
+    let expected = "\
+<?php
+namespace Test;
+
+use PHPMD\\Node\\MethodNode;
+use PHPMD\\Rule;
+
+class Foo {
+    public function bar(MethodNode $m, Rule $r): void {}
+}
+";
+    assert_eq!(
+        result, expected,
+        "Removing the first import should not leave a blank line"
+    );
+}
+
+#[test]
+fn removes_last_import_without_blank_line() {
+    let backend = create_test_backend();
+    let content = "\
+<?php
+namespace Test;
+
+use PHPMD\\Node\\AbstractCallableNode;
+use PHPMD\\Node\\MethodNode;
+use PHPMD\\Rule;
+
+class Foo {
+    public function bar(AbstractCallableNode $a, MethodNode $m): void {}
+}
+";
+    let uri = "file:///test.php";
+    backend.update_ast(uri, content);
+    let (result, fixes) = phpantom_lsp::fix::fix_unused_imports(&backend, uri, content);
+
+    assert_eq!(fixes.len(), 1);
+    assert!(fixes[0].description.contains("Rule"));
+
+    let expected = "\
+<?php
+namespace Test;
+
+use PHPMD\\Node\\AbstractCallableNode;
+use PHPMD\\Node\\MethodNode;
+
+class Foo {
+    public function bar(AbstractCallableNode $a, MethodNode $m): void {}
+}
+";
+    assert_eq!(
+        result, expected,
+        "Removing the last import should not leave a blank line"
     );
 }

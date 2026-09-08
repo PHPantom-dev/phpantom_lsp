@@ -228,7 +228,7 @@ impl Backend {
         // constructor takes the view name and the data rather than the
         // attributes, so the tag declares the variable without a call.
         let anonymous = self.anonymous_component_namespaces();
-        super::component_tags::view_names_for_component_tag(name, &anonymous)
+        super::component_names::view_names_for_component_tag(name, &anonymous)
             .iter()
             .any(|view| discovery.views.contains_key(view))
             .then(|| ComponentTarget {
