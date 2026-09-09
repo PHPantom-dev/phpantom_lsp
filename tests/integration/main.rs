@@ -199,6 +199,7 @@ mod laravel_gates;
 mod laravel_macro_facade;
 mod laravel_macros;
 mod laravel_migration_columns;
+mod laravel_morph_columns;
 mod laravel_morph_map;
 mod laravel_named_resources;
 mod laravel_path_helpers;

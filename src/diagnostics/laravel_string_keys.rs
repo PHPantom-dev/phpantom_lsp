@@ -141,10 +141,12 @@ impl Backend {
             return;
         };
         let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
+        let morph_columns = self.morph_column_spans_for(uri, &symbol_map);
         let key_spans: Vec<(CheckedStringKind, &str, u32, u32)> = symbol_map
             .spans
             .iter()
             .chain(extra.iter())
+            .chain(morph_columns.iter())
             .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| {
                 if let SymbolKind::LaravelStringKey {

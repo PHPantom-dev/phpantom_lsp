@@ -274,12 +274,10 @@ pub(crate) fn extract_generic_args_from_ancestor(
 
     // If the arg type itself is already generic with the wrapper name,
     // extract directly.  E.g. argument type is `Container<Foo>`.
-    if let TypeKind::Generic(g) = arg_type.kind() {
-        let n_short = crate::util::short_name(&g.name);
-        let wrapper_short = crate::util::short_name(wrapper_name);
-        if n_short.eq_ignore_ascii_case(wrapper_short) {
-            return Some(g.args.clone());
-        }
+    if let TypeKind::Generic(g) = arg_type.kind()
+        && generic_wrapper_matches(&g.name, wrapper_name)
+    {
+        return Some(g.args.clone());
     }
 
     let class_loader = rctx.class_loader;
@@ -293,9 +291,8 @@ pub(crate) fn extract_generic_args_from_ancestor(
         TypeKind::Generic(g) => crate::inheritance::build_generic_subs(&cls, &g.args),
         _ => HashMap::new(),
     };
-    let wrapper_short = crate::util::short_name(wrapper_name);
     let mut visited = Vec::new();
-    ancestor_generic_args(&cls, wrapper_short, &subs, &mut visited, class_loader)
+    ancestor_generic_args(&cls, wrapper_name, &subs, &mut visited, class_loader)
 }
 
 /// Maximum ancestry depth walked while looking for an ancestor's generic
@@ -361,8 +358,17 @@ fn find_extends_generic_args<'c>(cls: &'c ClassInfo, target_short: &str) -> Opti
     cls.extends_generics
         .iter()
         .chain(cls.implements_generics.iter())
-        .find(|(name, _)| crate::util::short_name(name) == target_short)
+        .find(|(name, _)| generic_wrapper_matches(name, target_short))
         .map(|(_, args)| args.as_slice())
+}
+
+fn generic_wrapper_matches(name: &str, target: &str) -> bool {
+    if target.contains('\\') {
+        name.trim_start_matches('\\')
+            .eq_ignore_ascii_case(target.trim_start_matches('\\'))
+    } else {
+        crate::util::short_name(name).eq_ignore_ascii_case(target)
+    }
 }
 
 /// Remap constructor template substitutions from ancestor param names to child
@@ -894,6 +900,17 @@ pub(crate) fn resolve_array_literal_generic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn morph_builder_wrappers_match_qualified_identity_and_explicit_short_names() {
+        assert!(generic_wrapper_matches("App\\Builder", "Builder"));
+        assert!(generic_wrapper_matches("App\\Builder", "\\app\\builder"));
+        assert!(!generic_wrapper_matches(
+            "App\\Builder",
+            "Illuminate\\Database\\Eloquent\\Builder"
+        ));
+        assert!(!generic_wrapper_matches("App\\Other", "Builder"));
+    }
 
     #[test]
     fn classify_direct_param() {
