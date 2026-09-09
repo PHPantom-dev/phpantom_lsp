@@ -49,7 +49,14 @@
 //! run on a sibling temp file in the same directory as the original so
 //! that config walkers (`.php-cs-fixer.php`, `.phpcs.xml`, etc.) find
 //! the project rules.  Pint uses `--stdin-filename` to achieve the
-//! same config discovery without temp files.
+//! same config discovery without temp files, and reads `pint.json`
+//! from its working directory, so every tool runs with the workspace
+//! root as its working directory.
+//!
+//! ## Blade templates
+//!
+//! A `.blade.php` file is resolved separately, see [`blade`]: Pint when
+//! the project has its Blade rule on, the built-in reindenter otherwise.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -60,8 +67,10 @@ use crate::Backend;
 use crate::composer::{self, ComposerPackage};
 use crate::config::FormattingConfig;
 
+pub mod blade;
 mod external;
 mod mago;
+mod pint;
 #[cfg(test)]
 mod tests;
 
@@ -267,10 +276,12 @@ impl Backend {
         cancelled: &AtomicBool,
     ) -> Result<Option<String>, String> {
         let config = self.config();
+        let workspace_root = self.workspace.workspace_root.read().clone();
         format_content(
             strategy,
             content,
             file_path,
+            workspace_root.as_deref(),
             &config.formatting,
             self.php_version(),
             cancelled,
@@ -282,19 +293,28 @@ impl Backend {
 
 /// Run `strategy` on `content` and return the formatted text, or `None`
 /// when formatting is disabled or nothing changed.
+///
+/// External tools run with `workspace_root` as their working directory,
+/// which is where Pint looks for `pint.json`.
 pub fn format_content(
     strategy: &FormattingStrategy,
     content: &str,
     file_path: &Path,
+    workspace_root: Option<&Path>,
     config: &FormattingConfig,
     php_version: crate::types::PhpVersion,
     cancelled: &AtomicBool,
 ) -> Result<Option<String>, String> {
     let formatted = match strategy {
         FormattingStrategy::Disabled => return Ok(None),
-        FormattingStrategy::External(tools) => {
-            external::run_external_pipeline(tools, content, file_path, config, cancelled)?
-        }
+        FormattingStrategy::External(tools) => external::run_external_pipeline(
+            tools,
+            content,
+            file_path,
+            workspace_root,
+            config,
+            cancelled,
+        )?,
         FormattingStrategy::BuiltIn(config_path) => {
             let mago_version = mago::to_mago_php_version(php_version);
             let settings = match config_path {
@@ -313,11 +333,20 @@ pub fn execute_strategy(
     strategy: &FormattingStrategy,
     content: &str,
     file_path: &Path,
+    workspace_root: Option<&Path>,
     config: &FormattingConfig,
     php_version: crate::types::PhpVersion,
     cancelled: &AtomicBool,
 ) -> Result<Option<Vec<TextEdit>>, String> {
-    let formatted = format_content(strategy, content, file_path, config, php_version, cancelled)?;
+    let formatted = format_content(
+        strategy,
+        content,
+        file_path,
+        workspace_root,
+        config,
+        php_version,
+        cancelled,
+    )?;
     Ok(formatted.map(|formatted| compute_edits(content, &formatted)))
 }
 

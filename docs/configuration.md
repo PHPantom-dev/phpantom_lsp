@@ -114,6 +114,7 @@ highlighting remains in charge of ordinary PHP syntax.
 | Key            | Type    | Default | Description |
 | -------------- | ------- | ------- | ----------- |
 | `pint`         | string  | unset   | Command or path for Laravel Pint. Unset: auto-detect from `require-dev`. `""`: disable. |
+| `pint-blade`   | boolean | unset   | Whether `.blade.php` files are formatted by Pint's `Pint/laravel_blade` rule. Unset: follow the workspace `pint.json`. `true`: send them to Pint with `--blade`. `false`: never; use the built-in Blade formatter. |
 | `php-cs-fixer` | string  | unset   | Command or path for php-cs-fixer. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `phpcbf`       | string  | unset   | Command or path for phpcbf. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `timeout`      | integer | `10000` | Max runtime in milliseconds per external formatting tool. |
@@ -201,6 +202,8 @@ PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the b
 1. **Explicit config wins.** A tool path set under `[formatting]` in `.phpantom.toml` (`pint`, `php-cs-fixer`, or `phpcbf`) is always used. Setting a tool to `""` disables it.
 2. **Composer `require-dev` wins over the built-in formatter.** If `composer.json` lists `laravel/pint`, `friendsofphp/php-cs-fixer`, or `squizlabs/php_codesniffer` in `require-dev`, PHPantom resolves the binary through Composer's bin-dir and runs it as a subprocess. A `phpcs.xml`, `.phpcs.xml`, `phpcs.xml.dist`, or `.phpcs.xml.dist` file at the workspace root certifies phpcbf the same way, so a project that only pulls `squizlabs/php_codesniffer` in transitively (e.g. through `slevomat/coding-standard`) is still detected. These tools discover their own project config (`pint.json`, `.php-cs-fixer.php`, `.phpcs.xml`, etc.) as they normally would.
 3. **Otherwise, the built-in formatter is used.**
+
+**Blade templates** are resolved on their own, since only Pint knows how to format one. A `.blade.php` file goes to Pint when the project's `pint.json` turns the `Pint/laravel_blade` rule on (or `pint-blade = true` asks for it, which also passes `--blade`), and otherwise to PHPantom's built-in Blade formatter. The built-in formatter reindents the template without changing the content of any line: indentation follows the nesting of directives, HTML and component tags, multi-line attribute lists and values, and brackets left open at the end of a line, using the editor's tab size and spaces-or-tabs setting. The bodies of `<script>`, `<style>`, and `@php` blocks are moved as a unit and keep their own layout; `<pre>`, `<textarea>`, and `@verbatim` contents are left exactly as written, as is anything between `{{-- blade-formatter-disable --}}` and `{{-- blade-formatter-enable --}}`. Templates whose indentation is output are never touched: Envoy task files, Markdown mail templates (under `resources/views/mail`, `resources/views/emails`, or `vendor/mail`, or using `<x-mail::` components), and Laravel Boost guidelines.
 
 The built-in formatter defaults to the PER-CS 2.0 style. If a `mago.toml` is present at the workspace root, its `[formatter]` table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:
 

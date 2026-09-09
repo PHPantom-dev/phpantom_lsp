@@ -341,6 +341,17 @@ pub struct FormattingConfig {
     /// - `""` — disable pint.
     /// - Any other value — use as the command.
     pub pint: Option<String>,
+    /// Whether Blade templates are formatted through Pint's
+    /// `Pint/laravel_blade` rule.
+    ///
+    /// - `None` (default) — follow the workspace `pint.json`: Blade files
+    ///   go to Pint when its `rules` turn the rule on, and to the built-in
+    ///   reindenter otherwise.
+    /// - `true` — send Blade files to Pint with `--blade`, which turns the
+    ///   rule on for the run.
+    /// - `false` — never send Blade files to Pint.
+    #[serde(rename = "pint-blade")]
+    pub pint_blade: Option<bool>,
     /// Maximum runtime in milliseconds before each formatter is killed.
     /// Defaults to 10 000 ms (10 seconds).  Applied per tool, not
     /// for the combined pipeline.

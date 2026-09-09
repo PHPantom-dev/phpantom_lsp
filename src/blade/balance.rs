@@ -72,9 +72,13 @@ enum Opens {
     /// `@forelse`'s separator, and an `@error="…"` in markup is a
     /// JavaScript framework's event binding.
     WithArgs,
-    /// `@section('sidebar')` opens a section; the two-argument
-    /// `@section('title', 'Home')` is a complete statement on its own.
-    Section,
+    /// Unless a second argument supplies the content inline:
+    /// `@section('sidebar')` opens a section, `@section('title', 'Home')`
+    /// is a complete statement on its own, and `@push`, `@prepend`, and
+    /// `@slot` take the same two shapes. Laravel only buffers a block when
+    /// the content argument is missing or empty, so `@section('x', null)`
+    /// and `@push('x', '')` still open one.
+    UnlessContent,
     /// `@lang` and `@lang(['count' => 1])` open a translation block, while
     /// `@lang('messages.welcome')` echoes one string.
     Lang,
@@ -91,13 +95,13 @@ enum Opens {
 /// compiler would accept any of them anywhere. The pairing below is the one
 /// Laravel's documentation gives and the one every Blade-aware editor
 /// checks, which is what an author means when they write it.
-struct Block {
-    opener: &'static str,
-    closers: &'static [&'static str],
+pub(crate) struct Block {
+    pub(crate) opener: &'static str,
+    pub(crate) closers: &'static [&'static str],
     opens: Opens,
 }
 
-const BLOCKS: &[Block] = &[
+pub(crate) const BLOCKS: &[Block] = &[
     Block {
         opener: "if",
         closers: &["endif"],
@@ -224,12 +228,12 @@ const BLOCKS: &[Block] = &[
     Block {
         opener: "section",
         closers: &["endsection", "stop", "show", "append", "overwrite"],
-        opens: Opens::Section,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "push",
         closers: &["endpush"],
-        opens: Opens::WithArgs,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "pushIf",
@@ -244,7 +248,7 @@ const BLOCKS: &[Block] = &[
     Block {
         opener: "prepend",
         closers: &["endprepend"],
-        opens: Opens::WithArgs,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "prependOnce",
@@ -264,7 +268,7 @@ const BLOCKS: &[Block] = &[
     Block {
         opener: "slot",
         closers: &["endslot"],
-        opens: Opens::WithArgs,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "lang",
@@ -430,13 +434,14 @@ pub(crate) fn block_pairs(content: &str) -> Vec<BlockPair> {
 }
 
 /// Whether an occurrence of `block`'s opener with `args` opens a block.
-fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
+pub(crate) fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
     match block.opens {
         Opens::Always => true,
         Opens::WithArgs => args.is_some(),
-        Opens::Section => {
-            args.is_some_and(|args| split_top_level_args(inside(content, args)).len() < 2)
-        }
+        Opens::UnlessContent => args.is_some_and(|args| {
+            let parts = split_top_level_args(inside(content, args));
+            parts.len() < 2 || matches!(parts[1].trim(), "null" | "''" | "\"\"")
+        }),
         Opens::Lang => args.is_none_or(|args| inside(content, args).trim_start().starts_with('[')),
         Opens::Never => false,
     }
@@ -587,12 +592,24 @@ mod tests {
     }
 
     /// The two-argument `@section` is a complete statement; the
-    /// one-argument form opens a block.
+    /// one-argument form opens a block. `@push`, `@prepend`, and `@slot`
+    /// take the same two shapes, and an explicit empty content argument
+    /// still opens a block, because Laravel only buffers when the content
+    /// is missing or empty.
     #[test]
     fn a_two_argument_section_opens_nothing() {
         assert!(report("@section('title', 'Home')\n").is_empty());
         assert_eq!(report("@section('body')\n"), ["unclosed section"]);
         assert!(report("@section('body')\n@endsection\n").is_empty());
+        assert_eq!(report("@section('body', null)\n"), ["unclosed section"]);
+        assert!(report("@push('scripts', $inline)\n").is_empty());
+        assert!(report("@prepend('scripts', '<script></script>')\n").is_empty());
+        assert!(report("@slot('title', 'Home')\n").is_empty());
+        assert_eq!(report("@push('scripts', '')\n"), ["unclosed push"]);
+        assert_eq!(
+            report("@slot('title', null, ['class' => 'x'])\n"),
+            ["unclosed slot"]
+        );
     }
 
     /// `@lang('key')` echoes a string; the bare and array forms buffer a

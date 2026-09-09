@@ -119,6 +119,7 @@ fn malformed_mago_toml_returns_error_not_panic() {
         &FormattingStrategy::BuiltIn(Some(config_path)),
         content,
         &PathBuf::from("/tmp/test.php"),
+        None,
         &FormattingConfig::default(),
         crate::types::PhpVersion::default(),
         &AtomicBool::new(false),
@@ -132,6 +133,7 @@ fn strategy_both_disabled() {
         pint: Some(String::new()),
         php_cs_fixer: Some(String::new()),
         phpcbf: Some(String::new()),
+        pint_blade: None,
         timeout: None,
     };
     let strategy = resolve_strategy(None, &config, None, None);
@@ -144,6 +146,7 @@ fn strategy_explicit_commands() {
         pint: None,
         php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
         phpcbf: Some("/usr/bin/phpcbf".to_string()),
+        pint_blade: None,
         timeout: None,
     };
     let strategy = resolve_strategy(None, &config, None, None);
@@ -165,6 +168,7 @@ fn strategy_one_explicit_one_disabled() {
         pint: None,
         php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
         phpcbf: Some(String::new()),
+        pint_blade: None,
         timeout: None,
     };
     let strategy = resolve_strategy(None, &config, None, None);
@@ -464,6 +468,7 @@ fn strategy_explicit_overrides_require_dev() {
         pint: None,
         php_cs_fixer: Some("/opt/php-cs-fixer".to_string()),
         phpcbf: Some(String::new()),
+        pint_blade: None,
         timeout: None,
     };
     let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
@@ -672,6 +677,7 @@ fn execute_builtin_returns_edits_for_unformatted_input() {
         &FormattingStrategy::BuiltIn(None),
         content,
         &file_path,
+        None,
         &config,
         php_version,
         &AtomicBool::new(false),
@@ -692,6 +698,7 @@ fn execute_builtin_reformats_messy_class() {
         &FormattingStrategy::BuiltIn(None),
         content,
         &file_path,
+        None,
         &config,
         php_version,
         &AtomicBool::new(false),
@@ -717,6 +724,7 @@ fn execute_disabled_returns_none() {
         pint: None,
         php_cs_fixer: Some(String::new()),
         phpcbf: Some(String::new()),
+        pint_blade: None,
         timeout: None,
     };
     let php_version = crate::types::PhpVersion { major: 8, minor: 4 };
@@ -726,6 +734,7 @@ fn execute_disabled_returns_none() {
         &FormattingStrategy::Disabled,
         content,
         &file_path,
+        None,
         &config,
         php_version,
         &AtomicBool::new(false),

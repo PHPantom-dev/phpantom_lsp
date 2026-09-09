@@ -1878,13 +1878,6 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri.to_string();
 
-        // Blade markup isn't PHP; running it through the PHP formatting
-        // pipeline errors out or produces nonsense edits. Real Blade-aware
-        // formatting is tracked separately (docs/todo/blade.md).
-        if self.is_blade_file(&uri) {
-            return Ok(None);
-        }
-
         // External tools discover their config from the file's real path.
         let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
             return Ok(None);
@@ -1893,13 +1886,30 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // Blade markup isn't PHP, so a template resolves its own strategy:
+        // Pint when the project formats Blade with it, the built-in
+        // reindenter otherwise.
+        let is_blade = self.is_blade_file(&uri);
+        let blade_options = formatting::blade::options_from_lsp(&params.options);
+
         // Resolving the strategy reads composer.json and running it may
         // spawn an external tool, so all of it stays off the async runtime.
         let backend = self.clone_for_blocking();
         let result = run_blocking_cancel_safe("formatting", move || {
-            let strategy = backend.resolve_formatting_strategy();
-            backend
-                .format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+            let formatted = if is_blade {
+                let strategy = backend.resolve_blade_formatting_strategy();
+                backend.format_blade_content(
+                    &strategy,
+                    &file_path,
+                    &content,
+                    &blade_options,
+                    &backend.shutdown_flag,
+                )
+            } else {
+                let strategy = backend.resolve_formatting_strategy();
+                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+            };
+            formatted
                 .map(|formatted| formatted.map(|text| formatting::compute_edits(&content, &text)))
         })
         .await;

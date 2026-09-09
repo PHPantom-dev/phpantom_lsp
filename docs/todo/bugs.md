@@ -54,24 +54,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B1. The Pint formatting proxy inherits the server's working directory
-
-**Impact: Medium · Complexity: Low**
-
-`run_pint` in `src/formatting/external.rs` spawns
-`pint --stdin-filename=<path>` without `current_dir`, so the child
-inherits whatever directory the language server was started in. Pint
-resolves `pint.json` from `getcwd()` (`Project::path()`), not by walking
-up from the stdin filename, so in an editor that does not start the
-server in the workspace root (Neovim launched from a subdirectory, a
-multi-root workspace) the project's preset and rules are silently
-ignored and the `laravel` preset is applied instead. The PHPStan and
-PHPCS proxies already pass `current_dir(workspace_root)`; Pint should
-too. This also gates the Blade path in
-[BL16](blade.md#bl16-blade-aware-formatting): with the
-`Pint/laravel_blade` rule enabled Pint resolves the project's
-`node_modules` from the same directory.
-
-Fix: pass the workspace root as the child's working directory in
-`run_pint`, and add a test that a `pint.json` at the workspace root is
-honoured when the server's cwd is elsewhere.
+No outstanding items.

@@ -6,7 +6,10 @@
 //! alive.  A tool that rewrites its argument in place (php-cs-fixer,
 //! phpcbf) works on a sibling temp file so its config discovery finds the
 //! project rules; a tool that formats stdin (Pint) is told the real path
-//! with `--stdin-filename` for the same reason.
+//! with `--stdin-filename` for the same reason.  Every tool runs with the
+//! workspace root as its working directory: Pint reads `pint.json` from
+//! there (and, for Blade, the project's `node_modules`), not from the
+//! directory the language server happened to be started in.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -77,6 +80,27 @@ impl Tool {
     }
 }
 
+/// Where and how long a tool runs.
+struct Run<'a> {
+    workspace_root: Option<&'a Path>,
+    timeout: Duration,
+    cancelled: &'a AtomicBool,
+}
+
+impl<'a> Run<'a> {
+    fn new(
+        workspace_root: Option<&'a Path>,
+        config: &FormattingConfig,
+        cancelled: &'a AtomicBool,
+    ) -> Self {
+        Self {
+            workspace_root,
+            timeout: Duration::from_millis(config.timeout.unwrap_or(DEFAULT_TIMEOUT_MS)),
+            cancelled,
+        }
+    }
+}
+
 /// Run the external tool pipeline on `content` and return the result.
 ///
 /// Each tool in the pipeline runs in sequence.  The output of one tool
@@ -89,45 +113,56 @@ pub(super) fn run_external_pipeline(
     tools: &[ResolvedTool],
     content: &str,
     file_path: &Path,
+    workspace_root: Option<&Path>,
     config: &FormattingConfig,
     cancelled: &AtomicBool,
 ) -> Result<String, String> {
-    let timeout = Duration::from_millis(config.timeout.unwrap_or(DEFAULT_TIMEOUT_MS));
-
+    let run = Run::new(workspace_root, config, cancelled);
     let mut current = content.to_string();
     for tool in tools {
-        current = run_tool(tool, &current, file_path, timeout, cancelled)?;
+        current = run_tool(tool, &current, file_path, &run)?;
     }
     Ok(current)
+}
+
+/// Format a Blade template through Pint's `Pint/laravel_blade` rule.
+///
+/// `blade_flag` passes `--blade`, which turns the rule on for the run
+/// when the project's `pint.json` does not.  Pint refuses the run (exit
+/// code 1, nothing written) when the Node dependencies the rule needs
+/// are not installed, which surfaces as an error rather than as output.
+pub(super) fn run_pint_on_blade(
+    tool: &ResolvedTool,
+    content: &str,
+    file_path: &Path,
+    workspace_root: Option<&Path>,
+    blade_flag: bool,
+    config: &FormattingConfig,
+    cancelled: &AtomicBool,
+) -> Result<String, String> {
+    let mut arguments = Tool::Pint.arguments(file_path);
+    if blade_flag {
+        arguments.push("--blade".into());
+    }
+    let run = Run::new(workspace_root, config, cancelled);
+    let output = execute(tool, &arguments, Some(content), &run)?;
+    Ok(output.stdout)
 }
 
 fn run_tool(
     tool: &ResolvedTool,
     content: &str,
     file_path: &Path,
-    timeout: Duration,
-    cancelled: &AtomicBool,
+    run: &Run<'_>,
 ) -> Result<String, String> {
     match tool.tool.invocation() {
         Invocation::Stdin => {
-            let output = run(
-                tool,
-                &tool.tool.arguments(file_path),
-                Some(content),
-                timeout,
-                cancelled,
-            )?;
+            let output = execute(tool, &tool.tool.arguments(file_path), Some(content), run)?;
             Ok(output.stdout)
         }
         Invocation::SiblingFile => {
             let temp = write_sibling_temp_file(file_path, content)?;
-            let result = run(
-                tool,
-                &tool.tool.arguments(temp.path()),
-                None,
-                timeout,
-                cancelled,
-            );
+            let result = execute(tool, &tool.tool.arguments(temp.path()), None, run);
             // Read back before checking the outcome: phpcbf reports partial
             // fixes through a non-zero code and the file is what it wrote.
             let formatted = std::fs::read_to_string(temp.path())
@@ -138,17 +173,29 @@ fn run_tool(
 }
 
 /// Run one tool and check its exit code.
-fn run(
+fn execute(
     tool: &ResolvedTool,
     arguments: &[OsString],
     stdin: Option<&str>,
-    timeout: Duration,
-    cancelled: &AtomicBool,
+    run: &Run<'_>,
 ) -> Result<crate::process::CommandOutput, String> {
+    // A relative path with a directory in it (`./tools/pint`) is relative
+    // to the server's own working directory, which changing the child's
+    // working directory must not move.
+    let program = if tool.path.is_relative() && tool.path.components().count() > 1 {
+        std::path::absolute(&tool.path).unwrap_or_else(|_| tool.path.clone())
+    } else {
+        tool.path.clone()
+    };
+    let mut command = Command::new(program);
+    command.args(arguments);
+    if let Some(root) = run.workspace_root {
+        command.current_dir(root);
+    }
     let output = crate::process::run_command_with_timeout(
-        Command::new(&tool.path).args(arguments),
-        timeout,
-        cancelled,
+        &mut command,
+        run.timeout,
+        run.cancelled,
         tool.tool.name(),
         stdin,
     )?;
