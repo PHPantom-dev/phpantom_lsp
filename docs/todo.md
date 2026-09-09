@@ -36,7 +36,7 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-| BL18 | [Format the PHP embedded in a Blade template](todo/blade.md#bl18-format-the-php-embedded-in-a-blade-template)                                 | Low-Medium | Medium-High |
+| BL19 | [Reflow a multi-line PHP fragment in a Blade template](todo/blade.md#bl19-reflow-a-multi-line-php-fragment-in-a-blade-template)                | Low        | Medium     |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions

@@ -93,14 +93,14 @@ const INLINE_ELEMENTS: &[&str] = &[
 
 /// Elements whose body is kept as it is: their whitespace is rendered
 /// (`<pre>`, `<textarea>`).
-const PRESERVED_ELEMENTS: &[&str] = &["pre", "textarea"];
+pub(super) const PRESERVED_ELEMENTS: &[&str] = &["pre", "textarea"];
 
 /// Elements whose body is another language, shifted as a block rather
 /// than reindented line by line.
-const OPAQUE_ELEMENTS: &[&str] = &["script", "style"];
+pub(super) const OPAQUE_ELEMENTS: &[&str] = &["script", "style"];
 
-const DISABLE_MARKER: &str = "blade-formatter-disable";
-const ENABLE_MARKER: &str = "blade-formatter-enable";
+pub(super) const DISABLE_MARKER: &str = "blade-formatter-disable";
+pub(super) const ENABLE_MARKER: &str = "blade-formatter-enable";
 
 /// Reindent `content` with `options`.
 pub fn reindent(content: &str, options: &Options) -> String {
@@ -253,27 +253,15 @@ impl<'a> Scanner<'a> {
             .all(|b| matches!(b, b' ' | b'\t' | b'\r'))
     }
 
-    fn directive_boundary_before(&self, at: usize) -> bool {
-        at == 0 || !(self.bytes[at - 1] == b'@' || is_word_byte(self.bytes[at - 1]))
-    }
-
-    fn word_end(&self, from: usize) -> usize {
-        let mut i = from;
-        while i < self.bytes.len() && is_word_byte(self.bytes[i]) {
-            i += 1;
-        }
-        i
-    }
-
     fn collect_end_names(&mut self) {
         let mut i = 0;
         while let Some(at) = self.bytes[i..].iter().position(|b| *b == b'@') {
             let at = i + at;
             i = at + 1;
-            if !self.directive_boundary_before(at) {
+            if !boundary_before(self.bytes, at) {
                 continue;
             }
-            let end = self.word_end(at + 1);
+            let end = word_end(self.bytes, at + 1);
             let name = &self.src[at + 1..end];
             if let Some(closed) = name.strip_prefix("end")
                 && !closed.is_empty()
@@ -292,7 +280,7 @@ impl<'a> Scanner<'a> {
         while i < self.bytes.len() {
             i = match self.bytes[i] {
                 b'{' if self.bytes[i..].starts_with(b"{{--") => self.scan_comment(i),
-                b'{' if self.is_echo_start(i) => self.scan_echo(i, self.bytes.len()),
+                b'{' if is_echo_start(self.bytes, i) => self.scan_echo(i, self.bytes.len()),
                 b'@' => self.scan_directive(i),
                 b'<' => self.scan_markup(i),
                 b'\'' | b'"' if !self.brackets.is_empty() => {
@@ -377,7 +365,7 @@ impl<'a> Scanner<'a> {
                 b'{' if self.bytes[i..end].starts_with(b"{{--") => {
                     find(self.bytes, i + 4, end, b"--}}").map_or(end, |at| at + 4)
                 }
-                b'{' if self.is_echo_start(i) => self.scan_echo(i, end),
+                b'{' if is_echo_start(self.bytes, i) => self.scan_echo(i, end),
                 b'\'' | b'"' => self.skip_string(i, end).unwrap_or(i + 1),
                 b'(' | b'[' | b'{' => self.open_bracket(i),
                 b')' | b']' | b'}' => self.close_bracket(i),
@@ -388,27 +376,12 @@ impl<'a> Scanner<'a> {
 
     // ── Echoes and comments ─────────────────────────────────────────
 
-    fn is_echo_start(&self, at: usize) -> bool {
-        self.bytes[at..].starts_with(b"{{") || self.bytes[at..].starts_with(b"{!!")
-    }
-
-    /// The opening and closing delimiters of the echo at `at`.
-    fn echo_delimiters(&self, at: usize) -> (&'static [u8], &'static [u8]) {
-        if self.bytes[at..].starts_with(b"{{{") {
-            (b"{{{", b"}}}")
-        } else if self.bytes[at..].starts_with(b"{!!") {
-            (b"{!!", b"!!}")
-        } else {
-            (b"{{", b"}}")
-        }
-    }
-
     /// Scan an echo's expression as code, skipping the delimiters so their
     /// braces count for nothing. An unterminated echo is two literal
     /// braces.
     fn scan_echo(&mut self, at: usize, limit: usize) -> usize {
-        let (open, close) = self.echo_delimiters(at);
-        let Some(end) = find(self.bytes, at + open.len(), limit, close) else {
+        let (open, close) = echo_delimiters(self.bytes, at);
+        let Some(end) = find(self.bytes, at + open.len(), limit, close.as_bytes()) else {
             return at + open.len();
         };
         self.scan_code(at + open.len(), end);
@@ -417,9 +390,14 @@ impl<'a> Scanner<'a> {
 
     /// The extent of the echo at `at`, without scanning it.
     fn skip_echo(&self, at: usize) -> usize {
-        let (open, close) = self.echo_delimiters(at);
-        find(self.bytes, at + open.len(), self.bytes.len(), close)
-            .map_or(at + open.len(), |end| end + close.len())
+        let (open, close) = echo_delimiters(self.bytes, at);
+        find(
+            self.bytes,
+            at + open.len(),
+            self.bytes.len(),
+            close.as_bytes(),
+        )
+        .map_or(at + open.len(), |end| end + close.len())
     }
 
     fn scan_comment(&mut self, at: usize) -> usize {
@@ -485,9 +463,9 @@ impl<'a> Scanner<'a> {
         while let Some(at) = self.bytes[i..].iter().position(|b| *b == b'@') {
             let at = i + at;
             i = at + 1;
-            if self.directive_boundary_before(at)
+            if boundary_before(self.bytes, at)
                 && self.src[at + 1..].starts_with(name)
-                && self.word_end(at + 1) == at + 1 + name.len()
+                && word_end(self.bytes, at + 1) == at + 1 + name.len()
             {
                 return Some(at..at + 1 + name.len());
             }
@@ -496,17 +474,17 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_directive(&mut self, at: usize) -> usize {
-        if !self.directive_boundary_before(at) {
+        if !boundary_before(self.bytes, at) {
             return at + 1;
         }
         match self.bytes.get(at + 1) {
             // `@@if` is the escape for a literal `@if`.
             Some(b'@') => return at + 2,
             // `@{{ … }}` is a literal echo, whose braces are text.
-            Some(b'{') if self.is_echo_start(at + 1) => return self.skip_echo(at + 1),
+            Some(b'{') if is_echo_start(self.bytes, at + 1) => return self.skip_echo(at + 1),
             _ => {}
         }
-        let name_end = self.word_end(at + 1);
+        let name_end = word_end(self.bytes, at + 1);
         if name_end == at + 1 {
             return at + 1;
         }
@@ -667,34 +645,17 @@ impl<'a> Scanner<'a> {
             return find_byte(self.bytes, at, b'>').map_or(self.bytes.len(), |gt| gt + 1);
         }
         if rest.starts_with(b"</") {
-            let Some((name, name_end)) = self.tag_name(at + 2) else {
+            let Some((name, name_end)) = tag_name(self.src, at + 2) else {
                 return at + 1;
             };
             let end = find_byte(self.bytes, name_end, b'>').map_or(self.bytes.len(), |gt| gt + 1);
             self.push(at, Kind::CloseElement(name));
             return end;
         }
-        match self.tag_name(at + 1) {
+        match tag_name(self.src, at + 1) {
             Some((name, name_end)) => self.scan_tag(at, name, name_end),
             None => at + 1,
         }
-    }
-
-    /// The tag name starting at `from`: a static name, or a dynamic
-    /// `{{ $tag }}` echo.
-    fn tag_name(&self, from: usize) -> Option<(String, usize)> {
-        if self.bytes[from..].starts_with(b"{{") {
-            let close = find(self.bytes, from + 2, self.bytes.len(), b"}}")?;
-            return Some((self.src[from..close + 2].to_ascii_lowercase(), close + 2));
-        }
-        if !self.bytes.get(from)?.is_ascii_alphabetic() {
-            return None;
-        }
-        let mut end = from;
-        while end < self.bytes.len() && is_tag_name_char(self.bytes[end] as char) {
-            end += 1;
-        }
-        Some((self.src[from..end].to_ascii_lowercase(), end))
     }
 
     fn scan_tag(&mut self, lt: usize, name: String, name_end: usize) -> usize {
@@ -722,7 +683,7 @@ impl<'a> Scanner<'a> {
                 b'/' if self.bytes.get(i + 1) == Some(&b'>') => break (i, true),
                 b'/' => i + 1,
                 b'{' if self.bytes[i..].starts_with(b"{{--") => self.scan_comment(i),
-                b'{' if self.is_echo_start(i) => self.scan_echo(i, self.bytes.len()),
+                b'{' if is_echo_start(self.bytes, i) => self.scan_echo(i, self.bytes.len()),
                 b'@' => self.scan_directive(i),
                 b'\'' | b'"' => self.scan_attribute_value(i),
                 b'(' | b'[' | b'{' => self.open_bracket(i),
@@ -741,7 +702,7 @@ impl<'a> Scanner<'a> {
         let after = if self_closing || VOID_ELEMENTS.contains(&name.as_str()) {
             After::Nothing
         } else if let Some(kind) = element_region_kind(&name) {
-            match self.find_closing_tag(end, &name) {
+            match find_closing_tag(self.src, end, &name) {
                 Some(terminator) => {
                     let resume = terminator.end;
                     let after = if self.line_of(terminator.start) == self.line_of(gt) {
@@ -790,28 +751,6 @@ impl<'a> Scanner<'a> {
             .iter()
             .find(|b| !matches!(b, b' ' | b'\t'))
             .is_some_and(|b| !matches!(b, b'<' | b'\n' | b'\r'))
-    }
-
-    /// The closing tag `</name>` at or after `from`, case-insensitively.
-    fn find_closing_tag(&self, from: usize, name: &str) -> Option<Range<usize>> {
-        let mut i = from;
-        while let Some(at) = find(self.bytes, i, self.bytes.len(), b"</") {
-            let name_end = at + 2 + name.len();
-            if self
-                .src
-                .get(at + 2..name_end)
-                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-                && self
-                    .bytes
-                    .get(name_end)
-                    .is_none_or(|b| b.is_ascii_whitespace() || *b == b'>')
-            {
-                let gt = find_byte(self.bytes, name_end, b'>').unwrap_or(self.bytes.len() - 1);
-                return Some(at..gt + 1);
-            }
-            i = at + 2;
-        }
-        None
     }
 
     /// An attribute, with its value when it has one.
@@ -878,6 +817,75 @@ impl<'a> Scanner<'a> {
     }
 }
 
+/// Whether the byte before `at` lets an `@` there start a directive, which
+/// is Blade's own word-boundary rule.
+pub(super) fn boundary_before(bytes: &[u8], at: usize) -> bool {
+    at == 0 || !(bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1]))
+}
+
+/// The end of the `\w+` run starting at `from`.
+pub(super) fn word_end(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < bytes.len() && is_word_byte(bytes[i]) {
+        i += 1;
+    }
+    i
+}
+
+pub(super) fn is_echo_start(bytes: &[u8], at: usize) -> bool {
+    bytes[at..].starts_with(b"{{") || bytes[at..].starts_with(b"{!!")
+}
+
+/// The opening and closing delimiters of the echo at `at`.
+pub(super) fn echo_delimiters(bytes: &[u8], at: usize) -> (&'static str, &'static str) {
+    if bytes[at..].starts_with(b"{{{") {
+        ("{{{", "}}}")
+    } else if bytes[at..].starts_with(b"{!!") {
+        ("{!!", "!!}")
+    } else {
+        ("{{", "}}")
+    }
+}
+
+/// The tag name starting at `from`: a static name, or a dynamic
+/// `{{ $tag }}` echo.
+pub(super) fn tag_name(src: &str, from: usize) -> Option<(String, usize)> {
+    let bytes = src.as_bytes();
+    if bytes[from..].starts_with(b"{{") {
+        let close = find(bytes, from + 2, bytes.len(), b"}}")?;
+        return Some((src[from..close + 2].to_ascii_lowercase(), close + 2));
+    }
+    if !bytes.get(from)?.is_ascii_alphabetic() {
+        return None;
+    }
+    let mut end = from;
+    while end < bytes.len() && is_tag_name_char(bytes[end] as char) {
+        end += 1;
+    }
+    Some((src[from..end].to_ascii_lowercase(), end))
+}
+
+/// The closing tag `</name>` at or after `from`, case-insensitively.
+pub(super) fn find_closing_tag(src: &str, from: usize, name: &str) -> Option<Range<usize>> {
+    let bytes = src.as_bytes();
+    let mut i = from;
+    while let Some(at) = find(bytes, i, bytes.len(), b"</") {
+        let name_end = at + 2 + name.len();
+        if src
+            .get(at + 2..name_end)
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+            && bytes
+                .get(name_end)
+                .is_none_or(|b| b.is_ascii_whitespace() || *b == b'>')
+        {
+            let gt = find_byte(bytes, name_end, b'>').unwrap_or(bytes.len() - 1);
+            return Some(at..gt + 1);
+        }
+        i = at + 2;
+    }
+    None
+}
+
 fn element_region_kind(name: &str) -> Option<RegionKind> {
     if PRESERVED_ELEMENTS.contains(&name) {
         Some(RegionKind::Preserve)
@@ -890,15 +898,15 @@ fn element_region_kind(name: &str) -> Option<RegionKind> {
 
 /// `<x-alert>`, `<flux:button>`, `<livewire:counter>`, and any custom
 /// element: a name with a dash or a colon.
-fn is_component_name(name: &str) -> bool {
+pub(super) fn is_component_name(name: &str) -> bool {
     name.contains('-') || name.contains(':')
 }
 
-fn is_word_byte(byte: u8) -> bool {
+pub(super) fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
-fn find(bytes: &[u8], from: usize, limit: usize, needle: &[u8]) -> Option<usize> {
+pub(super) fn find(bytes: &[u8], from: usize, limit: usize, needle: &[u8]) -> Option<usize> {
     if from >= limit || needle.len() > limit - from {
         return None;
     }
@@ -908,7 +916,7 @@ fn find(bytes: &[u8], from: usize, limit: usize, needle: &[u8]) -> Option<usize>
         .map(|at| from + at)
 }
 
-fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
+pub(super) fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
     bytes[from..]
         .iter()
         .position(|b| *b == needle)

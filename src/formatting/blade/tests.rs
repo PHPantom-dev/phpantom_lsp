@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 use crate::config::FormattingConfig;
+use crate::types::PhpVersion;
 
 use super::reindent::{Options, reindent};
 use super::{
@@ -1022,14 +1023,12 @@ fn indentation_never_panics_on_malformed_input() {
     }
 }
 
-/// The idempotence and leading-whitespace-only properties hold over the
-/// Laravel example project's views, which are real templates rather than
-/// cases written for the formatter.
-#[test]
-fn indentation_is_idempotent_over_the_example_views() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/laravel/resources/views");
-    let mut checked = 0;
-    let mut pending = vec![root];
+/// The Laravel example project's views, which are real templates rather
+/// than cases written for the formatter.
+fn example_views() -> Vec<(std::path::PathBuf, String)> {
+    let mut views = Vec::new();
+    let mut pending =
+        vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/laravel/resources/views")];
     while let Some(dir) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -1040,27 +1039,36 @@ fn indentation_is_idempotent_over_the_example_views() {
                 pending.push(path);
             } else if path.to_string_lossy().ends_with(".blade.php") {
                 let source = std::fs::read_to_string(&path).unwrap();
-                let once = reindent(&source, &Options::default());
-                assert_eq!(
-                    reindent(&once, &Options::default()),
-                    once,
-                    "{} is not idempotent",
-                    path.display()
-                );
-                assert_eq!(source.lines().count(), once.lines().count());
-                for (before, after) in source.lines().zip(once.lines()) {
-                    assert_eq!(
-                        before.trim_start_matches([' ', '\t']),
-                        after.trim_start_matches([' ', '\t']),
-                        "{} changed beyond leading whitespace",
-                        path.display()
-                    );
-                }
-                checked += 1;
+                views.push((path, source));
             }
         }
     }
-    assert!(checked > 10, "only {checked} views checked");
+    assert!(views.len() > 10, "only {} views found", views.len());
+    views
+}
+
+/// The idempotence and leading-whitespace-only properties hold over real
+/// templates.
+#[test]
+fn indentation_is_idempotent_over_the_example_views() {
+    for (path, source) in example_views() {
+        let once = reindent(&source, &Options::default());
+        assert_eq!(
+            reindent(&once, &Options::default()),
+            once,
+            "{} is not idempotent",
+            path.display()
+        );
+        assert_eq!(source.lines().count(), once.lines().count());
+        for (before, after) in source.lines().zip(once.lines()) {
+            assert_eq!(
+                before.trim_start_matches([' ', '\t']),
+                after.trim_start_matches([' ', '\t']),
+                "{} changed beyond leading whitespace",
+                path.display()
+            );
+        }
+    }
 }
 
 // ── Whitespace-sensitive templates ──────────────────────────────
@@ -1107,7 +1115,7 @@ fn builtin_strategy_skips_whitespace_sensitive_templates() {
     let content = "<div>\n<p>x</p>\n</div>";
     let config = FormattingConfig::default();
     let skipped = format_blade_content(
-        &BladeFormattingStrategy::BuiltIn,
+        &BladeFormattingStrategy::BuiltIn(None),
         content,
         Path::new("/app/resources/views/mail/welcome.blade.php"),
         None,
@@ -1118,7 +1126,7 @@ fn builtin_strategy_skips_whitespace_sensitive_templates() {
     .unwrap();
     assert!(skipped.is_none());
     let formatted = format_blade_content(
-        &BladeFormattingStrategy::BuiltIn,
+        &BladeFormattingStrategy::BuiltIn(None),
         content,
         Path::new("/app/resources/views/welcome.blade.php"),
         None,
@@ -1184,8 +1192,14 @@ fn is_pint(strategy: &BladeFormattingStrategy, flag: bool) -> bool {
 
 #[test]
 fn blade_strategy_is_builtin_without_pint() {
-    let strategy = resolve_blade_strategy(None, &FormattingConfig::default(), None, None);
-    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn));
+    let strategy = resolve_blade_strategy(
+        None,
+        &FormattingConfig::default(),
+        None,
+        None,
+        PhpVersion::default(),
+    );
+    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn(_)));
 }
 
 #[test]
@@ -1196,7 +1210,7 @@ fn blade_strategy_is_disabled_when_formatting_is() {
         phpcbf: Some(String::new()),
         ..FormattingConfig::default()
     };
-    let strategy = resolve_blade_strategy(None, &config, None, None);
+    let strategy = resolve_blade_strategy(None, &config, None, None, PhpVersion::default());
     assert!(matches!(strategy, BladeFormattingStrategy::Disabled));
 }
 
@@ -1207,23 +1221,41 @@ fn blade_strategy_follows_the_pint_json_rule() {
 
     // Pint is the PHP formatter, but its Blade rule is off, so Blade
     // files must not go to it: it would echo them back unchanged.
-    let strategy = resolve_blade_strategy(Some(dir.path()), &config, Some(&composer), None);
-    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn));
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &config,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
+    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn(_)));
 
     std::fs::write(
         dir.path().join("pint.json"),
         r#"{"preset": "laravel", "rules": {"Pint/laravel_blade": false}}"#,
     )
     .unwrap();
-    let strategy = resolve_blade_strategy(Some(dir.path()), &config, Some(&composer), None);
-    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn));
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &config,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
+    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn(_)));
 
     std::fs::write(
         dir.path().join("pint.json"),
         r#"{"preset": "laravel", "rules": {"Pint/laravel_blade": true}}"#,
     )
     .unwrap();
-    let strategy = resolve_blade_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &config,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
     assert!(is_pint(&strategy, false), "{strategy:?}");
 
     // The rule takes an options object as well as a boolean.
@@ -1232,7 +1264,13 @@ fn blade_strategy_follows_the_pint_json_rule() {
         r#"{"rules": {"Pint/laravel_blade": {"tailwind": false}}}"#,
     )
     .unwrap();
-    let strategy = resolve_blade_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &config,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
     assert!(is_pint(&strategy, false), "{strategy:?}");
 }
 
@@ -1244,7 +1282,13 @@ fn blade_strategy_honours_pint_blade_config() {
         pint_blade: Some(true),
         ..FormattingConfig::default()
     };
-    let strategy = resolve_blade_strategy(Some(dir.path()), &on, Some(&composer), None);
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &on,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
     assert!(is_pint(&strategy, true), "{strategy:?}");
 
     std::fs::write(
@@ -1256,12 +1300,18 @@ fn blade_strategy_honours_pint_blade_config() {
         pint_blade: Some(false),
         ..FormattingConfig::default()
     };
-    let strategy = resolve_blade_strategy(Some(dir.path()), &off, Some(&composer), None);
-    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn));
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &off,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
+    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn(_)));
 
     // Asking for Pint's Blade rule without Pint changes nothing.
-    let strategy = resolve_blade_strategy(None, &on, None, None);
-    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn));
+    let strategy = resolve_blade_strategy(None, &on, None, None, PhpVersion::default());
+    assert!(matches!(strategy, BladeFormattingStrategy::BuiltIn(_)));
 }
 
 #[cfg(unix)]
@@ -1273,7 +1323,13 @@ fn pint_runs_in_the_workspace_root_with_the_blade_flag() {
         pint_blade: Some(true),
         ..FormattingConfig::default()
     };
-    let strategy = resolve_blade_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &config,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
     let file = dir.path().join("resources/views/welcome.blade.php");
     let output = format_blade_content(
         &strategy,
@@ -1329,7 +1385,13 @@ fn pint_failure_is_an_error_not_an_edit() {
         pint_blade: Some(true),
         ..FormattingConfig::default()
     };
-    let strategy = resolve_blade_strategy(Some(dir.path()), &config, Some(&composer), None);
+    let strategy = resolve_blade_strategy(
+        Some(dir.path()),
+        &config,
+        Some(&composer),
+        None,
+        PhpVersion::default(),
+    );
     let result = format_blade_content(
         &strategy,
         "<div></div>\n",
@@ -1340,4 +1402,346 @@ fn pint_failure_is_an_error_not_an_edit() {
         &AtomicBool::new(false),
     );
     assert!(result.is_err(), "{result:?}");
+}
+
+// ── Embedded PHP ────────────────────────────────────────────────
+
+/// Format `input` with `blade-php = true`, the opt-in that lets the
+/// built-in formatter rewrite the PHP a template carries, and check it
+/// against `expected`. Formatting the result again has to be a no-op:
+/// the PHP pass and the reindenter run one after the other, so a
+/// disagreement between them would show up as an oscillation.
+fn check_embedded(input: &str, expected: &str) {
+    let actual = format_embedded(input);
+    assert_eq!(
+        actual, expected,
+        "\n--- input ---\n{input}\n--- actual ---\n{actual}"
+    );
+    assert_eq!(
+        format_embedded(&actual),
+        actual,
+        "formatting is not idempotent"
+    );
+}
+
+/// Check that `input` comes back unchanged.
+fn check_embedded_unchanged(input: &str) {
+    check_embedded(input, input);
+}
+
+fn format_embedded(input: &str) -> String {
+    let config = FormattingConfig {
+        blade_php: Some(true),
+        ..FormattingConfig::default()
+    };
+    let strategy = resolve_blade_strategy(None, &config, None, None, PhpVersion::default());
+    assert!(
+        matches!(strategy, BladeFormattingStrategy::BuiltIn(Some(_))),
+        "blade-php = true should resolve the embedded-PHP pass: {strategy:?}"
+    );
+    format_blade_content(
+        &strategy,
+        input,
+        Path::new("/app/resources/views/page.blade.php"),
+        None,
+        &config,
+        &Options::default(),
+        &AtomicBool::new(false),
+    )
+    .expect("formatting failed")
+    .unwrap_or_else(|| input.to_string())
+}
+
+#[test]
+fn embedded_php_is_off_unless_the_project_asks_for_it() {
+    let input = "{{$name}}\n@if($a&&$b)\n<p>x</p>\n@endif\n";
+    let formatted = format_blade_content(
+        &BladeFormattingStrategy::BuiltIn(None),
+        input,
+        Path::new("/app/resources/views/page.blade.php"),
+        None,
+        &FormattingConfig::default(),
+        &Options::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(
+        formatted.as_deref(),
+        Some("{{$name}}\n@if($a&&$b)\n    <p>x</p>\n@endif\n"),
+        "only the indentation may change"
+    );
+}
+
+#[test]
+fn embedded_php_pads_an_echo() {
+    check_embedded("{{$name}}\n", "{{ $name }}\n");
+}
+
+#[test]
+fn embedded_php_formats_an_echo_expression() {
+    check_embedded(
+        "{{ $user->name ?? 'anonymous'}}\n",
+        "{{ $user->name ?? 'anonymous' }}\n",
+    );
+}
+
+#[test]
+fn embedded_php_pads_a_raw_echo() {
+    check_embedded("{!!$html!!}\n", "{!! $html !!}\n");
+}
+
+#[test]
+fn embedded_php_formats_an_echo_inside_an_attribute_value() {
+    check_embedded(
+        "<div class=\"{{$class}}\"></div>\n",
+        "<div class=\"{{ $class }}\"></div>\n",
+    );
+}
+
+#[test]
+fn embedded_php_spaces_a_control_directive_from_its_condition() {
+    check_embedded(
+        "@if($a&&$b)\n<p>x</p>\n@endif\n",
+        "@if ($a && $b)\n    <p>x</p>\n@endif\n",
+    );
+}
+
+#[test]
+fn embedded_php_writes_a_call_directive_without_a_space() {
+    check_embedded(
+        "@include ('shared.errors')\n",
+        "@include('shared.errors')\n",
+    );
+}
+
+#[test]
+fn embedded_php_formats_a_foreach_header() {
+    check_embedded(
+        "@foreach($users   as $user)\n<p>{{$user->name}}</p>\n@endforeach\n",
+        "@foreach ($users as $user)\n    <p>{{ $user->name }}</p>\n@endforeach\n",
+    );
+}
+
+#[test]
+fn embedded_php_formats_a_for_header() {
+    check_embedded(
+        "@for($i=0;$i<3;$i++)\n@endfor\n",
+        "@for ($i = 0; $i < 3; $i++)\n@endfor\n",
+    );
+}
+
+#[test]
+fn embedded_php_formats_an_argument_list() {
+    check_embedded("@section('title','Home')\n", "@section('title', 'Home')\n");
+}
+
+#[test]
+fn embedded_php_formats_a_php_block_and_the_reindenter_places_it() {
+    check_embedded(
+        "@if ($a)\n@php\n$total=1+2;\n  $label='x';\n@endphp\n@endif\n",
+        "@if ($a)\n    @php\n        $total = 1 + 2;\n        $label = 'x';\n    @endphp\n@endif\n",
+    );
+}
+
+#[test]
+fn embedded_php_keeps_a_one_line_php_block_on_its_line() {
+    check_embedded(
+        "@php $total=1+2; @endphp\n",
+        "@php $total = 1 + 2; @endphp\n",
+    );
+}
+
+#[test]
+fn embedded_php_formats_a_raw_php_island() {
+    check_embedded(
+        "<div>\n<?php\n$x=1;\n?>\n</div>\n",
+        "<div>\n    <?php\n        $x = 1;\n    ?>\n</div>\n",
+    );
+}
+
+#[test]
+fn embedded_php_spaces_a_self_closing_tag() {
+    check_embedded("<br/>\n<x-alert   />\n", "<br />\n<x-alert />\n");
+}
+
+#[test]
+fn embedded_php_leaves_a_fragment_that_does_not_parse_alone() {
+    check_embedded(
+        "{{ $a ** }}\n@if($ok)\n<p>x</p>\n@endif\n",
+        "{{ $a ** }}\n@if ($ok)\n    <p>x</p>\n@endif\n",
+    );
+}
+
+#[test]
+fn embedded_php_leaves_a_multi_line_echo_alone() {
+    check_embedded_unchanged("{{ $items->map(\n    fn ($i) => $i->name\n) }}\n");
+}
+
+#[test]
+fn embedded_php_leaves_verbatim_alone() {
+    check_embedded_unchanged("@verbatim\n{{$vue}}\n@endverbatim\n");
+}
+
+/// Only the reindenter's own block shift applies to a `<script>` or
+/// `<style>` body: the echo inside it keeps the spacing it was written
+/// with.
+#[test]
+fn embedded_php_leaves_script_and_style_bodies_alone() {
+    check_embedded(
+        "<script>\nlet x = {{$n}};\n</script>\n<style>\n.a{color:red}\n</style>\n",
+        "<script>\n    let x = {{$n}};\n</script>\n<style>\n    .a{color:red}\n</style>\n",
+    );
+}
+
+#[test]
+fn embedded_php_leaves_pre_bodies_alone() {
+    check_embedded_unchanged("<pre>\n{{$raw}}\n</pre>\n");
+}
+
+#[test]
+fn embedded_php_leaves_a_lookalike_in_a_comment_alone() {
+    check_embedded_unchanged("{{-- {{$name}} --}}\n");
+}
+
+#[test]
+fn embedded_php_leaves_a_disabled_region_alone() {
+    check_embedded_unchanged(
+        "{{-- blade-formatter-disable --}}\n{{$name}}\n{{-- blade-formatter-enable --}}\n",
+    );
+}
+
+#[test]
+fn embedded_php_leaves_an_escaped_echo_alone() {
+    check_embedded_unchanged("@{{$vue}}\n");
+}
+
+/// Blade closes a `@php` block with a non-greedy regex, so an `@endphp`
+/// written inside a string literal really does end it. The pass reads it
+/// the same way the reindenter and the compiler do, which leaves a body
+/// that no longer parses, and an unparseable body is left as written.
+#[test]
+fn embedded_php_reads_a_delimiter_in_a_string_the_way_blade_does() {
+    check_embedded(
+        "@php\n$x = '@endphp';\n$y = 2;\n@endphp\n",
+        "@php\n    $x = '@endphp';\n$y = 2;\n@endphp\n",
+    );
+}
+
+#[test]
+fn embedded_php_leaves_an_alpine_attribute_alone() {
+    check_embedded_unchanged("<div x-data=\"{ open:false }\" @click=\"open=!open\"></div>\n");
+}
+
+#[test]
+fn embedded_php_leaves_a_livewire_attribute_alone() {
+    check_embedded_unchanged("<input wire:model.live=\"search\" />\n");
+}
+
+#[test]
+fn embedded_php_leaves_an_alpine_bind_on_a_plain_element_alone() {
+    check_embedded_unchanged("<div :class=\"open?'a':'b'\"></div>\n");
+}
+
+/// The pass and the reindenter run one after the other, so a template
+/// that exercises both has to reach a fixed point.
+#[test]
+fn embedded_php_is_idempotent_over_a_whole_template() {
+    let template = concat!(
+        "@extends('layouts.app')\n",
+        "@section('content')\n",
+        "@php\n",
+        "$items=collect([1,2,3]);\n",
+        "@endphp\n",
+        "<div class=\"wrap\" x-data=\"{ open: false }\">\n",
+        "@forelse($items as $item)\n",
+        "<x-row :item=\"$item\"/>\n",
+        "{{-- a comment --}}\n",
+        "<p>{{$item}}</p>\n",
+        "@empty\n",
+        "<p>@lang('none')</p>\n",
+        "@endforelse\n",
+        "@switch($mode)\n",
+        "@case('a')\n",
+        "@break\n",
+        "@endswitch\n",
+        "</div>\n",
+        "@endsection\n",
+    );
+    let once = format_embedded(template);
+    assert_eq!(format_embedded(&once), once, "\n--- once ---\n{once}");
+}
+
+/// The pass reaches a fixed point on real templates too, not only on the
+/// cases written for it.
+#[test]
+fn embedded_php_is_idempotent_over_the_example_views() {
+    for (path, source) in example_views() {
+        let once = format_embedded(&source);
+        assert_eq!(
+            format_embedded(&once),
+            once,
+            "{} is not idempotent",
+            path.display()
+        );
+    }
+}
+
+/// The same malformed templates the reindenter's own fixed-point test
+/// uses, which are the shapes a scanner is most likely to run off the end
+/// of.
+#[test]
+fn embedded_php_is_idempotent_over_malformed_templates() {
+    for input in [
+        "",
+        "@if",
+        "@if(",
+        "{{",
+        "{{ $a",
+        "{!!",
+        "@php",
+        "@php $x =",
+        "@verbatim",
+        "<div",
+        "<div attr=\"",
+        "<script>",
+        "<!--",
+        "<?php echo 1;",
+        "{{-- blade-formatter-disable --}}\n<p>\n  x",
+        "@@\n@\n<\n</\n<//>",
+    ] {
+        let once = format_embedded(input);
+        assert_eq!(format_embedded(&once), once, "{input:?}");
+    }
+}
+
+/// A snippet is formatted on its own, so the print width has to be told
+/// what column the reindenter will put it back at. Otherwise a deeply
+/// nested `@php` block comes back filled to 120 columns and is then
+/// pushed past the end of the line.
+#[test]
+fn embedded_php_formats_a_php_block_to_the_width_left_at_its_column() {
+    // 107 columns: it fits at the top level, where the body starts at
+    // column 4, and not three blocks in, where it starts at 16.
+    let statement = "$url = $language->url . \\App\\Helpers\\Slug::translate('/page', $langCode) . '/' . $page->getSlugForLocale();";
+    check_embedded(
+        &format!("@php\n{statement}\n@endphp\n"),
+        &format!("@php\n    {statement}\n@endphp\n"),
+    );
+    check_embedded(
+        &format!(
+            "@if ($a)\n@if ($b)\n@if ($c)\n@php\n{statement}\n@endphp\n@endif\n@endif\n@endif\n"
+        ),
+        concat!(
+            "@if ($a)\n",
+            "    @if ($b)\n",
+            "        @if ($c)\n",
+            "            @php\n",
+            "                $url =\n",
+            "                    $language->url . \\App\\Helpers\\Slug::translate('/page', $langCode) . '/' . $page->getSlugForLocale();\n",
+            "            @endphp\n",
+            "        @endif\n",
+            "    @endif\n",
+            "@endif\n",
+        ),
+    );
 }

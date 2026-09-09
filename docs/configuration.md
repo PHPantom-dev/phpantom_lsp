@@ -115,6 +115,7 @@ highlighting remains in charge of ordinary PHP syntax.
 | -------------- | ------- | ------- | ----------- |
 | `pint`         | string  | unset   | Command or path for Laravel Pint. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `pint-blade`   | boolean | unset   | Whether `.blade.php` files are formatted by Pint's `Pint/laravel_blade` rule. Unset: follow the workspace `pint.json`. `true`: send them to Pint with `--blade`. `false`: never; use the built-in Blade formatter. |
+| `blade-php`    | boolean | unset   | Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. `true`: format it. No effect on a project whose Blade files go to Pint. |
 | `php-cs-fixer` | string  | unset   | Command or path for php-cs-fixer. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `phpcbf`       | string  | unset   | Command or path for phpcbf. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `timeout`      | integer | `10000` | Max runtime in milliseconds per external formatting tool. |
@@ -204,6 +205,8 @@ PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the b
 3. **Otherwise, the built-in formatter is used.**
 
 **Blade templates** are resolved on their own, since only Pint knows how to format one. A `.blade.php` file goes to Pint when the project's `pint.json` turns the `Pint/laravel_blade` rule on (or `pint-blade = true` asks for it, which also passes `--blade`), and otherwise to PHPantom's built-in Blade formatter. The built-in formatter reindents the template without changing the content of any line: indentation follows the nesting of directives, HTML and component tags, multi-line attribute lists and values, and brackets left open at the end of a line, using the editor's tab size and spaces-or-tabs setting. The bodies of `<script>`, `<style>`, and `@php` blocks are moved as a unit and keep their own layout; `<pre>`, `<textarea>`, and `@verbatim` contents are left exactly as written, as is anything between `{{-- blade-formatter-disable --}}` and `{{-- blade-formatter-enable --}}`. Templates whose indentation is output are never touched: Envoy task files, Markdown mail templates (under `resources/views/mail`, `resources/views/emails`, or `vendor/mail`, or using `<x-mail::` components), and Laravel Boost guidelines.
+
+Setting `blade-php = true` adds a pass that formats the PHP a template carries through the same built-in PHP formatter (and the same `mago.toml` settings) a `.php` file gets: `@php` bodies and `<?php` islands as statement lists, echoes and directive arguments as expressions, along with the spacing that is Blade's own rather than PHP's, so `@if($a&&$b)` becomes `@if ($a && $b)` and `{{$x}}` becomes `{{ $x }}`. It is opt-in because it changes the content of a line, which the reindenter on its own never does. A fragment the formatter cannot parse is left exactly as written and the rest of the template still formats, and the pass stays out of everything the reindenter leaves alone, plus Alpine and Livewire attribute values, which are JavaScript.
 
 The built-in formatter defaults to the PER-CS 2.0 style. If a `mago.toml` is present at the workspace root, its `[formatter]` table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:
 

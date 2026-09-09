@@ -352,6 +352,20 @@ pub struct FormattingConfig {
     /// - `false` — never send Blade files to Pint.
     #[serde(rename = "pint-blade")]
     pub pint_blade: Option<bool>,
+    /// Whether the built-in Blade formatter also formats the PHP the
+    /// template carries: `@php` bodies, `<?php` islands, echoes, and
+    /// directive arguments, along with the spacing that is Blade's own
+    /// (`@if(` to `@if (`, `{{$x}}` to `{{ $x }}`).
+    ///
+    /// - `None` (default) — the reindenter changes leading whitespace
+    ///   only, and every fragment keeps the spacing its author typed.
+    /// - `true` — format each fragment through the built-in PHP
+    ///   formatter, with the same `mago.toml` settings a `.php` file gets.
+    ///
+    /// Has no effect on a project whose Blade files go to Pint, which
+    /// formats them itself.
+    #[serde(rename = "blade-php")]
+    pub blade_php: Option<bool>,
     /// Maximum runtime in milliseconds before each formatter is killed.
     /// Defaults to 10 000 ms (10 seconds).  Applied per tool, not
     /// for the combined pipeline.
@@ -1503,6 +1517,16 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::write(&path, "[formatting]\ntimeout = 3000\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.formatting.timeout_ms(), 3000);
+    }
+
+    #[test]
+    fn parses_blade_php_formatting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[formatting]\nblade-php = true\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.formatting.blade_php, Some(true));
+        assert!(!config.formatting.is_disabled());
     }
 
     #[test]

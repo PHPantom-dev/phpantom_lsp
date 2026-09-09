@@ -172,6 +172,7 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
         &formatting_config,
         composer_json.as_ref(),
         bin_dir.as_deref(),
+        php_version,
     );
 
     // Formatting off in `.phpantom.toml` means there is nothing to
@@ -416,7 +417,7 @@ fn describe_strategy(strategy: &FormattingStrategy) -> String {
 fn describe_blade_strategy(strategy: &BladeFormattingStrategy) -> &'static str {
     match strategy {
         BladeFormattingStrategy::Disabled => "formatting disabled",
-        BladeFormattingStrategy::BuiltIn => "the built-in reindenter",
+        BladeFormattingStrategy::BuiltIn(_) => "the built-in reindenter",
         BladeFormattingStrategy::Pint { .. } => Tool::Pint.name(),
     }
 }

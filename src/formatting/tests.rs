@@ -134,6 +134,7 @@ fn strategy_both_disabled() {
         php_cs_fixer: Some(String::new()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_php: None,
         timeout: None,
     };
     let strategy = resolve_strategy(None, &config, None, None);
@@ -147,6 +148,7 @@ fn strategy_explicit_commands() {
         php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
         phpcbf: Some("/usr/bin/phpcbf".to_string()),
         pint_blade: None,
+        blade_php: None,
         timeout: None,
     };
     let strategy = resolve_strategy(None, &config, None, None);
@@ -169,6 +171,7 @@ fn strategy_one_explicit_one_disabled() {
         php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_php: None,
         timeout: None,
     };
     let strategy = resolve_strategy(None, &config, None, None);
@@ -469,6 +472,7 @@ fn strategy_explicit_overrides_require_dev() {
         php_cs_fixer: Some("/opt/php-cs-fixer".to_string()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_php: None,
         timeout: None,
     };
     let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
@@ -725,6 +729,7 @@ fn execute_disabled_returns_none() {
         php_cs_fixer: Some(String::new()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_php: None,
         timeout: None,
     };
     let php_version = crate::types::PhpVersion { major: 8, minor: 4 };

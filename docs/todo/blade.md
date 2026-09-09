@@ -88,45 +88,39 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 
 ---
 
-## BL18. Format the PHP embedded in a Blade template
+## BL19. Reflow a multi-line PHP fragment in a Blade template
 
-**Impact: Low-Medium · Complexity: Medium-High**
+**Impact: Low · Complexity: Medium**
 
-The built-in Blade formatter (`src/formatting/blade/reindent.rs`)
-changes leading whitespace only, so the PHP inside a template keeps
-whatever spacing the author typed: `{{$name}}` stays `{{$name}}`,
-`@if($a&&$b)` stays as written, and an `@php` block is shifted but not
-formatted. Pint's Blade rule formats those fragments with its PHP fixers
-(`PhpBlockFormatting` over `@php` blocks, `<?php` islands, directive
-arguments, and echoes); the built-in formatter should do the same through
-the embedded `mago` formatter, on isolated snippets, the way diagnostics
-isolate virtual-PHP buffers rather than through the preprocessor's
-lowering.
+`blade-php = true` (`src/formatting/blade/php.rs`) formats a PHP fragment
+that is written on one line and stays on one line. A fragment that spans
+lines is left as written: a multi-line `{{ … }}`, a `@props([` whose
+array the author broke over several lines, a `<?= … ?>` island. The
+reindenter still lays those out by bracket depth, so they are indented
+correctly, but their spacing and their line breaks are the author's.
 
-- `@php … @endphp` bodies and `<?php … ?>` islands are statement lists:
-  format them as a file body and let the reindenter shift the result to
-  the block's level, which it already does for any body.
-- `{{ }}`, `{!! !!}`, and directive arguments are single expressions:
-  format each as an expression statement and drop the trailing `;`. A
-  fragment that spans lines has to keep its line count, or the
-  reindenter's per-line model has to learn to re-derive it.
-- Spacing that is Blade's rather than PHP's belongs to the same pass:
-  `@if(` to `@if (`, `{{$x}}` to `{{ $x }}`, `/>` spacing. The reflow
-  tools all do it, and the directive and echo scanners make it cheap.
-- Opt-in, behind a `[formatting]` key, since it changes line content
-  and the reindenter's contract today is that it never does. It must
-  not run inside `@verbatim`, a comment, a string, `<script>`,
-  `<style>`, or `<pre>`.
-- Never touch an Alpine or Livewire attribute value: it is JavaScript.
+Two things are missing before the pass can own them:
+
+- Mago formats a snippet from column 0, so its wrapping decisions do not
+  know what column the fragment actually sits at. A fragment near the
+  print width comes back broken in the wrong place, or joined into a line
+  that overflows once the reindenter puts it back at depth. The
+  fragment's starting column has to reach the formatter.
+- Joining an author's deliberately broken array onto one line is a
+  reflow, which is what the built-in formatter set out not to do. Whether
+  a fragment that fits should be joined, or only re-spaced in place, is a
+  decision to make before the code is written.
+
+`<?= … ?>` is the cheap half of this: its interior is a single
+expression and needs neither, only a decision about its optional
+trailing `;`.
 
 ### Tests
 
-- `{{$name}}` becomes `{{ $name }}`, `@if($a&&$b)` becomes
-  `@if ($a && $b)`, and an `@php` block is formatted as PHP and lands at
-  the block's indentation.
-- A fragment that does not parse is left as written and the rest of the
-  template still formats.
-- Nothing inside `@verbatim`, `<script>`, `<style>`, or a string
-  changes.
-- Formatting stays idempotent over the corpora the reindenter's tests
-  use.
+- A `@props([` broken over lines comes back formatted, at the
+  directive's indentation, without joining.
+- A multi-line echo that mago would join stays broken, or joins, per the
+  decision above, and does not overflow the print width once the
+  reindenter has placed it.
+- `<?= $x ?>` is re-spaced and `<?= $x; ?>` keeps its semicolon.
+- Formatting stays idempotent over the Laravel example project's views.
