@@ -675,6 +675,7 @@ class Demo
         // Try: complete the locale argument or a replacement-array key.
         // Hover shows the English and French values with links to both files.
         __('Fresh bread for :name', replace: ['name' => 'Ada'], locale: 'fr');
+        // Try: change this to 'messages.new_key' and apply the insertion quick fix.
         __('messages.welcome');
         trans('auth.failed');
         trans_choice('messages.notifications', 5);

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Missing translations can be added with a quick fix.** An unknown translation key offers an empty entry in each existing locale's PHP group file, preserving nested keys and neighbouring entries. Contributed by @shuvroroy.
+
 - **Translation hover shows values across locales.** Each value links to its declaration, including JSON translations and translations under `resources/lang/`. Contributed by @shuvroroy.
 
 - **Laravel translation arguments complete from the project's language files.** Locale arguments and replacement-array keys now suggest the available locales and translation placeholders, including named arguments and files under `lang/` and `resources/lang/`. Contributed by @shuvroroy.
