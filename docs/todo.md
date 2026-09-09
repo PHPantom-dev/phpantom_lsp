@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci)         | Low-Medium | Medium     |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 | BL18 | [Format the PHP embedded in a Blade template](todo/blade.md#bl18-format-the-php-embedded-in-a-blade-template)                                 | Low-Medium | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |

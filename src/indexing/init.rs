@@ -49,6 +49,46 @@ impl Backend {
         }
     }
 
+    /// Register where the project keeps its code: the PSR-4 mappings from
+    /// the root `composer.json` and from its path repositories, and the
+    /// vendor directory every workspace walk skips.
+    ///
+    /// Returns the vendor directory both as `composer.json` spells it and
+    /// as an absolute path.  Split out from [`Self::init_single_project`]
+    /// because the `format` command needs the project's source layout
+    /// without paying for a class index it never consults.
+    pub(crate) fn init_autoload_paths(
+        &self,
+        root: &std::path::Path,
+        composer_json: Option<&composer::ComposerPackage>,
+    ) -> (String, PathBuf) {
+        let (mappings, vendor_dir) = match composer_json {
+            Some(pkg) => (
+                composer::extract_psr4_mappings_from_package(pkg),
+                composer::get_vendor_dir(pkg),
+            ),
+            None => (Vec::new(), "vendor".to_string()),
+        };
+
+        // Cache the vendor dir path so cross-file scans can skip it
+        // without re-reading composer.json on every request.
+        let vendor_path = root.join(&vendor_dir);
+        self.add_vendor_dir(&vendor_path);
+
+        // Include PSR-4 mappings from path-repository packages (local
+        // packages symlinked into vendor/, e.g. internachi/modular modules).
+        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
+        let mut all_mappings = mappings;
+        all_mappings.extend(path_repo_mappings);
+        // Keep the merged list longest-prefix-first so path-repo namespaces
+        // are matched before any shorter root prefix (e.g. an empty-prefix
+        // root fallback).
+        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
+        *self.workspace.psr4_mappings.write() = all_mappings;
+
+        (vendor_dir, vendor_path)
+    }
+
     /// Initialize a single-project workspace (root `composer.json` exists).
     ///
     /// This is the standard fast path: read PSR-4 mappings, build the
@@ -95,30 +135,7 @@ impl Backend {
             .write()
             .set_runtime_permission_package(runtime_permissions);
 
-        let (mappings, vendor_dir) = match &composer_json {
-            Some(pkg) => {
-                let mappings = composer::extract_psr4_mappings_from_package(pkg);
-                let vendor_dir = composer::get_vendor_dir(pkg);
-                (mappings, vendor_dir)
-            }
-            None => (Vec::new(), "vendor".to_string()),
-        };
-
-        // Cache the vendor dir path so cross-file scans can skip it
-        // without re-reading composer.json on every request.
-        let vendor_path = root.join(&vendor_dir);
-        self.add_vendor_dir(&vendor_path);
-
-        // Include PSR-4 mappings from path-repository packages (local
-        // packages symlinked into vendor/, e.g. internachi/modular modules).
-        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
-        let mut all_mappings = mappings;
-        all_mappings.extend(path_repo_mappings);
-        // Keep the merged list longest-prefix-first so path-repo namespaces
-        // are matched before any shorter root prefix (e.g. an empty-prefix
-        // root fallback).
-        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
-        *self.workspace.psr4_mappings.write() = all_mappings;
+        let (vendor_dir, vendor_path) = self.init_autoload_paths(root, composer_json.as_ref());
 
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();

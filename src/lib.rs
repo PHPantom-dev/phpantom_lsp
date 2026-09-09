@@ -247,6 +247,7 @@ mod document_links;
 mod document_symbols;
 pub mod fix;
 mod folding;
+pub mod format_cli;
 pub mod formatting;
 mod highlight;
 mod hover;

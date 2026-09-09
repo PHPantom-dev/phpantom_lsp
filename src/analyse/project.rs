@@ -1,9 +1,9 @@
 //! Opening a project for a command-line run.
 //!
 //! Every subcommand that works on a whole project (`analyze`, `fix`,
-//! `move`) starts the way the LSP server's `initialized` handler does:
-//! read the project's `composer.json`, settle on a PHP version, and run
-//! the indexing pipeline on a headless `Backend`. This is that sequence,
+//! `move`, `format`) starts the way the LSP server's `initialized`
+//! handler does: read the project's `composer.json`, settle on a PHP
+//! version, and set up a headless `Backend`. This is that sequence,
 //! written once, so a new subcommand cannot drift from the others in
 //! which version it analyses against or what it indexes.
 
@@ -37,17 +37,7 @@ pub(crate) fn load_config_or_default(root: &Path, global_config: Option<&Path>) 
 /// no `composer.json` still opens: classes are found by scanning the tree.
 pub(crate) async fn open_headless_project(backend: &Backend, root: &Path, cfg: config::Config) {
     let composer_package = composer::read_composer_package(root);
-    let php_version = cfg
-        .php
-        .version
-        .as_deref()
-        .and_then(PhpVersion::from_composer_constraint)
-        .or_else(|| {
-            composer_package
-                .as_ref()
-                .and_then(composer::detect_php_version_from_package)
-        })
-        .unwrap_or_default();
+    let php_version = project_php_version(&cfg, composer_package.as_ref());
 
     *backend.workspace_root().write() = Some(root.to_path_buf());
     backend.set_config(cfg);
@@ -55,6 +45,37 @@ pub(crate) async fn open_headless_project(backend: &Backend, root: &Path, cfg: c
     backend
         .init_single_project(root, php_version, composer_package, None)
         .await;
+}
+
+/// Point `backend` at the project under `root` without indexing it.
+///
+/// `format` asks the backend only where the project keeps its code and
+/// which PHP version to format for; it never looks a class up. Building
+/// the class index would be the dominant cost of the run and would answer
+/// neither question, so this stops after the project's shape: config, PHP
+/// version, PSR-4 source directories, and the vendor directory to skip.
+pub(crate) fn open_headless_project_unindexed(backend: &Backend, root: &Path, cfg: config::Config) {
+    let composer_package = composer::read_composer_package(root);
+    let php_version = project_php_version(&cfg, composer_package.as_ref());
+
+    *backend.workspace_root().write() = Some(root.to_path_buf());
+    backend.set_config(cfg);
+    backend.set_php_version(php_version);
+    backend.init_autoload_paths(root, composer_package.as_ref());
+}
+
+/// The PHP version a command-line run works against: the one the config
+/// names, then the `php` constraint in `composer.json`, then the default.
+fn project_php_version(
+    cfg: &config::Config,
+    composer_package: Option<&composer::ComposerPackage>,
+) -> PhpVersion {
+    cfg.php
+        .version
+        .as_deref()
+        .and_then(PhpVersion::from_composer_constraint)
+        .or_else(|| composer_package.and_then(composer::detect_php_version_from_package))
+        .unwrap_or_default()
 }
 
 /// Parse every file in `files` on parallel workers, populating the

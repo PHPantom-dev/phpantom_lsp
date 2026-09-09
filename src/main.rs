@@ -112,6 +112,45 @@ enum Command {
         project: ProjectArgs,
     },
 
+    /// Format PHP files and Blade templates across the project.
+    ///
+    /// Runs the same formatter the editor runs on save: a Laravel Pint,
+    /// php-cs-fixer, or PHP_CodeSniffer the project depends on, and the
+    /// built-in formatter otherwise. Blade templates are reindented by
+    /// the built-in reindenter unless the project formats them with Pint.
+    ///
+    /// With --check nothing is written: the files that are not formatted
+    /// are listed and the command exits non-zero, so a CI job can require
+    /// that a pull request ran the formatter.
+    Format {
+        /// Paths to format (files or directories). Defaults to the entire project.
+        #[arg(value_name = "PATH")]
+        paths: Vec<std::path::PathBuf>,
+
+        /// List the files that are not formatted and write nothing.
+        ///
+        /// Exits with code 0 when every file is already formatted, or
+        /// code 2 when at least one would change.
+        #[arg(long)]
+        check: bool,
+
+        /// Spaces per indentation level for Blade templates.
+        ///
+        /// Only the built-in Blade reindenter reads this; it takes the
+        /// value from the editor over LSP and has no other source for it
+        /// on the command line. PHP files are formatted to the project's
+        /// own rules either way.
+        #[arg(long, value_name = "N", default_value_t = 4)]
+        indent_size: usize,
+
+        /// Indent Blade templates with tabs instead of spaces.
+        #[arg(long, conflicts_with = "indent_size")]
+        use_tabs: bool,
+
+        #[command(flatten)]
+        project: ProjectArgs,
+    },
+
     /// Move a class, namespace, PHP file, or PSR-4 directory.
     Move {
         /// Source FQN, namespace, PHP file, or directory.
@@ -395,6 +434,39 @@ async fn async_main() {
             };
 
             let exit_code = phpantom_lsp::fix::run(options).await;
+            std::process::exit(exit_code);
+        }
+        Some(Command::Format {
+            paths,
+            check,
+            indent_size,
+            use_tabs,
+            project,
+        }) => {
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
+
+            let options = phpantom_lsp::format_cli::FormatOptions {
+                workspace_root,
+                path_filters: paths
+                    .into_iter()
+                    .map(|p| resolve_path_filter(p, 1))
+                    .collect(),
+                check,
+                indent: if use_tabs {
+                    "\t".to_string()
+                } else {
+                    " ".repeat(indent_size)
+                },
+                use_colour,
+                output_format,
+                global_config: phpantom_lsp::config::global_config_path(),
+            };
+
+            let exit_code = phpantom_lsp::format_cli::run(options);
             std::process::exit(exit_code);
         }
         Some(Command::Move {

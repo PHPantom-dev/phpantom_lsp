@@ -88,46 +88,6 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 
 ---
 
-## BL17. `format --check` CLI subcommand for CI
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Once PHPantom's resolved formatting strategy (the built-in PHP
-formatter, the built-in Blade reindenter, or an external tool) is
-trustworthy enough to enforce, projects want a
-non-editor way to verify a PR ran it, the same role `blade-formatter
--c`/`--check-formatted` plays today. `main.rs` currently only exposes
-`analyse` and `fix` as CLI subcommands; there is no way to invoke
-`textDocument/formatting`'s resolution logic (`src/formatting/`) outside
-the LSP connection at all.
-
-- Add a `format` subcommand (`phpantom_lsp format --project-root
-  <DIR> [--check]`) that walks project PHP/Blade files, runs the same
-  `resolve_strategy` external-tool-or-built-in logic `src/formatting/`
-  already uses, and either writes the formatted result back or (with
-  `--check`) exits non-zero and lists files that would change, without
-  writing them — mirroring `blade-formatter -c -d` and `phpcs
-  --dry-run`/`php-cs-fixer --dry-run` conventions projects already use
-  in CI.
-- This depends on the built-in Blade reindenter
-  (`src/formatting/blade/`) being fast/correct enough that a maintainer
-  would want it enforced in CI; do not build the CLI surface before that
-  bar is met, since the CLI is only useful once there's a trustworthy
-  formatter behind it (or a detected Pint/`php-cs-fixer` external tool,
-  which `--check` should honour identically to `format` without
-  `--check`).
-
-### Tests
-
-- `format --check` on an already-formatted project exits 0 with no
-  output.
-- `format --check` on a project with an unformatted `.blade.php` file
-  exits non-zero and names the file.
-- `format` (no `--check`) rewrites the file in place and a second run
-  is a no-op.
-
----
-
 ## BL18. Format the PHP embedded in a Blade template
 
 **Impact: Low-Medium · Complexity: Medium-High**

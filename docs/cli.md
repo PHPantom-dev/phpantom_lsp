@@ -1,9 +1,9 @@
 # CLI Reference
 
 PHPantom is a language server, but it also ships CLI tools for batch
-analysis and automated fixing. These run the same engine that powers the
-editor, so results are consistent between what you see in your editor
-and what CI reports.
+analysis, automated fixing, and formatting. These run the same engine
+that powers the editor, so results are consistent between what you see
+in your editor and what CI reports.
 
 ## Modes
 
@@ -13,6 +13,7 @@ and what CI reports.
 | `phpantom_lsp --tcp 9257`| Start the LSP server listening on a TCP port         |
 | `phpantom_lsp analyze`   | Report diagnostics across the project                |
 | `phpantom_lsp fix`       | Apply automated code fixes across the project        |
+| `phpantom_lsp format`    | Format PHP files and Blade templates                 |
 | `phpantom_lsp move`      | Move classes or namespaces and update references     |
 | `phpantom_lsp init`      | Generate a default `.phpantom.toml` config file      |
 
@@ -346,6 +347,97 @@ writes nothing.
 
 ---
 
+## `format`
+
+Formats every PHP file and Blade template in the project with the same
+formatter the editor runs on save, or, with `--check`, reports the files
+that are not formatted and exits non-zero without writing anything. That
+is the role `blade-formatter -c`, `phpcs`, and `php-cs-fixer --dry-run`
+play in a pipeline, so a CI job can require that a pull request ran the
+formatter.
+
+```sh
+phpantom_lsp format                               # format the whole project
+phpantom_lsp format --check                       # report unformatted files, write nothing
+phpantom_lsp format resources/views               # restrict to a subdirectory
+phpantom_lsp format app/Foo.php                   # format a single file
+phpantom_lsp format --check --format github       # annotate a pull request diff
+phpantom_lsp format --project-root /path/to/app   # explicit project root
+```
+
+Each file goes through the strategy PHPantom resolves for the project, so
+a run honours a Laravel Pint, php-cs-fixer, or PHP_CodeSniffer the project
+depends on, and uses the built-in formatter otherwise. Blade templates
+resolve separately: Pint when the project formats Blade with it, the
+built-in reindenter otherwise. See
+[`[formatting]`](configuration.md#formatting) for how that is decided and how
+to override it. The run opens with a line on stderr naming what it
+resolved, so a CI log records which formatter enforced the result.
+
+Templates whose indentation is output rather than layout (Envoy task
+files, Markdown mail templates, Laravel Boost guidelines) are left alone,
+and `--check` never fails a project for having one. Formatting turned off
+in `.phpantom.toml` exits 0 with a note rather than reporting every file
+as formatted.
+
+### Options
+
+| Flag                       | Description                                                            |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `[PATH]...`                | Files or directories to format. Defaults to the entire project.        |
+| `--check`                  | List the files that are not formatted and write nothing.               |
+| `--indent-size <N>`        | Spaces per indentation level for Blade templates (default 4).          |
+| `--use-tabs`               | Indent Blade templates with tabs instead of spaces.                    |
+| `--project-root <DIR>`     | Project root directory. Defaults to the current working directory.     |
+| `--no-colour`              | Disable ANSI colour output.                                            |
+| `--format <FORMAT>`        | `table` (default), `github`, or `json`.                                |
+
+`--indent-size` and `--use-tabs` reach the built-in Blade reindenter
+only, which takes indentation from the editor over LSP and has no other
+source for it on the command line. PHP files are formatted to the
+project's own rules either way.
+
+### Exit codes
+
+| Code | Meaning                                            |
+| ---- | -------------------------------------------------- |
+| 0    | Every file is formatted, or every file was written |
+| 1    | A file could not be read, formatted, or written    |
+| 2    | `--check` found files that are not formatted       |
+
+### Example output
+
+```sh
+phpantom_lsp format --check
+```
+
+```
+ resources/views/home.blade.php
+ src/Service/UserService.php
+
+ [CHECK] 2 files would be reformatted
+```
+
+```sh
+phpantom_lsp format
+```
+
+```
+ resources/views/home.blade.php
+ src/Service/UserService.php
+
+ [FORMATTED] Reformatted 2 files
+```
+
+### Idempotency
+
+Running `format` twice produces the same result as running it once, and
+`--check` passes immediately afterwards. That is what makes the pair
+usable as a CI gate: the job runs `--check`, and a contributor clears it
+by running the command without it.
+
+---
+
 ## `init`
 
 Creates a `.phpantom.toml` in the current directory with a JSON schema
@@ -436,6 +528,13 @@ phpantom_lsp analyze --severity warning --project-root . --no-colour
 
 ```sh
 phpantom_lsp fix --dry-run --rule unused_import --project-root . --no-colour
+```
+
+**Formatting gate.** Fail the build when a file was committed
+unformatted:
+
+```sh
+phpantom_lsp format --check --project-root . --no-colour
 ```
 
 **Pre-commit hook.** Clean up imports before every commit:
