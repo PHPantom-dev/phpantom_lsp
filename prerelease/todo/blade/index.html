@@ -833,34 +833,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#bl19-reflow-a-multi-line-php-fragment-in-a-blade-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL19. Reflow a multi-line PHP fragment in a Blade template
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL19. Reflow a multi-line PHP fragment in a Blade template">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1388,34 +1360,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#bl19-reflow-a-multi-line-php-fragment-in-a-blade-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL19. Reflow a multi-line PHP fragment in a Blade template
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL19. Reflow a multi-line PHP fragment in a Blade template">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1541,40 +1485,6 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 <li>Filtering out actions that don't make sense in Blade context.</li>
 </ul>
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
-<hr />
-<h2 id="bl19-reflow-a-multi-line-php-fragment-in-a-blade-template">BL19. Reflow a multi-line PHP fragment in a Blade template<a class="headerlink" href="#bl19-reflow-a-multi-line-php-fragment-in-a-blade-template" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>blade-php = true</code> (<code>src/formatting/blade/php.rs</code>) formats a PHP fragment
-that is written on one line and stays on one line. A fragment that spans
-lines is left as written: a multi-line <code>{{ … }}</code>, a <code>@props([</code> whose
-array the author broke over several lines, a <code>&lt;?= … ?&gt;</code> island. The
-reindenter still lays those out by bracket depth, so they are indented
-correctly, but their spacing and their line breaks are the author's.</p>
-<p>Two things are missing before the pass can own them:</p>
-<ul>
-<li>Mago formats a snippet from column 0, so its wrapping decisions do not
-  know what column the fragment actually sits at. A fragment near the
-  print width comes back broken in the wrong place, or joined into a line
-  that overflows once the reindenter puts it back at depth. The
-  fragment's starting column has to reach the formatter.</li>
-<li>Joining an author's deliberately broken array onto one line is a
-  reflow, which is what the built-in formatter set out not to do. Whether
-  a fragment that fits should be joined, or only re-spaced in place, is a
-  decision to make before the code is written.</li>
-</ul>
-<p><code>&lt;?= … ?&gt;</code> is the cheap half of this: its interior is a single
-expression and needs neither, only a decision about its optional
-trailing <code>;</code>.</p>
-<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
-<ul>
-<li>A <code>@props([</code> broken over lines comes back formatted, at the
-  directive's indentation, without joining.</li>
-<li>A multi-line echo that mago would join stays broken, or joins, per the
-  decision above, and does not overflow the print width once the
-  reindenter has placed it.</li>
-<li><code>&lt;?= $x ?&gt;</code> is re-spaced and <code>&lt;?= $x; ?&gt;</code> keeps its semicolon.</li>
-<li>Formatting stays idempotent over the Laravel example project's views.</li>
-</ul>
 
 
 
