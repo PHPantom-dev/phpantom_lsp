@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_fixtures::make_backend;
+use tower_lsp::lsp_types::Range;
 
 #[test]
 fn json_translation_declarations_preserve_source_ranges_and_values() {
@@ -122,5 +123,5 @@ fn json_translation_provider_paths_and_duplicate_keys_resolve() {
         locations[0].range,
         Range::new(Position::new(1, 2), Position::new(1, 5))
     );
-    assert!(json_definitions(&backend, "missing").is_empty());
+    assert!(backend.translation_definitions("missing").is_empty());
 }

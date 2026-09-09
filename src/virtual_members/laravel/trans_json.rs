@@ -1,6 +1,6 @@
 //! JSON translation declarations with their source positions.
 
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
 use crate::symbol_map::LaravelStringKind;
@@ -46,51 +46,6 @@ fn parse_declarations(content: &str) -> Option<Vec<TransKeyMatch>> {
         }
         input = input.strip_prefix(',')?.trim_start();
     }
-}
-
-/// Locate a key in application and provider-registered JSON language files.
-pub(super) fn json_definitions(backend: &Backend, key: &str) -> Vec<Location> {
-    let mut directories: Vec<_> = backend
-        .laravel_provider_resources
-        .read()
-        .trans_dirs
-        .iter()
-        .filter(|resource| resource.namespace.is_empty())
-        .map(|resource| resource.path.clone())
-        .collect();
-    if let Some(root) = backend.workspace.workspace_root.read().as_ref() {
-        directories.extend([root.join("lang"), root.join("resources/lang")]);
-    }
-    directories.sort();
-    directories.dedup();
-    let mut locations = Vec::new();
-    for directory in directories {
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-                && let Ok(uri) = Url::from_file_path(&path)
-                && let Some(content) = backend.get_file_content(uri.as_str())
-                && let Some(declaration) = collect_json_trans_declarations(&content)
-                    .into_iter()
-                    .rev()
-                    .find(|declaration| declaration.key == key)
-            {
-                locations.push(Location::new(
-                    uri,
-                    Range::new(
-                        crate::text_position::offset_to_position(&content, declaration.start),
-                        crate::text_position::offset_to_position(&content, declaration.end),
-                    ),
-                ));
-            }
-        }
-    }
-    locations
 }
 
 /// Find uses of the JSON translation key under the cursor through the

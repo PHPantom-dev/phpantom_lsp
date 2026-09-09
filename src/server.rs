@@ -3278,6 +3278,7 @@ impl Backend {
         let directives_changed = *self.blade_custom_directives.read() != directives;
         *self.blade_custom_directives.write() = directives;
         *self.laravel_provider_resources.write() = resources;
+        self.laravel_string_key_cache.write().translations = None;
 
         // The shared and composed template variables are resolved from these
         // registrations, so the previous scan's set is stale whether or not
@@ -3289,7 +3290,6 @@ impl Backend {
             cache.config_keys = None;
             cache.config_trees = None;
             cache.view_names = None;
-            cache.trans_keys = None;
             cache.routes = None;
             cache.blade_discovery = None;
         }

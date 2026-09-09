@@ -318,6 +318,9 @@ impl Backend {
     ///
     /// Called from `did_close` to clean up state when a file is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
+        self.laravel_string_key_cache
+            .write()
+            .invalidate_for_uri(uri, "");
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
         // when the uri_classes_index entry is missing.
