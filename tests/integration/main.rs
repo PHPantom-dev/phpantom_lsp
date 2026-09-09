@@ -191,6 +191,7 @@ mod laravel_string_key_call_sites;
 mod laravel_string_key_non_laravel_gate;
 mod laravel_trans_loader;
 mod laravel_trans_types;
+mod laravel_translation_depth;
 mod laravel_validated_shape;
 mod lsp_concurrency;
 mod narrowing_condition_proofs;

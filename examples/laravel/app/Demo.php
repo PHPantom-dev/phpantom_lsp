@@ -668,6 +668,9 @@ class Demo
         request()->routeIs('bakeries.*');
 
         // Translation Keys
+        // Ctrl+Click a JSON key to reach its exact declaration; find
+        // references from lang/en.json to return to its call sites.
+        __('Fresh bread for :name', ['name' => 'Ada']);
         __('messages.welcome');
         trans('auth.failed');
         trans_choice('messages.notifications', 5);

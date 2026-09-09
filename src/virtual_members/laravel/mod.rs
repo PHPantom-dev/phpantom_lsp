@@ -133,6 +133,7 @@ mod route_names;
 mod scopes;
 mod storage;
 mod string_keys;
+mod trans_json;
 mod trans_keys;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
@@ -185,6 +186,7 @@ pub(crate) use storage::{
     extract_storage_driver_registrations, is_storage_facade_name, patch_storage_disk_type,
     storage_facade_local_names,
 };
+pub(crate) use trans_json::find_json_trans_references;
 pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars};

@@ -137,6 +137,18 @@ impl Backend {
             }
         }
 
+        if self.resolved_class_cache.read().is_laravel()
+            && let Some(locations) = laravel::find_json_trans_references(
+                self,
+                uri,
+                content,
+                position,
+                include_declaration,
+            )
+        {
+            return Some(locations);
+        }
+
         // Fallback for declaration sites in config/*.php
         let start_laravel = std::time::Instant::now();
         if self.resolved_class_cache.read().is_laravel()

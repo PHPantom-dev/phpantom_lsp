@@ -55,7 +55,7 @@ pub(crate) fn unresolved_trans_type() -> PhpType {
 ///
 /// Falls back to the top of the file when the exact key cannot be located.
 pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Location> {
-    let mut results = Vec::new();
+    let mut results = super::trans_json::json_definitions(backend, key);
 
     if let Some((namespace, rest)) = key.split_once("::") {
         let file_stem = rest.split('.').next().unwrap_or(rest);
@@ -123,27 +123,6 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
         }
     }
 
-    if let Some(root) = backend.workspace.workspace_root.read().clone() {
-        for sub in &["lang", "resources/lang"] {
-            let dir = root.join(sub);
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json")
-                    && let Ok(content) = std::fs::read_to_string(&path)
-                    && let Ok(map) =
-                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-                    && map.contains_key(key)
-                    && let Ok(uri) = Url::from_file_path(&path)
-                {
-                    results.push(crate::definition::point_location(uri, Position::new(0, 0)));
-                }
-            }
-        }
-    }
-
     results
 }
 
@@ -187,6 +166,8 @@ fn trans_file_prefix(key: &str) -> String {
 pub(crate) struct TransKeyMatch {
     pub key: String,
     pub start: usize,
+    /// Byte offset immediately after the key's source text, before its quote.
+    pub end: usize,
     /// Whether the key's value is itself a nested array (a translation
     /// group) rather than a scalar string entry.
     pub is_group: bool,
@@ -281,7 +262,7 @@ fn collect_array<'a>(
         let ArrayElement::KeyValue(kv) = element else {
             continue;
         };
-        let Some((key_text, key_start, _)) =
+        let Some((key_text, key_start, key_end)) =
             super::helpers::extract_string_literal(kv.key, content)
         else {
             continue;
@@ -293,6 +274,7 @@ fn collect_array<'a>(
         out.push(TransKeyMatch {
             key: dot_key,
             start: key_start,
+            end: key_end,
             is_group: value_is_group(kv.value),
             value: super::helpers::extract_string_literal(kv.value, content)
                 .map(|(text, _, _)| text.to_string()),
