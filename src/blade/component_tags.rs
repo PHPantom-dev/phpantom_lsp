@@ -494,16 +494,12 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
 /// Whether a closing tag spelled `closer_name` ends an opener of kind
 /// `kind` named `name`.
 ///
-/// Every tag closes under its own name, with one exception Blade's own
-/// compiler carves out: a named slot (`<x-slot:title>`, or the legacy
-/// `<x-slot name="title">`) still closes with the bare `</x-slot>`, never
-/// repeating the slot's own name in the closing tag.
+/// Every tag closes under its own name. A named slot (`<x-slot:title>`)
+/// also accepts the bare `</x-slot>` used by the legacy
+/// `<x-slot name="title">` form.
 fn closer_matches(kind: TagKind, name: &str, closer_name: &str) -> bool {
-    if kind == TagKind::Blade && is_slot_tag_name(name) {
-        closer_name == "slot"
-    } else {
-        name == closer_name
-    }
+    name == closer_name
+        || (kind == TagKind::Blade && is_slot_tag_name(name) && closer_name == "slot")
 }
 
 /// A place a component tag's block structure does not add up: the same
@@ -1468,13 +1464,23 @@ mod tests {
         assert_eq!(names, ["card", "alert", "note"]);
     }
 
-    /// A named inline slot closes with the bare `</x-slot>`, not
-    /// `</x-slot:title>`; `tag_spans` has to know that too or every named
-    /// slot in the file comes back unclosed.
+    /// A named inline slot may close with the bare `</x-slot>`.
     #[test]
     fn a_named_slot_closes_with_the_bare_tag() {
         let blade = "<x-card>\n<x-slot:title>\nHi\n</x-slot>\n</x-card>\n";
         assert_eq!(tag_bodies(blade).len(), 2);
+    }
+
+    #[test]
+    fn a_named_slot_closes_with_its_own_name() {
+        let blade = "<x-card>\n<x-slot:title>\nHi\n</x-slot:title>\n</x-card>\n";
+        let tags = tag_spans(blade);
+        assert_eq!(tags.len(), 2);
+        assert!(tags.iter().all(|tag| tag.closed));
+        assert_eq!(
+            &blade[tags[1].span.clone()],
+            "<x-slot:title>\nHi\n</x-slot:title>"
+        );
     }
 
     /// The imbalances [`tag_imbalances`] finds, as short strings for
@@ -1550,10 +1556,24 @@ mod tests {
         );
     }
 
-    /// A named inline slot that is properly closed reports nothing, even
-    /// though its closing tag never repeats the slot's own name.
+    /// Both closing spellings of a named inline slot are balanced.
     #[test]
     fn a_properly_closed_named_slot_reports_nothing() {
-        assert!(tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot>\n</x-card>\n").is_empty());
+        for closer in ["slot", "slot:title"] {
+            let blade = format!("<x-card>\n<x-slot:title>\nHi\n</x-{closer}>\n</x-card>\n");
+            assert!(tag_report(&blade).is_empty(), "{blade}");
+        }
+    }
+
+    #[test]
+    fn a_named_slot_closed_by_a_different_tag_is_mismatched() {
+        for closer in ["slot:other", "alert"] {
+            let blade = format!("<x-card>\n<x-slot:title>\nHi\n</x-{closer}>\n</x-card>\n");
+            assert_eq!(
+                tag_report(&blade),
+                [format!("mismatched </x-{closer}>/<x-slot:title>")],
+                "{blade}"
+            );
+        }
     }
 }
