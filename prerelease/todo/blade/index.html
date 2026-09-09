@@ -834,38 +834,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl16-blade-aware-formatting" class="md-nav__link">
+  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL16. Blade-aware formatting
+        BL17. <code>format --check</code> CLI subcommand for CI
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BL16. Blade-aware formatting">
+    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#feasibility-research" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Feasibility research
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#test-corpora-to-port" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Test corpora to port
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#tests" class="md-nav__link">
@@ -884,15 +862,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
+  <a href="#bl18-format-the-php-embedded-in-a-blade-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL17. <code>format --check</code> CLI subcommand for CI
+        BL18. Format the PHP embedded in a Blade template
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
+    <nav class="md-nav" aria-label="BL18. Format the PHP embedded in a Blade template">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1439,38 +1417,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl16-blade-aware-formatting" class="md-nav__link">
+  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL16. Blade-aware formatting
+        BL17. <code>format --check</code> CLI subcommand for CI
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BL16. Blade-aware formatting">
+    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#feasibility-research" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Feasibility research
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#test-corpora-to-port" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Test corpora to port
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#tests" class="md-nav__link">
@@ -1489,15 +1445,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
+  <a href="#bl18-format-the-php-embedded-in-a-blade-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL17. <code>format --check</code> CLI subcommand for CI
+        BL18. Format the PHP embedded in a Blade template
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
+    <nav class="md-nav" aria-label="BL18. Format the PHP embedded in a Blade template">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1642,316 +1598,11 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 </ul>
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
 <hr />
-<h2 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<p><code>src/formatting/</code> has no Blade awareness. <code>mago</code>'s formatter runs against
-the virtual PHP buffer generated for <code>.blade.php</code> files, and its output
-has no fixed relationship to the original directive/HTML structure, so
-<code>textDocument/formatting</code> currently returns no edits for a Blade file
-(<code>server.rs</code> short-circuits on <code>is_blade_file</code>).</p>
-<p>Three tools format Blade today; the feasibility notes below compare them.
-The plan that falls out of the comparison:</p>
-<ol>
-<li><strong>Short term: let the existing Pint proxy format Blade.</strong> Pint 1.30.0
-   (June 2026) formats <code>.blade.php</code> natively behind the
-   <code>Pint/laravel_blade</code> rule (also reachable as the <code>--blade</code> flag), and
-   it works over the <code>--stdin-filename</code> invocation
-   <code>src/formatting/external.rs</code> already uses. Route a Blade file to Pint
-   when the project's <code>pint.json</code> enables the rule, and pass <code>--blade</code>
-   when <code>.phpantom.toml</code> asks for it explicitly (<code>[formatting]
-   pint-blade = true</code>). Otherwise a Blade file must not go to Pint at
-   all: Pint echoes an excluded file back unchanged with exit 0, which
-   is indistinguishable from "already formatted", so the decision has
-   to be made from the config, the same way a <code>phpcs.xml</code> or a
-   <code>mago.toml</code> <code>[formatter]</code> table already steers <code>resolve_strategy</code>.
-   Depends on <a href="../bugs/#b1-the-pint-formatting-proxy-inherits-the-servers-working-directory">B1</a>:
-   Pint reads <code>pint.json</code> and, for Blade, the project's <code>node_modules</code>
-   from its working directory, and the proxy does not set one today.</li>
-<li><strong>Long term: a native reindent-only formatter as the built-in
-   fallback</strong>, modelled on <code>joelstein/blade-formatter</code>'s
-   <code>IndentationFormatter</code> and built on the directive and tag scanners
-   <code>src/blade/</code> already has (see "What we already have" below). Leading
-   whitespace only: directive nesting, HTML/component tag nesting,
-   multi-line tag attributes. No reflow, no attribute wrapping or
-   sorting, no Tailwind class sorting, no quote normalisation. Embedded
-   PHP (<code>@php</code> blocks, <code>{{ }}</code>, directive arguments) is a later step
-   through <code>mago</code>'s formatter on isolated snippets, the same way
-   diagnostics isolate virtual-PHP buffers.</li>
-<li><strong>Explicit-path proxies only for the two standalone Blade
-   formatters.</strong> <code>shufo/blade-formatter</code> (npm, <code>--stdin</code>) and
-   <code>joelstein/blade-formatter</code> (Composer, <code>vendor/bin/blade-format</code>,
-   rewrites a path in place) can be supported as <code>.phpantom.toml</code>
-   overrides if a project asks, but neither should be auto-detected.
-   Pint now covers the "team already uses a Blade reflow formatter" case
-   with a Composer-visible signal, and a detection path for an npm tool
-   (Node present, <code>package.json</code>, <code>node_modules/.bin</code>) is a second
-   resolver for a shrinking audience. If the Composer one is ever
-   wired up, note that it decides what to do from the file <em>name</em>
-   (<code>Envoy.blade.php</code>, <code>vendor/mail/…</code>, the <code>.blade.php</code> suffix), so
-   the sibling temp file <code>write_sibling_temp_file</code> creates would need
-   the real basename, not the <code>.phpantom-fmt-*.php</code> pattern.</li>
-</ol>
-<h3 id="feasibility-research">Feasibility research<a class="headerlink" href="#feasibility-research" title="Permanent link">&para;</a></h3>
-<p><strong>Pint formats Blade natively since 1.30.0.</strong> The <code>Pint/laravel_blade</code>
-fixer (<code>app/Fixers/LaravelBlade/Fixer.php</code>) hands every <code>.blade.php</code> to
-<code>app/BladeFormatter.php</code>, which runs prettier with <code>prettier-plugin-blade</code>
-and <code>prettier-plugin-tailwindcss</code> inside a long-lived Node worker
-(<code>resources/js/worker.cjs</code>, newline-delimited JSON over stdin), wrapped in
-eleven regex pre/post passes (mask Blade inside <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> and
-Alpine <code>x-mask</code>, collapse short slots and single-attribute tags, re-join
-dangling <code>&gt;</code>, restore <code>@@</code> spacing). Prettier's own PHP formatting is
-turned off (<code>bladePhpFormatting: "off"</code> in the bundled
-<code>resources/prettier/prettierrc.json</code>); Pint's regular fixers format the
-PHP fragments instead (<code>PhpBlockFormatting</code> over <code>@php</code> blocks, <code>&lt;?php</code>
-islands, directive arguments, and echoes, via <code>PhpFragmentFormatter</code>).
-Output is prettier reflow: <code>printWidth</code> 120, <code>tabWidth</code> 4, single quotes,
-<code>htmlWhitespaceSensitivity: css</code>, Tailwind classes always sorted. It
-skips <code>Envoy.blade.php</code>, anything under <code>vendor/mail</code> or using an
-<code>&lt;x-mail::</code> component, and <code>resources/boost/guidelines/**</code>, all
-whitespace-sensitive.</p>
-<p>Verified against the <code>references/pint</code> checkout (v1.31.1, PHP 8.5,
-Node 25):</p>
-<ul>
-<li><code>pint --blade --stdin-filename=resources/views/welcome.blade.php</code> on a
-  four-line sample reindented it, normalised <code>@if(true)</code> to <code>@if (true)</code>
-  and <code>{{$name}}</code> to <code>{{ $name }}</code>, sorted <code>class="p-4 flex"</code> to
-  <code>flex p-4</code>, and spaced <code>/&gt;</code>; exit 0. Pint's own <code>StdinTest.php</code> covers
-  the same path.</li>
-<li>The same input without <code>--blade</code> and without the rule in <code>pint.json</code>
-  came back byte-identical with exit 0. <code>ConfigurationFactory</code> excludes
-  <code>*.blade.php</code> from the finder whenever the rule is off, and the stdin
-  path echoes an excluded file. This is why detection has to read the
-  config rather than try Pint and see.</li>
-<li><code>--blade</code> from a directory with no <code>node_modules</code> printed an
-  explanation and exited 1 in 0.2 s without writing anything: the
-  Laravel Prompts "install them now?" confirmation falls back to its
-  default (no) when stdin is not a TTY, and <code>run_pint</code> already treats a
-  non-zero exit as an error rather than as output. It does not hang, and
-  it does not create a <code>package.json</code> (that only happens on an accepted
-  prompt).</li>
-<li>Requirements on the machine: Node or Bun on <code>PATH</code> (Bun only when a
-  <code>bun.lock</code> exists), and <code>prettier ^3.9.6</code>, <code>prettier-plugin-blade
-  ^3.3.3</code>, <code>prettier-plugin-tailwindcss ^0.8.1</code> resolvable from the
-  project root. Version drift is refused with a message, not silently
-  accepted.</li>
-</ul>
-<p><strong>The three tools side by side.</strong></p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th><code>shufo/blade-formatter</code> 1.44 (npm)</th>
-<th>Pint 1.30+ <code>--blade</code></th>
-<th><code>joelstein/blade-formatter</code> 0.10 (Composer)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Engine</td>
-<td><code>js-beautify</code> for the HTML shell, <code>@prettier/plugin-php</code> for PHP snippets, a TextMate grammar (<code>vscode-textmate</code> + oniguruma WASM) to classify directive tokens, ~30 regex processors around them</td>
-<td>prettier + <code>prettier-plugin-blade</code> + <code>prettier-plugin-tailwindcss</code> in a Node worker, Pint's PHP fixers for embedded PHP, 11 regex pre/post passes</td>
-<td>One hand-written per-line indenter in PHP (706 lines, no dependencies); Pint for <code>@php</code>/Livewire SFC PHP; prettier for Tailwind sorting</td>
-</tr>
-<tr>
-<td>What it changes</td>
-<td>Reflow: wraps at <code>wrapLineLength</code>, re-lays-out attributes, normalises spacing, optional attribute and Tailwind sorting</td>
-<td>Reflow at 120 columns, spacing normalisation, Tailwind sorting always on</td>
-<td>Leading whitespace only; line breaks stay where the author put them</td>
-</tr>
-<tr>
-<td>Runtime</td>
-<td>Node</td>
-<td>PHP + Node/Bun + three npm packages</td>
-<td>PHP (Node only for Tailwind sorting)</td>
-</tr>
-<tr>
-<td>Invocation</td>
-<td><code>--stdin</code></td>
-<td><code>--stdin-filename</code>, cwd must be the project root</td>
-<td>In place on a path, no stdin; its own VS Code extension writes a temp file and reads it back</td>
-</tr>
-<tr>
-<td>Detection signal</td>
-<td><code>package.json</code></td>
-<td><code>composer.json</code> <code>laravel/pint</code> plus <code>pint.json</code> <code>rules["Pint/laravel_blade"]</code></td>
-<td><code>composer.json</code> <code>joelstein/blade-formatter</code></td>
-</tr>
-<tr>
-<td>Config file</td>
-<td><code>.bladeformatterrc.json</code></td>
-<td><code>pint.json</code> (prettier config is bundled, not the project's)</td>
-<td><code>blade-formatter.json</code></td>
-</tr>
-<tr>
-<td>Disable regions</td>
-<td><code>{{-- blade-formatter-disable --}}</code> / <code>-enable</code>, <code>-disable-next-line</code></td>
-<td>none</td>
-<td><code>{{-- blade-formatter-disable --}}</code> / <code>-enable</code></td>
-</tr>
-</tbody>
-</table>
-<p>Pint depends on prettier just as much as <code>blade-formatter</code> does; it only
-hides it behind Composer. There is no dependency-free reflow formatter for
-Blade, and there is not going to be one inside PHPantom either.</p>
-<p><strong>Scope: reindent, not reflow.</strong> <code>joelstein/blade-formatter</code>'s README
-makes the case for this scope well: HTML whitespace can be meaningful,
-Blade files are one deep tree so wrapping compounds at every level, and
-line length and attributes-per-line are exactly the settings teams
-disagree about. Reindenting existing lines is what every one of the
-three tools agrees on and where their outputs coincide; it is also the
-part that needs no external dependency and no per-language formatter
-for the CSS/JS/PHP embedded in the file. Concretely, the native
-formatter should:</p>
-<ul>
-<li>Reindent every line by directive depth and HTML/component tag depth,
-  including continuation lines of a multi-line opening tag (attributes
-  one level in, the closing <code>&gt;</code>/<code>/&gt;</code> back at the tag's level).</li>
-<li>Shift <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, and <code>@php</code> bodies to the enclosing level
-  while preserving their internal relative indentation (the
-  "indent-preserve" mode <code>joelstein/blade-formatter</code> uses for <code>@php</code>),
-  rather than formatting JavaScript or CSS.</li>
-<li>Leave <code>&lt;pre&gt;</code>, <code>&lt;textarea&gt;</code>, and <code>@verbatim</code> bodies byte-identical,
-  honour <code>{{-- blade-formatter-disable --}}</code>/<code>-enable</code> regions, and skip
-  whole files where indentation is output: <code>Envoy.blade.php</code>, Markdown
-  mail (<code>&lt;x-mail::</code>, <code>vendor/mail</code>), <code>resources/boost/guidelines/**</code>.</li>
-<li>Not touch anything inside a line. Spacing normalisation (<code>@if(</code> to
-  <code>@if (</code>, <code>{{$x}}</code> to <code>{{ $x }}</code>) is cheap with our tokenizer and both
-  reflow tools do it, but it is a separate, opt-in step, and it must not
-  run inside <code>@verbatim</code>, strings, or <code>&lt;script&gt;</code> bodies.</li>
-</ul>
-<p>Embedded PHP through <code>mago</code> comes after that, and only for regions the
-preprocessor already isolates.</p>
-<p><strong>Nobody else can format the non-Blade part of a Blade file.</strong> LSP
-formatting is per document: the client picks one server for a language
-ID and sends it the whole file. There is no protocol for one server
-formatting the HTML and another the directives, and editors that handle
-embedded languages (VS Code's HTML server for CSS/JS in <code>&lt;style&gt;</code>/
-<code>&lt;script&gt;</code>) do it inside a single server. Whichever formatter PHPantom
-runs owns the whole <code>.blade.php</code>, so "just do the Blade bits" is not an
-option; hence the shift-don't-format rule for <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> above.</p>
-<p><strong>How <code>shufo/blade-formatter</code> works, and why its design does not
-transfer.</strong> It is not AST-based. <code>formatContentPipeline.ts</code> runs its
-~30 regex string processors in a pre-process/post-process sandwich around
-<code>js-beautify</code> (HTML) and <code>@prettier/plugin-php</code> (isolated PHP/Blade-brace
-expressions): content that would confuse those formatters (raw <code>@php</code>
-blocks, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, comments, Alpine <code>x-data</code>/<code>x-init</code>,
-component props) is swapped for placeholder tokens before beautifying and
-spliced back afterward. Directive-nesting indent is a separate pass
-(<code>formatter.ts</code>'s <code>processTokenizeResult</code>/<code>processKeyword</code>): it tokenizes
-each line with the bundled TextMate grammar purely to find Blade
-keywords, then walks hardcoded directive-start/-end/-else lists
-(<code>indent.ts</code>) with special cases (<code>@case</code> inside <code>@switch</code> dedents one
-extra level, <code>@break</code> inside <code>@if</code> does not indent, <code>@section</code>/<code>@push</code>/
-<code>@slot</code> are self-closing with a second argument, <code>@hasSection</code> never
-closes). The directive lists are worth cross-checking our classification
-table against; nothing else carries over.</p>
-<p><strong>How <code>joelstein/blade-formatter</code> works, and why it is the model.</strong>
-<code>app/Formatters/IndentationFormatter.php</code> is a single forward pass over
-lines with a handful of counters: indent level, a directive stack (so an
-<code>@endif</code> aligns with its <code>@if</code> even when an HTML tag opened between them
-was never closed inside the block), an HTML tag stack, brace depth for
-multi-line Alpine/<code>@class</code> attribute values, a "multi-line tag" state
-for attributes on their own lines, preserve and indent-preserve block
-modes. Tables: void elements, inline elements (do not indent when
-followed by text), opening directives with their closers (<code>@hasSection</code>
-and <code>@sectionMissing</code> close with <code>@endif</code>), mid-block directives
-(<code>@else</code>, <code>@elseif</code>), <code>@case</code>/<code>@default</code>. Its weak points are the ones
-we can fix structurally: it recognises tags and directives with per-line
-regexes and counts braces by character (Blade delimiters and quoted
-strings are blanked first), where we can take directive and tag spans
-from real scanners and know exactly which braces are inside a <code>{{ }}</code>.
-Its 86 unit tests are the closest thing to a specification of the
-reindent-only behaviour that exists.</p>
-<p><strong>What we already have.</strong> We already scan raw Blade source, so none of
-this needs a new tokenizer or a TextMate dependency.
-<code>blade::balance::directives</code> yields every directive with its span and
-argument list, <code>blade::balance::BLOCKS</code> pairs each opener with the
-closers Blade accepts for it (the same table <code>shufo/blade-formatter</code>
-hardcodes in <code>indent.ts</code>), <code>blade::balance::walk</code>/<code>block_pairs</code> walk
-that stream with a stack of open blocks and return each opener/closer
-pair with spans, and <code>blade::signature::inert_regions</code> masks comments,
-<code>@verbatim</code>, and <code>@php</code> blocks. That is the directive half of the depth
-model. <code>blade::component_tags::tag_spans</code>/<code>tag_imbalances</code> and
-<code>lex_tag_attributes</code> already read HTML and <code>&lt;x-…&gt;</code> tags with
-void/self-closing handling for the unbalanced-tag diagnostic, which is
-the tag half. Build on those. Do not build on the preprocessor:
-<code>preprocess_with_vars</code> is one 1,100-line lowering that emits PHP as it
-scans, not a tokenizer, and it is not to be refactored for this. What
-is missing is (a) marking the else-like directives (<code>@else</code>, <code>@elseif</code>,
-<code>@empty</code> inside <code>@forelse</code>, <code>@case</code>/<code>@default</code>) that dedent without
-closing, on top of the open/close pairing <code>BLOCKS</code> gives, (b) a per-line
-indent computation that consumes both span streams, including an HTML
-tag-depth counter for plain elements interleaved with directive depth
-on the same line, (c) the multi-line-attribute and brace-depth handling
-inside a tag, and (d) the preserve/skip rules.</p>
-<h3 id="test-corpora-to-port">Test corpora to port<a class="headerlink" href="#test-corpora-to-port" title="Permanent link">&para;</a></h3>
-<p>All three projects are MIT, so their fixtures can be copied with an
-attribution note in the fixture directory's README.</p>
-<table>
-<thead>
-<tr>
-<th>Source</th>
-<th>What</th>
-<th>Size</th>
-<th>How to use it</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>joelstein/blade-formatter</code> <code>tests/Unit/IndentationFormatterTest.php</code></td>
-<td>Inline input/expected pairs for leading-whitespace-only reindentation: HTML nesting, void/self-closing, <code>x-</code>/<code>flux:</code> components, every block directive family, <code>@switch</code>/<code>@case</code>, <code>@hasSection</code>, inline vs block <code>@php</code>/<code>@section</code>, multi-line tags and Alpine attribute values, <code>&lt;pre&gt;</code>/<code>@verbatim</code> preservation, <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> shifting, dynamic <code>&lt;{{ $tag }}&gt;</code>, crossed HTML/Blade nesting</td>
-<td>86 cases</td>
-<td>Port near-verbatim as unit tests of the native formatter. This is the golden set; the expectations match our scope exactly. <code>tests/Unit/ParserTest.php</code> (Livewire SFC split) if SFCs are handled.</td>
-</tr>
-<tr>
-<td><code>shufo/blade-formatter</code> <code>__tests__/formatter/*.ts</code></td>
-<td>207 inline tests; <code>indent.test.ts</code>, <code>builtin-directives.test.ts</code> (31, every built-in block directive), <code>if-else</code>, <code>nested</code>, <code>unbalanced</code>, <code>custom-directives</code>, <code>case</code> fixture</td>
-<td>~60 indent-focused</td>
-<td>Expected output also carries reflow effects (<code>@if (</code> spacing, <code>js-beautify</code> attribute layout), so port the <em>input</em> side and re-derive expectations, or use the expected side as input for idempotence. Cross-check <code>src/indent.ts</code>'s directive lists against our classification.</td>
-</tr>
-<tr>
-<td><code>shufo/blade-formatter</code> <code>__tests__/fixtures/</code></td>
-<td>40 <code>x.blade.php</code> / <code>formatted.x.blade.php</code> pairs, 18 <code>snapshots/*.snapshot</code> (options / content / expected sections), <code>largefile.blade.php</code>, <code>syntax.error.blade.php</code></td>
-<td>58 files</td>
-<td>Property corpus: format twice is a no-op; only leading whitespace changes; blank lines preserved; <code>&lt;pre&gt;</code>/<code>@verbatim</code> bodies byte-identical; malformed input does not panic. <code>largefile</code> for a perf floor.</td>
-</tr>
-<tr>
-<td>Pint <code>tests/Fixtures/blade-formatting/**</code></td>
-<td><code>.blade.php</code> / <code>.blade.php.expected</code> pairs in 23 groups (alpine, attributes, comments, components, control-structures, directives, echoes, error-directives, escaping, html, ignorables, inline, kitchen-sink, minimal, normalization, not-operator, php, script, style, style-dynamic, tailwind, trailing, whitespace)</td>
-<td>183 pairs</td>
-<td>The expected side is prettier reflow and is not golden for a reindenter. The input side is the best stress corpus available (<code>kitchen-sink/everything.blade.php</code> is deliberately messy and touches everything), and <code>ignorables/</code> enumerates the must-not-touch files. The pairs <em>are</em> golden for an integration test of the Pint proxy, gated on Node and the three packages being present, so not run in CI.</td>
-</tr>
-<tr>
-<td>Pint <code>tests/Feature/StdinTest.php</code></td>
-<td>The <code>--stdin-filename</code> Blade case</td>
-<td>1</td>
-<td>Template for the Pint-proxy integration test and for the "excluded file echoes back unchanged" case.</td>
-</tr>
-</tbody>
-</table>
-<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
-<ul>
-<li>A <code>.blade.php</code> in a project whose <code>pint.json</code> enables
-  <code>Pint/laravel_blade</code> is sent to Pint with the workspace root as the
-  working directory; the same file in a project without the rule is not
-  sent to Pint (native formatter, or no edits until it lands).</li>
-<li><code>pint-blade = true</code> in <code>.phpantom.toml</code> adds <code>--blade</code>; a Pint exit
-  code of 1 (missing Node dependencies) surfaces as a formatting error,
-  never as an edit that replaces the document with Pint's message.</li>
-<li>Native formatter: the ported <code>IndentationFormatterTest</code> cases pass;
-  formatting is idempotent over every corpus above; every output line
-  equals its input line after trimming leading whitespace; blank lines,
-  <code>&lt;pre&gt;</code>/<code>@verbatim</code> bodies, disabled regions, and the skip-listed
-  files are byte-identical.</li>
-<li><code>formatting</code> on a <code>.blade.php</code> file never corrupts the file, whichever
-  strategy resolves.</li>
-</ul>
-<hr />
 <h2 id="bl17-format-check-cli-subcommand-for-ci">BL17. <code>format --check</code> CLI subcommand for CI<a class="headerlink" href="#bl17-format-check-cli-subcommand-for-ci" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong> (depends on BL16)</p>
-<p>Filed while researching BL16: once the native Blade formatter (and,
-more generally, PHPantom's resolved formatting strategy — external
-tool or built-in) is trustworthy enough to enforce, projects want a
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Once PHPantom's resolved formatting strategy (the built-in PHP
+formatter, the built-in Blade reindenter, or an external tool) is
+trustworthy enough to enforce, projects want a
 non-editor way to verify a PR ran it, the same role <code>blade-formatter
 -c</code>/<code>--check-formatted</code> plays today. <code>main.rs</code> currently only exposes
 <code>analyse</code> and <code>fix</code> as CLI subcommands; there is no way to invoke
@@ -1966,15 +1617,15 @@ the LSP connection at all.</p>
   writing them — mirroring <code>blade-formatter -c -d</code> and <code>phpcs
   --dry-run</code>/<code>php-cs-fixer --dry-run</code> conventions projects already use
   in CI.</li>
-<li>This depends on the native Blade formatter model (BL16 long term)
-  existing and being fast/correct enough that a maintainer would want
-  it enforced in CI; do not build the CLI surface before that bar is
-  met, since the CLI is only useful once there's a trustworthy
-  formatter behind it (or a detected <code>blade-formatter</code>/<code>php-cs-fixer</code>
-  external tool, which <code>--check</code> should honour identically to
-  <code>format</code> without <code>--check</code>).</li>
+<li>This depends on the built-in Blade reindenter
+  (<code>src/formatting/blade/</code>) being fast/correct enough that a maintainer
+  would want it enforced in CI; do not build the CLI surface before that
+  bar is met, since the CLI is only useful once there's a trustworthy
+  formatter behind it (or a detected Pint/<code>php-cs-fixer</code> external tool,
+  which <code>--check</code> should honour identically to <code>format</code> without
+  <code>--check</code>).</li>
 </ul>
-<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
+<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>format --check</code> on an already-formatted project exits 0 with no
   output.</li>
@@ -1982,6 +1633,48 @@ the LSP connection at all.</p>
   exits non-zero and names the file.</li>
 <li><code>format</code> (no <code>--check</code>) rewrites the file in place and a second run
   is a no-op.</li>
+</ul>
+<hr />
+<h2 id="bl18-format-the-php-embedded-in-a-blade-template">BL18. Format the PHP embedded in a Blade template<a class="headerlink" href="#bl18-format-the-php-embedded-in-a-blade-template" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>The built-in Blade formatter (<code>src/formatting/blade/reindent.rs</code>)
+changes leading whitespace only, so the PHP inside a template keeps
+whatever spacing the author typed: <code>{{$name}}</code> stays <code>{{$name}}</code>,
+<code>@if($a&amp;&amp;$b)</code> stays as written, and an <code>@php</code> block is shifted but not
+formatted. Pint's Blade rule formats those fragments with its PHP fixers
+(<code>PhpBlockFormatting</code> over <code>@php</code> blocks, <code>&lt;?php</code> islands, directive
+arguments, and echoes); the built-in formatter should do the same through
+the embedded <code>mago</code> formatter, on isolated snippets, the way diagnostics
+isolate virtual-PHP buffers rather than through the preprocessor's
+lowering.</p>
+<ul>
+<li><code>@php … @endphp</code> bodies and <code>&lt;?php … ?&gt;</code> islands are statement lists:
+  format them as a file body and let the reindenter shift the result to
+  the block's level, which it already does for any body.</li>
+<li><code>{{ }}</code>, <code>{!! !!}</code>, and directive arguments are single expressions:
+  format each as an expression statement and drop the trailing <code>;</code>. A
+  fragment that spans lines has to keep its line count, or the
+  reindenter's per-line model has to learn to re-derive it.</li>
+<li>Spacing that is Blade's rather than PHP's belongs to the same pass:
+  <code>@if(</code> to <code>@if (</code>, <code>{{$x}}</code> to <code>{{ $x }}</code>, <code>/&gt;</code> spacing. The reflow
+  tools all do it, and the directive and echo scanners make it cheap.</li>
+<li>Opt-in, behind a <code>[formatting]</code> key, since it changes line content
+  and the reindenter's contract today is that it never does. It must
+  not run inside <code>@verbatim</code>, a comment, a string, <code>&lt;script&gt;</code>,
+  <code>&lt;style&gt;</code>, or <code>&lt;pre&gt;</code>.</li>
+<li>Never touch an Alpine or Livewire attribute value: it is JavaScript.</li>
+</ul>
+<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>{{$name}}</code> becomes <code>{{ $name }}</code>, <code>@if($a&amp;&amp;$b)</code> becomes
+  <code>@if ($a &amp;&amp; $b)</code>, and an <code>@php</code> block is formatted as PHP and lands at
+  the block's indentation.</li>
+<li>A fragment that does not parse is left as written and the rest of the
+  template still formats.</li>
+<li>Nothing inside <code>@verbatim</code>, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, or a string
+  changes.</li>
+<li>Formatting stays idempotent over the corpora the reindenter's tests
+  use.</li>
 </ul>
 
 
