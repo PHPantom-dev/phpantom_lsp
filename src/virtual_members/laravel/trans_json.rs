@@ -16,10 +16,16 @@ pub(super) fn collect_json_trans_declarations(content: &str) -> Vec<TransKeyMatc
 }
 
 fn parse_declarations(content: &str) -> Option<Vec<TransKeyMatch>> {
-    let mut input = content.trim_start().strip_prefix('{')?.trim_start();
+    let mut input = content
+        .trim_start_matches([' ', '\t', '\r', '\n'])
+        .strip_prefix('{')?
+        .trim_start_matches([' ', '\t', '\r', '\n']);
     let mut out = Vec::new();
     if let Some(rest) = input.strip_prefix('}') {
-        return rest.trim().is_empty().then_some(out);
+        return rest
+            .trim_matches([' ', '\t', '\r', '\n'])
+            .is_empty()
+            .then_some(out);
     }
     loop {
         let start = content.len() - input.len() + 1;
@@ -28,12 +34,12 @@ fn parse_declarations(content: &str) -> Option<Vec<TransKeyMatch>> {
         let consumed = keys.byte_offset();
         let end = start + consumed - 2;
         input = input[consumed..]
-            .trim_start()
+            .trim_start_matches([' ', '\t', '\r', '\n'])
             .strip_prefix(':')?
-            .trim_start();
+            .trim_start_matches([' ', '\t', '\r', '\n']);
         let mut values = serde_json::Deserializer::from_str(input).into_iter::<serde_json::Value>();
         let value = values.next()?.ok()?;
-        input = input[values.byte_offset()..].trim_start();
+        input = input[values.byte_offset()..].trim_start_matches([' ', '\t', '\r', '\n']);
         out.push(TransKeyMatch {
             key,
             start,
@@ -42,9 +48,14 @@ fn parse_declarations(content: &str) -> Option<Vec<TransKeyMatch>> {
             value: value.as_str().map(str::to_string),
         });
         if let Some(rest) = input.strip_prefix('}') {
-            return rest.trim().is_empty().then_some(out);
+            return rest
+                .trim_matches([' ', '\t', '\r', '\n'])
+                .is_empty()
+                .then_some(out);
         }
-        input = input.strip_prefix(',')?.trim_start();
+        input = input
+            .strip_prefix(',')?
+            .trim_start_matches([' ', '\t', '\r', '\n']);
     }
 }
 

@@ -166,6 +166,7 @@ fn collect_array<'a>(
             continue;
         };
 
+        let key_text = literal_value(kv.key).unwrap_or(key_text);
         let mut full_path = path.to_vec();
         full_path.push(key_text.to_string());
         let dot_key = format!("{prefix}.{}", full_path.join("."));
@@ -174,15 +175,17 @@ fn collect_array<'a>(
             start: key_start,
             end: key_end,
             is_group: value_is_group(kv.value),
-            value: match kv.value {
-                Expression::Literal(Literal::String(string)) => {
-                    string.value.map(|value| bytes_to_str(value).to_string())
-                }
-                _ => None,
-            },
+            value: literal_value(kv.value).map(str::to_string),
         });
 
         collect_expr(kv.value, content, prefix, &full_path, out);
+    }
+}
+
+fn literal_value<'a>(expression: &'a Expression<'_>) -> Option<&'a str> {
+    match expression {
+        Expression::Literal(Literal::String(string)) => string.value.map(bytes_to_str),
+        _ => None,
     }
 }
 

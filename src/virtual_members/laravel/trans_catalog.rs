@@ -104,6 +104,25 @@ impl TranslationCatalog {
             }
         }
     }
+
+    fn insert_locale(&mut self, backend: &Backend, path: &Path, namespace: &str) {
+        let Some(locale) = path.file_name().and_then(|name| name.to_str()) else {
+            return;
+        };
+        if locale == "vendor" {
+            return;
+        }
+        self.locales.insert(locale.to_string());
+        let Ok(files) = std::fs::read_dir(path) else {
+            return;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().is_some_and(|ext| ext == "php") {
+                self.insert_file(backend, &path, locale, namespace);
+            }
+        }
+    }
 }
 
 impl Backend {
@@ -140,22 +159,7 @@ impl Backend {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    let Some(locale) = path.file_name().and_then(|name| name.to_str()) else {
-                        continue;
-                    };
-                    if locale == "vendor" {
-                        continue;
-                    }
-                    catalog.locales.insert(locale.to_string());
-                    let Ok(files) = std::fs::read_dir(&path) else {
-                        continue;
-                    };
-                    for file in files.flatten() {
-                        let path = file.path();
-                        if path.extension().is_some_and(|ext| ext == "php") {
-                            catalog.insert_file(self, &path, locale, &root.namespace);
-                        }
-                    }
+                    catalog.insert_locale(self, &path, &root.namespace);
                 } else if root.namespace.is_empty()
                     && path.extension().is_some_and(|ext| ext == "json")
                     && let Some(locale) = path.file_stem().and_then(|name| name.to_str())

@@ -60,6 +60,10 @@ fn json_translation_declarations_reject_invalid_documents() {
         "{\"a\":1,}",
         "{\"a\":1} trailing",
         "{} trailing",
+        "\u{a0}{}",
+        "{\u{a0}\"key\":1}",
+        "{\"key\":1}\u{a0}",
+        "{}\u{a0}",
         "{\"a\":1",
     ] {
         assert!(

@@ -144,3 +144,19 @@ fn translation_argument_completion_ignores_other_calls_and_array_values() {
         assert!(complete(source).is_none(), "{source}");
     }
 }
+
+#[test]
+fn translation_argument_completion_handles_nested_calls_and_unknown_replacements() {
+    assert_eq!(
+        labels("<?php __('messages.hello', ['|' => foo()]);"),
+        ["count", "name"]
+    );
+    assert_eq!(
+        labels("<?php __('messages.hello', $replacements, locale: '|');"),
+        ["de", "en", "fr"]
+    );
+    assert_eq!(
+        labels("<?php __('messages.hello', [...$replacements, '|']);"),
+        ["count", "name"]
+    );
+}

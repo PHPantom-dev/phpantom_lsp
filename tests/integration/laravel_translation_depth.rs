@@ -240,3 +240,35 @@ async fn translation_hover_and_references_bind_named_keys_and_show_all_locales()
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn json_translation_references_decode_php_and_blade_string_escapes() {
+    let php = "<?php\n__('It\\'s open');\n";
+    let blade = "{{ __('It\\'s open') }}\n";
+    let json = r#"{"It's open":"Open"}"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/usage.php", php),
+            ("resources/views/welcome.blade.php", blade),
+            ("resources/lang/en.json", json),
+        ],
+    );
+    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let blade_uri =
+        Url::from_file_path(dir.path().join("resources/views/welcome.blade.php")).unwrap();
+    let json_uri = Url::from_file_path(dir.path().join("resources/lang/en.json")).unwrap();
+    open_php(&backend, &php_uri, php).await;
+    open_document(&backend, &blade_uri, "blade", blade).await;
+    let found = references(&backend, &json_uri, position(json, "It's open"), true).await;
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert!(found.iter().any(|location| location.uri == php_uri));
+    assert!(found.iter().any(|location| location.uri == blade_uri
+        && location.range == Range::new(Position::new(0, 7), Position::new(0, 17))));
+    assert_eq!(
+        references(&backend, &blade_uri, Position::new(0, 8), false)
+            .await
+            .len(),
+        2
+    );
+}

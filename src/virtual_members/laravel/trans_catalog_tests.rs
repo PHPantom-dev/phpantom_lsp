@@ -167,3 +167,47 @@ fn translation_catalog_handles_missing_and_unreadable_files() {
     backend.laravel_string_key_cache.write().translations = None;
     assert!(backend.cached_translations().entries.is_empty());
 }
+
+#[test]
+fn translation_catalog_decodes_php_keys_and_preserves_their_raw_ranges() {
+    let backend = make_backend();
+    let dir = tempfile::tempdir().unwrap();
+    *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+    std::fs::create_dir_all(dir.path().join("lang/en")).unwrap();
+    std::fs::write(
+        dir.path().join("lang/en/messages.php"),
+        "<?php return ['it\\'s' => 'It\\'s :name'];",
+    )
+    .unwrap();
+    let catalog = backend.cached_translations();
+    let entry = &catalog.entries["messages.it's"][0];
+    assert_eq!(entry.value.as_deref(), Some("It's :name"));
+    assert_eq!(entry.range.end.character - entry.range.start.character, 5);
+}
+
+#[cfg(unix)]
+#[test]
+fn translation_catalog_handles_invalid_and_removed_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let backend = make_backend();
+    let dir = tempfile::tempdir().unwrap();
+    let mut catalog = TranslationCatalog::default();
+    catalog.insert_file(&backend, Path::new("relative.php"), "en", "");
+    assert!(catalog.files.is_empty());
+    let invalid = dir.path().join(std::ffi::OsString::from_vec(vec![0xff]));
+    catalog.insert_locale(&backend, &invalid, "");
+    assert!(catalog.locales.is_empty());
+    // Editor URIs can describe paths the host filesystem cannot create.
+    let invalid_file = dir.path().join(std::ffi::OsString::from_vec(vec![
+        0xff, b'.', b'p', b'h', b'p',
+    ]));
+    let uri = Url::from_file_path(&invalid_file).unwrap();
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), Arc::new("<?php return [];".to_string()));
+    catalog.insert_file(&backend, &invalid_file, "en", "");
+    assert!(catalog.files.is_empty());
+    catalog.insert_locale(&backend, &dir.path().join("removed"), "");
+    assert!(catalog.entries.is_empty());
+}

@@ -487,6 +487,12 @@ fn push_laravel_string_span(
         return;
     };
 
+    if kind == crate::symbol_map::LaravelStringKind::Trans
+        && let Expression::Literal(Literal::String(string)) = expr
+    {
+        key = string.value.map(bytes_to_str).unwrap_or(key);
+    }
+
     if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
         // Require at least one dot: bare keys like 'app' are not valid config paths.
         return;
