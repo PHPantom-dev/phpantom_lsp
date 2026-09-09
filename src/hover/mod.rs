@@ -17,6 +17,7 @@
 mod class;
 mod constants;
 mod formatting;
+mod laravel_trans;
 mod member;
 mod see_refs;
 mod templates;
@@ -621,31 +622,7 @@ impl Backend {
                 };
                 ("View", detail)
             }
-            LaravelStringKind::Trans => {
-                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
-                    self, kind, key, uri,
-                );
-                let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/lang/")
-                        .next()
-                        .map(|p| format!("lang/{}", p))
-                        .unwrap_or_else(|| path.to_string());
-                    // The line as written: a `:placeholder` is left in
-                    // place, since what it stands for is decided by the
-                    // call site rather than by the translation.
-                    match crate::virtual_members::laravel::trans_line(self, key, &loc.uri) {
-                        Some(line) => {
-                            format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
-                        }
-                        None => format!("Defined in `{}`", short_path),
-                    }
-                } else {
-                    "Translation key".to_string()
-                };
-                ("Trans", detail)
-            }
+            LaravelStringKind::Trans => ("Trans", self.translation_hover_detail(key)),
             LaravelStringKind::Command => {
                 let index = self.laravel_commands.read();
                 let detail = if let Some(entry) = index.get(key) {

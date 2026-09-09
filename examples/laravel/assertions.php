@@ -1472,12 +1472,21 @@ check("url('/login') returns a string", is_string(url('/login')));
 
 $translationLoader = new \Illuminate\Translation\FileLoader(
     new \Illuminate\Filesystem\Filesystem(),
-    __DIR__ . '/lang'
+    [__DIR__ . '/lang', __DIR__ . '/resources/lang']
 );
 $translationDemo = new \Illuminate\Translation\Translator($translationLoader, 'en');
 check(
     'JSON translation keys resolve with replacements',
     $translationDemo->get('Fresh bread for :name', ['name' => 'Ada']) === 'Fresh bread for Ada'
+);
+
+check(
+    'Locale and named replacements resolve in resources/lang',
+    $translationDemo->get(
+        locale: 'fr',
+        replace: ['name' => 'Ada'],
+        key: 'Fresh bread for :name'
+    ) === 'Du pain frais pour Ada'
 );
 
 // ─── Summary ────────────────────────────────────────────────────────────────

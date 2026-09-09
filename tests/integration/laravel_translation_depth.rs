@@ -189,3 +189,54 @@ async fn translation_argument_completion_uses_both_language_folders() {
         );
     }
 }
+
+#[tokio::test]
+async fn translation_hover_and_references_bind_named_keys_and_show_all_locales() {
+    let source = "<?php\n__(locale: 'en', key: 'Welcome');\nLang::get(locale: 'fr', key: 'Welcome');\n__(locale: 'fr');";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/usage.php", source),
+            ("lang/en.json", "{\n\"Welcome\": \"Welcome :name\"\n}"),
+            (
+                "resources/lang/fr.json",
+                "{\n\n\"Welcome\": \"Bonjour :name\"\n}",
+            ),
+        ],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    open_php(&backend, &uri, source).await;
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: position(source, "Welcome"),
+            },
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("markdown hover")
+    };
+    assert!(
+        markup.value.contains("`en`: `Welcome :name`"),
+        "{}",
+        markup.value
+    );
+    assert!(markup.value.contains("`fr`: `Bonjour :name`"));
+    assert!(markup.value.contains("/lang/en.json#L2>"));
+    assert!(markup.value.contains("/resources/lang/fr.json#L3>"));
+    assert_eq!(
+        references(&backend, &uri, position(source, "Welcome"), false)
+            .await
+            .len(),
+        2
+    );
+    assert!(
+        references(&backend, &uri, position(source, "en'"), false)
+            .await
+            .is_empty()
+    );
+}

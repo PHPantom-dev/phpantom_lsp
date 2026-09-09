@@ -1,7 +1,7 @@
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::Location;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -56,18 +56,6 @@ pub(crate) fn unresolved_trans_type() -> PhpType {
 /// Whole PHP groups resolve to the start of their file.
 pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Location> {
     backend.translation_definitions(key)
-}
-
-/// The literal translation in a particular declaring file.
-pub(crate) fn trans_line(backend: &Backend, key: &str, file_uri: &Url) -> Option<String> {
-    let catalog = backend.cached_translations();
-    catalog
-        .entries
-        .get(key)?
-        .iter()
-        .find(|entry| catalog.files[entry.file].uri == *file_uri)?
-        .value
-        .clone()
 }
 
 // ─── Declaration extractor (mirrors config_keys logic) ───────────────────────
@@ -186,8 +174,12 @@ fn collect_array<'a>(
             start: key_start,
             end: key_end,
             is_group: value_is_group(kv.value),
-            value: super::helpers::extract_string_literal(kv.value, content)
-                .map(|(text, _, _)| text.to_string()),
+            value: match kv.value {
+                Expression::Literal(Literal::String(string)) => {
+                    string.value.map(|value| bytes_to_str(value).to_string())
+                }
+                _ => None,
+            },
         });
 
         collect_expr(kv.value, content, prefix, &full_path, out);

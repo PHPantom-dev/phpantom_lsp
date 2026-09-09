@@ -189,7 +189,7 @@ pub(crate) use storage::{
 };
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
-pub(crate) use trans_keys::{trans_line, unresolved_trans_type};
+pub(crate) use trans_keys::unresolved_trans_type;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars};
 pub(crate) use view_names::canonical_view_name;

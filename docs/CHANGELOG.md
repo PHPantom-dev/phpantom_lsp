@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Translation hover shows values across locales.** Each value links to its declaration, including JSON translations and translations under `resources/lang/`. Contributed by @shuvroroy.
+
 - **Laravel translation arguments complete from the project's language files.** Locale arguments and replacement-array keys now suggest the available locales and translation placeholders, including named arguments and files under `lang/` and `resources/lang/`. Contributed by @shuvroroy.
 
 - **JSON translation keys support precise navigation.** Laravel translation keys now navigate to their exact location in JSON language files, and find-references works from their declarations as well as their call sites. Contributed by @shuvroroy.

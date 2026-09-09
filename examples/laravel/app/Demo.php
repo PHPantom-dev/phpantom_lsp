@@ -673,7 +673,8 @@ class Demo
         __('Fresh bread for :name', ['name' => 'Ada']);
 
         // Try: complete the locale argument or a replacement-array key.
-        __('Fresh bread for :name', replace: ['name' => 'Ada'], locale: 'en');
+        // Hover shows the English and French values with links to both files.
+        __('Fresh bread for :name', replace: ['name' => 'Ada'], locale: 'fr');
         __('messages.welcome');
         trans('auth.failed');
         trans_choice('messages.notifications', 5);

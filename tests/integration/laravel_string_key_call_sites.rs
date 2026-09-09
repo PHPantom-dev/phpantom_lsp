@@ -402,14 +402,14 @@ async fn translation_hover_shows_the_translated_line() {
 
     let leaf = hover_text(&backend, &uri, 4, 16).await;
     assert!(
-        leaf.contains("`Explore :name`") && leaf.contains("Defined in `lang/en/boards.php`"),
+        leaf.contains("`Explore :name`") && leaf.contains("Defined in [`lang/en/boards.php`]"),
         "got {leaf}"
     );
 
     // A group has no single line, so the hover keeps naming only the file.
     let group = hover_text(&backend, &uri, 5, 16).await;
     assert!(
-        group.contains("Defined in `lang/en/boards.php`"),
+        group.contains("Defined in [`lang/en/boards.php`]"),
         "got {group}"
     );
 }

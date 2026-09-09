@@ -116,6 +116,12 @@ pub(super) fn try_emit_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
+    if kind == crate::symbol_map::LaravelStringKind::Trans {
+        if let Some(key) = argument_expr_for_parameter(argument_list, "key") {
+            push_laravel_string_span(kind, false, false, key, content, spans);
+        }
+        return;
+    }
     emit_laravel_string_span(kind, false, 0, argument_list, content, spans);
 }
 
