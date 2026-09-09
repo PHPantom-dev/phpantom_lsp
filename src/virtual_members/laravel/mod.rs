@@ -76,7 +76,9 @@
 //! - **Implicit primary key.** Every model exposes a primary key column
 //!   (`id` by default, respecting `$primaryKey`/`$keyType` overrides)
 //!   even when no schema or cast entry describes it, unless the model
-//!   overrides `getKeyName()`.
+//!   overrides `getKeyName()`. `HasUuids` and `HasUlids` make the key a
+//!   string, including when inherited or composed through other traits,
+//!   unless a `uniqueIds()` override leaves the key out.
 //!
 //! - **Timestamp properties.** `created_at`/`updated_at` (or their
 //!   configured names) are added as the configured Laravel date class,
@@ -136,6 +138,7 @@ mod scopes;
 mod storage;
 mod string_keys;
 mod trans_keys;
+mod unique_ids;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
 mod view_data;
@@ -860,7 +863,10 @@ impl VirtualMemberProvider for LaravelModelProvider {
             if !laravel.has_get_key_name_method {
                 let primary_key = laravel.primary_key.as_deref().unwrap_or("id");
                 if seen_props.insert(primary_key.to_string()) {
-                    let php_type = if laravel.key_type.as_deref() == Some("string") {
+                    let php_type = if laravel.key_type.as_deref() == Some("string")
+                        || (unique_ids::uses_unique_string_ids(class, class_loader)
+                            && unique_ids::unique_ids_include(class, primary_key, class_loader))
+                    {
                         PhpType::string()
                     } else {
                         PhpType::int()

@@ -1652,6 +1652,12 @@ pub struct LaravelMetadata {
     /// and cannot be resolved statically, so no implicit primary key
     /// property is synthesized.
     pub has_get_key_name_method: bool,
+    /// Columns returned by the model's own `uniqueIds()` override.
+    ///
+    /// - `None` — not declared, or not a literal list of strings.
+    /// - `Some(["uuid"])` — `HasUuids`/`HasUlids` generate these columns;
+    ///   the primary key is only a string when it is listed.
+    pub unique_ids: Option<Vec<String>>,
     /// Whether `$timestamps` is explicitly set on the model.
     ///
     /// - `None` — not declared (inherits the default, which is `true`
