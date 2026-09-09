@@ -494,6 +494,9 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     }
     z += vs(&l.column_names);
     z.add(l.column_sources.capacity() * size_of::<u16>());
+    if let Some(ids) = &l.unique_ids {
+        z += vs(ids);
+    }
     for o in [
         &l.connection_name,
         &l.table_name,

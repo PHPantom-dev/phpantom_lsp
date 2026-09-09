@@ -211,6 +211,7 @@ mod laravel_string_key_non_laravel_gate;
 mod laravel_trans_loader;
 mod laravel_trans_types;
 mod laravel_translation_keys;
+mod laravel_unique_ids;
 mod laravel_validated_shape;
 mod laravel_view_names;
 mod lsp_concurrency;

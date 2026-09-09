@@ -894,6 +894,46 @@ fn extract_facade_accessor<'a>(
     (!name.is_empty()).then(|| FacadeAccessor::Class(atom(name)))
 }
 
+/// Extract the columns a model's own `uniqueIds()` override returns.
+///
+/// Only a `return [...]` of string literals is statically knowable. Any
+/// other shape (`[$this->getKeyName(), 'uuid']`, a spread of
+/// `parent::uniqueIds()`, a computed value) yields `None`, as does a
+/// model that does not declare the method.
+fn extract_unique_ids<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    content: &str,
+) -> Option<Vec<String>> {
+    let method = members.into_iter().find_map(|member| match member {
+        class_like::member::ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case("uniqueIds") =>
+        {
+            Some(method)
+        }
+        _ => None,
+    })?;
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let value = block.statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })?;
+    let elements = match value {
+        Expression::Array(arr) => &arr.elements,
+        Expression::LegacyArray(arr) => &arr.elements,
+        _ => return None,
+    };
+    elements
+        .iter()
+        .map(|element| match element {
+            ArrayElement::Value(v) => super::helpers::extract_string_literal(v.value, content)
+                .map(|(text, _, _)| text.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn extract_string_property<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
@@ -1090,6 +1130,11 @@ pub(crate) fn extract_laravel_metadata<'a>(
     let has_get_key_name_method = methods
         .iter()
         .any(|m| m.name.eq_ignore_ascii_case("getKeyName"));
+    let unique_ids = methods
+        .iter()
+        .any(|m| m.name.eq_ignore_ascii_case("uniqueIds"))
+        .then(|| extract_unique_ids(class.members.iter(), content))
+        .flatten();
 
     let dates_definitions = extract_dates_definitions(class.members.iter(), content);
 
@@ -1128,6 +1173,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         primary_key,
         key_type,
         has_get_key_name_method,
+        unique_ids,
         timestamps,
         created_at_name,
         updated_at_name,
