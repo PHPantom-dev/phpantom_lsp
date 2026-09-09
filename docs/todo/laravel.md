@@ -28,7 +28,7 @@ within the same impact tier.
 | Facade → concrete resolution via booting | Requires booting (`getFacadeRoot()`). When `getFacadeAccessor()` returns a `::class` reference, static resolution is possible without booting. See "Facade completion" section below. |
 | Contract → concrete resolution | Fully out of scope, including core framework contracts. Calling a concrete-only method on a contract-typed value is unsound per the declared types — the diagnostic is intended, exactly as `fn (A $a) => $a->bMethod()` is not a false positive just because `B extends A` at every call site. Where the *framework's own* docblock is needlessly wide, fix the docblock upstream or via stub patches. |
 | Manager → driver resolution | Requires instantiating the manager at runtime. |
-| Narrowing a `MorphTo` relation to concrete models | `$comment->commentable` resolves to the generic `Illuminate\Database\Eloquent\Model`, which is what the relation declares. The morph map (now indexed, see L47/L42) is global rather than per-relation, so the only type it could supply is a union of *every* mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with `@return MorphTo<Post\|Video, $this>` where the target set is actually known. |
+| Narrowing a `MorphTo` relation to concrete models | `$comment->commentable` resolves to the generic `Illuminate\Database\Eloquent\Model`, which is what the relation declares. The morph map is global rather than per-relation, so the only type it could supply is a union of *every* mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with `@return MorphTo<Post\|Video, $this>` where the target set is actually known. |
 
 ---
 
@@ -378,34 +378,6 @@ purposes just the `id` type is the main gap.
 Alternatively, if the stubs for these traits include `@property`
 tags or a typed `$id` override, the PHPDoc provider may handle it
 automatically once the traits are loaded.
-
-#### L47. Morph aliases in `*_type` column comparisons
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-The morph-map index (`virtual_members/laravel/morph_map.rs`) recognizes
-alias strings in the positions Eloquent resolves through the map by
-name: the `morphMap()` keys themselves, `Relation::getMorphedModel()`,
-`Model::getActualClassNameForMorph()`, and the `$types` argument of the
-`whereHasMorph()` family. It does **not** recognize an alias compared
-against a morph type *column*, which is how much real code reads it:
-
-```php
-$query->where('commentable_type', 'post');
-if ($comment->commentable_type === 'post') { … }
-```
-
-Both are alias literals, but recognizing them means knowing that the
-column named on the other side is a polymorphic type column. The
-information is available: a `morphTo()` relation declares its type
-column (defaulting to `<relation>_type`), and the relation methods of
-the model being queried are already parsed. The work is to collect the
-morph type columns of a model, then match a string literal that appears
-opposite one in a `where()` / comparison against the alias index.
-
-Once a literal is recognized it inherits hover, go-to-definition,
-find-references, and the enforced-map diagnostic for free, since those
-dispatch on the `LaravelStringKind::MorphAlias` span kind.
 
 #### L42. Morph alias completion in array positions
 
