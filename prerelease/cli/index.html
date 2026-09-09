@@ -806,6 +806,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>format</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idempotency_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#init" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1886,6 +1947,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>format</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idempotency_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#init" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1971,9 +2093,9 @@
 
 <h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
 <p>PHPantom is a language server, but it also ships CLI tools for batch
-analysis and automated fixing. These run the same engine that powers the
-editor, so results are consistent between what you see in your editor
-and what CI reports.</p>
+analysis, automated fixing, and formatting. These run the same engine
+that powers the editor, so results are consistent between what you see
+in your editor and what CI reports.</p>
 <h2 id="modes">Modes<a class="headerlink" href="#modes" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1998,6 +2120,10 @@ and what CI reports.</p>
 <tr>
 <td><code>phpantom_lsp fix</code></td>
 <td>Apply automated code fixes across the project</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp format</code></td>
+<td>Format PHP files and Blade templates</td>
 </tr>
 <tr>
 <td><code>phpantom_lsp move</code></td>
@@ -2461,6 +2587,120 @@ cleaned up in seconds rather than file by file.</p>
 all issues are already resolved, the command exits with code 0 and
 writes nothing.</p>
 <hr />
+<h2 id="format"><code>format</code><a class="headerlink" href="#format" title="Permanent link">&para;</a></h2>
+<p>Formats every PHP file and Blade template in the project with the same
+formatter the editor runs on save, or, with <code>--check</code>, reports the files
+that are not formatted and exits non-zero without writing anything. That
+is the role <code>blade-formatter -c</code>, <code>phpcs</code>, and <code>php-cs-fixer --dry-run</code>
+play in a pipeline, so a CI job can require that a pull request ran the
+formatter.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>phpantom_lsp<span class="w"> </span>format<span class="w">                               </span><span class="c1"># format the whole project</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check<span class="w">                       </span><span class="c1"># report unformatted files, write nothing</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>resources/views<span class="w">               </span><span class="c1"># restrict to a subdirectory</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>app/Foo.php<span class="w">                   </span><span class="c1"># format a single file</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check<span class="w"> </span>--format<span class="w"> </span>github<span class="w">       </span><span class="c1"># annotate a pull request diff</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w">   </span><span class="c1"># explicit project root</span>
+</code></pre></div>
+<p>Each file goes through the strategy PHPantom resolves for the project, so
+a run honours a Laravel Pint, php-cs-fixer, or PHP_CodeSniffer the project
+depends on, and uses the built-in formatter otherwise. Blade templates
+resolve separately: Pint when the project formats Blade with it, the
+built-in reindenter otherwise. See
+<a href="../configuration/#formatting"><code>[formatting]</code></a> for how that is decided and how
+to override it. The run opens with a line on stderr naming what it
+resolved, so a CI log records which formatter enforced the result.</p>
+<p>Templates whose indentation is output rather than layout (Envoy task
+files, Markdown mail templates, Laravel Boost guidelines) are left alone,
+and <code>--check</code> never fails a project for having one. Formatting turned off
+in <code>.phpantom.toml</code> exits 0 with a note rather than reporting every file
+as formatted.</p>
+<h3 id="options_4">Options<a class="headerlink" href="#options_4" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[PATH]...</code></td>
+<td>Files or directories to format. Defaults to the entire project.</td>
+</tr>
+<tr>
+<td><code>--check</code></td>
+<td>List the files that are not formatted and write nothing.</td>
+</tr>
+<tr>
+<td><code>--indent-size &lt;N&gt;</code></td>
+<td>Spaces per indentation level for Blade templates (default 4).</td>
+</tr>
+<tr>
+<td><code>--use-tabs</code></td>
+<td>Indent Blade templates with tabs instead of spaces.</td>
+</tr>
+<tr>
+<td><code>--project-root &lt;DIR&gt;</code></td>
+<td>Project root directory. Defaults to the current working directory.</td>
+</tr>
+<tr>
+<td><code>--no-colour</code></td>
+<td>Disable ANSI colour output.</td>
+</tr>
+<tr>
+<td><code>--format &lt;FORMAT&gt;</code></td>
+<td><code>table</code> (default), <code>github</code>, or <code>json</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--indent-size</code> and <code>--use-tabs</code> reach the built-in Blade reindenter
+only, which takes indentation from the editor over LSP and has no other
+source for it on the command line. PHP files are formatted to the
+project's own rules either way.</p>
+<h3 id="exit-codes_3">Exit codes<a class="headerlink" href="#exit-codes_3" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Every file is formatted, or every file was written</td>
+</tr>
+<tr>
+<td>1</td>
+<td>A file could not be read, formatted, or written</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>--check</code> found files that are not formatted</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-output_2">Example output<a class="headerlink" href="#example-output_2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a> resources/views/home.blade.php
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a> src/Service/UserService.php
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a> [CHECK] 2 files would be reformatted
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>phpantom_lsp<span class="w"> </span>format
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a> resources/views/home.blade.php
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a> src/Service/UserService.php
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a> [FORMATTED] Reformatted 2 files
+</code></pre></div>
+<h3 id="idempotency_1">Idempotency<a class="headerlink" href="#idempotency_1" title="Permanent link">&para;</a></h3>
+<p>Running <code>format</code> twice produces the same result as running it once, and
+<code>--check</code> passes immediately afterwards. That is what makes the pair
+usable as a CI gate: the job runs <code>--check</code>, and a contributor clears it
+by running the command without it.</p>
+<hr />
 <h2 id="init"><code>init</code><a class="headerlink" href="#init" title="Permanent link">&para;</a></h2>
 <p>Creates a <code>.phpantom.toml</code> in the current directory with a JSON schema
 directive and a link to the configuration reference. The file is
@@ -2469,8 +2709,8 @@ Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for all available
 options via the schema. Safe to run if the file already exists (it will
 not overwrite).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>phpantom_lsp<span class="w"> </span>init
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>phpantom_lsp<span class="w"> </span>init
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
 </code></pre></div>
 <p><code>--global</code> writes to the platform config directory
 (<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux and macOS) instead, creating it
@@ -2497,27 +2737,27 @@ better at catching structural gaps: unknown classes, unresolvable
 members, missing implementations. Running both gives you broad coverage
 without needing PHPStan at max level to get full symbol resolution.</p>
 <h3 id="github-actions-example">GitHub Actions example<a class="headerlink" href="#github-actions-example" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Type Coverage</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="nt">jobs</span><span class="p">:</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span><span class="nt">phpantom</span><span class="p">:</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">      </span><span class="c1"># Use --no-dev to catch production code that depends on dev-only</span>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">      </span><span class="c1"># packages (e.g. calling PHPUnit classes from application code).</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install Composer dependencies</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer install --no-interaction --prefer-dist --no-dev</span>
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install PHPantom</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="w">          </span><span class="no">curl -sL https://github.com/PHPantom-dev/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz</span>
-<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="w">          </span><span class="no">chmod +x phpantom_lsp</span>
-<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>
-<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Check type coverage</span>
-<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./phpantom_lsp analyze --severity warning --no-colour src/</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Type Coverage</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="nt">jobs</span><span class="p">:</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">phpantom</span><span class="p">:</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">      </span><span class="c1"># Use --no-dev to catch production code that depends on dev-only</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">      </span><span class="c1"># packages (e.g. calling PHPUnit classes from application code).</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install Composer dependencies</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer install --no-interaction --prefer-dist --no-dev</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install PHPantom</span>
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="w">          </span><span class="no">curl -sL https://github.com/PHPantom-dev/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz</span>
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a><span class="w">          </span><span class="no">chmod +x phpantom_lsp</span>
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Check type coverage</span>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./phpantom_lsp analyze --severity warning --no-colour src/</span>
 </code></pre></div>
 <p>The <code>analyze</code> step fails the build if any class, member, or function
 cannot be resolved (including unused imports). The output is clean and
@@ -2525,17 +2765,21 @@ readable in the CI log.</p>
 <h3 id="common-patterns">Common patterns<a class="headerlink" href="#common-patterns" title="Permanent link">&para;</a></h3>
 <p><strong>Diagnostics gate.</strong> Fail the build when PHPantom finds unresolvable
 symbols:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
 </code></pre></div>
 <p><strong>Enforce clean imports.</strong> Fail the build when unused imports exist:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+</code></pre></div>
+<p><strong>Formatting gate.</strong> Fail the build when a file was committed
+unformatted:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
 </code></pre></div>
 <p><strong>Pre-commit hook.</strong> Clean up imports before every commit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.
 </code></pre></div>
 <p><strong>Combine analyze and fix.</strong> Run fixes first, then check what remains:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>.
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>.
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>.
 </code></pre></div>
 
 

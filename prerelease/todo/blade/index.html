@@ -834,34 +834,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL17. <code>format --check</code> CLI subcommand for CI
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl18-format-the-php-embedded-in-a-blade-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -874,7 +846,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
+  <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1417,34 +1389,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL17. <code>format --check</code> CLI subcommand for CI
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl18-format-the-php-embedded-in-a-blade-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1457,7 +1401,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
+  <a href="#tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1598,43 +1542,6 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 </ul>
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
 <hr />
-<h2 id="bl17-format-check-cli-subcommand-for-ci">BL17. <code>format --check</code> CLI subcommand for CI<a class="headerlink" href="#bl17-format-check-cli-subcommand-for-ci" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Once PHPantom's resolved formatting strategy (the built-in PHP
-formatter, the built-in Blade reindenter, or an external tool) is
-trustworthy enough to enforce, projects want a
-non-editor way to verify a PR ran it, the same role <code>blade-formatter
--c</code>/<code>--check-formatted</code> plays today. <code>main.rs</code> currently only exposes
-<code>analyse</code> and <code>fix</code> as CLI subcommands; there is no way to invoke
-<code>textDocument/formatting</code>'s resolution logic (<code>src/formatting/</code>) outside
-the LSP connection at all.</p>
-<ul>
-<li>Add a <code>format</code> subcommand (<code>phpantom_lsp format --project-root
-  &lt;DIR&gt; [--check]</code>) that walks project PHP/Blade files, runs the same
-  <code>resolve_strategy</code> external-tool-or-built-in logic <code>src/formatting/</code>
-  already uses, and either writes the formatted result back or (with
-  <code>--check</code>) exits non-zero and lists files that would change, without
-  writing them — mirroring <code>blade-formatter -c -d</code> and <code>phpcs
-  --dry-run</code>/<code>php-cs-fixer --dry-run</code> conventions projects already use
-  in CI.</li>
-<li>This depends on the built-in Blade reindenter
-  (<code>src/formatting/blade/</code>) being fast/correct enough that a maintainer
-  would want it enforced in CI; do not build the CLI surface before that
-  bar is met, since the CLI is only useful once there's a trustworthy
-  formatter behind it (or a detected Pint/<code>php-cs-fixer</code> external tool,
-  which <code>--check</code> should honour identically to <code>format</code> without
-  <code>--check</code>).</li>
-</ul>
-<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>format --check</code> on an already-formatted project exits 0 with no
-  output.</li>
-<li><code>format --check</code> on a project with an unformatted <code>.blade.php</code> file
-  exits non-zero and names the file.</li>
-<li><code>format</code> (no <code>--check</code>) rewrites the file in place and a second run
-  is a no-op.</li>
-</ul>
-<hr />
 <h2 id="bl18-format-the-php-embedded-in-a-blade-template">BL18. Format the PHP embedded in a Blade template<a class="headerlink" href="#bl18-format-the-php-embedded-in-a-blade-template" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>The built-in Blade formatter (<code>src/formatting/blade/reindent.rs</code>)
@@ -1664,7 +1571,7 @@ lowering.</p>
   <code>&lt;style&gt;</code>, or <code>&lt;pre&gt;</code>.</li>
 <li>Never touch an Alpine or Livewire attribute value: it is JavaScript.</li>
 </ul>
-<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
+<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>{{$name}}</code> becomes <code>{{ $name }}</code>, <code>@if($a&amp;&amp;$b)</code> becomes
   <code>@if ($a &amp;&amp; $b)</code>, and an <code>@php</code> block is formatted as PHP and lands at
