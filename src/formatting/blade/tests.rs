@@ -11,6 +11,8 @@
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
+use mago_formatter::settings::FormatSettings;
+
 use crate::config::FormattingConfig;
 use crate::types::PhpVersion;
 
@@ -1560,6 +1562,81 @@ fn embedded_php_formats_a_raw_php_island() {
 }
 
 #[test]
+fn embedded_php_formats_a_short_echo_island() {
+    check_embedded(
+        "<div><?=$user->name?></div>\n",
+        "<div><?= $user->name ?></div>\n",
+    );
+}
+
+/// The `;` a `<?=` island may end with is optional, so it stays or goes
+/// as the author wrote it.
+#[test]
+fn embedded_php_keeps_a_short_echo_semicolon() {
+    check_embedded("<?=$a->b(1,2) ;?>\n", "<?= $a->b(1, 2); ?>\n");
+    check_embedded("<?=$a->b(1,2)?>\n", "<?= $a->b(1, 2) ?>\n");
+}
+
+#[test]
+fn embedded_php_leaves_an_empty_short_echo_alone() {
+    check_embedded_unchanged("<?= ?>\n");
+}
+
+/// Whether a short `<?` tag opens PHP at all depends on
+/// `short_open_tag`, so the pass does not read what follows it as PHP.
+#[test]
+fn embedded_php_leaves_a_short_open_tag_alone() {
+    check_embedded_unchanged("<? echo $x ; ?>\n");
+}
+
+/// A fragment the author broke over lines is re-spaced and stays
+/// broken. Which lines it takes within that is mago's, and mago keeps
+/// an array the author broke broken.
+#[test]
+fn embedded_php_formats_a_broken_props_array_without_joining_it() {
+    check_embedded(
+        "<div>\n@props([\n'on',\n'color'=>'blue',\n])\n</div>\n",
+        "<div>\n    @props([\n        'on',\n        'color' => 'blue',\n    ])\n</div>\n",
+    );
+}
+
+#[test]
+fn embedded_php_formats_a_broken_echo_argument_list() {
+    check_embedded(
+        "<p>\n{{ __('messages.welcome',[\n'name'=>$name,\n]) }}\n</p>\n",
+        "<p>\n    {{ __('messages.welcome', [\n        'name' => $name,\n    ]) }}\n</p>\n",
+    );
+}
+
+/// A break the author put right after the opening delimiter and right
+/// before the closing one is the pass's own padding, not part of the
+/// fragment: `{{\n$x\n}}` is the one-line echo `{{ $x }}`.
+#[test]
+fn embedded_php_joins_a_fragment_only_its_delimiters_broke() {
+    check_embedded("{{ $x\n}}\n", "{{ $x }}\n");
+}
+
+/// The column a broken fragment sits at reaches the formatter, so what
+/// it wraps to still fits once the reindenter has put it back one level
+/// in from the line it opened on.
+#[test]
+fn embedded_php_wraps_a_broken_fragment_for_the_column_it_sits_at() {
+    let deep = "<div>\n".repeat(5);
+    let close = "</div>\n".repeat(5);
+    let echo = "{{ __('key', [\n'first' => $someQuiteLongVariableName, 'second' => $anotherQuiteLongName,\n]) }}\n";
+    let formatted = format_embedded(&format!("{deep}{echo}{close}"));
+    let widest = formatted.lines().map(str::len).max().unwrap_or(0);
+    assert!(
+        widest <= FormatSettings::default().print_width,
+        "a line ran past the print width:\n{formatted}"
+    );
+    assert!(
+        formatted.contains("'first' => $someQuiteLongVariableName,\n"),
+        "the argument list should have wrapped:\n{formatted}"
+    );
+}
+
+#[test]
 fn embedded_php_spaces_a_self_closing_tag() {
     check_embedded("<br/>\n<x-alert   />\n", "<br />\n<x-alert />\n");
 }
@@ -1572,9 +1649,22 @@ fn embedded_php_leaves_a_fragment_that_does_not_parse_alone() {
     );
 }
 
+/// A broken fragment mago hands back on one line is left as written
+/// rather than joined: the pass owns the spacing inside a fragment, not
+/// how many lines it takes. mago joins a broken argument list by
+/// default, so this echo is never rewritten.
 #[test]
 fn embedded_php_leaves_a_multi_line_echo_alone() {
     check_embedded_unchanged("{{ $items->map(\n    fn ($i) => $i->name\n) }}\n");
+}
+
+/// The same rule the other way round: an overlong fragment the author
+/// wrote on one line is left there rather than broken.
+#[test]
+fn embedded_php_leaves_a_long_one_line_echo_on_its_line() {
+    check_embedded_unchanged(
+        "{{ __('a.very.long.translation.key.that.will.not.fit', ['first' => $first, 'second' => $second]) }}\n",
+    );
 }
 
 #[test]

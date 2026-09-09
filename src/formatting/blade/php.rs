@@ -5,7 +5,8 @@
 //! each PHP fragment through the embedded mago formatter, on an isolated
 //! snippet rather than on the virtual PHP the preprocessor lowers a
 //! template to: a `@php` body and a `<?php` island are a statement list,
-//! an echo and a directive's argument list a single expression.
+//! an echo, a `<?=` island, and a directive's argument list a single
+//! expression.
 //!
 //! Reindenting happens afterwards, on the rewritten template, so a
 //! fragment that gains or loses lines needs no handling here: the
@@ -22,6 +23,17 @@
 //! reindenter first is also what makes the result stable, since the
 //! columns the pass reads are the ones it will read again next time.
 //!
+//! The same subtraction applies to an echo or an argument list that
+//! spans lines, whose first line continues the line it sits on and
+//! whose rest the reindenter writes one level in from it.
+//!
+//! Line structure stays the author's. A fragment written on one line
+//! comes back on one line or not at all, and one written across lines
+//! comes back across lines or not at all: the pass owns the spacing
+//! inside a fragment, not whether the fragment takes one line or
+//! several. Where a fragment stays broken the breaks within it are
+//! mago's, which by default keeps an array the author broke broken.
+//!
 //! Spacing that is Blade's rather than PHP's is part of the same pass,
 //! because it is the same scan: `@if(` becomes `@if (`, `{{$x}}` becomes
 //! `{{ $x }}`, and a self-closing tag gets one space before its `/>`.
@@ -30,7 +42,8 @@
 //! `blade-formatter-disable` region, `<script>`, `<style>`, `<pre>`,
 //! `<textarea>`, or an Alpine or Livewire attribute value, which is
 //! JavaScript. A fragment mago cannot parse is left exactly as written,
-//! and so is one that would not fit back on its line.
+//! and so is one whose result would not fit back into the lines it was
+//! written on.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -176,10 +189,23 @@ impl Scanner<'_> {
             return body_start;
         };
         let end = body_end + close.len();
-        if let Some(expression) = self.expression(&self.src[body_start..body_end]) {
+        if let Some(expression) = self.expression(body_start..body_end) {
             self.replace(at..end, format!("{open} {expression} {close}"));
         }
         end
+    }
+
+    /// `<?= … ?>`: one expression, like an echo. The `;` it may end with
+    /// is optional, so it stays or goes as the author wrote it.
+    fn short_echo(&mut self, body: Range<usize>) {
+        let text = self.src[body.clone()].trim_end();
+        let (expression_end, semicolon) = match text.strip_suffix(';') {
+            Some(head) => (body.start + head.len(), ";"),
+            None => (body.start + text.len(), ""),
+        };
+        if let Some(expression) = self.expression(body.start..expression_end) {
+            self.replace(body, format!(" {expression}{semicolon} "));
+        }
     }
 
     /// A `{{-- … --}}` comment, whose text is not PHP. The one that turns
@@ -269,10 +295,7 @@ impl Scanner<'_> {
                 String::new()
             },
         );
-        let args = &self.src[open + 1..close];
-        if !args.contains('\n')
-            && let Some(formatted) = self.arguments(name, args.trim())
-        {
+        if let Some(formatted) = self.arguments(name, open + 1..close) {
             self.replace(open + 1..close, formatted);
         }
         close + 1
@@ -330,9 +353,18 @@ impl Scanner<'_> {
                 None => end,
             };
         }
-        // A `<?=` echo and a short `<?` tag are skipped rather than
-        // formatted: both are rare in a template and neither is a
-        // statement list.
+        if rest.starts_with(b"<?=") {
+            return match find(self.bytes, at + 3, end, b"?>") {
+                Some(close) => {
+                    self.short_echo(at + 3..close);
+                    close + 2
+                }
+                None => end,
+            };
+        }
+        // A short `<?` tag is skipped rather than formatted: whether it
+        // opens PHP at all depends on `short_open_tag`, and what follows
+        // it is a statement list only when it does.
         if rest.starts_with(b"<?") {
             return find(self.bytes, at + 2, end, b"?>").map_or(end, |close| close + 2);
         }
@@ -491,25 +523,16 @@ impl Scanner<'_> {
         )
     }
 
-    /// An echo's expression, or `None` when it is empty, runs across
-    /// lines, or does not parse.
-    ///
-    /// Formatted to the full print width, not the column-adjusted one a
-    /// statement list gets: the result is only taken when it comes back
-    /// on one line, and narrowing the width would just reject a long
-    /// echo that was already that long in the source.
-    fn expression(&self, body: &str) -> Option<String> {
-        let body = body.trim();
-        if body.is_empty() || body.contains('\n') {
-            return None;
-        }
+    /// An echo's expression, or `None` when it is empty or does not
+    /// parse.
+    fn expression(&self, body: Range<usize>) -> Option<String> {
         self.wrapped(CALL_WRAPPER, body, ");")
     }
 
     /// A directive's argument list. A loop header is not an expression, so
     /// it is formatted inside the statement Blade compiles it to; every
     /// other directive takes what a call takes, one expression included.
-    fn arguments(&self, name: &str, args: &str) -> Option<String> {
+    fn arguments(&self, name: &str, args: Range<usize>) -> Option<String> {
         let (open, close) = match name {
             "foreach" | "forelse" => ("foreach (", "): endforeach;"),
             "for" => ("for (", "): endfor;"),
@@ -518,17 +541,50 @@ impl Scanner<'_> {
         self.wrapped(open, args, close)
     }
 
-    /// Format `body` inside the `open`…`close` wrapper and hand back what
-    /// came out between the wrapper's parentheses, when it still fits on
-    /// one line.
-    fn wrapped(&self, open: &str, body: &str, close: &str) -> Option<String> {
-        let source = format!("<?php\n{open}{body}{close}\n");
-        let formatted = self.format_php(&source, self.php.settings.print_width)?;
+    /// Format the fragment at `body` inside the `open`…`close` wrapper and
+    /// hand back what came out between the wrapper's parentheses, when it
+    /// still takes the lines the author wrote it on.
+    fn wrapped(&self, open: &str, body: Range<usize>, close: &str) -> Option<String> {
+        let raw = &self.src[body.clone()];
+        let text = raw.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let broken = text.contains('\n');
+        let width = if broken {
+            self.inline_width(body.start + (raw.len() - raw.trim_start().len()))
+        } else {
+            // The full print width, not the column-adjusted one: a result
+            // that wraps is rejected anyway, so narrowing the width would
+            // just reject a long fragment that was already that long in
+            // the source.
+            self.php.settings.print_width
+        };
+        let source = format!("<?php\n{open}{text}{close}\n");
+        let formatted = self.format_php(&source, width)?;
         // mago writes the wrapper back verbatim, so its own `(` is still
-        // the one at the end of `open`.
+        // the one at the end of `open`. Its columns counted against the
+        // width too, which only ever wraps a fragment a shade earlier
+        // than it had to.
         let rest = formatted.strip_prefix(open)?;
-        let inner = &rest[..matching_paren(formatted.as_bytes(), open.len() - 1)? - open.len()];
-        (!inner.contains('\n')).then(|| inner.to_string())
+        let inner =
+            rest[..matching_paren(formatted.as_bytes(), open.len() - 1)? - open.len()].trim();
+        (inner.contains('\n') == broken).then(|| inner.to_string())
+    }
+
+    /// The print width left for a fragment written inline at `body`: its
+    /// first line continues the line it sits on, and the reindenter puts
+    /// the rest one level in from that line's indentation. One width is
+    /// all the formatter takes, so whichever of the two columns leaves
+    /// less room decides.
+    fn inline_width(&self, body: usize) -> usize {
+        let tab_width = self.php.settings.tab_width;
+        let line_start = self.src[..body].rfind('\n').map_or(0, |at| at + 1);
+        let head = &self.src[line_start..body];
+        let leading = &head[..head.len() - head.trim_start().len()];
+        let column =
+            display_width(head, tab_width).max(display_width(leading, tab_width) + self.indent);
+        self.php.settings.print_width.saturating_sub(column).max(1)
     }
 
     /// Format one snippet to `width` columns and return its body, without

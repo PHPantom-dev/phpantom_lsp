@@ -36,7 +36,6 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-| BL19 | [Reflow a multi-line PHP fragment in a Blade template](todo/blade.md#bl19-reflow-a-multi-line-php-fragment-in-a-blade-template)                | Low        | Medium     |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions
@@ -93,6 +92,7 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B49 | [A bracket inside a PHP comment counts as a bracket in a Blade template](todo/bugs.md#b49-a-bracket-inside-a-php-comment-counts-as-a-bracket-in-a-blade-template)            | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

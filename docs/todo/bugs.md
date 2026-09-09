@@ -54,4 +54,28 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B49. A bracket inside a PHP comment counts as a bracket in a Blade template
+
+**Impact: Low · Complexity: Medium**
+
+Neither the Blade reindenter's bracket scan
+(`open_bracket`/`close_bracket` in `src/formatting/blade/reindent.rs`)
+nor `matching_paren` in `src/blade/signature.rs` skips a PHP comment, so
+a `)` or `]` written inside one closes a construct that is still open:
+
+```blade
+@props([
+    'a' => 1, // trailing )
+])
+```
+
+The reindenter reads the comment's `)` as the one closing `@props(` and
+writes the real closing line one level too deep (`    ])`). The
+embedded-PHP pass reads the same comment the same way, so the argument
+range it hands the formatter stops short of the `]`, the snippet does not
+parse, and the fragment is left as written instead of being formatted.
+
+Both scans need the same PHP comment handling they already have for
+string literals: `//` and `#` to the end of the line, and `/* … */` to
+its terminator. `matching_paren` is shared with the signature parser, so
+the fix has to hold for a `@bladestan-signature` argument list too.
