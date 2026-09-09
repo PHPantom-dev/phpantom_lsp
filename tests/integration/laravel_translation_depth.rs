@@ -132,3 +132,60 @@ async fn json_translation_navigation_reads_unsaved_escaped_keys() {
         r#"Say \"hello\""#
     );
 }
+
+#[tokio::test]
+async fn translation_argument_completion_uses_both_language_folders() {
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            (
+                "lang/en/messages.php",
+                "<?php return ['hello'=>'Hello :name :count'];",
+            ),
+            ("resources/lang/fr.json", r#"{"Welcome":"Bonjour :ami"}"#),
+            ("src/usage.php", "<?php"),
+        ],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    for (source, expected) in [
+        ("<?php __('messages.hello', [], '|');", vec!["en", "fr"]),
+        (
+            "<?php use Illuminate\\Support\\Facades\\Lang as L; L::get(locale: '|', key: 'messages.hello');",
+            vec!["en", "fr"],
+        ),
+        (
+            "<?php trans_choice('messages.hello', 2, replace: ['name'=>'Ada', '|' => 1]);",
+            vec!["count"],
+        ),
+        ("<?php __(replace: ['|'], key: 'Welcome');", vec!["ami"]),
+    ] {
+        let at = position(source, "|");
+        let php = source.replace('|', "");
+        open_php(&backend, &uri, &php).await;
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: at,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{source}"
+        );
+    }
+}

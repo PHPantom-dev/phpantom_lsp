@@ -671,6 +671,9 @@ class Demo
         // Ctrl+Click a JSON key to reach its exact declaration; find
         // references from lang/en.json to return to its call sites.
         __('Fresh bread for :name', ['name' => 'Ada']);
+
+        // Try: complete the locale argument or a replacement-array key.
+        __('Fresh bread for :name', replace: ['name' => 'Ada'], locale: 'en');
         __('messages.welcome');
         trans('auth.failed');
         trans_choice('messages.notifications', 5);
