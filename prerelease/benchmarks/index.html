@@ -1381,8 +1381,9 @@
 
 <h1 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h1>
 <p>PHPantom is benchmarked on every commit to track performance
-regressions. All numbers below were measured on a production codebase:
-21K PHP files, 1.5M lines of code (vendor + application).</p>
+regressions. All numbers below were measured on a production Laravel
+codebase: 5.1K PHP files (389k lines) and 1.3K Blade templates (88k
+lines), with 27k vendor files (1.7M lines).</p>
 <h2 id="headline-numbers">Headline Numbers<a class="headerlink" href="#headline-numbers" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1397,34 +1398,70 @@ regressions. All numbers below were measured on a production codebase:
 </thead>
 <tbody>
 <tr>
-<td>Time to ready</td>
-<td>5 s</td>
-<td>1 min 25 s</td>
-<td>3 min 17 s</td>
-<td>15 min 39 s</td>
+<td>Cold start, CPU time</td>
+<td>17 s</td>
+<td>16 s</td>
+<td>36 s</td>
+<td>3 min 18 s</td>
 <td>17 min 55 s</td>
 </tr>
 <tr>
-<td>RAM usage</td>
-<td>360 MB</td>
-<td>520 MB</td>
-<td>3.9 GB</td>
-<td>498 MB</td>
-<td>1.7 GB</td>
+<td>Cold start, wall clock</td>
+<td>2 s</td>
+<td>11 s</td>
+<td>10 s</td>
+<td>3 min 17 s</td>
+<td>1 m 7 s</td>
+</tr>
+<tr>
+<td>Warm start, CPU time</td>
+<td>17 s</td>
+<td>4 s</td>
+<td>36 s</td>
+<td>3 s</td>
+<td>3 min 23 s</td>
+</tr>
+<tr>
+<td>Warm start, wall clock</td>
+<td>2 s</td>
+<td>1 s</td>
+<td>10 s</td>
+<td>4 s</td>
+<td>5 s</td>
+</tr>
+<tr>
+<td>RAM, cold start</td>
+<td>578 MB</td>
+<td>766 MB</td>
+<td>594 MB</td>
+<td>467 MB</td>
+<td>1 GB</td>
+</tr>
+<tr>
+<td>RAM, warm start</td>
+<td>578 MB</td>
+<td>759 MB</td>
+<td>594 MB</td>
+<td>60 MB</td>
+<td>2 GB</td>
 </tr>
 <tr>
 <td>Disk cache</td>
 <td>0</td>
-<td>45 MB</td>
+<td>51 MB</td>
 <td>0</td>
-<td>4.1 GB</td>
-<td>551 MB</td>
+<td>2.3 GB</td>
+<td>379 MB</td>
 </tr>
 </tbody>
 </table>
-<p>Time to ready is CPU time consumed until full type intelligence is
-available on a cold start (first index). Tools with a disk cache launch
-faster on subsequent starts.</p>
+<p>A cold start is the first index with no disk cache; a warm start reuses
+the cache written by a previous session. CPU time is the total consumed
+until full type intelligence is available; wall-clock times are
+approximate. RAM is the steady resident memory once indexing has
+finished, not the peak reached during the index itself. Intelephense and Phpactor do not analyse Blade templates
+or Laravel's runtime magic, which makes this codebase cheaper for them
+than the numbers alone suggest.</p>
 <h2 id="live-charts">Live Charts<a class="headerlink" href="#live-charts" title="Permanent link">&para;</a></h2>
 <p>Latency and memory usage are tracked on every commit and plotted over
 time. These charts are useful for catching regressions and observing
