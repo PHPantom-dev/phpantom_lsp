@@ -1462,6 +1462,12 @@ approximate. RAM is the steady resident memory once indexing has
 finished, not the peak reached during the index itself. Intelephense and Phpactor do not analyse Blade templates
 or Laravel's runtime magic, which makes this codebase cheaper for them
 than the numbers alone suggest.</p>
+<p>The codebase was stripped to its PHP and Blade files before each run,
+with the <code>.git</code> directory and all JS/CSS assets removed, so every tool
+indexes the same PHP-only surface. PHPStorm's baseline IDE startup time
+was measured separately and subtracted from its cold and warm start
+figures above, to keep the comparison focused on PHP indexing rather
+than general editor overhead.</p>
 <h2 id="live-charts">Live Charts<a class="headerlink" href="#live-charts" title="Permanent link">&para;</a></h2>
 <p>Latency and memory usage are tracked on every commit and plotted over
 time. These charts are useful for catching regressions and observing
