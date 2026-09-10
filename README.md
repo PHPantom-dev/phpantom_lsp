@@ -8,7 +8,7 @@
   <a href="https://crates.io/crates/phpantom_lsp"><img src="https://img.shields.io/crates/v/phpantom_lsp?logo=rust" alt="crates"></a>
 </p>
 
-A fast, lightweight PHP language server written in Rust. Ready in seconds, uses a fraction of the RAM other language servers need, and stays responsive throughout. No indexing phase, no waiting.
+A fast, lightweight PHP language server written in Rust. Ready in seconds, keeps memory use modest even on large codebases, and stays responsive throughout. Indexing happens in the background, so you're never left waiting on it.
 
 Check out the **[documentation](https://phpantom-dev.github.io/phpantom_lsp/)** to get started.
 
@@ -36,7 +36,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
 | Symfony & Twig                           | ❌       | ❌           | ❌         | 🚧          | 🧩         |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
-| Other frameworks<sup>7</sup>             | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
+| Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
 | Rename                                   | ✅       | ✅🔒         | ✅🔒       | ✅          | ✅          |
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
@@ -49,14 +49,13 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 
 <p>
 <sub>
-🚧 = partial support. ❌ = not available. 🧩 = via plugin. 🔒 = paid tier. Modifiers combine with the support level: 🚧🔒 means partial, and only in the paid tier.<br>
+🚧 = partial support. ❌ = not available. 🧩 = via plugin. 🔒 = paid tier.<br>
 <sup>1</sup> Completion, hover, signature help, go-to-definition, find references, diagnostics, document symbols, workspace symbols.<br>
 <sup>2</sup> Call hierarchy, type hierarchy, go-to implementation / type-definition, code lens.<br>
 <sup>3</sup> Semantic tokens, inlay hints, auto-import, smart select, folding ranges, formatting, document links.<br>
 <sup>4</sup> Undefined and unused variables, type errors, unknown symbols and members, argument counts.<br>
 <sup>5</sup> PHPantom runs PHPStan, PHPCS, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
 <sup>6</sup> Conditional return types, type aliases (`@phpstan-type` / `@phpstan-import-type`), pseudo-types, `@mixin`.<br>
-<sup>7</sup> WordPress, CakePHP, Doctrine, PHPUnit, Behat, and Prophecy.<br>
 <sup>8</sup> Extract method/function, extract/inline variable, extract constant, extract interface, promote constructor parameter, generate constructor, generate getters/setters, implement interface methods.<br>
 <sup>9</sup> Null-check simplification, string interpolation conversion, converting between arrow functions and closures, and switch statements to match expressions.<br>
 Performance measured on a production Laravel codebase: 5.1K PHP files (389k lines) and 1.3K Blade templates (88k lines), with 27k vendor files (1.7M lines). Time to ready is the approximate wall-clock time from launch until full type intelligence is available on a cold start (first index). RAM is the steady resident memory once indexing has finished.<br>
