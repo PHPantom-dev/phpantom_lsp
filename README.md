@@ -34,7 +34,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
 | **Frameworks**                           |          |              |            |             |             |
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧          |
-| Symfony & Twig                           | ❌       | ❌           | ❌         | 🚧          | ✅🧩        |
+| Symfony & Twig                           | ❌       | ❌           | ❌         | 🚧          | 🧩         |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅          |
 | Other frameworks<sup>7</sup>             | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
@@ -42,9 +42,10 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
 | Simplify & modernize<sup>9</sup>         | ✅       | ❌           | ✅🔒       | ❌          | ✅          |
 | **Performance**                          |          |              |            |             |             |
-| Time to ready                            | 5 s      | 1 min 25 s   | 3 min 17 s | 15 min 39 s | 17 min 55 s |
-| RAM usage                                | 360 MB   | 520 MB       | 3.9 GB     | 498 MB      | 1.7 GB      |
-| Disk cache                               | 0        | 45 MB        | 0          | 4.1 GB      | 551 MB      |
+| Time to ready (from cache)               | 2 s      | 11 s (1 s)   | 10 s       | 3 min 17 s (4 s) | 1 min 7 s (5 s)        |
+| RAM                                      | 578 MB   | 766 MB       | 594 MB     | 467 MB      | 2 GB        |
+| CPU time                                 | 17 s     | 16 s         | 36 s       | 3 min 18 s  | 17 min 55 s |
+| Disk cache                               | -        | 51 MB        | -          | 2.3 GB      | 379 MB      |
 
 <p>
 <sub>
@@ -58,7 +59,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 <sup>7</sup> WordPress, CakePHP, Doctrine, PHPUnit, Behat, and Prophecy.<br>
 <sup>8</sup> Extract method/function, extract/inline variable, extract constant, extract interface, promote constructor parameter, generate constructor, generate getters/setters, implement interface methods.<br>
 <sup>9</sup> Null-check simplification, string interpolation conversion, converting between arrow functions and closures, and switch statements to match expressions.<br>
-Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application). Time to ready is CPU time consumed until full type intelligence is available on a cold start (first index); tools with a disk cache launch faster on subsequent starts.<br>
+Performance measured on a production Laravel codebase: 5.1K PHP files (389k lines) and 1.3K Blade templates (88k lines), with 27k vendor files (1.7M lines). Time to ready is the approximate wall-clock time from launch until full type intelligence is available on a cold start (first index). RAM is the steady resident memory once indexing has finished.<br>
 Independent, re-runnable type-inference conformance results across twelve PHP engines: <a href="https://zonuexe.github.io/php-typing-conformance/">php-typing-conformance</a> (Qodana covers the PHPStorm engine, phpy the PHP Tools engine).
 </sub>
 </p>
