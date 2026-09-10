@@ -16,6 +16,79 @@ use crate::composer;
 use crate::config::IndexingStrategy;
 
 impl Backend {
+    /// Build the symbol indexes for whichever shape the workspace at
+    /// `root` turns out to have.
+    ///
+    /// `composer_package` is the already-parsed root `composer.json`, so
+    /// the file is read once per pass rather than once per caller.
+    ///
+    /// Shared by the `initialized` handshake and by the rediscovery a
+    /// mid-session filter change schedules, so the two produce the same
+    /// index rather than the latter re-implementing a walk of its own.
+    /// Every index write below is an insert-if-absent, which is what
+    /// makes a second pass safe to run over a populated index.
+    pub(crate) async fn discover_workspace_symbols(
+        &self,
+        root: &std::path::Path,
+        php_version: crate::types::PhpVersion,
+        composer_package: Option<composer::ComposerPackage>,
+        progress: Option<&crate::progress::ScanProgress>,
+    ) {
+        if composer_package.is_some() {
+            self.init_single_project(root, php_version, composer_package, progress)
+                .await;
+            return;
+        }
+
+        let subprojects = composer::discover_subproject_roots(root);
+        if subprojects.is_empty() {
+            self.init_no_composer(root, php_version, progress).await;
+        } else {
+            self.init_monorepo(root, &subprojects, php_version, progress)
+                .await;
+        }
+    }
+
+    /// Register where the project keeps its code: the PSR-4 mappings from
+    /// the root `composer.json` and from its path repositories, and the
+    /// vendor directory every workspace walk skips.
+    ///
+    /// Returns the vendor directory both as `composer.json` spells it and
+    /// as an absolute path.  Split out from [`Self::init_single_project`]
+    /// because the `format` command needs the project's source layout
+    /// without paying for a class index it never consults.
+    pub(crate) fn init_autoload_paths(
+        &self,
+        root: &std::path::Path,
+        composer_json: Option<&composer::ComposerPackage>,
+    ) -> (String, PathBuf) {
+        let (mappings, vendor_dir) = match composer_json {
+            Some(pkg) => (
+                composer::extract_psr4_mappings_from_package(pkg),
+                composer::get_vendor_dir(pkg),
+            ),
+            None => (Vec::new(), "vendor".to_string()),
+        };
+
+        // Cache the vendor dir path so cross-file scans can skip it
+        // without re-reading composer.json on every request.
+        let vendor_path = root.join(&vendor_dir);
+        self.add_vendor_dir(&vendor_path);
+
+        // Include PSR-4 mappings from path-repository packages (local
+        // packages symlinked into vendor/, e.g. internachi/modular modules).
+        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
+        let mut all_mappings = mappings;
+        all_mappings.extend(path_repo_mappings);
+        // Keep the merged list longest-prefix-first so path-repo namespaces
+        // are matched before any shorter root prefix (e.g. an empty-prefix
+        // root fallback).
+        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
+        *self.workspace.psr4_mappings.write() = all_mappings;
+
+        (vendor_dir, vendor_path)
+    }
+
     /// Initialize a single-project workspace (root `composer.json` exists).
     ///
     /// This is the standard fast path: read PSR-4 mappings, build the
@@ -40,6 +113,17 @@ impl Backend {
             .unwrap_or(false);
         self.resolved_class_cache.write().set_laravel(is_laravel);
 
+        // A library's configuration is declared by whatever application
+        // installs it, so the keys it reads cannot be judged.  An `artisan`
+        // file settles it for an application whose `composer.json` says
+        // neither way.
+        self.set_is_application(
+            composer_json
+                .as_ref()
+                .is_some_and(composer::is_application_project)
+                || root.join("artisan").is_file(),
+        );
+
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
         // the unknown-ability diagnostic has nothing to judge them against.
@@ -51,31 +135,8 @@ impl Backend {
             .write()
             .set_runtime_permission_package(runtime_permissions);
 
-        let (mappings, vendor_dir) = match &composer_json {
-            Some(pkg) => {
-                let mappings = composer::extract_psr4_mappings_from_package(pkg);
-                let vendor_dir = composer::get_vendor_dir(pkg);
-                (mappings, vendor_dir)
-            }
-            None => (Vec::new(), "vendor".to_string()),
-        };
-
-        // Cache the vendor dir path so cross-file scans can skip it
-        // without re-reading composer.json on every request.
-        let vendor_path = root.join(&vendor_dir);
+        let (vendor_dir, vendor_path) = self.init_autoload_paths(root, composer_json.as_ref());
         let vendor_paths = path_aliases(&vendor_path);
-        self.add_vendor_dir(&vendor_path);
-
-        // Include PSR-4 mappings from path-repository packages (local
-        // packages symlinked into vendor/, e.g. internachi/modular modules).
-        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
-        let mut all_mappings = mappings;
-        all_mappings.extend(path_repo_mappings);
-        // Keep the merged list longest-prefix-first so path-repo namespaces
-        // are matched before any shorter root prefix (e.g. an empty-prefix
-        // root fallback).
-        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
-        *self.workspace.psr4_mappings.write() = all_mappings;
 
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();
@@ -115,8 +176,10 @@ impl Backend {
                 if let Some(p) = progress {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
-                let mut scan =
-                    classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+                let filters = self.index_filters();
+                let mut scan = classmap_scanner::scan_workspace_fallback_full(
+                    root, &skip_dirs, &filters, progress,
+                );
 
                 // Merge vendor packages (excluded from the workspace
                 // walk above, scanned separately here).
@@ -128,6 +191,7 @@ impl Backend {
                     &vendor_dir,
                     &HashSet::new(),
                     &explicit_deps,
+                    &filters,
                     progress,
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
@@ -240,8 +304,11 @@ impl Backend {
             if let Some(p) = progress {
                 p.set_scope(70, 74, "Scanning Drupal directories");
             }
-            let drupal_result =
-                classmap_scanner::scan_drupal_directories(&drupal_web_root, progress);
+            let drupal_result = classmap_scanner::scan_drupal_directories(
+                &drupal_web_root,
+                &self.index_filters(),
+                progress,
+            );
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -371,6 +438,10 @@ impl Backend {
         // authorizing from the database opens the ability space workspace-wide,
         // since the gate index that judges abilities is shared.
         let mut any_runtime_permissions = false;
+        // One application among the subprojects makes the workspace's config
+        // files the whole configuration; a workspace of libraries alone reads
+        // keys that only the installing application declares.
+        let mut any_application = false;
 
         for (sub_idx, (sub_root, vendor_dir)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -398,11 +469,13 @@ impl Backend {
             }
             skip_dirs.insert(sub_root.clone());
 
-            if (!any_laravel || !any_runtime_permissions)
+            if (!any_laravel || !any_runtime_permissions || !any_application)
                 && let Some(pkg) = composer::read_composer_package(sub_root)
             {
                 any_laravel |= composer::is_laravel_project(&pkg);
                 any_runtime_permissions |= composer::has_runtime_permission_package(&pkg);
+                any_application |=
+                    composer::is_application_project(&pkg) || sub_root.join("artisan").is_file();
             }
 
             // ── PSR-4 mappings ──────────────────────────────────────
@@ -466,14 +539,20 @@ impl Backend {
         }
 
         self.resolved_class_cache.write().set_laravel(any_laravel);
+        self.set_is_application(any_application);
         self.laravel_gates
             .write()
             .set_runtime_permission_package(any_runtime_permissions);
 
         // Re-sort PSR-4 mappings by prefix length descending so
-        // longest-prefix-first matching works.
+        // longest-prefix-first matching works.  Each subproject appends
+        // to the shared list, and so does a rediscovery pass over a list
+        // an earlier one already filled, so drop the repeats instead of
+        // letting every pass grow what class-path resolution walks.
         {
             let mut psr4 = self.workspace.psr4_mappings.write();
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            psr4.retain(|m| seen.insert((m.prefix.clone(), m.base_path.clone())));
             psr4.sort_by_key(|b| std::cmp::Reverse(b.prefix.len()));
         }
 
@@ -485,7 +564,12 @@ impl Backend {
             p.set_scope(80, 85, "Scanning loose PHP files");
         }
 
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+        let scan = classmap_scanner::scan_workspace_fallback_full(
+            root,
+            &skip_dirs,
+            &self.index_filters(),
+            progress,
+        );
         self.populate_autoload_indices(&scan);
         {
             let mut idx = self.symbols.fqn_uri_index.write();
@@ -535,7 +619,12 @@ impl Backend {
         self.resolved_class_cache.write().set_laravel(false);
 
         let skip_dirs = HashSet::new();
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+        let scan = classmap_scanner::scan_workspace_fallback_full(
+            root,
+            &skip_dirs,
+            &self.index_filters(),
+            progress,
+        );
         self.populate_autoload_indices(&scan);
 
         let symbol_count = scan.classmap.len();

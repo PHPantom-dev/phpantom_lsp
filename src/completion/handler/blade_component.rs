@@ -19,9 +19,8 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::Backend;
-use crate::blade::component_tags::{
-    TagContext, TagCursor, TagKind, kebab_case, tag_context_at, view_names_for_component_tag,
-};
+use crate::blade::component_names::view_names_for_component_tag;
+use crate::blade::component_tags::{TagContext, TagCursor, TagKind, kebab_case, tag_context_at};
 use crate::blade::signature;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::Visibility;
@@ -91,7 +90,7 @@ impl Backend {
                     .collect();
                 let views: Vec<String> = discovery.views.keys().cloned().collect();
                 let anonymous = self.anonymous_component_namespaces();
-                for name in crate::blade::component_tags::component_tag_names(&views, &anonymous) {
+                for name in crate::blade::component_names::component_tag_names(&views, &anonymous) {
                     // A template whose name a class already answers to is
                     // that class's view, not a component of its own.
                     if !discovery.components.contains_key(&name) {
@@ -255,8 +254,9 @@ impl Backend {
         attributes
     }
 
-    /// The attributes an anonymous component accepts, which is what its
-    /// template's `@props` declares.
+    /// The attributes an anonymous component accepts: what its template's
+    /// `@props` declares, then the names its body reads that nothing in the
+    /// template defines.
     ///
     /// `@aware` is deliberately left out: those entries are pulled from
     /// the surrounding component's data rather than named by the tag.
@@ -284,6 +284,44 @@ impl Backend {
                         .map(|default| format!("= {default}"))
                         .unwrap_or_default(),
                     required: entry.default.is_none(),
+                },
+            );
+        }
+        // A small partial usually has no `@props` line at all and reads the
+        // tag's attributes straight off its own scope. Nothing but the tag
+        // can fill a name the template neither defines nor is handed, so
+        // reading one is the template declaring an attribute implicitly
+        // (see [`crate::blade::implicit_props`]).
+        let custom_directives = self.blade_custom_directives.read();
+        let implicit = crate::blade::implicit_props::implicit_props(&source, &custom_directives);
+        if implicit.is_empty() {
+            return attributes;
+        }
+        // Only worth asking once the template turns out to read something
+        // it does not declare: a template whose `@props` covers its whole
+        // body pays for neither lookup.
+        let names = std::slice::from_ref(&view);
+        let (backing, _) = self.blade_backing_class_vars(names);
+        let shared = self.blade_provider_vars(names);
+        for name in implicit {
+            // A member of the class backing the view, or a variable a
+            // provider shares or composes into it, reaches the template
+            // whatever the tag writes, so neither is the tag's to pass.
+            if backing
+                .iter()
+                .chain(shared.iter())
+                .any(|(supplied, _)| supplied == &name)
+            {
+                continue;
+            }
+            push_attribute(
+                &mut attributes,
+                ComponentAttribute {
+                    name: kebab_case(&name),
+                    detail: "implicit prop".to_string(),
+                    // The template has no value of its own for it, so a tag
+                    // that leaves it out renders an undefined variable.
+                    required: true,
                 },
             );
         }

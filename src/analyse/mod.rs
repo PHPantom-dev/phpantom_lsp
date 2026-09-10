@@ -40,16 +40,23 @@
 //! ```
 //!
 //! The driver and file discovery live in [`run`]; output formatting
-//! (table, GitHub annotations, JSON) lives in [`output`].
+//! (table, GitHub annotations, JSON) lives in [`output`]; opening the
+//! project on a headless `Backend`, which `fix`, `move`, and `format`
+//! share, lives in [`project`].
 
 use std::path::PathBuf;
 
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
 mod output;
+mod project;
 mod run;
 
-pub(crate) use output::{format_github_message, json_escape};
+pub(crate) use output::{format_github_message, json_escape, print_success_box, progress_bar};
+pub(crate) use project::{
+    discover_laravel_resources, load_config_or_default, open_headless_project,
+    open_headless_project_unindexed, parse_user_files,
+};
 pub(crate) use run::discover_user_files;
 pub use run::run;
 

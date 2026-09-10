@@ -7,7 +7,7 @@
 //! or every `route('…')` call naming one of those routes is reported as
 //! unknown.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -89,26 +89,13 @@ fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
     )
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
 #[tokio::test]
 async fn routes_outside_the_routes_directory_are_not_reported_as_unknown() {
     let (backend, dir) = workspace();
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, CONSUMER).await;
+    open_php(&backend, &uri, CONSUMER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
@@ -157,7 +144,7 @@ async fn a_package_with_no_route_files_does_not_flag_route_calls() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Widget.php")).unwrap();
-    open(&backend, &uri, PACKAGE_CONSUMER).await;
+    open_php(&backend, &uri, PACKAGE_CONSUMER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), PACKAGE_CONSUMER, &mut diags);
@@ -182,7 +169,7 @@ async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, CONSUMER).await;
+    open_php(&backend, &uri, CONSUMER).await;
 
     // Cursor inside 'kiosk.register' on line 4.
     let result = backend
@@ -259,7 +246,7 @@ async fn routes_under_a_dynamic_group_prefix_are_not_flagged() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
-    open(&backend, &uri, CONSUMER_DYNAMIC).await;
+    open_php(&backend, &uri, CONSUMER_DYNAMIC).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_DYNAMIC, &mut diags);
@@ -324,7 +311,7 @@ async fn routes_under_a_wholly_unknown_group_name_are_not_flagged() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
-    open(&backend, &uri, CONSUMER_BARE_DYNAMIC).await;
+    open_php(&backend, &uri, CONSUMER_BARE_DYNAMIC).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_BARE_DYNAMIC, &mut diags);

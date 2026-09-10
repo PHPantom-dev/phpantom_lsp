@@ -145,6 +145,183 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
     None
 }
 
+/// A directive a service provider registered on top of the ones Blade
+/// compiles itself, as the provider scan recorded it (see
+/// `crate::virtual_members::laravel::ProviderResources::custom_directives`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomDirective {
+    /// The registered name, without the leading `@`.
+    pub name: String,
+    /// Whether `Blade::if()` registered it rather than `Blade::directive()`.
+    /// An `if` registration also gives the template the other three members
+    /// of its family (`@unless…`, `@else…`, `@end…`).
+    pub conditional: bool,
+}
+
+/// What real PHP a custom directive lowers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustomForm {
+    /// A `Blade::directive()` registration. Its handler returns whatever PHP
+    /// it likes, so a marker statement stands in for it and the argument the
+    /// template wrote is still type-checked.
+    Statement,
+    /// The `@admin` or `@unlessadmin` opener of a `Blade::if()` family, which
+    /// Blade compiles to an `if (…):` that `@endadmin` closes. The negation
+    /// `@unless…` applies is not modelled: the condition stands in for a
+    /// callback this scan cannot evaluate either way.
+    Open,
+    /// The `@elseadmin` of a `Blade::if()` family.
+    Else,
+    /// The `@endadmin` of a `Blade::if()` family.
+    End,
+}
+
+/// The marker call a custom directive lowers to.
+///
+/// Deliberately not the generic `blade_directive`: that marker's calls are
+/// counted in document order to pair a component tag's bound attributes with
+/// the expressions they pass (`super::component_tags`), so a directive
+/// emitting one would shift every pairing after it. Returning `bool` lets
+/// the same marker stand inside the condition a `Blade::if()` family
+/// compiles to.
+pub const CUSTOM_MARKER: &str = "blade_custom_directive";
+
+/// One name a template can write, and what the preprocessor does with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CustomEntry {
+    name: String,
+    form: CustomForm,
+    /// The `@end…` closing the block a `Blade::if()` opener opens, so
+    /// completing the opener can insert the whole pair.
+    closer: Option<String>,
+}
+
+/// The directives a project's service providers register, expanded so that
+/// every name a template can write is one lookup away.
+///
+/// Empty for a project that registers none, which is the common case and
+/// costs the preprocessor nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CustomDirectives {
+    /// Longest name first, so a registration that another name is a prefix
+    /// of (`foo` and `foo::bar`) is not shadowed by the shorter one.
+    entries: Vec<CustomEntry>,
+}
+
+/// A custom directive offered as a directive-name completion candidate.
+pub struct CustomDirectiveCompletion<'a> {
+    pub name: &'a str,
+    /// The text inserted after the `@` the user has already typed, matching
+    /// how [`DIRECTIVE_COMPLETIONS`] entries are written.
+    pub insert_text: String,
+    pub is_snippet: bool,
+}
+
+impl CustomDirectives {
+    /// Expand the registrations a provider scan found, giving each
+    /// `Blade::if()` the four names Blade synthesizes from it.
+    pub fn from_registrations(registrations: &[CustomDirective]) -> Self {
+        let mut entries: Vec<CustomEntry> = Vec::new();
+        let mut record = |name: String, form: CustomForm, closer: Option<String>| {
+            match entries.iter_mut().find(|entry| entry.name == name) {
+                // Blade holds one handler per name and a later registration
+                // replaces the one before it.
+                Some(entry) => {
+                    entry.form = form;
+                    entry.closer = closer;
+                }
+                None => entries.push(CustomEntry { name, form, closer }),
+            }
+        };
+
+        for registration in registrations {
+            let name = registration.name.as_str();
+            if !is_directive_name(name) {
+                continue;
+            }
+            if registration.conditional {
+                let closer = format!("end{name}");
+                record(name.to_string(), CustomForm::Open, Some(closer.clone()));
+                record(
+                    format!("unless{name}"),
+                    CustomForm::Open,
+                    Some(closer.clone()),
+                );
+                record(format!("else{name}"), CustomForm::Else, None);
+                record(closer, CustomForm::End, None);
+            } else {
+                record(name.to_string(), CustomForm::Statement, None);
+            }
+        }
+
+        entries.sort_unstable_by(|a, b| {
+            b.name
+                .len()
+                .cmp(&a.name.len())
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        Self { entries }
+    }
+
+    /// The custom directive the text right after an `@` names, and how it
+    /// lowers.
+    pub fn match_directive(&self, after_at: &str) -> Option<(&str, CustomForm)> {
+        self.entries.iter().find_map(|entry| {
+            let rest = after_at.strip_prefix(entry.name.as_str())?;
+            // Blade reads a directive name as `\w+`, so a registered name
+            // glued to further word characters is a different directive
+            // that nobody registered.
+            rest.chars()
+                .next()
+                .is_none_or(|next| !is_name_char(next))
+                .then_some((entry.name.as_str(), entry.form))
+        })
+    }
+
+    /// Every custom directive a template can write, as completion
+    /// candidates.
+    ///
+    /// A `Blade::if()` family has a shape Blade itself guarantees, so its
+    /// opener inserts the whole block. A `Blade::directive()` handler's
+    /// arity is its own business, so its name is inserted bare rather than
+    /// an argument list being invented for it.
+    pub fn completions(&self) -> impl Iterator<Item = CustomDirectiveCompletion<'_>> {
+        self.entries.iter().map(|entry| match &entry.closer {
+            Some(closer) => CustomDirectiveCompletion {
+                name: &entry.name,
+                insert_text: format!("{}\n\t$0\n@{closer}", entry.name),
+                is_snippet: true,
+            },
+            None => CustomDirectiveCompletion {
+                name: &entry.name,
+                insert_text: entry.name.clone(),
+                is_snippet: false,
+            },
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Whether `name` is one Blade accepts: `\w+`, optionally with a
+/// `::`-separated second segment. `BladeCompiler::directive()` throws on
+/// anything else, so a registration this rejects never reaches a template.
+fn is_directive_name(name: &str) -> bool {
+    let segment_ok = |segment: &str| !segment.is_empty() && segment.chars().all(is_name_char);
+    let mut segments = name.split("::");
+    segments.next().is_some_and(segment_ok)
+        && segments.next().is_none_or(segment_ok)
+        && segments.next().is_none()
+}
+
+/// Whether `ch` is one of the characters PHP's `\w` matches, which is what
+/// Blade validates a directive name against.
+fn is_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
 /// A directive-name completion candidate offered when `@` is typed in an
 /// HTML/directive position of a Blade template.
 ///
@@ -890,6 +1067,108 @@ mod tests {
                 entry.marker()
             );
         }
+    }
+
+    fn custom(names: &[(&str, bool)]) -> CustomDirectives {
+        let registrations: Vec<CustomDirective> = names
+            .iter()
+            .map(|(name, conditional)| CustomDirective {
+                name: name.to_string(),
+                conditional: *conditional,
+            })
+            .collect();
+        CustomDirectives::from_registrations(&registrations)
+    }
+
+    /// `Blade::if('admin')` registers four directives, not one.
+    #[test]
+    fn a_condition_registration_expands_to_its_whole_family() {
+        let directives = custom(&[("admin", true)]);
+        for (written, expected) in [
+            ("admin", CustomForm::Open),
+            ("unlessadmin", CustomForm::Open),
+            ("elseadmin", CustomForm::Else),
+            ("endadmin", CustomForm::End),
+        ] {
+            assert_eq!(
+                directives.match_directive(written),
+                Some((written, expected)),
+                "@{written} did not resolve to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plain_registration_is_a_statement() {
+        let directives = custom(&[("datetime", false)]);
+        assert_eq!(
+            directives.match_directive("datetime($post->createdAt)"),
+            Some(("datetime", CustomForm::Statement))
+        );
+        // A name that merely starts with a registered one is a different
+        // directive, exactly as Blade's own `\w+` name pattern reads it.
+        assert_eq!(directives.match_directive("datetimezone"), None);
+        assert_eq!(directives.match_directive("datetime_utc"), None);
+    }
+
+    /// A registered name another registration is a prefix of still wins for
+    /// the text that spells it out, since `::` ends a name as surely as a
+    /// space does.
+    #[test]
+    fn the_longest_registered_name_wins() {
+        let directives = custom(&[("foo", false), ("foo::bar", false)]);
+        assert_eq!(
+            directives.match_directive("foo::bar"),
+            Some(("foo::bar", CustomForm::Statement))
+        );
+        assert_eq!(
+            directives.match_directive("foo"),
+            Some(("foo", CustomForm::Statement))
+        );
+    }
+
+    /// `BladeCompiler::directive()` throws on a name that is not `\w+`
+    /// (optionally with a `::` segment), so such a registration can never
+    /// produce a directive a template writes.
+    #[test]
+    fn a_name_blade_would_reject_registers_nothing() {
+        for name in ["", "has space", "dash-ed", "a::b::c", "trailing::"] {
+            assert!(
+                custom(&[(name, false)]).is_empty(),
+                "{name:?} was accepted as a directive name"
+            );
+        }
+    }
+
+    /// The opener of a condition family completes to the whole block; a
+    /// plain registration completes to its bare name, since nothing says
+    /// what arguments its handler takes.
+    #[test]
+    fn completions_insert_what_the_registration_guarantees() {
+        let directives = custom(&[("admin", true), ("datetime", false)]);
+        let mut inserted: Vec<(String, String, bool)> = directives
+            .completions()
+            .map(|c| (c.name.to_string(), c.insert_text, c.is_snippet))
+            .collect();
+        inserted.sort();
+        assert_eq!(
+            inserted,
+            vec![
+                (
+                    "admin".to_string(),
+                    "admin\n\t$0\n@endadmin".to_string(),
+                    true
+                ),
+                ("datetime".to_string(), "datetime".to_string(), false),
+                ("elseadmin".to_string(), "elseadmin".to_string(), false),
+                ("endadmin".to_string(), "endadmin".to_string(), false),
+                (
+                    "unlessadmin".to_string(),
+                    "unlessadmin\n\t$0\n@endadmin".to_string(),
+                    true
+                ),
+            ]
+        );
     }
 
     /// Every completion's insert text must actually start with the

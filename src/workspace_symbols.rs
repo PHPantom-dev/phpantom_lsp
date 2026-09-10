@@ -355,6 +355,13 @@ impl Backend {
         {
             let fmap = self.symbols.global_functions.read();
             for (_name, (file_uri, func)) in fmap.iter() {
+                // The Blade lowering's wrapper and marker functions are
+                // boilerplate no file wrote, so they are not symbols of
+                // the project even though they have to resolve.
+                if crate::blade::is_synthetic_function(&func.name) {
+                    continue;
+                }
+
                 let display_name = function_display_name(func);
 
                 let func_short = short_name(&display_name);

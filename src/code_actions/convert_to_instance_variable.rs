@@ -513,6 +513,7 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::apply_edits;
 
     /// Helper: given PHP source with a cursor marker `/*|*/`, run the
     /// convert-to-instance-variable action and return the resulting edits.
@@ -573,25 +574,6 @@ mod tests {
         let parsed_uri = Url::parse(uri).unwrap();
         let edits = changes.get(&parsed_uri)?;
         Some(edits.clone())
-    }
-
-    /// Apply TextEdits to content (edits applied from bottom to top).
-    fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
-        let mut result = content.to_string();
-        let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-        sorted.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-        for edit in sorted {
-            let start = position_to_byte_offset(&result, edit.range.start);
-            let end = position_to_byte_offset(&result, edit.range.end);
-            result.replace_range(start..end, &edit.new_text);
-        }
-        result
     }
 
     // ── Basic conversion ────────────────────────────────────────────────

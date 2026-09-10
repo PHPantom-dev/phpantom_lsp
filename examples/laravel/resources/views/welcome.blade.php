@@ -114,13 +114,23 @@
          project ships (a class-backed one is listed as the class it names,
          an anonymous one as its template). Inside a tag whose name is
          written, typing a space offers the attributes that component takes,
-         plain and `:` bound.
+         plain and `:` bound. A template that declares no @props still
+         offers the variables it reads and never defines, since the tag is
+         the only thing that can fill one: `<x-widgets::badge ` offers
+         `label` and `author`, and `<x-alert ` offers `messages`.
          Ctrl+Click any tag name below to open what it renders: the class
          for a class-backed component, the template for an anonymous one. --}}
 
     {{-- The <x-alert> component view is where $attributes and $slot come
-         from: resources/views/components/alert.blade.php --}}
-    <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>
+         from: resources/views/components/alert.blade.php
+
+         <x-slot:title> is scoped to the component it fills, not to this
+         template: $title only exists inside alert.blade.php, never here.
+         Ctrl+Click alert.blade.php's own $title to see it declared there. --}}
+    <x-alert class="mt-4">
+        <x-slot:title>Latest update</x-slot:title>
+        {{ __('messages.welcome') }}
+    </x-alert>
 
     {{-- A bound attribute whose expression is wrapped over several lines
          (what a formatter does to a long array) is still read as one PHP
@@ -178,10 +188,31 @@
     @php($bakery = \App\Models\Bakery::firstOrFail())
     <x-card :bakery="$bakery" footer="Baked today" />
 
+    {{-- @priceTag and the @bakeryOpen family are this project's own
+         directives, registered in DemoServiceProvider::boot() with
+         Blade::directive() and Blade::if(). Neither exists in Blade, so that
+         registration is the only record of them: without it a template
+         writing them gets nothing at all.
+         Try: type `@price` and `@bakery` on a line of their own — both
+         complete like Blade's own directives. What a directive is handed
+         stays real PHP, so hover $bakery below and change `dough_temp` to a
+         column the model does not have to see it reported. --}}
+    @priceTag($bakery->dough_temp)
+    @bakeryOpen($bakery)
+        <p>{{ __('messages.welcome') }}</p>
+    @elsebakeryOpen($bakery)
+        <p>{{ trans('auth.failed') }}</p>
+    @endbakeryOpen
+
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim
         <p>This {{ $blade }} syntax is not processed</p>
     @endverbatim
+
+    {{-- A leading @ escapes one interpolation without entering a whole
+         @verbatim block. Frontend-only syntax inside remains literal text. --}}
+    <p>@{{.Image}}</p>
+    <p>@{!! $name !!}</p>
 
     {{-- Conditional rendering with config --}}
     @if(config('app.debug'))

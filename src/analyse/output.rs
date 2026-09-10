@@ -270,9 +270,8 @@ pub(super) fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_c
     println!();
 }
 
-/// Print the `[OK]` success box.
-pub(super) fn print_success_box(_file_count: usize, use_colour: bool) {
-    let text = " [OK] No errors ";
+/// Print `text` in the green `[OK]` box a clean run ends with.
+pub(crate) fn print_success_box(text: &str, use_colour: bool) {
     if use_colour {
         let pad = " ".repeat(text.len());
         println!();
@@ -305,15 +304,17 @@ pub(super) fn print_error_box(total_errors: usize, _file_count: usize, use_colou
 
 const BAR_WIDTH: usize = 28;
 
-/// Render a PHPStan-style progress bar string:
-/// ` 120/883 [▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░]  13%`
-pub(super) fn progress_bar(done: usize, total: usize) -> String {
+/// Render a PHPStan-style progress bar string, with an optional phase
+/// label after it:
+/// ` 120/883 [▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░]  13% Parsing`
+pub(crate) fn progress_bar(done: usize, total: usize, label: &str) -> String {
     let pct = (done * 100).checked_div(total).unwrap_or(100);
     let filled = (done * BAR_WIDTH).checked_div(total).unwrap_or(BAR_WIDTH);
     let empty = BAR_WIDTH - filled;
+    let separator = if label.is_empty() { "" } else { " " };
 
     format!(
-        " {done:>width$}/{total} [{bar_fill}{bar_empty}] {pct:>3}%",
+        " {done:>width$}/{total} [{bar_fill}{bar_empty}] {pct:>3}%{separator}{label}",
         width = total.to_string().len(),
         bar_fill = "▓".repeat(filled),
         bar_empty = "░".repeat(empty),

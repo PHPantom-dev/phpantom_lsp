@@ -19,6 +19,7 @@ use crate::Backend;
 use std::sync::Arc;
 
 /// JSON-RPC error codes we return, from the LSP specification.
+const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
@@ -200,10 +201,15 @@ impl LspDispatcher {
         let Some((uri, content)) = self.buffer(&uri) else {
             return Ok(Value::Null);
         };
-        Ok(self
+        match self
             .backend
             .handle_rename(&uri, &content, position, &params.new_name)
-            .map_or(Value::Null, to_value))
+        {
+            Ok(edit) => Ok(edit.map_or(Value::Null, to_value)),
+            // The move's destination is taken; the reason is the whole
+            // point of the response.
+            Err(message) => Err((INVALID_REQUEST, message)),
+        }
     }
 
     fn signature_help(&self, params: Value) -> Result<Value, (i64, String)> {

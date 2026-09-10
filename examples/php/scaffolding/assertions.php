@@ -2078,6 +2078,25 @@ function runDemoAssertions(): void
     assert($reconstructed->eitherPrefix($qualifiedName, $plainName) === 'App\\', 'the first flag holding proves its own subject');
     assert($reconstructed->eitherPrefix($plainName, $plainName) === '', 'neither flag holding leaves the guard');
 
+    // ── Member visibility ───────────────────────────────────────────────
+    // The diagnostics demo claims which members of ScaffoldingVault are out
+    // of reach from outside; reflection is what makes that claim checkable
+    // without writing code PHP would fatal on.
+    $vault = new \ReflectionClass(Scaffolding\ScaffoldingVault::class);
+    assert($vault->getProperty('pin')->isPrivate(), '$pin is private, so an outside read is fatal');
+    assert($vault->getProperty('branch')->isProtected(), '$branch is protected, so a subclass may read it');
+    assert($vault->getProperty('label')->isPublic(), '$label is public and always reachable');
+    assert($vault->getProperty('openCount')->isPrivate(), '$openCount is a private static property');
+    assert($vault->getMethod('rotate')->isPrivate(), 'rotate() is private');
+    assert($vault->getMethod('open')->isPublic(), 'open() is the public way in');
+    assert($vault->getReflectionConstant('MASTER_KEY')->isPrivate(), 'MASTER_KEY is a private constant');
+    assert($vault->getReflectionConstant('REGION')->isPublic(), 'REGION is a public constant');
+
+    $branchVault = new \ReflectionClass(Scaffolding\ScaffoldingBranchVault::class);
+    assert($branchVault->getProperty('ledger')->isPrivate(), '$ledger is private to the subclass that declares it');
+    assert($branchVault->isSubclassOf(Scaffolding\ScaffoldingVault::class), 'the branch vault descends from the vault');
+    assert(!$branchVault->hasProperty('pin') || $branchVault->getProperty('pin')->getDeclaringClass()->getName() === Scaffolding\ScaffoldingVault::class, 'a private parent property is not inherited into the subclass scope');
+
     echo "All assertions passed.\n";
 }
 

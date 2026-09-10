@@ -16,10 +16,17 @@
 //!
 //! 3. **`global_defines`** — provides `DefineInfo` records for
 //!    `define()` / top-level `const` declarations.
+//!
+//! For a Blade template those three describe the virtual PHP the
+//! preprocessor emits, so the tree they build is translated back to the
+//! template's own coordinates and the template's own landmarks (its
+//! sections, stacks, and component tags) are added on top. See
+//! [`crate::blade::outline`].
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::blade::outline::OutlineEntry;
 use crate::text_position::LineIndex;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, FunctionInfo, MethodInfo, PropertyInfo, Visibility,
@@ -90,6 +97,10 @@ impl Backend {
             }
         }
 
+        if self.is_blade_file(uri) {
+            return self.blade_document_symbols(uri, symbols);
+        }
+
         // Sort by position so the outline matches source order.
         symbols.sort_by(|a, b| {
             a.range
@@ -105,6 +116,131 @@ impl Backend {
             Some(DocumentSymbolResponse::Nested(symbols))
         }
     }
+
+    /// The outline of a Blade template: `php_symbols`, built from the
+    /// virtual PHP, translated back to the template, with the template's
+    /// own sections, stacks, and component tags added.
+    ///
+    /// Everything is then nested by containment, so a component tag
+    /// written inside a `@section` (or a class declared inside a `@php`
+    /// block inside one) is listed under it.
+    fn blade_document_symbols(
+        &self,
+        uri: &str,
+        php_symbols: Vec<DocumentSymbol>,
+    ) -> Option<DocumentSymbolResponse> {
+        let content = self.get_file_content_arc(uri)?;
+        let idx = LineIndex::new(&content);
+
+        let mut symbols: Vec<DocumentSymbol> = php_symbols
+            .into_iter()
+            .filter_map(|symbol| self.translate_symbol(uri, symbol))
+            .collect();
+        symbols.extend(
+            self.blade_outline(&content)
+                .into_iter()
+                .map(|entry| entry_to_symbol(entry, &idx)),
+        );
+
+        if symbols.is_empty() {
+            return None;
+        }
+        Some(DocumentSymbolResponse::Nested(nest_by_containment(symbols)))
+    }
+
+    /// Translate a symbol built from the virtual PHP back to the
+    /// template, dropping it when either of its ranges lands in the
+    /// preprocessor's prologue: that code stands behind no template text,
+    /// so there is nowhere in the file to list it.
+    fn translate_symbol(&self, uri: &str, symbol: DocumentSymbol) -> Option<DocumentSymbol> {
+        let range = self.translate_range(uri, symbol.range)?;
+        let selection_range = self.translate_range(uri, symbol.selection_range)?;
+        let children = symbol.children.map(|children| {
+            children
+                .into_iter()
+                .filter_map(|child| self.translate_symbol(uri, child))
+                .collect()
+        });
+        Some(DocumentSymbol {
+            range,
+            selection_range,
+            children,
+            ..symbol
+        })
+    }
+
+    fn translate_range(&self, uri: &str, range: Range) -> Option<Range> {
+        Some(Range::new(
+            self.try_translate_php_to_blade(uri, range.start)?,
+            self.try_translate_php_to_blade(uri, range.end)?,
+        ))
+    }
+}
+
+/// Build the symbol for one Blade outline entry.
+#[allow(deprecated)]
+fn entry_to_symbol(entry: OutlineEntry, idx: &LineIndex<'_>) -> DocumentSymbol {
+    DocumentSymbol {
+        name: entry.name,
+        detail: entry.detail,
+        kind: entry.kind,
+        tags: None,
+        deprecated: None,
+        range: Range::new(idx.position(entry.span.start), idx.position(entry.span.end)),
+        selection_range: Range::new(
+            idx.position(entry.selection.start),
+            idx.position(entry.selection.end),
+        ),
+        children: None,
+    }
+}
+
+/// Nest a flat list of symbols so that each one becomes a child of the
+/// innermost symbol whose range encloses it.
+///
+/// Symbols that overlap without enclosing (a directive block opened
+/// inside a component tag and closed outside it, which Blade itself
+/// tolerates) end up as siblings rather than nested, which is what the
+/// source says: neither contains the other.
+fn nest_by_containment(mut symbols: Vec<DocumentSymbol>) -> Vec<DocumentSymbol> {
+    symbols.sort_by_key(|symbol| {
+        let start = (symbol.range.start.line, symbol.range.start.character);
+        let end = (symbol.range.end.line, symbol.range.end.character);
+        // The enclosing symbol comes first: same start, later end.
+        (start, std::cmp::Reverse(end))
+    });
+
+    let mut roots: Vec<DocumentSymbol> = Vec::new();
+    let mut open: Vec<DocumentSymbol> = Vec::new();
+    for symbol in symbols {
+        while open
+            .last()
+            .is_some_and(|parent| !encloses(&parent.range, &symbol.range))
+        {
+            let closed = open.pop().expect("the loop only runs with a last entry");
+            attach(closed, &mut open, &mut roots);
+        }
+        open.push(symbol);
+    }
+    while let Some(closed) = open.pop() {
+        attach(closed, &mut open, &mut roots);
+    }
+    roots
+}
+
+/// Add a finished symbol to the innermost symbol still open around it,
+/// or to the top level when there is none.
+fn attach(symbol: DocumentSymbol, open: &mut [DocumentSymbol], roots: &mut Vec<DocumentSymbol>) {
+    match open.last_mut() {
+        Some(parent) => parent.children.get_or_insert_default().push(symbol),
+        None => roots.push(symbol),
+    }
+}
+
+/// Whether `outer` covers all of `inner`.
+fn encloses(outer: &Range, inner: &Range) -> bool {
+    let position = |p: &Position| (p.line, p.character);
+    position(&outer.start) <= position(&inner.start) && position(&inner.end) <= position(&outer.end)
 }
 
 // ── Converters ──────────────────────────────────────────────────────
@@ -548,6 +684,65 @@ mod tests {
         assert_eq!(short_name("Foo\\Bar\\Baz"), "Baz");
         assert_eq!(short_name("Simple"), "Simple");
         assert_eq!(short_name(""), "");
+    }
+
+    // ── Nesting by containment ──────────────────────────────────────
+
+    /// A symbol named `name` spanning `start`..`end` on line 0.
+    #[allow(deprecated)]
+    fn symbol(name: &str, start: u32, end: u32) -> DocumentSymbol {
+        let range = Range::new(Position::new(0, start), Position::new(0, end));
+        DocumentSymbol {
+            name: name.to_string(),
+            detail: None,
+            kind: SymbolKind::NAMESPACE,
+            tags: None,
+            deprecated: None,
+            range,
+            selection_range: range,
+            children: None,
+        }
+    }
+
+    /// The tree as `(name, depth)` pairs, in outline order.
+    fn tree(symbols: &[DocumentSymbol]) -> Vec<(String, usize)> {
+        fn walk(symbols: &[DocumentSymbol], depth: usize, out: &mut Vec<(String, usize)>) {
+            for symbol in symbols {
+                out.push((symbol.name.clone(), depth));
+                if let Some(children) = &symbol.children {
+                    walk(children, depth + 1, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(symbols, 0, &mut out);
+        out
+    }
+
+    #[test]
+    fn an_enclosed_symbol_becomes_a_child() {
+        let nested = nest_by_containment(vec![
+            symbol("inner", 2, 4),
+            symbol("outer", 0, 10),
+            symbol("after", 6, 8),
+        ]);
+        assert_eq!(
+            tree(&nested),
+            [
+                ("outer".to_string(), 0),
+                ("inner".to_string(), 1),
+                ("after".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_symbol_reaching_past_its_neighbour_stays_a_sibling() {
+        let nested = nest_by_containment(vec![symbol("first", 0, 6), symbol("second", 4, 10)]);
+        assert_eq!(
+            tree(&nested),
+            [("first".to_string(), 0), ("second".to_string(), 0)]
+        );
     }
 
     #[test]

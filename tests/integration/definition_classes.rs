@@ -1185,3 +1185,89 @@ async fn test_goto_definition_aliased_use_does_not_match_same_file_short_name() 
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Type alias tags ────────────────────────────────────────────────────────
+
+/// Open `text` and return the go-to-definition result at `(line, character)`.
+async fn definition_at(
+    backend: &Backend,
+    uri: &Url,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Option<GotoDefinitionResponse> {
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn goto_definition_on_a_class_inside_a_phpstan_type_alias() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                       // 0
+        "namespace App;\n",                              // 1
+        "\n",                                            // 2
+        "class User {}\n",                               // 3
+        "\n",                                            // 4
+        "/**\n",                                         // 5
+        " * @phpstan-type UserRow array{owner: User}\n", // 6
+        " */\n",                                         // 7
+        "class Repo {}\n",                               // 8
+    );
+
+    // `User` inside the alias definition starts at char 38.
+    let result = definition_at(&backend, &uri, text, 6, 38).await;
+    let location = match result.expect("`User` in the alias definition should resolve") {
+        GotoDefinitionResponse::Scalar(l) => l,
+        GotoDefinitionResponse::Array(mut v) if !v.is_empty() => v.remove(0),
+        other => panic!("expected a location, got {other:?}"),
+    };
+    assert_eq!(location.range.start.line, 3, "got {location:?}");
+}
+
+#[tokio::test]
+async fn goto_definition_on_the_class_a_phpstan_import_type_names() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                  // 0
+        "namespace App;\n",                         // 1
+        "\n",                                       // 2
+        "class Other {}\n",                         // 3
+        "\n",                                       // 4
+        "/**\n",                                    // 5
+        " * @phpstan-import-type Row from Other\n", // 6
+        " */\n",                                    // 7
+        "class Repo {}\n",                          // 8
+    );
+
+    // `Other` after `from` starts at char 33.
+    let result = definition_at(&backend, &uri, text, 6, 33).await;
+    let location = match result.expect("the imported-from class should resolve") {
+        GotoDefinitionResponse::Scalar(l) => l,
+        GotoDefinitionResponse::Array(mut v) if !v.is_empty() => v.remove(0),
+        other => panic!("expected a location, got {other:?}"),
+    };
+    assert_eq!(location.range.start.line, 3, "got {location:?}");
+}

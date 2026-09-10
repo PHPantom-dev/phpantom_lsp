@@ -19,50 +19,48 @@ Check out the **[documentation](https://phpantom-dev.github.io/phpantom_lsp/)** 
 
 PHPantom focuses on deep type intelligence. Here's how it compares:
 
-|                                 | PHPantom | Intelephense | PHP Tools  | Phpactor    | PHPStorm    |
-| ------------------------------- | -------- | ------------ | ---------- | ----------- | ----------- |
-| Common LSP features<sup>1</sup> | ✅       | ✅           | ✅         | ✅          | ✅          |
-| Workspace symbols               | ✅       | ✅           | ✅         | ✅          | ✅          |
-| Call hierarchy                  | ❌       | ❌           | ❌         | ❌          | ✅          |
-| Semantic tokens                 | ✅       | ❌           | ✅         | ❌          | ✅          |
-| Extras<sup>2</sup>              | ✅       | 🔒           | 🚧         | 🚧          | ✅          |
-| **Diagnostics**                 |          |              |            |             |             |
-| PHPStan integration             | ✅       | ❌           | ❌         | 🚧          | 🚧          |
-| Undefined variable              | ✅       | 🔒           | ✅         | ✅          | ✅          |
-| Type errors                     | ✅       | 🔒           | ✅         | 🚧          | ✅          |
-| Unused variable                 | ✅       | ❌           | ✅         | ❌          | ✅          |
-| **Type Intelligence**           |          |              |            |             |             |
-| Generics / `@template`          | ✅       | 🚧           | ✅         | 🚧          | ✅          |
-| `@mixin` completion             | ✅       | 🔒           | ✅         | ✅          | 🚧          |
-| Array / object shapes           | ✅       | ✅           | ✅         | 🚧          | 🚧          |
-| PHPStan types                   | ✅       | ❌           | 🚧         | 🚧          | 🚧          |
-| Conditional return types        | ✅       | ❌           | ✅         | 🚧          | ❌          |
-| Closure parameter inference     | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
-| Laravel                         | ✅       | ❌           | 🚧         | ❌          | 🚧          |
-| Blade templates                 | 🚧       | ❌           | ✅         | ❌          | 🚧          |
-| Other frameworks<sup>4</sup>    | 🚧       | 🚧           | 🚧         | 🚧          | 🧩          |
-| **Refactoring**                 |          |              |            |             |             |
-| Rename                          | ✅       | 🔒           | 🔒         | ✅          | ✅          |
-| Common refactorings<sup>3</sup> | ✅       | ❌           | 🔒         | ✅          | ✅          |
-| Extract constant                | ✅       | ❌           | ❌         | ✅          | ✅          |
-| Extract interface               | ✅       | ❌           | ❌         | ✅          | ✅          |
-| Promote constructor parameter   | ✅       | ❌           | ❌         | ❌          | ✅          |
-| Simplify expressions            | ✅       | ❌           | 🔒         | ❌          | ✅          |
-| Modernize syntax<sup>5</sup>    | ✅       | ❌           | 🔒         | ❌          | ✅          |
-| **Performance**                 |          |              |            |             |             |
-| Time to ready                   | 5 s      | 1 min 25 s   | 3 min 17 s | 15 min 39 s | 17 min 55 s |
-| RAM usage                       | 360 MB   | 520 MB       | 3.9 GB     | 498 MB      | 1.7 GB      |
-| Disk cache                      | 0        | 45 MB        | 0          | 4.1 GB      | 551 MB      |
+|                                          | PHPantom | Intelephense | PHP Tools  | Phpactor    | PHPStorm    |
+| ---------------------------------------- | -------- | ------------ | ---------- | ----------- | ----------- |
+| Core LSP features<sup>1</sup>            | ✅       | ✅           | ✅         | ✅          | ✅          |
+| Advanced navigation<sup>2</sup>          | ✅       | 🚧🔒         | 🚧         | 🚧          | ✅          |
+| Editor extras<sup>3</sup>                | ✅       | 🚧🔒         | 🚧         | 🚧          | ✅          |
+| **Diagnostics**                          |          |              |            |             |             |
+| Built-in diagnostics<sup>4</sup>         | ✅       | 🚧🔒         | ✅         | 🚧          | ✅          |
+| External analyzer integration<sup>5</sup> | ✅       | ❌           | ❌         | 🚧          | 🚧          |
+| **Type Intelligence**                    |          |              |            |             |             |
+| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | ✅          |
+| Array / object shapes                    | ✅       | ✅           | ✅         | 🚧          | 🚧          |
+| Advanced PHPDoc types<sup>6</sup>        | ✅       | 🚧🔒         | 🚧         | 🚧          | 🚧          |
+| Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
+| **Frameworks**                           |          |              |            |             |             |
+| Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
+| Symfony & Twig                           | ❌       | ❌           | ❌         | 🚧          | 🧩         |
+| Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
+| Other frameworks<sup>7</sup>             | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
+| **Refactoring**                          |          |              |            |             |             |
+| Rename                                   | ✅       | ✅🔒         | ✅🔒       | ✅          | ✅          |
+| Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
+| Simplify & modernize<sup>9</sup>         | ✅       | ❌           | ✅🔒       | ❌          | ✅          |
+| **Performance**                          |          |              |            |             |             |
+| Time to ready (from cache)               | 2 s      | 11 s (1 s)   | 10 s       | 3 min 17 s (4 s) | 1 min 7 s (5 s)        |
+| RAM                                      | 578 MB   | 766 MB       | 594 MB     | 467 MB      | 2 GB        |
+| CPU time                                 | 17 s     | 16 s         | 36 s       | 3 min 18 s  | 17 min 55 s |
+| Disk cache                               | -        | 51 MB        | -          | 2.3 GB      | 379 MB      |
 
 <p>
 <sub>
-🚧 = partial support. 🧩 = requires plugin. 🔒 = paid tier.<br>
-<sup>1</sup> Completion, hover, signature help, go-to-definition, find references, diagnostics, document symbols.<br>
-<sup>2</sup> Auto-import, go-to implementation / type-definition, smart select, folding ranges, formatting, code lens, inlay hints, type hierarchy, document links.<br>
-<sup>3</sup> Implement interface methods, extract method/function, extract/inline variable, generate constructor, generate getter/setter.<br>
-<sup>4</sup> CakePHP, non-Composer WordPress, Symfony, Behat, PHPUnit, and Prophecy, and Twig.<br>
-<sup>5</sup> Convert between arrow functions and closures, and switch statements to match expressions.<br>
-Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application). Time to ready is CPU time consumed until full type intelligence is available on a cold start (first index); tools with a disk cache launch faster on subsequent starts.
+🚧 = partial support. ❌ = not available. 🧩 = via plugin. 🔒 = paid tier. Modifiers combine with the support level: 🚧🔒 means partial, and only in the paid tier.<br>
+<sup>1</sup> Completion, hover, signature help, go-to-definition, find references, diagnostics, document symbols, workspace symbols.<br>
+<sup>2</sup> Call hierarchy, type hierarchy, go-to implementation / type-definition, code lens.<br>
+<sup>3</sup> Semantic tokens, inlay hints, auto-import, smart select, folding ranges, formatting, document links.<br>
+<sup>4</sup> Undefined and unused variables, type errors, unknown symbols and members, argument counts.<br>
+<sup>5</sup> PHPantom runs PHPStan, PHPCS, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
+<sup>6</sup> Conditional return types, type aliases (`@phpstan-type` / `@phpstan-import-type`), pseudo-types, `@mixin`.<br>
+<sup>7</sup> WordPress, CakePHP, Doctrine, PHPUnit, Behat, and Prophecy.<br>
+<sup>8</sup> Extract method/function, extract/inline variable, extract constant, extract interface, promote constructor parameter, generate constructor, generate getters/setters, implement interface methods.<br>
+<sup>9</sup> Null-check simplification, string interpolation conversion, converting between arrow functions and closures, and switch statements to match expressions.<br>
+Performance measured on a production Laravel codebase: 5.1K PHP files (389k lines) and 1.3K Blade templates (88k lines), with 27k vendor files (1.7M lines). Time to ready is the approximate wall-clock time from launch until full type intelligence is available on a cold start (first index). RAM is the steady resident memory once indexing has finished.<br>
+Independent, re-runnable type-inference conformance results across twelve PHP engines: <a href="https://zonuexe.github.io/php-typing-conformance/">php-typing-conformance</a> (Qodana covers the PHPStorm engine, phpy the PHP Tools engine).
 </sub>
 </p>
 
@@ -76,7 +74,8 @@ Performance measured on a production codebase: 21K PHP files, 1.5M lines of code
 - **Closure parameter inference.** `$users->map(fn($u) => $u->name)` infers `$u` as `User` from the collection's generic context.
 - **Conditional return types.** PHPStan-style conditional `@return` types resolve to the concrete branch at each call site.
 - **Type aliases and shapes.** `@phpstan-type`, `@phpstan-import-type`, and `object{...}` shapes all resolve through to completions.
-- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string compleation on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
+- **The full modern language.** PHP 8.4 and 8.5 features resolve end-to-end: property hooks, asymmetric visibility, and the pipe operator behave like any other code.
+- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string completion on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
 ## Project Awareness
@@ -84,7 +83,7 @@ Performance measured on a production codebase: 21K PHP files, 1.5M lines of code
 PHPantom understands Composer projects out of the box, but works without setup on non-Composer projects too:
 
 - **Autoloader-accurate results.** Completions and go-to-definition only surface classes that Composer's autoloader can actually load, avoiding false positives from internal, inaccessible, or duplicate vendor classes. You see exactly what your application can use.
-- **PSR-4 correctness.** Qucik fixes for when the namespace or class name does not match their PSR-4 path.
+- **PSR-4 correctness.** Quick fixes for when the namespace or class name does not match their PSR-4 path.
 - **PSR-4 autoloading.** Resolves classes across files on demand.
 - **Classmap and file autoloading.** `autoload_classmap.php` and `autoload_files.php`.
 - **Embedded PHP stubs** from [phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) bundled in the binary, no runtime downloads needed.

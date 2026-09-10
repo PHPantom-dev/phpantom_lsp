@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -13,19 +13,6 @@ mod tests {
 
     const ITEM_CLASS: &str =
         "<?php\nnamespace App;\nclass Item { public string $name; public int $price; }\n";
-
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, language_id: &str, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: language_id.to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
-    }
 
     async fn hover_type(
         backend: &phpantom_lsp::Backend,
@@ -72,14 +59,14 @@ mod tests {
         let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &controller_uri,
             "php",
             &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -145,14 +132,14 @@ mod tests {
         let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &controller_uri,
             "php",
             &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -200,14 +187,14 @@ mod tests {
         let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &controller_uri,
             "php",
             &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -245,7 +232,7 @@ mod tests {
         let root = backend.workspace_root().read().clone().unwrap();
         for controller in ["app/AController.php", "app/BController.php"] {
             let uri = Url::from_file_path(root.join(controller)).unwrap();
-            open(
+            open_document(
                 &backend,
                 &uri,
                 "php",
@@ -254,7 +241,7 @@ mod tests {
             .await;
         }
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -292,14 +279,14 @@ mod tests {
         let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &controller_uri,
             "php",
             &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -339,14 +326,14 @@ mod tests {
         let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &controller_uri,
             "php",
             &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -413,8 +400,8 @@ mod tests {
         // it up; a `@php` block is the simplest way to do that in a plain
         // view.
         let page_source = "@php\n/** @var \\App\\Item $model */\n@endphp\n<x-brand.boxes :hairAnalysis=\"$model\" />\n";
-        open(&backend, &page_uri, "blade", page_source).await;
-        open(
+        open_document(&backend, &page_uri, "blade", page_source).await;
+        open_document(
             &backend,
             &component_uri,
             "blade",
@@ -427,6 +414,189 @@ mod tests {
         assert!(
             hover.contains("Item"),
             "$hairAnalysis should be typed Item from the tag's bound attribute, got: {}",
+            hover
+        );
+    }
+
+    /// A `<x-slot:title>` a caller fills declares `$title` in the
+    /// *component's* template, typed as `ComponentSlot` — not in the
+    /// caller's, where the tag is written.
+    #[tokio::test]
+    async fn named_slot_types_the_component_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes><x-slot:title>Latest</x-slot></x-brand.boxes>\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $title }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        open_document(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+        open_document(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("ComponentSlot"),
+            "$title should be typed ComponentSlot from the caller's named slot, got: {}",
+            hover
+        );
+    }
+
+    /// A slot named after a variable the *caller* already holds
+    /// (`<x-slot:item>` inside a `@foreach ($items as $item)`) must not
+    /// retype that variable in the caller: the slot only ever declares a
+    /// variable in the component it is scoped to.
+    #[tokio::test]
+    async fn a_slot_name_colliding_with_a_callers_variable_leaves_it_alone() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "resources/views/page.blade.php",
+                    "@php\n/** @var \\App\\Item[] $items */\n@endphp\n@foreach ($items as $item)\n<x-brand.boxes><x-slot:item>{{ $item->name }}</x-slot></x-brand.boxes>\n@endforeach\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $item }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+
+        open_document(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &page_uri, 4, 32).await;
+        assert!(
+            hover.contains("Item") && !hover.contains("ComponentSlot"),
+            "the caller's own $item must stay Item, not be retyped by the slot named after it, got: {}",
+            hover
+        );
+    }
+
+    /// The legacy `<x-slot name="title">` form types the same variable
+    /// the same way.
+    #[tokio::test]
+    async fn legacy_named_slot_attribute_types_the_component_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes><x-slot name=\"title\">Latest</x-slot></x-brand.boxes>\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $title }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        open_document(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+        open_document(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("ComponentSlot"),
+            "$title should be typed ComponentSlot from the caller's legacy named slot, got: {}",
+            hover
+        );
+    }
+
+    /// `@class(...)` compiles to the same generic marker call as a bound
+    /// attribute that names no parameter, so one written before a
+    /// component tag must not shift the index the tag's own bound
+    /// attribute is correlated against.
+    #[tokio::test]
+    async fn a_directive_before_the_tag_does_not_shift_the_bound_attribute_index() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes :hairAnalysis=\"$model\" />\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $hairAnalysis->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        let page_source = "@php\n/** @var \\App\\Item $model */\n@endphp\n@class(['featured' => true])\n<x-brand.boxes :hairAnalysis=\"$model\" />\n";
+        open_document(&backend, &page_uri, "blade", page_source).await;
+        open_document(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("Item"),
+            "@class(...) before the tag must not shift its bound attribute's index, got: {}",
             hover
         );
     }
@@ -460,8 +630,8 @@ mod tests {
         // No `@endphp` follows, so mistaking the inline directive for a
         // block opener blanks the rest of the file, tag included.
         let page_source = "@php\n/** @var \\App\\Item $item */\n@endphp\n@php($model = $item)\n<x-brand.boxes :hairAnalysis=\"$model\" />\n";
-        open(&backend, &page_uri, "blade", page_source).await;
-        open(
+        open_document(&backend, &page_uri, "blade", page_source).await;
+        open_document(
             &backend,
             &component_uri,
             "blade",
@@ -502,14 +672,14 @@ mod tests {
         let component_uri =
             Url::from_file_path(root.join("resources/views/components/alert.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &page_uri,
             "blade",
             &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &component_uri,
             "blade",
@@ -561,14 +731,14 @@ mod tests {
         let component_uri =
             Url::from_file_path(root.join("resources/views/components/alert.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &page_uri,
             "blade",
             &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &component_uri,
             "blade",
@@ -636,7 +806,7 @@ mod tests {
                 .unwrap();
         for uri in [&page_uri, &component_uri] {
             let path = uri.to_file_path().unwrap();
-            open(
+            open_document(
                 &backend,
                 uri,
                 "blade",
@@ -676,7 +846,7 @@ mod tests {
 
         for rel in ["app/Item.php", "app/Controller.php"] {
             let uri = Url::from_file_path(root.join(rel)).unwrap();
-            open(
+            open_document(
                 &backend,
                 &uri,
                 "php",
@@ -684,7 +854,7 @@ mod tests {
             )
             .await;
         }
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -827,14 +997,14 @@ mod tests {
         let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
         let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &controller_uri,
             "php",
             &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
         )
         .await;
-        open(
+        open_document(
             &backend,
             &blade_uri,
             "blade",
@@ -871,8 +1041,8 @@ mod tests {
             Url::from_file_path(root.join("resources/views/partials/row.blade.php")).unwrap();
 
         let page_source = "@php\n/** @var \\App\\Item $item */\n@endphp\n@include('partials.row', ['row' => $item])\n";
-        open(&backend, &page_uri, "blade", page_source).await;
-        open(
+        open_document(&backend, &page_uri, "blade", page_source).await;
+        open_document(
             &backend,
             &partial_uri,
             "blade",
@@ -910,7 +1080,7 @@ mod tests {
         let partial_uri =
             Url::from_file_path(root.join("resources/views/partials/row.blade.php")).unwrap();
 
-        open(
+        open_document(
             &backend,
             &partial_uri,
             "blade",
@@ -918,7 +1088,7 @@ mod tests {
         )
         .await;
         let page_source = "@php\n/** @var \\App\\Item $item */\n@endphp\n@include('partials.row', ['row' => $item])\n";
-        open(&backend, &page_uri, "blade", page_source).await;
+        open_document(&backend, &page_uri, "blade", page_source).await;
 
         let hover = hover_type(&backend, &partial_uri, 0, 5).await;
         assert!(
@@ -951,8 +1121,8 @@ mod tests {
             Url::from_file_path(root.join("resources/views/partials/line.blade.php")).unwrap();
 
         let page_source = "@php\n/** @var array<int, \\App\\Item> $items */\n@endphp\n@each('partials.line', $items, 'line')\n";
-        open(&backend, &page_uri, "blade", page_source).await;
-        open(
+        open_document(&backend, &page_uri, "blade", page_source).await;
+        open_document(
             &backend,
             &partial_uri,
             "blade",
@@ -997,8 +1167,8 @@ mod tests {
 
         let page_source =
             "@php\n/** @var \\App\\Item $item */\n@endphp\n@include('menu', ['node' => $item])\n";
-        open(&backend, &page_uri, "blade", page_source).await;
-        open(
+        open_document(&backend, &page_uri, "blade", page_source).await;
+        open_document(
             &backend,
             &menu_uri,
             "blade",
@@ -1038,7 +1208,7 @@ mod tests {
         for name in ["left", "right"] {
             let path = format!("resources/views/{name}.blade.php");
             let uri = Url::from_file_path(root.join(&path)).unwrap();
-            open(
+            open_document(
                 &backend,
                 &uri,
                 "blade",
@@ -1098,7 +1268,7 @@ mod tests {
                 "blade",
             ),
         ] {
-            open(
+            open_document(
                 &backend,
                 uri,
                 language,
@@ -1146,7 +1316,7 @@ mod tests {
             (&controller_uri, "app/Controller.php", "php"),
             (&blade_uri, "resources/views/shop.blade.php", "blade"),
         ] {
-            open(
+            open_document(
                 &backend,
                 uri,
                 language,

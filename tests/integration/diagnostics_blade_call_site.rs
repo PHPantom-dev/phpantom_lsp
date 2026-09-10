@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -57,19 +57,6 @@ class ViewServiceProvider
         create_psr4_workspace(COMPOSER, &all)
     }
 
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, language_id: &str, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: language_id.to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
-    }
-
     /// Collect the call-site diagnostics for one file, as
     /// `(code, message)` pairs in report order.
     async fn call_site_diagnostics(
@@ -82,7 +69,7 @@ class ViewServiceProvider
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        open(backend, &uri, language_id, &text).await;
+        open_document(backend, &uri, language_id, &text).await;
 
         // A Blade file is analysed through its virtual PHP, which is what
         // the symbol map and the source map are both keyed to.

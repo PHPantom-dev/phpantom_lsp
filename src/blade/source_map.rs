@@ -315,6 +315,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             map.prologue_lines > super::super::PROLOGUE_LINES,

@@ -423,12 +423,13 @@ fn synthesizes_belongs_to_many_property() {
 
 #[test]
 fn relationship_property_carries_pivot_config() {
-    use crate::types::PivotRelation;
+    use crate::types::{PivotAccessor, PivotRelation};
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
     user.laravel_mut().belongs_to_many_pivots = vec![PivotRelation {
         method: "roles".to_string(),
+        accessor: PivotAccessor::Custom(atom("membership")),
         using: Some("App\\Models\\RoleUser".to_string()),
         columns: vec!["expires_at".to_string(), "active".to_string()],
     }];
@@ -445,14 +446,74 @@ fn relationship_property_carries_pivot_config() {
         .unwrap();
     match roles.source.as_ref().unwrap() {
         PropertySource::Relationship {
+            pivot_accessor,
             pivot_using,
             pivot_columns,
             ..
         } => {
+            assert_eq!(pivot_accessor.as_deref(), Some("membership"));
             assert_eq!(pivot_using.as_deref(), Some("App\\Models\\RoleUser"));
             assert_eq!(pivot_columns, &["expires_at", "active"]);
         }
         other => panic!("expected Relationship source, got {other:?}"),
+    }
+}
+
+#[test]
+fn relationship_property_carries_pivot_accessor_from_generic() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.methods.push(Arc::new(make_method(
+        "roles",
+        Some("BelongsToMany<Role, $this, RoleUser, 'membership'>"),
+    )));
+
+    let result = provider.provide(&user, &no_loader, None);
+    let roles = result
+        .properties
+        .iter()
+        .find(|p| p.name == "roles")
+        .unwrap();
+    match roles.source.as_ref().unwrap() {
+        PropertySource::Relationship { pivot_accessor, .. } => {
+            assert_eq!(pivot_accessor.as_deref(), Some("membership"));
+        }
+        other => panic!("expected Relationship source, got {other:?}"),
+    }
+}
+
+#[test]
+fn relationship_property_omits_non_literal_pivot_accessors() {
+    use crate::types::{PivotAccessor, PivotRelation};
+
+    for accessor in [PivotAccessor::Default, PivotAccessor::Unknown] {
+        let provider = LaravelModelProvider;
+        let mut user = make_class("App\\Models\\User");
+        user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+        user.laravel_mut().belongs_to_many_pivots = vec![PivotRelation {
+            method: "roles".to_string(),
+            accessor,
+            using: None,
+            columns: vec!["active".to_string()],
+        }];
+        user.methods.push(Arc::new(make_method(
+            "roles",
+            Some("BelongsToMany<Role, $this>"),
+        )));
+
+        let result = provider.provide(&user, &no_loader, None);
+        let roles = result
+            .properties
+            .iter()
+            .find(|property| property.name == "roles")
+            .expect("roles relationship property should be synthesized");
+        match roles.source.as_ref().unwrap() {
+            PropertySource::Relationship { pivot_accessor, .. } => {
+                assert_eq!(*pivot_accessor, None);
+            }
+            other => panic!("expected Relationship source, got {other:?}"),
+        }
     }
 }
 

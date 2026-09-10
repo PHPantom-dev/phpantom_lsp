@@ -133,12 +133,6 @@ impl UseBlockInfo {
         }
     }
 
-    /// Check whether the existing use block contains any `use function`
-    /// imports.
-    pub(crate) fn has_function_imports(&self) -> bool {
-        self.existing.iter().any(|(_, k)| Self::key_group(k) == 2)
-    }
-
     /// Check whether the existing use block contains any class (plain
     /// `use`) imports — i.e. imports that are neither `use function`
     /// nor `use const`.
@@ -354,6 +348,19 @@ pub(crate) fn build_use_edit(
     use_block: &UseBlockInfo,
     file_namespace: &Option<String>,
 ) -> Option<Vec<TextEdit>> {
+    build_aliased_use_edit(fqn, None, use_block, file_namespace)
+}
+
+/// Like [`build_use_edit`] but emits `use Ns\Foo as Alias;` when `alias`
+/// is `Some`.  Used by the class-move rename, which has to import a
+/// moved class under an alias when its short name is already taken in
+/// the importing file.
+pub(crate) fn build_aliased_use_edit(
+    fqn: &str,
+    alias: Option<&str>,
+    use_block: &UseBlockInfo,
+    file_namespace: &Option<String>,
+) -> Option<Vec<TextEdit>> {
     // No namespace separator → this is a global class (e.g. `PDO`, `DateTime`).
     // Only needs an import when the current file declares a namespace;
     // otherwise we're already in the global namespace.
@@ -372,12 +379,17 @@ pub(crate) fn build_use_edit(
         ""
     };
 
+    let statement = match alias {
+        Some(alias) => format!("use {} as {};", fqn, alias),
+        None => format!("use {};", fqn),
+    };
+
     Some(vec![TextEdit {
         range: Range {
             start: insert_pos,
             end: insert_pos,
         },
-        new_text: format!("{}use {};\n", prefix, fqn),
+        new_text: format!("{}{}\n", prefix, statement),
     }])
 }
 
@@ -398,14 +410,22 @@ pub(crate) fn build_use_function_edit(
     fqn: &str,
     use_block: &UseBlockInfo,
 ) -> Option<Vec<TextEdit>> {
+    build_aliased_typed_use_edit(fqn, None, "function", use_block)
+}
+
+/// Build a `use function` or `use const` edit, optionally under an alias.
+pub(crate) fn build_aliased_typed_use_edit(
+    fqn: &str,
+    alias: Option<&str>,
+    kind: &str,
+    use_block: &UseBlockInfo,
+) -> Option<Vec<TextEdit>> {
     // Global functions (no namespace separator) never need importing.
     if !fqn.contains('\\') {
         return None;
     }
 
-    // Use a prefixed sort key so function imports sort after class
-    // imports and sit among other function imports.
-    let sort_key = format!("function {}", fqn.to_lowercase());
+    let sort_key = format!("{} {}", kind, fqn.to_lowercase());
 
     // Skip if this exact function is already imported.
     if use_block.existing.iter().any(|(_, k)| k == &sort_key) {
@@ -418,8 +438,12 @@ pub(crate) fn build_use_function_edit(
     //   namespace (separate namespace from the use block), or
     // - This is the first function import and there are already class
     //   imports (group separator).
+    let has_kind_imports = use_block
+        .existing
+        .iter()
+        .any(|(_, key)| key.starts_with(kind));
     let separator = if (use_block.existing.is_empty() && use_block.has_namespace)
-        || (!use_block.has_function_imports() && use_block.has_class_imports())
+        || (!has_kind_imports && use_block.has_class_imports())
     {
         "\n"
     } else {
@@ -431,7 +455,10 @@ pub(crate) fn build_use_function_edit(
             start: insert_pos,
             end: insert_pos,
         },
-        new_text: format!("{}use function {};\n", separator, fqn),
+        new_text: match alias {
+            Some(alias) => format!("{}use {} {} as {};\n", separator, kind, fqn, alias),
+            None => format!("{}use {} {};\n", separator, kind, fqn),
+        },
     }])
 }
 

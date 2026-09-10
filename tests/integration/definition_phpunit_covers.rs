@@ -6,7 +6,7 @@
 //! `@coversDefaultClass`, `@uses`), including the bare `::functionName`
 //! shape that names a global function.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -25,19 +25,6 @@ async fn goto_definition(
         partial_result_params: PartialResultParams::default(),
     };
     backend.goto_definition(params).await.unwrap()
-}
-
-async fn open_file(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
 }
 
 fn assert_line(response: Option<GotoDefinitionResponse>, expected_line: u32) {
@@ -85,7 +72,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // Cursor on `Calculator` inside `#[CoversClass(Calculator::class)]`.
     let response = goto_definition(&backend, &uri, 6, 18).await;
@@ -109,7 +96,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     let response = goto_definition(&backend, &uri, 6, 13).await;
     assert_line(response, 3);
@@ -132,7 +119,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     let response = goto_definition(&backend, &uri, 6, 25).await;
     assert_line(response, 5);
@@ -153,7 +140,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // The class portion of the reference.
     assert_line(goto_definition(&backend, &uri, 4, 16).await, 3);
@@ -178,7 +165,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     assert_line(goto_definition(&backend, &uri, 6, 11).await, 3);
 }
@@ -198,7 +185,7 @@ class HelperTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     let response = goto_definition(&backend, &uri, 5, 14).await;
     assert_line(response, 2);
@@ -222,7 +209,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // `@coversDefaultClass` names the class itself.
     assert_line(goto_definition(&backend, &uri, 6, 24).await, 3);
@@ -251,7 +238,7 @@ class CalculatorTest
     }
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     assert_line(goto_definition(&backend, &uri, 9, 17).await, 5);
 }
@@ -272,7 +259,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // Cursor inside the `'add'` literal.
     assert_line(goto_definition(&backend, &uri, 6, 36).await, 5);
@@ -293,7 +280,7 @@ class HelperTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     assert_line(goto_definition(&backend, &uri, 6, 20).await, 4);
 }
@@ -311,7 +298,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     assert_line(goto_definition(&backend, &uri, 3, 55).await, 3);
 }
@@ -334,7 +321,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     assert_eq!(goto_definition(&backend, &uri, 5, 36).await, None);
 }
@@ -356,7 +343,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // The class still navigates.
     assert_line(goto_definition(&backend, &uri, 6, 13).await, 3);
@@ -388,7 +375,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     let params = RenameParams {
         text_document_position: TextDocumentPositionParams {

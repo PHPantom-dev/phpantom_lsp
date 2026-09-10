@@ -40,6 +40,22 @@ class ImportClassDemo
 }
 
 
+// ── Code Action: Import Qualified Name ─────────────────────────────────────
+// Place the cursor on either qualified name and trigger "Code Action".
+// The refactoring adds the appropriate import and replaces every equivalent
+// usage in this file with its short name. The companion action alongside it,
+// "Import all qualified symbols and shorten usages", does the same for every
+// qualified class, function, and constant in this namespace at once.
+
+class ImportQualifiedNameDemo
+{
+    public function demo(): Scaffolding\Pen
+    {
+        return \Demo\Scaffolding\makePen();
+    }
+}
+
+
 // ── Code Action: Remove Unused Import ───────────────────────────────────────
 // The `use ReflectionClass;` below is unused — it appears dimmed in the editor.
 // Place cursor on it and press Ctrl+. → "Remove unused import 'ReflectionClass'"

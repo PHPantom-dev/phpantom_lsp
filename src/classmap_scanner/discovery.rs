@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use memchr::memmem;
 
+use super::filters::IndexFilters;
 use super::{ScanResult, WorkspaceScanResult, read_for_scan, scan_content};
 use crate::progress::ScanProgress;
 
@@ -70,7 +71,11 @@ pub fn scan_directories(
     vendor_dir_paths: &[PathBuf],
 ) -> HashMap<String, PathBuf> {
     let skip_paths = HashSet::new();
-    let opts = WalkOptions::new(vendor_dir_paths.to_vec(), &skip_paths);
+    let opts = WalkOptions::new(
+        vendor_dir_paths.to_vec(),
+        &skip_paths,
+        IndexFilters::empty(),
+    );
     let paths: Vec<PathBuf> = walk_roots(dirs, &opts).into_iter().flatten().collect();
     scan_files_parallel_classes(&paths, None)
 }
@@ -97,7 +102,14 @@ pub fn scan_psr4_directories(
     classmap_dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
 ) -> HashMap<String, PathBuf> {
-    scan_psr4_directories_with_skip(psr4, classmap_dirs, vendor_dir_paths, &HashSet::new(), None)
+    scan_psr4_directories_with_skip(
+        psr4,
+        classmap_dirs,
+        vendor_dir_paths,
+        &HashSet::new(),
+        &IndexFilters::empty(),
+        None,
+    )
 }
 
 /// Like [`scan_psr4_directories`] but accepts a set of absolute file
@@ -110,10 +122,15 @@ pub fn scan_psr4_directories_with_skip(
     classmap_dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
     skip_paths: &HashSet<PathBuf>,
+    filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
 ) -> HashMap<String, PathBuf> {
     // ── Walk the PSR-4 and classmap roots in one parallel pass ──────
-    let opts = WalkOptions::new(vendor_dir_paths.to_vec(), skip_paths);
+    let opts = WalkOptions::new(
+        vendor_dir_paths.to_vec(),
+        skip_paths,
+        std::sync::Arc::clone(filters),
+    );
     let mut roots: Vec<PathBuf> = psr4.iter().map(|(_, dir)| dir.clone()).collect();
     roots.extend(classmap_dirs.iter().cloned());
     let mut walked = walk_roots(&roots, &opts);
@@ -154,6 +171,7 @@ pub fn scan_vendor_packages(workspace_root: &Path, vendor_dir: &str) -> Workspac
         vendor_dir,
         &HashSet::new(),
         &HashSet::new(),
+        &IndexFilters::empty(),
         None,
     )
 }
@@ -386,6 +404,7 @@ pub fn scan_vendor_packages_with_skip(
     vendor_dir: &str,
     skip_paths: &HashSet<PathBuf>,
     explicit_deps: &HashSet<String>,
+    filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
@@ -478,7 +497,11 @@ pub fn scan_vendor_packages_with_skip(
     // the cores are shared across all packages instead of one thread per
     // package.  The roots are laid out PSR-4 first and classmap/`files`
     // second, matching the order phase 3 concatenates them in.
-    let opts = WalkOptions::new(vec![vendor_path.clone()], skip_paths);
+    let opts = WalkOptions::new(
+        vec![vendor_path.clone()],
+        skip_paths,
+        std::sync::Arc::clone(filters),
+    );
     let mut roots: Vec<PathBuf> = Vec::new();
     for (_, sources) in &collected {
         roots.extend(sources.psr4.iter().cloned());
@@ -877,11 +900,16 @@ fn scan_files_parallel_full(
 pub fn scan_workspace_fallback_full(
     workspace_root: &Path,
     skip_dirs: &HashSet<PathBuf>,
+    filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     // Phase 1: collect file paths
     let skip_paths = HashSet::new();
-    let opts = WalkOptions::new(skip_dirs.iter().cloned().collect(), &skip_paths);
+    let opts = WalkOptions::new(
+        skip_dirs.iter().cloned().collect(),
+        &skip_paths,
+        std::sync::Arc::clone(filters),
+    );
     let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
         walk_roots(&[workspace_root.to_path_buf()], &opts)
             .into_iter()
@@ -907,10 +935,17 @@ pub fn scan_workspace_fallback_full(
 /// for valid PHP source: `.module`, `.install`, `.theme`, `.profile`,
 /// `.inc`, and `.engine`.  All are included by this scanner.
 ///
-/// Test directories (`tests/` and `Tests/`) are excluded by name to avoid
-/// indexing duplicate class definitions from unit-test fixtures.
+/// Test directories are indexed too: module tests extend base classes
+/// that live in `core/tests/` (`Drupal\Tests\UnitTestCase`,
+/// `Drupal\KernelTests\KernelTestBase`, …) and reference test modules
+/// under `*/tests/modules/`, so skipping them by name leaves those
+/// classes unresolvable. Projects that want a smaller index can trim it
+/// with `[indexing] exclude`, which is honored here like everywhere
+/// else; duplicate fixture classes are handled by the classmap's
+/// first-wins merge.
 pub fn scan_drupal_directories(
     web_root: &Path,
+    filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     use ignore::WalkBuilder;
@@ -933,6 +968,7 @@ pub fn scan_drupal_directories(
             continue;
         }
 
+        let filter_excludes = std::sync::Arc::clone(filters);
         let walker = WalkBuilder::new(&dir)
             // Gitignore is intentionally disabled — Drupal's .gitignore
             // excludes web/core and web/modules/contrib which are the
@@ -943,21 +979,15 @@ pub fn scan_drupal_directories(
             .hidden(true) // still skip .git, .idea, etc.
             .parents(true)
             .ignore(false)
-            .filter_entry(|entry| {
-                if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                    let name = entry.file_name().to_str().unwrap_or("");
-                    // Exclude test directories (both conventional casings)
-                    if name == "tests" || name == "Tests" {
-                        return false;
-                    }
-                }
-                true
+            .filter_entry(move |entry| {
+                let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+                !filter_excludes.is_excluded_entry(entry.path(), is_dir)
             })
             .build();
 
         for entry in walker.flatten() {
             let path = entry.path();
-            if path.is_file() && is_drupal_php_file(path) {
+            if path.is_file() && (is_drupal_php_file(path) || filters.is_php_file(path)) {
                 php_files.push((path.to_path_buf(), crate::ClassCompletionOrigin::Project));
             }
         }
@@ -996,11 +1026,6 @@ fn value_to_strings(value: &serde_json::Value) -> Vec<String> {
     }
 }
 
-/// Return `true` for a file the PHP scanners should read.
-fn is_php_file(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| ext == "php")
-}
-
 /// What a [`walk_roots`] call leaves out.
 struct WalkOptions<'a> {
     /// Directories that must never be entered: vendor trees scanned
@@ -1011,13 +1036,20 @@ struct WalkOptions<'a> {
     /// Absolute file paths to leave out of the result, typically the ones
     /// Composer's generated classmap already covers.
     skip_paths: &'a HashSet<PathBuf>,
+    /// Compiled `[indexing]` exclude globs and extra PHP extensions.
+    filters: std::sync::Arc<IndexFilters>,
 }
 
 impl<'a> WalkOptions<'a> {
-    fn new(skip_dirs: Vec<PathBuf>, skip_paths: &'a HashSet<PathBuf>) -> Self {
+    fn new(
+        skip_dirs: Vec<PathBuf>,
+        skip_paths: &'a HashSet<PathBuf>,
+        filters: std::sync::Arc<IndexFilters>,
+    ) -> Self {
         Self {
             skip_dirs: std::sync::Arc::new(skip_dirs),
             skip_paths,
+            filters,
         }
     }
 }
@@ -1076,6 +1108,7 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
     };
 
     let skip_dirs = std::sync::Arc::clone(&opts.skip_dirs);
+    let filter_excludes = std::sync::Arc::clone(&opts.filters);
     builder
         .git_ignore(true)
         .git_global(true)
@@ -1085,12 +1118,16 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
         .ignore(true)
         .threads(thread_count())
         .filter_entry(move |entry| {
-            !(entry.file_type().is_some_and(|ft| ft.is_dir())
-                && skip_dirs.iter().any(|dir| dir == entry.path()))
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir && skip_dirs.iter().any(|dir| dir == entry.path()) {
+                return false;
+            }
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         });
 
     let (tx, rx) = std::sync::mpsc::channel::<(usize, PathBuf)>();
     let skip_paths = opts.skip_paths;
+    let filters = &opts.filters;
     let roots_by_path = &roots_by_path;
     builder.build_parallel().run(|| {
         let tx = tx.clone();
@@ -1101,7 +1138,7 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
             let path = entry.path();
             let file_type = entry.file_type();
             if file_type.is_some_and(|ft| ft.is_dir())
-                || !is_php_file(path)
+                || !filters.is_php_file(path)
                 || skip_paths.contains(path)
                 // `ignore` reports a symlink's own type, so confirm the
                 // target is a regular file before indexing it.  The tests

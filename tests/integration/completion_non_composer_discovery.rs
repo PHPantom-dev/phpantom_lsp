@@ -349,7 +349,7 @@ async fn namespaced_function_completion_from_autoload_index() {
 
 #[test]
 fn scan_workspace_fallback_full_discovers_all_symbol_types() {
-    use phpantom_lsp::classmap_scanner::scan_workspace_fallback_full;
+    use phpantom_lsp::classmap_scanner::{IndexFilters, scan_workspace_fallback_full};
 
     let dir = tempfile::tempdir().unwrap();
 
@@ -375,7 +375,7 @@ fn scan_workspace_fallback_full_discovers_all_symbol_types() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None);
 
     // Classes
     assert!(
@@ -411,7 +411,7 @@ fn scan_workspace_fallback_full_discovers_all_symbol_types() {
 
 #[test]
 fn scan_workspace_fallback_full_excludes_class_methods_and_constants() {
-    use phpantom_lsp::classmap_scanner::scan_workspace_fallback_full;
+    use phpantom_lsp::classmap_scanner::{IndexFilters, scan_workspace_fallback_full};
 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -421,7 +421,7 @@ fn scan_workspace_fallback_full_excludes_class_methods_and_constants() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None);
 
     assert!(
         result.classmap.contains_key("Service"),

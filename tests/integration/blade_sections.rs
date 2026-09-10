@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -47,16 +47,7 @@ mod tests {
     async fn open(backend: &phpantom_lsp::Backend, dir: &tempfile::TempDir, relative: &str) -> Url {
         let uri = uri_of(dir, relative);
         let text = std::fs::read_to_string(dir.path().join(relative)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text,
-                },
-            })
-            .await;
+        open_document(backend, &uri, "blade", &text).await;
         uri
     }
 

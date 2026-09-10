@@ -26,6 +26,19 @@ use crate::util::short_name;
 
 use super::make_code_action_data;
 
+fn span_matches_request(
+    span_start: usize,
+    span_end: usize,
+    request_start: usize,
+    request_end: usize,
+) -> bool {
+    if request_start == request_end {
+        span_start <= request_start && request_start < span_end
+    } else {
+        span_start < request_end && span_end > request_start
+    }
+}
+
 impl Backend {
     /// Collect "Import class" code actions for the cursor position.
     ///
@@ -73,9 +86,12 @@ impl Backend {
             &file_namespace,
         );
         for span in &symbol_map.spans {
-            // Check overlap: span overlaps the request range if
-            // span.start < request_end && span.end > request_start
-            if span.start as usize >= request_end || span.end as usize <= request_start {
+            if !span_matches_request(
+                span.start as usize,
+                span.end as usize,
+                request_start,
+                request_end,
+            ) {
                 continue;
             }
 
@@ -230,7 +246,12 @@ impl Backend {
         let affinity_table =
             crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
         for span in &symbol_map.spans {
-            if span.start as usize >= request_end || span.end as usize <= request_start {
+            if !span_matches_request(
+                span.start as usize,
+                span.end as usize,
+                request_start,
+                request_end,
+            ) {
                 continue;
             }
 

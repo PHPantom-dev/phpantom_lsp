@@ -1569,3 +1569,91 @@ fn blade_foreach_directive_token() {
     );
     assert_eq!(endforeach_tok.unwrap().length, 11); // @endforeach
 }
+
+#[test]
+fn phpstan_type_alias_definition_highlights_its_class_names() {
+    // The alias definition is an ordinary type, so a class named inside
+    // it is classified like any other docblock type reference.
+    let php = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @phpstan-type UserRow array{owner: User, id: int}
+ */
+class Repo {}
+"#;
+    let decoded = decode_tokens(&get_tokens(php));
+    let user = find_decoded(&decoded, 6, 38).expect("expected a token on `User`");
+    assert_eq!(user.token_type, TT_CLASS, "got {user:?}");
+    assert_eq!(user.length, 4);
+}
+
+#[test]
+fn phpstan_import_type_highlights_the_class_it_imports_from() {
+    let php = r#"<?php
+namespace App;
+
+class Other {}
+
+/**
+ * @phpstan-import-type OtherRow from Other as Row
+ */
+class Repo {}
+"#;
+    let decoded = decode_tokens(&get_tokens(php));
+    let other = find_decoded(&decoded, 6, 38).expect("expected a token on `Other`");
+    assert_eq!(other.token_type, TT_CLASS, "got {other:?}");
+    assert_eq!(other.length, 5);
+}
+
+#[test]
+fn a_type_alias_name_is_not_classified_as_a_class() {
+    // `UserRow` and `Row` are alias names, not classes; nothing should
+    // claim them as class references.
+    let php = r#"<?php
+namespace App;
+
+class Other {}
+
+/**
+ * @phpstan-type UserRow array{id: int}
+ * @phpstan-import-type OtherRow from Other as Row
+ */
+class Repo {}
+"#;
+    let decoded = decode_tokens(&get_tokens(php));
+    // `UserRow` on line 6 starts at char 17, `Row` on line 7 at char 44.
+    for (line, character) in [(6u32, 17u32), (7, 44)] {
+        assert!(
+            find_decoded(&decoded, line, character).is_none_or(|t| t.token_type != TT_CLASS),
+            "an alias name was classified as a class at {line}:{character}"
+        );
+    }
+}
+
+#[test]
+fn the_psalm_and_bare_spellings_of_the_alias_tags_behave_the_same() {
+    let php = r#"<?php
+namespace App;
+
+class Other {}
+
+/**
+ * @psalm-type PsalmRow array{owner: Other}
+ * @psalm-import-type OtherRow from Other
+ * @type BareRow array{owner: Other}
+ */
+class Repo {}
+"#;
+    let decoded = decode_tokens(&get_tokens(php));
+    for (line, character) in [(6u32, 37u32), (7, 36), (8, 30)] {
+        let tok = find_decoded(&decoded, line, character)
+            .unwrap_or_else(|| panic!("expected a token at {line}:{character}"));
+        assert_eq!(
+            tok.token_type, TT_CLASS,
+            "at {line}:{character}, got {tok:?}"
+        );
+    }
+}

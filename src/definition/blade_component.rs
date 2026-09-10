@@ -9,9 +9,7 @@
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
-use crate::blade::component_tags::{
-    TagCursor, TagKind, tag_context_at, view_names_for_component_tag,
-};
+use crate::blade::component_tags::{TagCursor, TagKind, tag_context_at};
 use crate::text_position::position_to_byte_offset;
 
 impl Backend {
@@ -44,11 +42,8 @@ impl Backend {
     /// character: an anonymous component has no declaration to point at,
     /// so the file itself is the definition.
     fn anonymous_component_template(&self, tag: &str) -> Option<Location> {
-        let anonymous = self.anonymous_component_namespaces();
+        let view = self.anonymous_component_view(tag, &self.anonymous_component_namespaces())?;
         let discovery = self.blade_discovery();
-        let view = view_names_for_component_tag(tag, &anonymous)
-            .into_iter()
-            .find(|name| discovery.views.contains_key(name))?;
         let path = discovery.views.get(&view)?;
         Some(Location {
             uri: Url::from_file_path(path).ok()?,

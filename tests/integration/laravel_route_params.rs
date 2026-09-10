@@ -5,7 +5,7 @@
 //! the name was declared on.  The same applies to `to_route()`,
 //! `signedRoute()`, and `temporarySignedRoute()`.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -30,19 +30,6 @@ Route::resource('photos.comments', CommentController::class);
 Route::apiResource('categories', CategoryController::class)
     ->parameters(['categories' => 'slug']);
 ";
-
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 /// Position of the cursor immediately after the first occurrence of `needle`.
 fn position_after(content: &str, needle: &str) -> Position {
@@ -80,22 +67,16 @@ async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
     );
     backend.initialized(InitializedParams {}).await;
 
-    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php"))
-        .unwrap()
-        .to_string();
-    open(&backend, &routes_uri, ROUTES).await;
+    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php")).unwrap();
+    open_php(&backend, &routes_uri, ROUTES).await;
 
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open(&backend, &uri, consumer).await;
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php")).unwrap();
+    open_php(&backend, &uri, consumer).await;
 
     let result = backend
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: position_after(consumer, needle),
             },
             work_done_progress_params: WorkDoneProgressParams::default(),

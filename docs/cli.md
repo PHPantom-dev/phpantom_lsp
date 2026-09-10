@@ -1,9 +1,9 @@
 # CLI Reference
 
 PHPantom is a language server, but it also ships CLI tools for batch
-analysis and automated fixing. These run the same engine that powers the
-editor, so results are consistent between what you see in your editor
-and what CI reports.
+analysis, automated fixing, and formatting. These run the same engine
+that powers the editor, so results are consistent between what you see
+in your editor and what CI reports.
 
 ## Modes
 
@@ -13,10 +13,91 @@ and what CI reports.
 | `phpantom_lsp --tcp 9257`| Start the LSP server listening on a TCP port         |
 | `phpantom_lsp analyze`   | Report diagnostics across the project                |
 | `phpantom_lsp fix`       | Apply automated code fixes across the project        |
+| `phpantom_lsp format`    | Format PHP files and Blade templates                 |
+| `phpantom_lsp move`      | Move classes or namespaces and update references     |
 | `phpantom_lsp init`      | Generate a default `.phpantom.toml` config file      |
 
 Running with no subcommand starts the language server. Editors launch
 this automatically.
+
+---
+
+## `move`
+
+Moves a class or namespace and updates its declarations, imports, and references
+across the project. Inputs can be fully-qualified names or PSR-4 paths:
+
+```sh
+phpantom_lsp move 'App\Old\Widget' 'App\Domain\Gadget'
+phpantom_lsp move src/Old/Widget.php src/Domain/Gadget.php
+phpantom_lsp move 'App\Old' 'App\Domain'
+phpantom_lsp move src/Old src/Domain
+phpantom_lsp move --dry-run --format json src/Old src/Domain
+```
+
+`FROM` decides what is being moved, and `TO` is read the same way: a class
+moves to a full destination name, so `move 'App\Old\Widget' 'App\Domain'`
+renames the class to `Domain`, and moving it into `App\Domain` under its own
+name is written out as `'App\Domain\Widget'`.
+
+Path forms require a Composer PSR-4 mapping. A file identifies one class and a
+directory identifies its namespace prefix. The command refuses occupied class
+destinations and namespace merges with clashing class names before writing any
+files.
+
+A destination no PSR-4 mapping covers rewrites the declarations and their
+references, but no file can follow them, which leaves the autoloader unable to
+find what moved. That is reported as a warning, so a script can catch it. A
+destination under a *different* mapping is an ordinary move: the files follow it
+to that mapping's directory.
+
+### What a move could not reach
+
+The rewriter only reaches what it can resolve as a symbol. A namespace named in
+a Blade template, a Doctrine or Symfony YAML config, a PHPStan baseline, or a
+plain path string is invisible to it, and so is a directory spelled out inside
+`app_path('Elastic/Config/ILM/')`. Rewriting those is out of scope: nothing can
+tell whether a string is a path or a label, and the matching key in a deployment
+secret is out of reach entirely.
+
+So the move reports them instead. Once the plan is built, the project is scanned
+as it will look afterwards, and every leftover mention of the old name or the old
+location becomes a warning with the file and line it sits on:
+
+```
+Would move namespace `App\Entity` to `App\Domain\Entity` (71 file(s) changed, 1 path(s) moved).
+Warning: config/packages/doctrine.yaml:26: The old path `src/Entity` still appears here. ...
+Warning: src/Repository/SeasonRepository.php:65: The old name `App\Entity` still appears here. ...
+```
+
+`files_changed` can then be read against a stated list of what was left alone,
+rather than assumed complete. The scan covers every file regardless of extension,
+skipping `vendor/`, `.git/`, and anything `.gitignore` or `[indexing] exclude`
+rules out.
+
+### Options
+
+| Flag                   | Description                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| `FROM`                 | Source class, namespace, PHP file, or PSR-4 directory.             |
+| `TO`                   | Destination name or path, of the same kind as `FROM`.              |
+| `--dry-run`            | Validate and report the move without changing the project.         |
+| `--no-colour`          | Disable coloured output.                                           |
+| `--project-root <DIR>` | Project root directory. Defaults to the current working directory. |
+| `--format <FORMAT>`    | Output format: `table` (default), `github`, or `json`.             |
+
+`--format json` emits the same `{"totals": …, "files": …, "errors": []}` shape
+`analyze` does, with the move's own counters under a `move` key, so both commands
+can be consumed by the same tooling. `--format github` emits workflow
+annotations; the default `table` adds them automatically when `GITHUB_ACTIONS`
+is set.
+
+### Exit codes
+
+| Code | Meaning                                      |
+| ---- | -------------------------------------------- |
+| 0    | Move applied, or valid dry-run completed     |
+| 1    | Invalid input, conflict, or filesystem error |
 
 ---
 
@@ -174,6 +255,7 @@ Each has a rule identifier shown below the message.
 | `argument_count`         | Error    | Wrong number of arguments to a function or method     |
 | `implementation_error`   | Error    | Missing required interface or abstract methods        |
 | `scalar_member_access`   | Error    | Member access on a scalar type (int, string, etc.)    |
+| `invalid_member_access`  | Error    | `private` or `protected` member reached from outside  |
 | `unused_import`          | Hint     | `use` statement with no references in the file        |
 | `deprecated`             | Hint     | Reference to a `@deprecated` symbol                   |
 
@@ -262,6 +344,97 @@ phpantom_lsp fix --dry-run --project-root /path/to/app
 Running `fix` twice produces the same result as running it once. If
 all issues are already resolved, the command exits with code 0 and
 writes nothing.
+
+---
+
+## `format`
+
+Formats every PHP file and Blade template in the project with the same
+formatter the editor runs on save, or, with `--check`, reports the files
+that are not formatted and exits non-zero without writing anything. That
+is the role `blade-formatter -c`, `phpcs`, and `php-cs-fixer --dry-run`
+play in a pipeline, so a CI job can require that a pull request ran the
+formatter.
+
+```sh
+phpantom_lsp format                               # format the whole project
+phpantom_lsp format --check                       # report unformatted files, write nothing
+phpantom_lsp format resources/views               # restrict to a subdirectory
+phpantom_lsp format app/Foo.php                   # format a single file
+phpantom_lsp format --check --format github       # annotate a pull request diff
+phpantom_lsp format --project-root /path/to/app   # explicit project root
+```
+
+Each file goes through the strategy PHPantom resolves for the project, so
+a run honours a Laravel Pint, php-cs-fixer, or PHP_CodeSniffer the project
+depends on, and uses the built-in formatter otherwise. Blade templates
+resolve separately: Pint when the project formats Blade with it, the
+built-in reindenter otherwise. See
+[`[formatting]`](configuration.md#formatting) for how that is decided and how
+to override it. The run opens with a line on stderr naming what it
+resolved, so a CI log records which formatter enforced the result.
+
+Templates whose indentation is output rather than layout (Envoy task
+files, Markdown mail templates, Laravel Boost guidelines) are left alone,
+and `--check` never fails a project for having one. Formatting turned off
+in `.phpantom.toml` exits 0 with a note rather than reporting every file
+as formatted.
+
+### Options
+
+| Flag                       | Description                                                            |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `[PATH]...`                | Files or directories to format. Defaults to the entire project.        |
+| `--check`                  | List the files that are not formatted and write nothing.               |
+| `--indent-size <N>`        | Spaces per indentation level for Blade templates (default 4).          |
+| `--use-tabs`               | Indent Blade templates with tabs instead of spaces.                    |
+| `--project-root <DIR>`     | Project root directory. Defaults to the current working directory.     |
+| `--no-colour`              | Disable ANSI colour output.                                            |
+| `--format <FORMAT>`        | `table` (default), `github`, or `json`.                                |
+
+`--indent-size` and `--use-tabs` reach the built-in Blade reindenter
+only, which takes indentation from the editor over LSP and has no other
+source for it on the command line. PHP files are formatted to the
+project's own rules either way.
+
+### Exit codes
+
+| Code | Meaning                                            |
+| ---- | -------------------------------------------------- |
+| 0    | Every file is formatted, or every file was written |
+| 1    | A file could not be read, formatted, or written    |
+| 2    | `--check` found files that are not formatted       |
+
+### Example output
+
+```sh
+phpantom_lsp format --check
+```
+
+```
+ resources/views/home.blade.php
+ src/Service/UserService.php
+
+ [CHECK] 2 files would be reformatted
+```
+
+```sh
+phpantom_lsp format
+```
+
+```
+ resources/views/home.blade.php
+ src/Service/UserService.php
+
+ [FORMATTED] Reformatted 2 files
+```
+
+### Idempotency
+
+Running `format` twice produces the same result as running it once, and
+`--check` passes immediately afterwards. That is what makes the pair
+usable as a CI gate: the job runs `--check`, and a contributor clears it
+by running the command without it.
 
 ---
 
@@ -355,6 +528,13 @@ phpantom_lsp analyze --severity warning --project-root . --no-colour
 
 ```sh
 phpantom_lsp fix --dry-run --rule unused_import --project-root . --no-colour
+```
+
+**Formatting gate.** Fail the build when a file was committed
+unformatted:
+
+```sh
+phpantom_lsp format --check --project-root . --no-colour
 ```
 
 **Pre-commit hook.** Clean up imports before every commit:

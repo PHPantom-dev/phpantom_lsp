@@ -698,6 +698,80 @@ fn import_action_offered_for_unresolved_class() {
 }
 
 #[test]
+fn import_action_offered_for_point_request_at_first_character() {
+    let backend = crate::Backend::new_test();
+    let uri = "file:///test.php";
+    let content = "<?php\nnamespace App;\n\nnew Request();\n";
+    backend.update_ast(uri, content);
+
+    backend.symbols.fqn_uri_index.write().insert(
+        "Illuminate\\Http\\Request".to_string(),
+        "file:///vendor/Request.php".to_string(),
+    );
+
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier {
+            uri: uri.parse().unwrap(),
+        },
+        range: Range {
+            start: Position::new(3, 4),
+            end: Position::new(3, 4),
+        },
+        context: CodeActionContext {
+            diagnostics: vec![],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+
+    let actions = backend.handle_code_action(uri, content, &params);
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        CodeActionOrCommand::CodeAction(code_action)
+            if code_action.title == "Import `Illuminate\\Http\\Request`"
+    )));
+}
+
+#[test]
+fn import_action_offered_for_static_point_request_at_first_character() {
+    let backend = crate::Backend::new_test();
+    let uri = "file:///test.php";
+    let content = "<?php\nnamespace App;\n\nCarbon::now();\n";
+    backend.update_ast(uri, content);
+
+    backend.symbols.fqn_uri_index.write().insert(
+        "Carbon\\Carbon".to_string(),
+        "file:///vendor/Carbon.php".to_string(),
+    );
+
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier {
+            uri: uri.parse().unwrap(),
+        },
+        range: Range {
+            start: Position::new(3, 0),
+            end: Position::new(3, 0),
+        },
+        context: CodeActionContext {
+            diagnostics: vec![],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+
+    let actions = backend.handle_code_action(uri, content, &params);
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        CodeActionOrCommand::CodeAction(code_action)
+            if code_action.title == "Import `Carbon\\Carbon`"
+    )));
+}
+
+#[test]
 fn no_import_action_when_already_imported() {
     let backend = crate::Backend::new_test();
     let uri = "file:///test.php";
@@ -735,7 +809,7 @@ fn no_import_action_when_already_imported() {
     let import_actions: Vec<_> = actions
         .iter()
         .filter(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import"),
+            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import `"),
             _ => false,
         })
         .collect();
@@ -783,7 +857,7 @@ fn no_import_action_for_fqn_reference() {
     let import_actions: Vec<_> = actions
         .iter()
         .filter(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import"),
+            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Import `"),
             _ => false,
         })
         .collect();

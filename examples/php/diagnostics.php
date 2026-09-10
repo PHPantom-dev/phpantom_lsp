@@ -394,6 +394,60 @@ class ReadonlyWriteDemo
 }
 
 
+// ── Diagnostic: Member Visibility ───────────────────────────────────────────
+// A member that exists is not automatically a member you may touch.  PHP
+// resolves the access to a declaration first and enforces that declaration's
+// visibility second, so reaching a `private` or `protected` member from a
+// scope that cannot see it is a fatal error.  The check is made against the
+// class that *declares* the member, not the one the access went through.
+
+class MemberVisibilityDemo extends Scaffolding\ScaffoldingVault
+{
+    public function insideTheHierarchy(): void
+    {
+        // No diagnostic — a subclass sees protected members:
+        echo $this->branch;
+        echo $this->audit();
+        echo static::ROTATION;
+
+        // Error — PHP does not inherit private members, so `$pin` belongs to
+        // the parent alone:
+        echo $this->pin;
+    }
+
+    public function fromOutside(): void
+    {
+        $vault = new Scaffolding\ScaffoldingVault();
+
+        // No diagnostic — public members are always reachable:
+        echo $vault->label;
+        echo $vault->open();
+        echo Scaffolding\ScaffoldingVault::REGION;
+
+        // No diagnostic — `$branch` is protected and declared on the class
+        // this one descends from, so it is in scope even on another instance:
+        echo $vault->branch;
+
+        // Error — the property is private to the class that declares it:
+        echo $vault->pin;
+
+        // Error — a method is checked the same way:
+        echo $vault->rotate();
+
+        // Error — so is a class constant:
+        echo Scaffolding\ScaffoldingVault::MASTER_KEY;
+
+        // Error — and a static property:
+        echo Scaffolding\ScaffoldingVault::$openCount;
+
+        // Error — `$ledger` is private to the subclass that declares it, and
+        // this class is a sibling of that one rather than a descendant:
+        $branch = new Scaffolding\ScaffoldingBranchVault();
+        echo $branch->ledger;
+    }
+}
+
+
 // ── Diagnostic: Docblock Contradicts the Type Hint ──────────────────────────
 // A `@param` or `@return` tag refines the native declaration; it must not
 // disagree with it.  When the signature admits `null` and the tag does not,

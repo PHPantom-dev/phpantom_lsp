@@ -117,6 +117,18 @@ impl LanguageServer for Backend {
             *self.client_name.lock() = info.name.clone();
         }
 
+        // File filters the editor forwarded from its own settings. Read
+        // before anything scans, so the very first discovery pass already
+        // honours them rather than indexing excluded trees and dropping
+        // them later.
+        if let Some(options) = params
+            .initialization_options
+            .as_ref()
+            .and_then(crate::config::ClientIndexingOptions::from_client_settings)
+        {
+            self.set_client_indexing_options(options);
+        }
+
         let client_supports_pull = params
             .capabilities
             .text_document
@@ -126,18 +138,26 @@ impl LanguageServer for Backend {
         self.supports_pull_diagnostics
             .store(client_supports_pull, Ordering::Release);
 
-        // Detect whether the client supports file rename operations in
-        // workspace edits.  Used by the rename handler to include a
-        // `RenameFile` operation when a class rename matches PSR-4 naming.
-        let client_supports_file_rename = params
+        // Detect which resource operations the client accepts in workspace
+        // edits: the rename handler includes a `RenameFile` operation when a
+        // class rename matches PSR-4 naming, and the code actions that
+        // create a file (extract interface, create a missing view) are only
+        // offered when `CreateFile` is accepted.
+        let resource_operations = params
             .capabilities
             .workspace
             .as_ref()
             .and_then(|ws| ws.workspace_edit.as_ref())
-            .and_then(|we| we.resource_operations.as_ref())
-            .is_some_and(|ops| ops.contains(&ResourceOperationKind::Rename));
-        self.supports_file_rename
-            .store(client_supports_file_rename, Ordering::Release);
+            .and_then(|we| we.resource_operations.as_deref())
+            .unwrap_or_default();
+        self.supports_file_rename.store(
+            resource_operations.contains(&ResourceOperationKind::Rename),
+            Ordering::Release,
+        );
+        self.supports_file_create.store(
+            resource_operations.contains(&ResourceOperationKind::Create),
+            Ordering::Release,
+        );
 
         // Detect whether the client supports server-initiated work-done
         // progress (window/workDoneProgress/create).  Per the LSP spec,
@@ -176,6 +196,16 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
+
+        let client_supports_code_lens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.code_lens.as_ref())
+            .and_then(|code_lens| code_lens.refresh_support)
+            .unwrap_or(false);
+        self.supports_code_lens_refresh
+            .store(client_supports_code_lens_refresh, Ordering::Release);
 
         // Reference counts on declarations are computed off the request
         // path, so the hints an editor holds are the ones from before the
@@ -249,6 +279,7 @@ impl LanguageServer for Backend {
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
@@ -274,7 +305,7 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
-                    resolve_provider: Some(false),
+                    resolve_provider: Some(true),
                 }),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -342,7 +373,7 @@ impl LanguageServer for Backend {
                 self.workspace.global_config_path.as_deref(),
             ) {
                 Ok(cfg) => {
-                    *self.workspace.config.lock() = cfg;
+                    self.set_config(cfg);
                 }
                 Err(e) => {
                     self.log(
@@ -374,8 +405,6 @@ impl LanguageServer for Backend {
                 });
             self.set_php_version(php_version);
 
-            let has_composer_json = composer_package.is_some();
-
             // ── Create a progress token for indexing feedback ────────
             // The heavy scans below run synchronously, so per-file
             // progress is written to a shared `ScanProgress` state and
@@ -390,22 +419,8 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
-            if has_composer_json {
-                // ── Single-project path (root composer.json exists) ──────
-                self.init_single_project(&root, php_version, composer_package, Some(&progress))
-                    .await;
-            } else {
-                // ── Monorepo / non-Composer path ────────────────────────
-                let subprojects = composer::discover_subproject_roots(&root);
-
-                if !subprojects.is_empty() {
-                    self.init_monorepo(&root, &subprojects, php_version, Some(&progress))
-                        .await;
-                } else {
-                    self.init_no_composer(&root, php_version, Some(&progress))
-                        .await;
-                }
-            }
+            self.discover_workspace_symbols(&root, php_version, composer_package, Some(&progress))
+                .await;
 
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
@@ -559,45 +574,15 @@ impl LanguageServer for Backend {
         // Register file watchers for staleness detection.  The client
         // will notify us when PHP files or composer files change on disk
         // (even outside the editor), so we can refresh our indices.
-        let mut watchers = vec![
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/*.php".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/composer.json".to_string()),
-                kind: Some(WatchKind::Change),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
-                kind: Some(WatchKind::Change),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-        ];
-        if self.resolved_class_cache.read().is_laravel() {
-            watchers.extend([
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.sql".to_string()),
-                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                },
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
-                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                },
-            ]);
-        }
-
-        registrations.push(Registration {
-            id: "workspace/didChangeWatchedFiles".to_string(),
-            method: "workspace/didChangeWatchedFiles".to_string(),
-            register_options: Some(
-                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers })
-                    .unwrap(),
-            ),
-        });
+        // `[indexing] extensions` entries get their own watchers so files
+        // like Drupal's `.module` refresh the index the way `.php` does.
+        // Built by the same helper `reload_config` uses to keep this
+        // registration current when the extension list changes mid-session
+        // (see `indexing::watch::reregister_watched_files_if_changed`).
+        let (watched_files_registration, extra_extensions, is_laravel) =
+            self.build_watched_file_registration();
+        registrations.push(watched_files_registration);
+        *self.registered_watcher_state.write() = Some((extra_extensions, is_laravel));
 
         if let Some(client) = &self.client {
             let _ = client.register_capability(registrations).await;
@@ -730,6 +715,16 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
+        if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
+            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+                .await;
+            return;
+        }
+
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
@@ -809,6 +804,46 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // A resource document is re-scanned the same way a PHP file is
+        // re-parsed: on a blocking task, and only if the buffer it was
+        // queued for is still the current one.  Scanning a large XML on the
+        // service loop for every keystroke would stall interactive
+        // requests, and refreshing lenses per keystroke would make the
+        // client re-pull them faster than it can render them.
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if self.sync_ast_updates {
+                self.update_resource_symbol_index(&uri, &text);
+                return;
+            }
+            let backend = self.clone_for_blocking();
+            tokio::spawn(async move {
+                let refresh_backend = backend.clone_for_blocking();
+                let committed = run_blocking_cancel_safe("did_change resource scan", move || {
+                    let is_latest_text = backend
+                        .open_files
+                        .read()
+                        .get(&uri)
+                        .is_some_and(|current| Arc::ptr_eq(current, &text));
+                    if !is_latest_text {
+                        return false;
+                    }
+                    backend.update_resource_symbol_index(&uri, &text);
+                    true
+                })
+                .await;
+
+                if committed == Some(true)
+                    && refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    && let Some(ref client) = refresh_backend.client
+                {
+                    let _ = client.code_lens_refresh().await;
+                }
+            });
+            return;
+        }
+
         // Re-parse in a blocking background task so typing does not
         // monopolize the LSP service loop and delay completion requests.
         //
@@ -878,6 +913,12 @@ impl LanguageServer for Backend {
                     {
                         let _ = client.inlay_hint_refresh().await;
                     }
+                    if refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    {
+                        let _ = client.code_lens_refresh().await;
+                    }
                 }
             });
         }
@@ -908,7 +949,15 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
-        self.clear_file_maps(&uri);
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_resource_symbol_index(&uri, &content);
+            } else {
+                self.clear_file_maps(&uri);
+            }
+        } else {
+            self.clear_file_maps(&uri);
+        }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
@@ -919,13 +968,22 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            self.update_ast(&uri, &text);
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+        }
+
+        if is_resource {
+            return;
         }
 
         // A save is a reliable sync point: re-diagnose the saved file
@@ -956,6 +1014,42 @@ impl LanguageServer for Backend {
         self.schedule_external_diagnostics(uri);
     }
 
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        // Clients re-push settings for reasons of their own, so a
+        // notification that carries no file filters is not a request to
+        // drop the ones already in force, and one that repeats the
+        // current filters is not a change.
+        let Some(options) =
+            crate::config::ClientIndexingOptions::from_client_settings(&params.settings)
+        else {
+            return;
+        };
+        // Captured before the change, so the reconciliation below can
+        // tell which way the filters moved.
+        let previous_filters = self.index_filters();
+        if !self.set_client_indexing_options(options) {
+            return;
+        }
+
+        // A newly added extension needs its own watcher, or the client
+        // never reports events for those files and the index keeps
+        // serving the last full scan. Same follow-up a live
+        // `.phpantom.toml` edit performs.
+        self.reregister_watched_files_if_changed();
+
+        // The index was built under the filters the user just changed
+        // away from: drop what they now exclude, and walk for what they
+        // now admit.
+        self.reconcile_index_for_filter_change(&previous_filters);
+
+        // A narrowed exclude list makes classes resolvable that were
+        // missing a moment ago, so the negative cache has to go or the
+        // editor keeps showing "class not found" for them.
+        self.clear_class_not_found_cache();
+
+        self.request_diagnostic_refresh().await;
+    }
+
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         let workspace_root = self.workspace.workspace_root.read().clone();
         let Some(root) = workspace_root else {
@@ -979,6 +1073,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 
@@ -996,6 +1095,22 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("goto_definition", move || {
+            // YAML and XML may name PHP classes under any schema. Resolve
+            // fully-qualified class and Class::member tokens before entering
+            // the PHP-only symbol-map path below.
+            if crate::resource_navigation::is_resource_document(&uri_clone) {
+                let location = backend.get_file_content(&uri_clone).and_then(|content| {
+                    crate::util::catch_panic_unwind_safe(
+                        "goto_definition",
+                        &uri_clone,
+                        Some(position),
+                        || backend.resolve_resource_definition(&content, position),
+                    )
+                    .flatten()
+                });
+                return Ok(location.map(GotoDefinitionResponse::Scalar));
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -1411,18 +1526,29 @@ impl LanguageServer for Backend {
 
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
-        run_blocking_cancel_safe("rename", move || {
+        let outcome = run_blocking_cancel_safe("rename", move || {
             backend.handle_with_position("rename", &uri_clone, position, |content, pos| {
-                backend
-                    .handle_rename(&uri_clone, content, pos, &new_name)
-                    .map(|mut edit| {
-                        backend.translate_workspace_edit(&mut edit);
-                        edit
-                    })
+                Some(backend.handle_rename(&uri_clone, content, pos, &new_name))
             })
         })
         .await
-        .unwrap_or(Ok(None))
+        .unwrap_or(Ok(None))?;
+
+        // A refusal carries a reason the user has to see (the move's
+        // destination is taken), and an error response is the only part
+        // of the rename protocol an editor shows them.
+        match outcome {
+            Some(Err(message)) => {
+                self.log(MessageType::WARNING, message.clone()).await;
+                Err(tower_lsp::jsonrpc::Error {
+                    code: tower_lsp::jsonrpc::ErrorCode::InvalidRequest,
+                    message: message.into(),
+                    data: None,
+                })
+            }
+            Some(Ok(edit)) => Ok(edit),
+            None => Ok(None),
+        }
     }
 
     async fn document_symbol(
@@ -1461,7 +1587,7 @@ impl LanguageServer for Backend {
         let u = uri.clone();
         self.coalesced_whole_file("folding_range", &uri, move || {
             backend.handle_with_uri("folding_range", &u, |content| {
-                backend.handle_folding_range(content)
+                backend.handle_folding_range(&u, content)
             })
         })
         .await
@@ -1471,12 +1597,25 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
-        self.coalesced_whole_file("code_lens", &uri, move || {
-            backend.handle_with_uri("code_lens", &u, |content| {
-                backend.handle_code_lens(&u, content)
+        let lenses = self
+            .coalesced_whole_file("code_lens", &uri, move || {
+                backend.handle_with_uri("code_lens", &u, |content| {
+                    backend.handle_code_lens(&u, content)
+                })
             })
+            .await;
+        self.schedule_member_ref_counts();
+        lenses
+    }
+
+    async fn code_lens_resolve(&self, params: CodeLens) -> Result<CodeLens> {
+        let fallback = params.clone();
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("code_lens_resolve", move || {
+            backend.resolve_code_lens_item(params)
         })
         .await
+        .unwrap_or(fallback))
     }
 
     async fn execute_command(
@@ -1557,6 +1696,56 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         self.inlay_hint_request(params).await
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+        let backend = self.clone_for_blocking();
+        let request_uri = uri.clone();
+        run_blocking_cancel_safe("prepare_call_hierarchy", move || {
+            backend.handle_with_position(
+                "prepare_call_hierarchy",
+                &request_uri,
+                position,
+                |content, translated_position| {
+                    backend.prepare_call_hierarchy_impl(&request_uri, content, translated_position)
+                },
+            )
+        })
+        .await
+        .unwrap_or(Ok(None))
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("incoming_calls", move || {
+            backend.incoming_calls_impl(&params.item)
+        })
+        .await
+        .flatten())
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("outgoing_calls", move || {
+            backend.outgoing_calls_impl(&params.item)
+        })
+        .await
+        .flatten())
     }
 
     async fn prepare_type_hierarchy(
@@ -1689,55 +1878,39 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri.to_string();
 
-        // Blade markup isn't PHP; running it through the PHP formatting
-        // pipeline errors out or produces nonsense edits. Real Blade-aware
-        // formatting is tracked separately (docs/todo/blade.md).
-        if self.is_blade_file(&uri) {
+        // External tools discover their config from the file's real path.
+        let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
             return Ok(None);
-        }
-
-        let config = self.config();
-
-        // Read Composer metadata for require-dev detection and bin-dir.
-        let workspace_root = self.workspace.workspace_root.read().clone();
-        let composer_json: Option<composer::ComposerPackage> = workspace_root
-            .as_deref()
-            .and_then(composer::read_composer_package);
-        let bin_dir: Option<String> = composer_json.as_ref().map(composer::get_bin_dir);
-
-        // Resolve the formatting strategy: external tools, built-in, or disabled.
-        let strategy = formatting::resolve_strategy(
-            workspace_root.as_deref(),
-            &config.formatting,
-            composer_json.as_ref(),
-            bin_dir.as_deref(),
-        );
-
-        // Resolve the file path from the URI for config discovery.
-        let file_path = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok());
-        let file_path = match file_path {
-            Some(p) => p,
-            None => return Ok(None),
+        };
+        let Some(content) = self.get_file_content(&uri) else {
+            return Ok(None);
         };
 
-        let content = match self.get_file_content(&uri) {
-            Some(c) => c,
-            None => return Ok(None),
-        };
+        // Blade markup isn't PHP, so a template resolves its own strategy:
+        // Pint when the project formats Blade with it, the built-in
+        // reindenter otherwise.
+        let is_blade = self.is_blade_file(&uri);
+        let blade_options = formatting::blade::options_from_lsp(&params.options);
 
-        let php_version = self.php_version();
-
-        // Execute the resolved formatting strategy on a blocking thread
-        // to avoid stalling the async runtime while external tools run.
-        let formatting_config = config.formatting.clone();
+        // Resolving the strategy reads composer.json and running it may
+        // spawn an external tool, so all of it stays off the async runtime.
+        let backend = self.clone_for_blocking();
         let result = run_blocking_cancel_safe("formatting", move || {
-            formatting::execute_strategy(
-                &strategy,
-                &content,
-                &file_path,
-                &formatting_config,
-                php_version,
-            )
+            let formatted = if is_blade {
+                let strategy = backend.resolve_blade_formatting_strategy();
+                backend.format_blade_content(
+                    &strategy,
+                    &file_path,
+                    &content,
+                    &blade_options,
+                    &backend.shutdown_flag,
+                )
+            } else {
+                let strategy = backend.resolve_formatting_strategy();
+                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+            };
+            formatted
+                .map(|formatted| formatted.map(|text| formatting::compute_edits(&content, &text)))
         })
         .await;
 
@@ -1833,6 +2006,169 @@ mod tests {
         assert!(options["documentSelector"][0].get("scheme").is_none());
         assert!(options["documentSelector"][0].get("pattern").is_none());
     }
+
+    /// `initialize` params carrying a workspace root and whatever the
+    /// client chose to send as its initialization options.
+    fn init_params(
+        root: &std::path::Path,
+        initialization_options: Option<serde_json::Value>,
+    ) -> InitializeParams {
+        #[allow(deprecated)]
+        InitializeParams {
+            root_uri: Some(Url::from_file_path(root).unwrap()),
+            initialization_options,
+            ..Default::default()
+        }
+    }
+
+    /// The filters have to be live before anything scans, so the first
+    /// discovery pass already honours them instead of indexing excluded
+    /// trees and dropping them afterwards.
+    #[tokio::test]
+    async fn initialize_applies_client_supplied_file_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+
+        backend
+            .initialize(init_params(
+                dir.path(),
+                Some(serde_json::json!({
+                    "indexing": { "exclude": ["generated"], "extensions": ["module"] }
+                })),
+            ))
+            .await
+            .unwrap();
+
+        let filters = backend.index_filters();
+        assert!(filters.is_excluded_entry(&dir.path().join("generated"), true));
+        assert!(filters.is_php_file(&dir.path().join("a.module")));
+    }
+
+    /// Most clients send nothing, and one that does may send a shape
+    /// meant for something else entirely. Neither may switch filtering on.
+    #[tokio::test]
+    async fn initialize_without_client_filters_leaves_discovery_unfiltered() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for options in [None, Some(serde_json::json!({ "unrelated": true }))] {
+            let backend = Backend::new_test();
+            backend
+                .initialize(init_params(dir.path(), options))
+                .await
+                .unwrap();
+
+            let filters = backend.index_filters();
+            assert!(!filters.is_excluded_entry(&dir.path().join("generated"), true));
+            assert!(!filters.is_php_file(&dir.path().join("a.module")));
+        }
+    }
+
+    /// Editing the editor's own settings mid-session has to take effect
+    /// without a restart, the same way a live `.phpantom.toml` edit does.
+    #[tokio::test]
+    async fn did_change_configuration_recompiles_the_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        backend
+            .initialize(init_params(dir.path(), None))
+            .await
+            .unwrap();
+
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "phpantom": { "indexing": { "exclude": ["generated"] } }
+                }),
+            })
+            .await;
+
+        assert!(
+            backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true)
+        );
+
+        // Removing the entry again has to restore the unfiltered walk,
+        // not merely stop adding to the exclude list.
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({ "phpantom": { "indexing": {} } }),
+            })
+            .await;
+
+        assert!(
+            !backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true)
+        );
+    }
+
+    /// Recompiling the filters only governs the next scan. The
+    /// notification also has to reconcile the index that was built under
+    /// the old ones, or a class in a folder the user just hid keeps
+    /// answering completion and workspace symbol search until restart.
+    #[tokio::test]
+    async fn did_change_configuration_evicts_newly_excluded_classes() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        backend
+            .initialize(init_params(dir.path(), None))
+            .await
+            .unwrap();
+
+        let hidden = dir.path().join("generated/Hidden.php");
+        std::fs::create_dir_all(hidden.parent().unwrap()).unwrap();
+        std::fs::write(&hidden, "<?php\nclass Hidden {}\n").unwrap();
+        let uri = crate::util::path_to_uri(&hidden);
+        backend
+            .symbols
+            .with_class_declarations(|decls| decls.note_discovered("Hidden", uri));
+
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "phpantom": { "indexing": { "exclude": ["generated"] } }
+                }),
+            })
+            .await;
+
+        assert!(
+            backend.symbols.fqn_uri_index.read().get("Hidden").is_none(),
+            "a class under a newly excluded folder must leave the index"
+        );
+    }
+
+    /// VS Code's client syncs the whole `phpantom` settings section on
+    /// every change to any key in it. That notification says nothing
+    /// about file filters, so it must leave the ones the extension
+    /// forwarded at startup alone rather than reading as "cleared".
+    #[tokio::test]
+    async fn a_settings_push_without_filters_leaves_them_in_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        backend
+            .initialize(init_params(
+                dir.path(),
+                Some(serde_json::json!({ "indexing": { "exclude": ["generated"] } })),
+            ))
+            .await
+            .unwrap();
+
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "phpantom": { "trace": { "server": "verbose" } }
+                }),
+            })
+            .await;
+
+        assert!(
+            backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true),
+            "an unrelated settings push must not discard the client's filters"
+        );
+    }
 }
 
 // ─── Self-scan helpers ──────────────────────────────────────────────────────
@@ -1909,6 +2245,13 @@ impl Backend {
             {
                 let _ = client.inlay_hint_refresh().await;
             }
+            if progress_backend
+                .supports_code_lens_refresh
+                .load(Ordering::Acquire)
+                && let Some(ref client) = progress_backend.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
 
             // With the whole workspace parsed, eagerly resolve every
             // class so interactive requests hit a warm cache.  This
@@ -1975,7 +2318,9 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !self.symbol_maps.read().contains_key(uri) {
+        if !crate::resource_navigation::is_resource_document(uri)
+            && !self.symbol_maps.read().contains_key(uri)
+        {
             self.update_ast(uri, &content);
         }
 
@@ -2927,6 +3272,11 @@ impl Backend {
             + resources.folio_mounts.len()
             > 0;
         let has_bindings = !resources.bindings.is_empty();
+        let directives = crate::blade::directives::CustomDirectives::from_registrations(
+            &resources.custom_directives,
+        );
+        let directives_changed = *self.blade_custom_directives.read() != directives;
+        *self.blade_custom_directives.write() = directives;
         *self.laravel_provider_resources.write() = resources;
 
         // The shared and composed template variables are resolved from these
@@ -2949,6 +3299,29 @@ impl Backend {
         if has_bindings {
             *self.laravel_aliases.write() = None;
             self.clear_class_not_found_cache();
+        }
+
+        // Which directives exist decides what the preprocessor lowers rather
+        // than masks, and the providers registering them are scanned after
+        // the workspace index has already preprocessed every template — so
+        // the templates have to be preprocessed again against the set that
+        // just arrived.
+        if directives_changed {
+            self.reparse_blade_templates();
+        }
+    }
+
+    /// Re-preprocess every Blade template already in the virtual-PHP cache.
+    ///
+    /// A no-op before any template has been preprocessed, and only reached
+    /// when the registered directive set actually moved, so the pass cannot
+    /// repeat itself: the second scan publishes the same set.
+    fn reparse_blade_templates(&self) {
+        let uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        for uri in uris {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_ast(&uri, &content);
+            }
         }
     }
 

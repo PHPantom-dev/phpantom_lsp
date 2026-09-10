@@ -4229,6 +4229,151 @@ function test(array $params): void {
     );
 }
 
+// ─── Nullability-only argument mismatches (downgrade-nullable-argument-mismatch) ───
+
+#[test]
+fn negated_and_guard_leaves_null_reachable_as_an_error_by_default() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(mixed $password): void {
+    if ($password !== null && ! is_string($password)) {
+        throw new \Exception('bad');
+    }
+    takes_string($password);
+}
+"#;
+    let diags = collect(php);
+    let messages = type_error_messages(&diags);
+    assert_eq!(messages.len(), 1, "got {diags:?}");
+    assert!(
+        messages[0].contains("null does not satisfy string"),
+        "expected a nullability-only mismatch, got: {messages:?}"
+    );
+    let type_error = diags
+        .iter()
+        .find(|d| has_type_error(std::slice::from_ref(d)))
+        .unwrap();
+    assert_eq!(
+        type_error.severity,
+        Some(DiagnosticSeverity::ERROR),
+        "default severity must stay ERROR so existing projects see no change"
+    );
+}
+
+#[test]
+fn nullability_only_mismatch_can_be_downgraded_to_a_warning() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_downgrade.php";
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(mixed $password): void {
+    if ($password !== null && ! is_string($password)) {
+        throw new \Exception('bad');
+    }
+    takes_string($password);
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let type_errors: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .collect();
+    assert_eq!(type_errors.len(), 1, "got {diags:?}");
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::WARNING));
+}
+
+#[test]
+fn a_declared_nullable_argument_is_the_same_gap_as_the_union_spelling() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_downgrade_declared.php";
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(?string $a, string|null $b, ?array $c): void {
+    takes_string($a);
+    takes_string($b);
+    takes_string($c);
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let severities: Vec<Option<DiagnosticSeverity>> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .map(|d| d.severity)
+        .collect();
+    assert_eq!(
+        severities,
+        vec![
+            Some(DiagnosticSeverity::WARNING),
+            Some(DiagnosticSeverity::WARNING),
+            // `?array` fails on more than its nullability.
+            Some(DiagnosticSeverity::ERROR),
+        ],
+        "got {diags:?}"
+    );
+}
+
+#[test]
+fn a_declared_nullable_argument_stays_an_error_by_default() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(?string $a): void {
+    takes_string($a);
+}
+"#;
+    let diags = collect(php);
+    let type_errors: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .collect();
+    assert_eq!(type_errors.len(), 1, "got {diags:?}");
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+}
+
+#[test]
+fn a_genuine_type_mismatch_stays_an_error_even_when_downgrade_is_enabled() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_downgrade_control.php";
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(array|string $val): void {
+    takes_string($val);
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let type_errors: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .collect();
+    assert_eq!(type_errors.len(), 1, "got {diags:?}");
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+}
+
 #[test]
 fn no_diagnostic_when_is_int_guard_narrows_nullable() {
     let php = r#"<?php

@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
@@ -21,19 +21,6 @@ async fn goto_type_definition(
         partial_result_params: PartialResultParams::default(),
     };
     backend.goto_type_definition(params).await.unwrap()
-}
-
-async fn open(backend: &Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
 }
 
 fn assert_single_location(response: GotoTypeDefinitionResponse, expected_line: u32) -> Location {
@@ -119,7 +106,7 @@ async fn test_variable_type_definition_from_type_hint() {
         "    }\n",                                           // 7
         "}\n",                                               // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $logger in method body (line 6, char 9)
     let result = goto_type_definition(&backend, &uri, 6, 9).await;
@@ -144,7 +131,7 @@ async fn test_variable_type_definition_from_assignment() {
         "    $user->name;\n",         // 6
         "}\n",                        // 7
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $user on line 6
     let result = goto_type_definition(&backend, &uri, 6, 5).await;
@@ -164,7 +151,7 @@ async fn test_this_type_definition() {
         "    }\n",                              // 4
         "}\n",                                  // 5
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $this (line 3, char 9)
     let result = goto_type_definition(&backend, &uri, 3, 9).await;
@@ -192,7 +179,7 @@ async fn test_method_return_type_definition() {
         "    $svc->getResult();\n",                             // 10
         "}\n",                                                  // 11
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on getResult method call (line 10)
     let result = goto_type_definition(&backend, &uri, 10, 11).await;
@@ -219,7 +206,7 @@ async fn test_property_type_definition() {
         "    $user->address;\n",          // 8
         "}\n",                            // 9
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on address property access (line 8)
     let result = goto_type_definition(&backend, &uri, 8, 12).await;
@@ -244,7 +231,7 @@ async fn test_self_type_definition() {
         "    }\n",                                       // 4
         "}\n",                                           // 5
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on `self` in `new self()` (line 3)
     let result = goto_type_definition(&backend, &uri, 3, 20).await;
@@ -267,7 +254,7 @@ async fn test_parent_type_definition() {
         "    }\n",                                // 7
         "}\n",                                    // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on `parent` (line 6)
     let result = goto_type_definition(&backend, &uri, 6, 10).await;
@@ -292,7 +279,7 @@ async fn test_class_reference_type_definition() {
         "function test(Foo $f) {\n",            // 4
         "}\n",                                  // 5
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on Foo type hint in function parameter (line 4, char 15)
     let result = goto_type_definition(&backend, &uri, 4, 15).await;
@@ -322,7 +309,7 @@ async fn test_function_call_return_type_definition() {
         "    getConfig();\n",               // 9
         "}\n",                              // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on getConfig() call (line 9)
     let result = goto_type_definition(&backend, &uri, 9, 7).await;
@@ -346,7 +333,7 @@ async fn test_scalar_type_returns_none() {
         "    $name;\n",           // 3
         "}\n",                    // 4
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // $name is a string — no class to jump to.
     let result = goto_type_definition(&backend, &uri, 3, 5).await;
@@ -376,7 +363,7 @@ async fn test_nullable_type_definition() {
         "    $p->nextToken();\n",                      // 10
         "}\n",                                         // 11
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on nextToken() — return type is ?Token, should resolve to Token
     let result = goto_type_definition(&backend, &uri, 10, 9).await;
@@ -408,7 +395,7 @@ async fn test_union_type_multiple_locations() {
         "    $s->adopt();\n",                       // 14
         "}\n",                                      // 15
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on adopt() — return type is Cat|Dog
     let result = goto_type_definition(&backend, &uri, 14, 9).await;
@@ -453,7 +440,7 @@ async fn test_cross_file_type_definition() {
         "    }\n",                                        // 7
         "}\n",                                            // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $user in method body (line 6) — type is User from cross-file
     let result = goto_type_definition(&backend, &uri, 6, 9).await;
@@ -494,7 +481,7 @@ async fn test_docblock_var_type_definition() {
         "    $order;\n",                  // 7
         "}\n",                            // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $order (line 7)
     let result = goto_type_definition(&backend, &uri, 7, 5).await;
@@ -522,7 +509,7 @@ async fn test_foreach_variable_type_definition() {
         "    }\n",                                             // 10
         "}\n",                                                 // 11
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $item in the foreach body (line 8)
     let result = goto_type_definition(&backend, &uri, 8, 13).await;
@@ -553,7 +540,7 @@ async fn test_static_method_return_type_definition() {
         "    DB::connect();\n",                                 // 10
         "}\n",                                                  // 11
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on connect() static call (line 10)
     let result = goto_type_definition(&backend, &uri, 10, 8).await;
@@ -575,7 +562,7 @@ async fn test_class_declaration_returns_none() {
         "class Foo {\n", // 1
         "}\n",           // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on the `Foo` class declaration name (line 1, char 7)
     let result = goto_type_definition(&backend, &uri, 1, 7).await;
@@ -605,7 +592,7 @@ async fn test_chained_method_return_type_definition() {
         "    $b->where();\n",                       // 10
         "}\n",                                      // 11
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on where() — return type is Builder
     let result = goto_type_definition(&backend, &uri, 10, 9).await;
@@ -633,7 +620,7 @@ async fn test_method_returning_self_type_definition() {
         "    $f->set();\n",                    // 7
         "}\n",                                 // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on set() — return type is self, should resolve to Fluent
     let result = goto_type_definition(&backend, &uri, 7, 9).await;
@@ -665,7 +652,7 @@ async fn test_union_with_scalar_filters_scalars() {
         "    $h->handle();\n",                                  // 11
         "}\n",                                                  // 12
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on handle() — return type is string|ErrorResult, only ErrorResult should remain
     let result = goto_type_definition(&backend, &uri, 11, 9).await;
@@ -695,7 +682,7 @@ async fn test_catch_variable_type_definition() {
         "    }\n",                                  // 9
         "}\n",                                      // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $e in catch body (line 8)
     let result = goto_type_definition(&backend, &uri, 8, 9).await;
@@ -723,7 +710,7 @@ async fn test_parameter_type_definition() {
         "    }\n",                                                // 7
         "}\n",                                                    // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on $request in the method body (line 6)
     let result = goto_type_definition(&backend, &uri, 6, 9).await;

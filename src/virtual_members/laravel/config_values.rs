@@ -522,7 +522,10 @@ impl Backend {
         let mut config_uris: Vec<String> = Vec::new();
         if let Some(root) = &workspace_root {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
-            for path in crate::references::collect_php_files_gitignore(root, &vendor_dir_paths) {
+            let filters = self.index_filters();
+            for path in
+                crate::references::collect_php_files_gitignore(root, &vendor_dir_paths, &filters)
+            {
                 let uri = crate::util::path_to_uri(&path);
                 if laravel_config_prefix_from_uri(&uri).is_some() {
                     config_uris.push(uri);

@@ -14,7 +14,7 @@
 use super::directives::match_directive;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Html,
     /// Scanning toward a fixed closing token that is itself real PHP (an
     /// echo expression, a raw `<?php` tag, or a `@php` block body), so a
@@ -22,7 +22,8 @@ enum Mode {
     /// early.
     UntilMarkerInCode(&'static str),
     /// Scanning toward a fixed closing token that is not PHP — a Blade
-    /// comment or a `@verbatim` block — so quotes inside it are just text.
+    /// comment, an `@`-escaped echo (`@{{ … }}` / `@{!! … !!}`), or a
+    /// `@verbatim` block — so quotes inside it are just text.
     UntilMarkerRaw(&'static str),
 }
 
@@ -30,6 +31,17 @@ enum Mode {
 /// `offset` itself sits in template markup rather than inside one of the
 /// spans [`Mode`] tracks.
 pub(crate) fn is_html_position(content: &str, offset: usize) -> bool {
+    mode_at(content, offset) == Mode::Html
+}
+
+/// The [`Mode`] the scanner is in once it reaches `offset`, i.e. what the
+/// compiler makes of everything up to (not including) `offset`.
+///
+/// This is the single scanner both the directive-completion and
+/// echo-delimiter features read: it is what tells a `{{`/`}}`/`@{{` sighting
+/// apart from a lookalike inside a `{{-- --}}` comment, a `@verbatim` block,
+/// or an `@`-escaped echo, which none of those compile to an actual echo.
+pub(crate) fn mode_at(content: &str, offset: usize) -> Mode {
     let mut mode = Mode::Html;
     let mut in_string: Option<char> = None;
     let mut escaped = false;
@@ -65,7 +77,16 @@ pub(crate) fn is_html_position(content: &str, offset: usize) -> bool {
                     mode = Mode::UntilMarkerInCode("?>");
                     i += 2;
                 } else if let Some(after_at) = rest.strip_prefix('@') {
-                    if let Some(directive) = match_directive(after_at) {
+                    if after_at.starts_with("{!!") {
+                        // `@{!! … !!}` escapes a raw Blade echo: the `@`
+                        // strips the whole thing for a frontend template
+                        // engine, so none of it is PHP.
+                        mode = Mode::UntilMarkerRaw("!!}");
+                        i += 1 + 3;
+                    } else if after_at.starts_with("{{") {
+                        mode = Mode::UntilMarkerRaw("}}");
+                        i += 1 + 2;
+                    } else if let Some(directive) = match_directive(after_at) {
                         i += 1 + directive.len();
                         if directive == "php" {
                             let after_directive = after_at[directive.len()..].trim_start();
@@ -118,7 +139,7 @@ pub(crate) fn is_html_position(content: &str, offset: usize) -> bool {
         }
     }
 
-    mode == Mode::Html
+    mode
 }
 
 /// The directive-name prefix already typed after an `@` the cursor sits

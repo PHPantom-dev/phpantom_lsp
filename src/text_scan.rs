@@ -663,6 +663,110 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
     None
 }
 
+// ─── `use` statement scanning ───────────────────────────────────────────────
+
+/// Call `visit` with the fully-qualified name and local name of every class
+/// `use` item in the file, including the members of a group import.
+pub(crate) fn for_each_class_import(content: &str, visit: &mut dyn FnMut(&str, &str)) {
+    for statement in content.split(';') {
+        let Some(clause) = use_clause(statement) else {
+            continue;
+        };
+        // `use function …` / `use const …` import other symbol tables.
+        let mut words = clause.split_ascii_whitespace();
+        if words.next().is_some_and(|word| {
+            word.eq_ignore_ascii_case("function") || word.eq_ignore_ascii_case("const")
+        }) {
+            continue;
+        }
+
+        match clause.split_once('{') {
+            Some((prefix, items)) => {
+                let Some(items) = items.rsplit_once('}').map(|(items, _)| items) else {
+                    continue;
+                };
+                let prefix = prefix
+                    .trim()
+                    .trim_start_matches('\\')
+                    .trim_end_matches('\\');
+                for item in items.split(',') {
+                    if let Some((name, local)) = use_item(item) {
+                        visit(&format!("{prefix}\\{name}"), local);
+                    }
+                }
+            }
+            None => {
+                for item in clause.split(',') {
+                    if let Some((name, local)) = use_item(item) {
+                        visit(name, local);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Whether the file imports `fqn` under the local name `local`.
+pub(crate) fn imports_class_as(content: &str, fqn: &str, local: &str) -> bool {
+    let mut imported = false;
+    for_each_class_import(content, &mut |imported_fqn, imported_local| {
+        imported |=
+            imported_local.eq_ignore_ascii_case(local) && imported_fqn.eq_ignore_ascii_case(fqn);
+    });
+    imported
+}
+
+/// The text after the `use` keyword of a statement that opens with one.
+///
+/// Only the line the keyword sits on is examined, so an expression that
+/// happens to precede the statement does not turn into an import.
+fn use_clause(statement: &str) -> Option<&str> {
+    let mut offset = 0usize;
+    for line in statement.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("use "))
+        {
+            let leading = line.len() - trimmed.len();
+            return Some(statement[offset + leading + 4..].trim());
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// Split one `use` item into its imported name and the local name it binds.
+fn use_item(item: &str) -> Option<(&str, &str)> {
+    let mut words = item.split_whitespace();
+    let name = words.next()?.trim_start_matches('\\');
+    let local = match words.next() {
+        Some(keyword) if keyword.eq_ignore_ascii_case("as") => words.next()?,
+        // Anything else is not an import PHP would accept.
+        Some(_) => return None,
+        None => name.rsplit('\\').next().unwrap_or(name),
+    };
+    if words.next().is_some() || name.is_empty() || local.is_empty() {
+        return None;
+    }
+    Some((name, local))
+}
+
+/// Whether the file declares a namespace.  An unqualified name in a file
+/// without one resolves in the global namespace, where Laravel's class
+/// aliases live.
+pub(crate) fn source_declares_namespace(content: &str) -> bool {
+    content.lines().any(|line| {
+        let mut line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("<?php") {
+            line = rest.trim_start();
+        }
+        line.get(..9)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("namespace"))
+            && line.as_bytes().get(9).is_some_and(u8::is_ascii_whitespace)
+    })
+}
+
 #[cfg(test)]
 #[path = "text_scan_tests.rs"]
 mod tests;

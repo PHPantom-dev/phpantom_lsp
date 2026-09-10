@@ -75,6 +75,19 @@ thread_local! {
     /// of `(variable, offset)` questions get asked hundreds of times.
     static VAR_TYPE_MEMO: RefCell<Option<HashMap<VarQueryKey, Vec<ResolvedType>>>> =
         const { RefCell::new(None) };
+
+    #[cfg(test)]
+    static TEST_SCOPE_CACHE_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_scope_cache_hits() {
+    TEST_SCOPE_CACHE_HITS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_scope_cache_hits() -> usize {
+    TEST_SCOPE_CACHE_HITS.with(std::cell::Cell::get)
 }
 
 /// What identifies one "what is the type of `$var` here?" question: the
@@ -309,6 +322,8 @@ pub(crate) fn resolve_variable_types(
         };
         if let Some(types) = super::forward_walk::lookup_diagnostic_scope(&prefixed, cursor_offset)
         {
+            #[cfg(test)]
+            TEST_SCOPE_CACHE_HITS.with(|count| count.set(count.get() + 1));
             return types;
         }
         // Variable not in the forward-walked scope — fall through to

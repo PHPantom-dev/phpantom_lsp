@@ -2429,7 +2429,7 @@ fn user_file_symbol_maps_exclude_vendor_and_stubs() {
 }
 
 #[test]
-fn workspace_index_progress_covers_known_files_and_refresh_walks() {
+fn workspace_index_progress_covers_known_and_discovered_files() {
     let dir = tempfile::tempdir().expect("temp dir");
     let src = dir.path().join("src");
     std::fs::create_dir_all(&src).expect("src dir");
@@ -2510,6 +2510,33 @@ fn workspace_index_progress_covers_known_files_and_refresh_walks() {
     );
 }
 
+/// Once the first workspace pass is complete, each reference-count or
+/// CodeLens query must reuse it. In particular, a concurrent caller must not
+/// queue behind the workspace lock and begin another disk walk.
+#[test]
+fn completed_workspace_index_is_reused_without_waiting() {
+    let backend = Backend::new_test();
+    backend
+        .workspace_indexed
+        .store(true, std::sync::atomic::Ordering::Release);
+    let indexing = backend.workspace_index_lock.lock();
+
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let waiter = {
+        let backend = backend.clone_for_blocking();
+        std::thread::spawn(move || {
+            backend.ensure_workspace_index_ready_with_progress(None);
+            done_tx.send(()).expect("report completion");
+        })
+    };
+
+    done_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("a completed index should bypass the in-flight lock");
+    drop(indexing);
+    waiter.join().expect("waiter thread");
+}
+
 #[test]
 fn request_progress_maps_indexing_into_lower_window() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -2559,7 +2586,7 @@ fn blocked_request_reports_in_flight_index_status() {
         let backend = backend.clone_for_blocking();
         let reports = std::sync::Arc::clone(&reports);
         std::thread::spawn(move || {
-            backend.ensure_workspace_indexed_with_progress(Some(&|percentage, message| {
+            backend.ensure_workspace_index_ready_with_progress(Some(&|percentage, message| {
                 reports
                     .lock()
                     .expect("reports lock")
@@ -2583,12 +2610,29 @@ fn blocked_request_reports_in_flight_index_status() {
         "Waiting for workspace index: Parsing workspace files (3/9)"
     );
 
+    // Stand in for the lock owner publishing the completed index before it
+    // releases the single-flight guard.
+    backend
+        .workspace_indexed
+        .store(true, std::sync::atomic::Ordering::Release);
+    *backend.workspace_index_status.lock() = None;
     drop(indexing);
     waiter.join().expect("waiter thread");
 
     assert!(
         backend.workspace_index_status.lock().is_none(),
         "a finished indexing pass clears the shared status"
+    );
+    let reports = reports.lock().expect("reports lock");
+    assert!(
+        !reports
+            .iter()
+            .any(|(_, message)| message == "Preparing workspace index"),
+        "the waiting request must reuse the index published by the lock owner"
+    );
+    assert_eq!(
+        reports.last(),
+        Some(&(100, "Workspace index ready".to_string()))
     );
 }
 

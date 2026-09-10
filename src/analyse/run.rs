@@ -17,8 +17,6 @@ use crate::parser::with_parse_cache;
 use crate::virtual_members::with_active_resolved_class_cache;
 
 use crate::Backend;
-use crate::composer;
-use crate::config;
 use crate::types::ClassInfo;
 
 use super::output::{
@@ -46,13 +44,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
-    let cfg = match config::load_config_from(root, options.global_config.as_deref()) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Warning: failed to load .phpantom.toml: {e}");
-            config::Config::default()
-        }
-    };
+    let cfg = super::load_config_or_default(root, options.global_config.as_deref());
 
     let ignore_rules =
         crate::diagnostics::ignore_rules::compile_ignore_rules(&cfg.diagnostics.ignore);
@@ -62,27 +54,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // pipeline as the LSP server.  With client=None the log/progress
     // calls are no-ops.
     let backend = Backend::new_headless();
-    *backend.workspace_root().write() = Some(root.to_path_buf());
-    *backend.workspace.config.lock() = cfg.clone();
-
-    let composer_package = composer::read_composer_package(root);
-
-    let php_version = cfg
-        .php
-        .version
-        .as_deref()
-        .and_then(crate::types::PhpVersion::from_composer_constraint)
-        .unwrap_or_else(|| {
-            composer_package
-                .as_ref()
-                .and_then(composer::detect_php_version_from_package)
-                .unwrap_or_default()
-        });
-    backend.set_php_version(php_version);
-
-    backend
-        .init_single_project(root, php_version, composer_package, None)
-        .await;
+    super::open_headless_project(&backend, root, cfg).await;
     // ── 3. Locate user files (via PSR-4) and crop to path ───────────
     let files = discover_user_files(&backend, root, &options.path_filters);
 
@@ -123,97 +95,20 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         .unwrap_or(4);
 
     // ── Phase 1: Parse all files (parallel) ─────────────────────────
-    // Read each file from disk and call `update_ast`.  Store the
-    // (uri, content) pairs so Phase 2 can reuse them without re-reading.
+    // Keep the (uri, content) pairs so Phase 2 can reuse them without
+    // re-reading.
     //
     // Parsing is fast, so the progress bar is drawn at 0% before Phase 1
     // and only advances during Phase 2 (the expensive diagnostic pass).
     if show_progress {
-        eprint!("\r\x1b[2K {}", progress_bar(0, file_count));
+        eprint!("\r\x1b[2K {}", progress_bar(0, file_count, ""));
     }
     let parse_t0 = Instant::now();
-    let next_idx = AtomicUsize::new(0);
-
-    let file_data: Vec<Option<(String, String)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|worker| {
-                let backend = &backend;
-                let next_idx = &next_idx;
-                let files = &files;
-                std::thread::Builder::new()
-                    .name("index-worker".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let mut entries: Vec<(usize, String, String)> = Vec::new();
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-
-                            let file_path = &files[i];
-                            if debug && verbosity >= 2 {
-                                let display =
-                                    file_path.strip_prefix(root).unwrap_or(file_path).display();
-                                eprintln!("[w{worker:02}] parse {display}");
-                            }
-                            let content = match std::fs::read_to_string(file_path) {
-                                Ok(c) => c,
-                                Err(_) => continue,
-                            };
-
-                            let uri = crate::util::path_to_uri(file_path);
-                            backend.update_ast(&uri, &content);
-                            entries.push((i, uri, content));
-                        }
-                        entries
-                    })
-                    .expect("failed to spawn index-worker thread")
-            })
-            .collect();
-
-        // Collect into an indexed vec so Phase 2 can iterate in the
-        // same order as `files`.
-        let mut indexed: Vec<Option<(String, String)>> = (0..file_count).map(|_| None).collect();
-        for handle in handles {
-            for (i, uri, content) in handle.join().unwrap_or_default() {
-                indexed[i] = Some((uri, content));
-            }
-        }
-        indexed
-    });
+    let file_data = super::parse_user_files(&backend, root, &files, debug && verbosity >= 2);
     let parse_elapsed = parse_t0.elapsed();
     let populate_t0 = Instant::now();
 
-    // ── Discover the configured Laravel date class ──────────────────
-    // The `now()`/`today()` helpers and the Date facade / DateFactory
-    // resolve to the class selected by `Date::use()` (defaulting to
-    // `Illuminate\Support\Carbon`).  Discovery reads project service
-    // providers, so it must run after Phase 1 has parsed every user file.
-    // The LSP does the equivalent in its `initialized` handler; without
-    // this call the helpers would resolve to nothing here, producing
-    // false-positive return-type diagnostics.
-    if backend.resolved_class_cache.read().is_laravel() {
-        backend.build_laravel_date_class();
-        // Discover config files, view/translation directories, and route
-        // files registered by service providers so that config(), view(),
-        // trans(), and route() string keys resolve the same way they do in
-        // the LSP (which builds these in its `initialized` handler).
-        backend.build_provider_resources();
-        // Discover the Eloquent morph map so alias strings are validated the
-        // same way here as in the LSP.
-        backend.build_laravel_morph_map_index();
-        // Discover the gate abilities and policy map so authorization strings
-        // are validated the same way here as in the LSP.
-        backend.build_laravel_gate_index();
-        // Scan the whole FQN → URI index for Artisan commands and for macro
-        // registrations.  `update_ast` only refreshes these from the files it
-        // parses, which here is the project's own source, so without a full
-        // scan the indexes hold no vendor entries and every framework command
-        // name and vendor-registered macro reads as unknown.
-        backend.build_laravel_command_index();
-        backend.build_laravel_macro_index();
-    }
+    super::discover_laravel_resources(&backend);
 
     // ── Phase 1.5: Eager class population ───────────────────────────
     // Pre-populate the resolved_class_cache by resolving every known
@@ -515,7 +410,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // not work that has merely been started.
                         let completed = done_count.fetch_add(1, Ordering::Relaxed) + 1;
                         if show_progress {
-                            eprint!("\r\x1b[2K {}", progress_bar(completed, file_count));
+                            eprint!("\r\x1b[2K {}", progress_bar(completed, file_count, ""));
                         }
                         if debug && verbosity >= 1 {
                             let display =
@@ -572,7 +467,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     });
 
     if show_progress {
-        eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count));
+        eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count, ""));
     }
     if verbosity >= 1 {
         // Every phase is listed, including the class population between
@@ -610,7 +505,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // ── 5. Render output ────────────────────────────────────────────
     if all_file_diagnostics.is_empty() {
         match output_format {
-            OutputFormat::Table => print_success_box(file_count, options.use_colour),
+            OutputFormat::Table => print_success_box(" [OK] No errors ", options.use_colour),
             OutputFormat::Github => {} // no output on success
             OutputFormat::Json => print_json_output(&[], 0),
         }
@@ -665,9 +560,14 @@ pub(crate) fn discover_user_files(
         })
         .partition(|p| p.is_dir());
 
+    // `[indexing] extensions` files are PHP source, so they are analysed
+    // like `.php`; `[indexing] exclude` prunes the default project walk
+    // below but never a path the user named outright.
+    let filters = backend.index_filters();
+
     let mut files: Vec<PathBuf> = filter_files
         .into_iter()
-        .filter(|p| p.extension().is_some_and(|ext| ext == "php"))
+        .filter(|p| filters.is_php_file(p))
         .collect();
 
     // Every filter named a file, so there is nothing left to walk.
@@ -745,14 +645,18 @@ pub(crate) fn discover_user_files(
                 continue;
             }
 
-            collect_php_files(dir, &vendor_dirs, &psr4_filters, &mut files);
+            collect_php_files(dir, &vendor_dirs, &psr4_filters, &filters, &mut files);
         }
     }
 
     // The user explicitly targeted these paths, so no vendor exclusion and
-    // no cropping beyond the walked directory itself.
+    // no cropping beyond the walked directory itself.  `[indexing] exclude`
+    // still applies: it declares what is not the project's code at all, the
+    // way PHPStan's `excludePaths` holds for a path named on its command
+    // line too.  Naming a file outright bypasses it (those never reach this
+    // walk), which is the escape hatch for analysing an excluded path.
     for dir in &external_filters {
-        collect_php_files(dir, &[], &[], &mut files);
+        collect_php_files(dir, &[], &[], &filters, &mut files);
     }
 
     files.sort();
@@ -763,10 +667,20 @@ pub(crate) fn discover_user_files(
 /// Walk `dir` for PHP files, skipping anything under `skip_vendor` and
 /// keeping only files under one of the `crop` paths (all of them when
 /// `crop` is empty).
-fn collect_php_files(dir: &Path, skip_vendor: &[PathBuf], crop: &[&Path], out: &mut Vec<PathBuf>) {
+///
+/// `filters` decides which extensions count as PHP source and which
+/// paths `[indexing] exclude` prunes.
+fn collect_php_files(
+    dir: &Path,
+    skip_vendor: &[PathBuf],
+    crop: &[&Path],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    out: &mut Vec<PathBuf>,
+) {
     use ignore::WalkBuilder;
 
     let skip_vendor = skip_vendor.to_vec();
+    let filter_excludes = std::sync::Arc::clone(filters);
     let walker = WalkBuilder::new(dir)
         .git_ignore(true)
         .git_global(true)
@@ -775,20 +689,21 @@ fn collect_php_files(dir: &Path, skip_vendor: &[PathBuf], crop: &[&Path], out: &
         .parents(true)
         .ignore(true)
         .filter_entry(move |entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir())
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir
                 && !skip_vendor.is_empty()
                 && let Ok(canonical) = entry.path().canonicalize()
                 && skip_vendor.iter().any(|v| canonical.starts_with(v))
             {
                 return false;
             }
-            true
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
         .build();
 
     for entry in walker.flatten() {
         let path = entry.into_path();
-        if !path.is_file() || path.extension().is_none_or(|ext| ext != "php") {
+        if !path.is_file() || !filters.is_php_file(&path) {
             continue;
         }
 
@@ -929,6 +844,65 @@ mod tests {
             !names.contains(&"readme.txt".to_string()),
             "non-PHP files must be skipped: {names:?}"
         );
+    }
+
+    /// `[indexing] exclude` prunes the project scan, and `[indexing]
+    /// extensions` brings non-`.php` sources into it, so `analyze`
+    /// reports on the same set of files the indexer holds. Excludes
+    /// hold for a directory named on the command line as well; naming
+    /// a file outright is the escape hatch.
+    #[test]
+    fn discover_user_files_honors_the_indexing_filters() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("index.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("hooks.module"), "<?php\n").unwrap();
+        std::fs::create_dir_all(root.join("generated")).unwrap();
+        std::fs::write(root.join("generated/Stub.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        *backend.workspace_root().write() = Some(root.to_path_buf());
+        let mut cfg = crate::config::Config::default();
+        cfg.indexing.exclude = Some(vec!["generated".to_string()]);
+        cfg.indexing.extensions = Some(vec!["module".to_string()]);
+        backend.set_config(cfg);
+
+        let names = |files: &[PathBuf]| -> Vec<String> {
+            files
+                .iter()
+                .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+
+        let scanned = names(&discover_user_files(&backend, root, &[]));
+        assert!(scanned.contains(&"index.php".to_string()), "{scanned:?}");
+        assert!(
+            scanned.contains(&"hooks.module".to_string()),
+            "a configured extension is analysed like .php: {scanned:?}"
+        );
+        assert!(
+            !scanned.iter().any(|n| n.starts_with("generated")),
+            "an excluded directory must be pruned: {scanned:?}"
+        );
+
+        // Naming the excluded directory does not re-enable it...
+        let targeted = names(&discover_user_files(
+            &backend,
+            root,
+            &[root.join("generated")],
+        ));
+        assert!(
+            targeted.is_empty(),
+            "an exclude holds for a directory named on the command line: {targeted:?}"
+        );
+
+        // ...but naming the file itself does.
+        let by_file = names(&discover_user_files(
+            &backend,
+            root,
+            &[root.join("generated/Stub.php")],
+        ));
+        assert_eq!(by_file, vec!["generated/Stub.php".to_string()]);
     }
 
     #[cfg(unix)]

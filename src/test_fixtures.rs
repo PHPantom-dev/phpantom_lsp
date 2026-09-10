@@ -8,8 +8,11 @@
 
 use std::sync::Arc;
 
+use tower_lsp::lsp_types::TextEdit;
+
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::text_position::position_to_byte_offset;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, ParameterInfo, PropertyInfo, Visibility,
 };
@@ -146,4 +149,26 @@ pub fn make_param(name: &str, type_hint: Option<&str>, is_required: bool) -> Par
 /// Useful for tests that don't need cross-class resolution.
 pub fn no_loader(_name: &str) -> Option<Arc<ClassInfo>> {
     None
+}
+
+/// Apply non-overlapping `TextEdit`s to `content` and return the result.
+///
+/// Edits are applied bottom-to-top so earlier edits never shift the
+/// positions of later ones. Columns are UTF-16 code units, as in LSP.
+pub fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
+    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
+    sorted.sort_by(|a, b| {
+        b.range
+            .start
+            .line
+            .cmp(&a.range.start.line)
+            .then(b.range.start.character.cmp(&a.range.start.character))
+    });
+    let mut result = content.to_string();
+    for edit in sorted {
+        let start = position_to_byte_offset(&result, edit.range.start);
+        let end = position_to_byte_offset(&result, edit.range.end);
+        result.replace_range(start..end, &edit.new_text);
+    }
+    result
 }

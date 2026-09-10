@@ -104,6 +104,11 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **Member visibility diagnostics** — report a `private` or
+//!   `protected` property, method, or class constant reached from a
+//!   scope PHP does not let see it.  Emitted from the unknown-member
+//!   walk, which has already resolved the subject.  Suppressed when the
+//!   class declares a magic handler that would answer for the member.
 //! - **Readonly write diagnostics** — report writes to a `readonly`
 //!   property from outside the class that declares it, and second
 //!   writes from inside it once the constructor has initialized the
@@ -213,6 +218,7 @@
 
 mod argument_count;
 mod blade_call_site;
+mod blade_component_tags;
 mod blade_directives;
 mod blade_sections;
 mod blade_signature;
@@ -229,6 +235,7 @@ mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
 mod match_type_errors;
+pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
@@ -579,6 +586,10 @@ impl Backend {
                 self.collect_blade_directive_diagnostics(uri_str, out)
             );
             step!(
+                "blade_component_tag_balance",
+                self.collect_blade_component_tag_diagnostics(uri_str, out)
+            );
+            step!(
                 "blade_section",
                 self.collect_blade_section_diagnostics(uri_str, out)
             );
@@ -785,18 +796,39 @@ impl Backend {
         } else {
             (HashSet::new(), Vec::new(), Vec::new())
         };
-        let config_keys: HashSet<String> = if has_config {
-            self.cached_config_keys().into_iter().collect()
+        // A library is installed into an application that declares the
+        // configuration it reads, and that application is a file we never
+        // see, so none of its keys can be judged.  Only an application owns
+        // the whole of its configuration.
+        let has_config = has_config && self.is_application_project();
+        let declared_config_keys: Vec<String> = if has_config {
+            self.cached_config_keys()
+        } else {
+            Vec::new()
+        };
+        // A key that `Config::set()` or the array form of the `config()`
+        // helper establishes is as real as one a `config/` file declares; a
+        // test that configures a disk in `setUp()` before exercising it is
+        // the common shape.
+        let written_config_keys = if has_config {
+            self.runtime_config_keys()
         } else {
             HashSet::new()
         };
         // The config files we managed to enumerate keys from, by name.  A
         // key whose root segment names none of them lives in a file we
-        // cannot see (a library whose config is supplied by the host
-        // application), so nothing about it is knowable.
-        let config_roots: HashSet<&str> = config_keys
+        // cannot see, so nothing about it is knowable.  A runtime write is
+        // deliberately not a root of its own: the keys one file writes say
+        // nothing about what the rest of that namespace holds, least of all
+        // when the writes that established it were spelled dynamically.
+        let config_roots: HashSet<&str> = declared_config_keys
             .iter()
             .map(|key| key.split('.').next().unwrap_or(key.as_str()))
+            .collect();
+        let config_keys: HashSet<&str> = declared_config_keys
+            .iter()
+            .chain(written_config_keys.iter())
+            .map(String::as_str)
             .collect();
         let view_keys: HashSet<String> = if has_view {
             self.cached_view_names().into_iter().collect()
@@ -934,11 +966,18 @@ impl Backend {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.
-                    let valid = config_keys.contains(key)
+                    // which are valid even without a direct match.  The other
+                    // direction holds for a key written at runtime: the value
+                    // it stored is opaque to us, so every path under it is
+                    // beyond judging as well.
+                    let valid = config_keys.contains(key.as_str())
                         || config_keys
                             .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
+                            .any(|k| k.starts_with(&format!("{}.", key)))
+                        || written_config_keys.iter().any(|written| {
+                            key.strip_prefix(written.as_str())
+                                .is_some_and(|rest| rest.starts_with('.'))
+                        });
                     (valid, "config key", "invalid_laravel_config")
                 }
                 CheckedStringKind::View => {

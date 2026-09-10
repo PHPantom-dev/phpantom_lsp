@@ -36,6 +36,7 @@ mod functions;
 mod members;
 mod variables;
 
+pub(crate) use members::MemberDeclarationReferenceQuery;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -67,7 +68,7 @@ impl Backend {
     /// vendor directory or the internal stub scheme.  All four cross-file
     /// reference scanners use this to restrict results to user code.
     pub(crate) fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         self.user_file_symbol_maps_matching(None)
     }
 
@@ -85,7 +86,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         let candidate_uris = self.reference_candidate_uris_for_keys(keys);
         self.user_file_symbol_maps_matching(candidate_uris.as_ref())
     }
@@ -215,6 +216,17 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("__construct")
 }
 
+fn sort_locations_for_references(locations: &mut Vec<Location>) {
+    locations.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+            .then(a.range.start.character.cmp(&b.range.start.character))
+    });
+    locations.dedup();
+}
+
 /// Check whether a resolved class name matches the target FQN.
 ///
 /// Two names match if their fully-qualified forms are equal, or if both
@@ -314,11 +326,46 @@ pub(super) fn member_candidate_keys(
 pub(crate) fn collect_php_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
 ) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
+        if filters.is_php_file(path) {
+            result.push(path.to_path_buf());
+        }
+    });
+    result
+}
+
+/// Collect the PHP and schema-free YAML/XML inputs used by the full workspace
+/// index in one `.gitignore`-aware walk.
+pub(crate) fn collect_workspace_index_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut php_files = Vec::new();
+    let mut resource_files = Vec::new();
+    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
+        if filters.is_php_file(path) {
+            php_files.push(path.to_path_buf());
+        } else if crate::resource_navigation::is_resource_path(path) {
+            resource_files.push(path.to_path_buf());
+        }
+    });
+    (php_files, resource_files)
+}
+
+fn visit_workspace_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    mut visit: impl FnMut(&Path),
+) {
     use ignore::WalkBuilder;
 
-    let mut result = Vec::new();
     let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
+    let filter_excludes = std::sync::Arc::clone(filters);
 
     let walker = WalkBuilder::new(root)
         // Respect .gitignore, .git/info/exclude, global gitignore
@@ -331,26 +378,23 @@ pub(crate) fn collect_php_files_gitignore(
         .parents(true)
         // Also respect .ignore files (ripgrep convention)
         .ignore(true)
-        // Always skip vendor directories, even if not gitignored
+        // Always skip vendor directories (even if not gitignored) and
+        // `[indexing] exclude` matches
         .filter_entry(move |entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                let path = entry.path();
-                if vendor_paths_owned.iter().any(|vp| vp == path) {
-                    return false;
-                }
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir && vendor_paths_owned.iter().any(|vp| vp == entry.path()) {
+                return false;
             }
-            true
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
         .build();
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
-            result.push(path.to_path_buf());
+        if path.is_file() {
+            visit(path);
         }
     }
-
-    result
 }
 
 /// Push a location only if it is not already present (deduplication).

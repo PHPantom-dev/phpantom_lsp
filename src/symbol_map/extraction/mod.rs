@@ -87,6 +87,11 @@ struct ExtractionCtx<'a> {
     /// Whether the file imports from `Illuminate\Container\Attributes\`
     /// (checked once lazily, cached for all attribute inspections).
     has_laravel_container_attrs: Option<bool>,
+    /// The local names Laravel's `Storage` facade answers to in this file,
+    /// resolved once lazily.  `disk()`, `fake()` and `forgetDisk()` are
+    /// common method names on unrelated facades, so the question comes up
+    /// often enough that rescanning the source each time is wasteful.
+    laravel_storage_facade_names: Option<Vec<String>>,
     /// Whether the file imports from `PHPUnit\Framework\Attributes\`, cached
     /// the same way as [`Self::has_laravel_container_attrs`].
     has_phpunit_attrs: Option<bool>,
@@ -173,6 +178,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
+        laravel_storage_facade_names: None,
         has_phpunit_attrs: None,
         has_laravel_http_attrs: None,
         in_console_command: false,

@@ -855,6 +855,9 @@ pub enum PropertySource {
     Relationship {
         method: String,
         kind: String,
+        /// Custom pivot accessor from `->as('name')` or the relationship's
+        /// fourth generic, if any. Surfaced in hover.
+        pivot_accessor: Option<Atom>,
         /// Custom pivot class from `->using(X::class)` on a many-to-many
         /// relationship (FQN), if any.  Surfaced in hover.
         pivot_using: Option<String>,
@@ -865,13 +868,13 @@ pub enum PropertySource {
     RelationshipCount {
         relationship: String,
     },
-    /// The `$pivot` attribute synthesized on a many-to-many target model.
+    /// A pivot accessor synthesized on a many-to-many target model.
     ///
     /// Related models accessed through a `belongsToMany`/`morphToMany`
-    /// relationship gain a `$pivot` instance at runtime.  A project-wide
-    /// reverse index (related-model FQN → pivot type) records which models
-    /// are reached through such a relationship, so `$pivot` is attached to
-    /// exactly those models and typed from the relationship's pivot generic.
+    /// relationship gain a `$pivot` instance at runtime, or an accessor with
+    /// the name configured by `->as('name')`. A project-wide reverse index
+    /// records which accessors each related model gains and types them from
+    /// the relationship's pivot generic.
     Pivot,
     /// An explicit `@property` / `@property-read` / `@property-write` tag
     /// declared on the class itself, a used trait, a parent class, or an
@@ -1670,8 +1673,9 @@ pub struct LaravelMetadata {
     /// Pivot configuration recovered from `belongsToMany`/`morphToMany`
     /// relationship method bodies.
     ///
-    /// One entry per many-to-many relationship method that declares a
-    /// `->using(CustomPivot::class)` and/or `->withPivot('col', …)` chain.
+    /// One entry per many-to-many relationship method that declares an
+    /// `->as('name')`, `->using(CustomPivot::class)`, and/or
+    /// `->withPivot('col', …)` chain.
     /// Populated from the method body during parsing; the `using` class is
     /// resolved to an FQN in the name-resolution pass.  Used to surface the
     /// custom pivot class and extra pivot columns in hover.
@@ -1704,13 +1708,15 @@ pub enum FacadeAccessor {
 
 /// Pivot metadata recovered from a single many-to-many relationship method.
 ///
-/// Corresponds to a `belongsToMany`/`morphToMany` method whose body chains
-/// `->using(...)` and/or `->withPivot(...)`.  Keyed back to the relationship
-/// by `method` so the provider can attach it to the synthesized property.
+/// Corresponds to a `belongsToMany`/`morphToMany` method whose body configures
+/// its pivot accessor, model, or columns. Keyed back to the relationship by
+/// `method` so the provider can attach it to the synthesized property.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PivotRelation {
     /// The relationship method name (e.g. `roles`).
     pub method: String,
+    /// The pivot accessor configured by `->as(...)`.
+    pub accessor: PivotAccessor,
     /// The custom pivot class from `->using(X::class)`, if declared.
     ///
     /// Stored as the short name during parsing and resolved to an FQN in
@@ -1718,6 +1724,18 @@ pub struct PivotRelation {
     pub using: Option<String>,
     /// Extra pivot columns declared via `->withPivot('a', 'b', …)`.
     pub columns: Vec<String>,
+}
+
+/// The pivot accessor configuration recovered from a relationship body.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PivotAccessor {
+    /// No `->as(...)` call is present, so Laravel uses `$pivot`.
+    #[default]
+    Default,
+    /// A literal custom accessor such as `->as('participation')`.
+    Custom(Atom),
+    /// An accessor was configured dynamically and cannot be named statically.
+    Unknown,
 }
 
 /// Virtual members declared by a class-level docblock's `@method` and
@@ -2633,9 +2651,8 @@ pub const ELOQUENT_COLLECTION_FQN: &str = "Illuminate\\Database\\Eloquent\\Colle
 
 /// The fully-qualified name of the Eloquent `Pivot` class.
 ///
-/// Used by the `LaravelModelProvider` to type the synthesized `$pivot`
-/// attribute that appears on models reached through a many-to-many
-/// (`belongsToMany` / `morphToMany`) relationship.
+/// Used to type synthesized pivot accessors on models reached through a
+/// many-to-many (`belongsToMany` / `morphToMany`) relationship.
 pub const ELOQUENT_PIVOT_FQN: &str = "Illuminate\\Database\\Eloquent\\Relations\\Pivot";
 
 // ─── Recursion Depth Limits ─────────────────────────────────────────────────

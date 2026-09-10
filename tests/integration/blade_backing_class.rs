@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -40,19 +40,6 @@ mod tests {
     const ORDER_CLASS: &str =
         "<?php\nnamespace App\\Models;\nclass Order { public string $reference = ''; }\n";
 
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, language_id: &str, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: language_id.to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
-    }
-
     async fn open_template(
         backend: &phpantom_lsp::Backend,
         root: &std::path::Path,
@@ -60,7 +47,7 @@ mod tests {
     ) -> Url {
         let uri = Url::from_file_path(root.join(relative)).unwrap();
         let text = std::fs::read_to_string(root.join(relative)).unwrap();
-        open(backend, &uri, "blade", &text).await;
+        open_document(backend, &uri, "blade", &text).await;
         uri
     }
 

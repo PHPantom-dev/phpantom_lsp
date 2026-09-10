@@ -4,24 +4,11 @@
 //! clicking on a property access like `$profile->name` should jump to the
 //! property key inside the docblock annotation that defines the shape.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-async fn open_file(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 async fn goto_definition(
     backend: &phpantom_lsp::Backend,
@@ -88,7 +75,7 @@ async fn test_gtd_object_shape_return_type_property() {
         "    }\n",                                               // 15
         "}\n",                                                   // 16
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "name" in `$data->name` on line 13
     let result = goto_definition(&backend, &uri, 13, 15).await;
@@ -130,7 +117,7 @@ async fn test_gtd_object_shape_inline_var_annotation() {
         "}\n",                                                             // 8
         "function getUnknownValue(): mixed { return null; }\n",            // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "title" in `$item->title` on line 5
     let result = goto_definition(&backend, &uri, 5, 15).await;
@@ -170,7 +157,7 @@ async fn test_gtd_object_shape_param_annotation() {
         "    }\n",                                                 // 8
         "}\n",                                                     // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "host" in `$config->host` on line 6
     let result = goto_definition(&backend, &uri, 6, 18).await;
@@ -217,7 +204,7 @@ async fn test_gtd_object_shape_property_with_class_type() {
         "    }\n",                                                       // 13
         "}\n",                                                           // 14
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "tool" in `$kit->tool` on line 11
     let result = goto_definition(&backend, &uri, 11, 14).await;
@@ -260,7 +247,7 @@ async fn test_gtd_nullable_object_shape() {
         "    }\n",                                                 // 11
         "}\n",                                                     // 12
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let result = goto_definition(&backend, &uri, 10, 18).await;
     assert!(
@@ -295,7 +282,7 @@ async fn test_gtd_object_shape_optional_property() {
         "    }\n",                                                      // 12
         "}\n",                                                          // 13
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "required" on line 10
     let result = goto_definition(&backend, &uri, 10, 14).await;
@@ -335,7 +322,7 @@ async fn test_gtd_object_shape_class_property_var() {
         "    }\n",                                           // 7
         "}\n",                                               // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "host" in `$this->config->host` on line 5
     let result = goto_definition(&backend, &uri, 5, 23).await;
@@ -381,7 +368,7 @@ async fn test_gtd_object_shape_closest_match() {
         "    }\n",                                                    // 13
         "}\n",                                                        // 14
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "name" in `$b->name` on line 12 — should prefer line 6
     // (the closest `object{name: …}` before the cursor).
@@ -418,7 +405,7 @@ async fn test_gtd_nested_object_shape_first_level() {
         "    }\n",                                                                    // 12
         "}\n",                                                                        // 13
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "data" in `$result->data` on line 10
     let result = goto_definition(&backend, &uri, 10, 18).await;
@@ -458,7 +445,7 @@ async fn test_gtd_object_shape_this_method_return() {
         "    public function getProfile(): object { return (object) []; }\n", // 8
         "}\n",                                                                // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "name" in `$profile->name` on line 4
     let result = goto_definition(&backend, &uri, 4, 19).await;
@@ -499,7 +486,7 @@ async fn test_gtd_object_shape_chain_first_property() {
         "    public function getResult(): object { return (object) []; }\n",           // 11
         "}\n",                                                                         // 12
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "tool" in `$result->tool` on line 7
     let result = goto_definition(&backend, &uri, 7, 18).await;

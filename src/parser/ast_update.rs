@@ -215,45 +215,9 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
-        let content_to_parse = if self.is_blade_file(uri) {
-            // Seed the template scope with the set cached by the refresh
-            // passes (post-index refresh, Blade did_open, caller save):
-            // the members of the component class backing the view, then
-            // the types its call sites imply, plus the class the view's
-            // `$this` is bound to.  Both variable sources sit below the
-            // template's own declarations, which the preprocessor gives
-            // priority.
-            //
-            // Neither is computed here: `update_ast` is called from the
-            // parallel index/analyse workers, where scanning call sites
-            // is wasted (callers may not be parsed yet) and resolving
-            // their expression types from many threads at once has
-            // deadlocked against the batch-publish locks.  The serial
-            // refresh passes own the cache; this path only reads it.
-            let injected = self
-                .blade_injected_vars
-                .read()
-                .get(uri)
-                .cloned()
-                .unwrap_or_default();
-            let components = self.blade_component_resolver(&injected.components);
-            let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
-                content,
-                &injected.vars,
-                crate::blade::template_kind(uri, content),
-                injected.this_class.as_deref(),
-                Some(&components),
-            );
-            self.blade_source_maps
-                .write()
-                .insert(uri.to_string(), source_map);
-            self.blade_virtual_content
-                .write()
-                .insert(uri.to_string(), virtual_php.clone());
-            virtual_php
-        } else {
-            content.to_string()
-        };
+        let content_to_parse = self
+            .record_blade_virtual_php(uri, content)
+            .unwrap_or_else(|| content.to_string());
 
         self.laravel_string_key_cache
             .write()
@@ -301,6 +265,12 @@ impl Backend {
         // provider that registers abilities and policies.  Cheap no-op for
         // files that mention neither `Gate` nor `$policies`.
         self.refresh_laravel_gates(uri, content);
+
+        // Keep the set of config keys the project declares at runtime
+        // coherent with edits to the files that write them.  Reads the spans
+        // the parse above just stored, so it runs after it rather than
+        // alongside the token-gated refreshes.
+        self.refresh_laravel_config_writes(uri);
 
         // Keep the container bindings, package config files, view and
         // translation directories, route files, and component namespaces
@@ -355,12 +325,82 @@ impl Backend {
         }
     }
 
+    /// Preprocess a Blade template into the virtual PHP everything else
+    /// reads it as, publishing the source map and the virtual content the
+    /// position translation rides on.
+    ///
+    /// Returns `None` for a file that is not a template, which is parsed
+    /// as it stands.
+    ///
+    /// Seeds the template scope with the set cached by the refresh passes
+    /// (post-index refresh, Blade did_open, caller save): the members of
+    /// the component class backing the view, then the types its call sites
+    /// imply, plus the class the view's `$this` is bound to.  Both variable
+    /// sources sit below the template's own declarations, which the
+    /// preprocessor gives priority.
+    ///
+    /// Neither is computed here: this runs on the parallel index/analyse
+    /// workers, where scanning call sites is wasted (callers may not be
+    /// parsed yet) and resolving their expression types from many threads
+    /// at once has deadlocked against the batch-publish locks.  The serial
+    /// refresh passes own the cache; this path only reads it.
+    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<String> {
+        if !self.is_blade_file(uri) {
+            return None;
+        }
+
+        let injected = self
+            .blade_injected_vars
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let components = self.blade_component_resolver(&injected.components);
+        // Read under the guard rather than cloned: the set is small but
+        // this runs on every keystroke in a template, and nothing the
+        // preprocessor does can write it back.
+        let custom_directives = self.blade_custom_directives.read();
+        let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
+            content,
+            &injected.vars,
+            crate::blade::template_kind(uri, content),
+            injected.this_class.as_deref(),
+            Some(&components),
+            &custom_directives,
+        );
+        self.blade_source_maps
+            .write()
+            .insert(uri.to_string(), source_map);
+        self.blade_virtual_content
+            .write()
+            .insert(uri.to_string(), virtual_php.clone());
+        Some(virtual_php)
+    }
+
     pub(crate) fn parse_ast_index_update_for_index(
         &self,
         uri: &str,
         content: &str,
     ) -> AstIndexParseResult {
         let uri_owned = uri.to_string();
+        // A template is indexed as the virtual PHP it lowers to, the same
+        // way an open one is.  Parsing its own bytes leaves everything
+        // Blade-specific as inline HTML, so the symbol map holds none of
+        // the class references the template makes and rename, references,
+        // and diagnostics all read it as empty.
+        //
+        // An open buffer is left alone: this batch reads the file from
+        // disk, and `apply_ast_index_parse_results_batch` drops its result
+        // for that reason.  Publishing virtual content from disk here
+        // would leave it describing different text than the symbol map
+        // `did_change` published, which is exactly what the rename's
+        // `matches_source` check refuses to plan against.
+        let preprocessed = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
+            self.record_blade_virtual_php(uri, content)
+        } else {
+            None
+        };
+        let content = preprocessed.as_deref().unwrap_or(content);
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
@@ -421,7 +461,7 @@ impl Backend {
 
         // Invalidate the reverse pivot index when a background-indexed file
         // declares a many-to-many relationship, so its target models pick up
-        // `$pivot` on the next class load.
+        // its pivot accessors on the next class load.
         if !self
             .laravel_pivots_dirty
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -653,6 +693,18 @@ impl Backend {
                 &namespace,
                 Some(&func_doc_ctx),
             );
+
+            // Drop the declarations the Blade lowering wrote itself: the
+            // wrapper holding the template body and the prologue's marker
+            // functions.  Every template lowers to the same ones, so
+            // publishing them makes each template a redeclaration of the
+            // last and puts boilerplate no file wrote into
+            // workspace-symbol results.  They stay in the virtual PHP, so
+            // the calls the lowering emits still resolve against them
+            // within the template.
+            if self.is_blade_file(uri) {
+                functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
+            }
 
             // Apply stub patches when parsing embedded stub content
             // (e.g. a constant lookup routes its stub source through
@@ -1322,6 +1374,10 @@ impl Backend {
 
         if changed {
             self.member_completion_cache.lock().clear();
+            // Exact member targets in other files may depend on the return or
+            // property type that changed here. Rebuild those files lazily;
+            // the edited file itself is evicted by reference reindexing below.
+            self.clear_resolved_member_files();
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.
@@ -2089,11 +2145,11 @@ mod tests {
         );
     }
 
-    /// A `belongsToMany` body with `->using(...)` and `->withPivot(...)`
-    /// must populate `belongs_to_many_pivots`, with the pivot class resolved
-    /// to an FQN.
+    /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
+    /// `->withPivot(...)` must populate `belongs_to_many_pivots`, with the
+    /// pivot class resolved to an FQN.
     #[test]
-    fn parses_pivot_using_and_columns_from_relationship_body() {
+    fn parses_pivot_accessor_using_and_columns_from_relationship_body() {
         let backend = Backend::new_test();
         let uri = "file:///app/Models/User.php";
         let content = "<?php
@@ -2103,7 +2159,7 @@ use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
 class User extends Model {
     /** @return BelongsToMany<Role, $this> */
     public function roles(): BelongsToMany {
-        return $this->belongsToMany(Role::class)->using(RoleUser::class)->withPivot('expires_at', 'active');
+        return $this->belongsToMany(Role::class)->as('participation')->using(RoleUser::class)->withPivot('expires_at', 'active');
     }
 }
 ";
@@ -2120,11 +2176,43 @@ class User extends Model {
         assert_eq!(pivots.len(), 1, "one pivot relation, got: {pivots:?}");
         assert_eq!(pivots[0].method, "roles");
         assert_eq!(
+            pivots[0].accessor,
+            crate::types::PivotAccessor::Custom(crate::atom::atom("participation"))
+        );
+        assert_eq!(
             pivots[0].using.as_deref(),
             Some("App\\Models\\RoleUser"),
             "using() class should be resolved to an FQN"
         );
         assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
+    }
+
+    #[test]
+    fn marks_dynamic_pivot_accessor_as_unknown() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Models/User.php";
+        let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(string $accessor): BelongsToMany {
+        return $this->belongsToMany(Role::class)->as($accessor);
+    }
+}
+";
+        backend.update_ast(uri, content);
+        let classes = backend.symbols.uri_classes_index.read();
+        let user = classes
+            .get(uri)
+            .and_then(|c| c.iter().find(|c| c.name == "User"))
+            .expect("User class should be indexed");
+        let pivot = user
+            .laravel()
+            .and_then(|laravel| laravel.belongs_to_many_pivots.first())
+            .expect("dynamic as() should still record pivot metadata");
+        assert_eq!(pivot.accessor, crate::types::PivotAccessor::Unknown);
     }
 
     /// A background/workspace parse batch must not clobber the state of a

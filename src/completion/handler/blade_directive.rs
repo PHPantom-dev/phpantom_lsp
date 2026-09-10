@@ -82,25 +82,65 @@ impl Backend {
 
     /// Build the directive-name completion list for an already-typed
     /// `prefix` (the text after `@`, matched case-insensitively).
+    ///
+    /// The directives the project's own service providers registered with
+    /// `Blade::directive()` / `Blade::if()` are offered alongside Blade's
+    /// own, told apart by their detail line rather than by position, since
+    /// the client is what orders the list.
     pub(super) fn complete_blade_directive(&self, prefix: &str) -> CompletionResponse {
         let prefix_lower = prefix.to_lowercase();
-        let items = DIRECTIVE_COMPLETIONS
+        let matches_prefix = |name: &str| name.to_lowercase().starts_with(&prefix_lower);
+
+        let mut items: Vec<CompletionItem> = DIRECTIVE_COMPLETIONS
             .iter()
-            .filter(|completion| completion.name.to_lowercase().starts_with(&prefix_lower))
-            .map(|completion| CompletionItem {
-                label: format!("@{}", completion.name),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some("Blade directive".to_string()),
-                filter_text: Some(format!("@{}", completion.name)),
-                insert_text: Some(completion.insert_text.to_string()),
-                insert_text_format: Some(if completion.is_snippet {
-                    tower_lsp::lsp_types::InsertTextFormat::SNIPPET
-                } else {
-                    tower_lsp::lsp_types::InsertTextFormat::PLAIN_TEXT
-                }),
-                ..CompletionItem::default()
+            .filter(|completion| matches_prefix(completion.name))
+            .map(|completion| {
+                directive_item(
+                    completion.name,
+                    completion.insert_text.to_string(),
+                    completion.is_snippet,
+                    "Blade directive",
+                )
             })
             .collect();
+
+        let custom = self.blade_custom_directives.read();
+        items.extend(
+            custom
+                .completions()
+                .filter(|completion| matches_prefix(completion.name))
+                .map(|completion| {
+                    directive_item(
+                        completion.name,
+                        completion.insert_text,
+                        completion.is_snippet,
+                        "Registered Blade directive",
+                    )
+                }),
+        );
         CompletionResponse::Array(items)
+    }
+}
+
+/// One directive-name completion item. `insert_text` never carries the
+/// leading `@`, which the trigger character already put in the buffer.
+fn directive_item(
+    name: &str,
+    insert_text: String,
+    is_snippet: bool,
+    detail: &str,
+) -> CompletionItem {
+    CompletionItem {
+        label: format!("@{name}"),
+        kind: Some(CompletionItemKind::KEYWORD),
+        detail: Some(detail.to_string()),
+        filter_text: Some(format!("@{name}")),
+        insert_text: Some(insert_text),
+        insert_text_format: Some(if is_snippet {
+            tower_lsp::lsp_types::InsertTextFormat::SNIPPET
+        } else {
+            tower_lsp::lsp_types::InsertTextFormat::PLAIN_TEXT
+        }),
+        ..CompletionItem::default()
     }
 }

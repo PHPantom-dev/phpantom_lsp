@@ -648,6 +648,76 @@ pub fn resolve_class_path(
     None
 }
 
+/// The part of `namespace` that lies below a PSR-4 mapping's prefix, or
+/// `None` when the mapping does not cover the namespace at all.
+///
+/// `""` means the namespace *is* the mapping's root. Matching is
+/// ASCII-case-insensitive, which is how PHP compares namespace segments,
+/// and byte lengths are preserved so the remainder can be sliced off the
+/// original spelling.
+pub(crate) fn namespace_below_prefix<'a>(
+    namespace: &'a str,
+    mapping_prefix: &str,
+) -> Option<&'a str> {
+    let prefix = mapping_prefix.trim_end_matches('\\');
+    if prefix.is_empty() {
+        // A root fallback mapping (`"": "src/"`) covers every namespace.
+        return Some(namespace);
+    }
+    if !namespace.get(..prefix.len())?.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    let rest = &namespace[prefix.len()..];
+    if rest.is_empty() {
+        return Some(rest);
+    }
+    rest.strip_prefix('\\')
+}
+
+/// Every directory PSR-4 places `namespace` in, paired with the mapping
+/// that puts it there.
+///
+/// Composer accepts an array of directories per prefix, so one namespace
+/// can be spread over several roots and each of them holds part of it.
+/// `mappings` is assumed to be sorted longest-prefix-first, so the most
+/// specific mapping comes first and a root fallback comes last.
+pub(crate) fn psr4_directories_for_namespace<'a>(
+    mappings: &'a [Psr4Mapping],
+    workspace_root: &'a Path,
+    namespace: &'a str,
+) -> impl Iterator<Item = (&'a Psr4Mapping, PathBuf)> + 'a {
+    mappings.iter().filter_map(move |mapping| {
+        let relative = namespace_below_prefix(namespace, &mapping.prefix)?;
+        let base = workspace_root.join(&mapping.base_path);
+        Some((
+            mapping,
+            if relative.is_empty() {
+                base
+            } else {
+                base.join(relative.replace('\\', std::path::MAIN_SEPARATOR_STR))
+            },
+        ))
+    })
+}
+
+/// The directory PSR-4 places `namespace` in, or `None` when no mapping
+/// covers it.
+///
+/// The counterpart of [`resolve_namespace_from_path`], and the namespace
+/// equivalent of [`resolve_class_path`]: it answers where a namespace's
+/// files have to live for the autoloader to find them. Where several
+/// mappings cover the namespace the most specific one wins; use
+/// [`psr4_directories_for_namespace`] to see all of them.
+pub(crate) fn psr4_directory_for_namespace(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    namespace: &str,
+) -> Option<PathBuf> {
+    psr4_directories_for_namespace(mappings, workspace_root, namespace)
+        .next()
+        .map(|(_, directory)| directory)
+}
+
 /// Reverse of [`resolve_class_path`]: given a file path, compute the
 /// expected PSR-4 namespace and class name.
 ///
@@ -1264,6 +1334,33 @@ pub(crate) fn is_laravel_application(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Detect whether `package` describes an application rather than a library
+/// that something else installs.
+///
+/// An application owns its configuration: the `config/` files it ships, plus
+/// the framework defaults they merge with, are the whole of what exists, so a
+/// key nothing declares is a typo.  A library's configuration belongs to
+/// whatever application installs it, and that application is a file we never
+/// see, so every key the library reads is unjudgeable.
+///
+/// Composer's `type` says which it is outright when it is set (`project` is
+/// what the Laravel skeleton ships).  A `composer.json` that leaves the type
+/// at its `library` default is read from what it requires: the framework
+/// itself in `require` is an application, while a library depends on the
+/// `illuminate/*` components it uses and keeps its copy of the framework in
+/// `require-dev` for its test suite.  This is why it cannot share
+/// [`is_laravel_application`], which counts a dev-only dependency too.
+pub(crate) fn is_application_project(package: &ComposerPackage) -> bool {
+    if let Some(kind) = &package.r#type {
+        return kind.0.eq_ignore_ascii_case("project");
+    }
+    package.require.keys().any(|name| {
+        ["laravel/framework", "laravel/laravel"]
+            .iter()
+            .any(|app| name.eq_ignore_ascii_case(app))
+    })
+}
+
 /// Packages that answer authorization checks from a runtime permission
 /// table rather than from `Gate::define()` calls or policy classes.
 ///
@@ -1414,6 +1511,35 @@ mod tests {
         let library = pkg(r#"{"require": {"illuminate/support": "^11.0"}}"#);
         assert!(is_laravel_project(&library));
         assert!(!is_laravel_application(&library));
+    }
+
+    // ── is_application_project ──────────────────────────────────────
+
+    /// The declared type settles it on its own, whichever way it points.
+    #[test]
+    fn a_declared_type_decides_whether_a_project_is_an_application() {
+        assert!(is_application_project(&pkg(
+            r#"{"type": "project", "require": {"illuminate/support": "^11.0"}}"#
+        )));
+        assert!(!is_application_project(&pkg(
+            r#"{"type": "library", "require": {"laravel/framework": "^11.0"}}"#
+        )));
+    }
+
+    /// Without one, requiring the framework itself is what tells an
+    /// application apart from a package that keeps its copy for tests.
+    #[test]
+    fn an_untyped_package_is_read_from_what_it_requires() {
+        assert!(is_application_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0"}}"#
+        )));
+        assert!(!is_application_project(&pkg(
+            r#"{"require": {"illuminate/support": "^11.0"},
+                "require-dev": {"laravel/framework": "^11.0"}}"#
+        )));
+        assert!(!is_application_project(&pkg(
+            r#"{"require": {"symfony/console": "^7.0"}}"#
+        )));
     }
 
     // ── has_runtime_permission_package ──────────────────────────────
@@ -1726,6 +1852,38 @@ mod tests {
                 Some("App\\Http\\Controllers\\Api\\V2".to_string()),
                 "UserController".to_string()
             ))
+        );
+    }
+
+    #[test]
+    fn a_prefix_with_several_roots_yields_every_directory() {
+        // Composer allows an array of directories per prefix, and each of
+        // them holds part of the same namespace.
+        let mappings = vec![
+            Psr4Mapping {
+                prefix: "Tests\\".to_string(),
+                base_path: "tests/".to_string(),
+            },
+            Psr4Mapping {
+                prefix: "Tests\\".to_string(),
+                base_path: "shared/tests/".to_string(),
+            },
+        ];
+        let root = Path::new("/project");
+        let directories: Vec<PathBuf> =
+            psr4_directories_for_namespace(&mappings, root, "Tests\\Unit")
+                .map(|(_, directory)| directory)
+                .collect();
+        assert_eq!(
+            directories,
+            vec![
+                PathBuf::from("/project/tests/Unit"),
+                PathBuf::from("/project/shared/tests/Unit"),
+            ]
+        );
+        assert_eq!(
+            psr4_directory_for_namespace(&mappings, root, "Tests\\Unit"),
+            Some(PathBuf::from("/project/tests/Unit"))
         );
     }
 

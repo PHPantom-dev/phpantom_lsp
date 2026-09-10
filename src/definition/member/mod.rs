@@ -96,6 +96,34 @@ pub(super) enum MemberAccessHint {
 impl Backend {
     // ─── Member Definition Resolution ───────────────────────────────────────
 
+    /// Resolve a member named by external project metadata, where the class
+    /// is already a fully-qualified name and there is no PHP source context
+    /// to extract a subject expression from.
+    pub(crate) fn class_member_declaration_location(
+        &self,
+        class_fqn: &str,
+        member_name: &str,
+    ) -> Option<Location> {
+        let target_class = self.find_or_load_class(class_fqn)?;
+        let class_loader = |name: &str| self.find_or_load_class(name);
+        let (declaring_class, declaring_fqn) =
+            Self::find_declaring_class(&target_class, member_name, &class_loader)?;
+        let member_kind =
+            Self::classify_member(&declaring_class, member_name, MemberAccessHint::Unknown)?;
+        let (class_uri, class_content) = self.find_class_file_content(&declaring_fqn, "", "")?;
+        let member_position = Self::find_member_position(
+            &class_content,
+            member_name,
+            member_kind,
+            declaring_class.member_name_offset(member_name, member_kind.as_str()),
+        )?;
+
+        Some(point_location(
+            Url::parse(&class_uri).ok()?,
+            member_position,
+        ))
+    }
+
     /// Resolve a member access to its definition using pre-extracted context.
     ///
     /// The caller provides a [`MemberDefinitionCtx`] bundling the subject

@@ -18,6 +18,7 @@
 use std::ops::Range;
 
 use super::directives::match_directive;
+use super::pairing::{self, Pair, Stray, Token};
 use super::signature::{
     InertOpener, inert_regions, mask_regions, matching_paren, split_top_level_args,
 };
@@ -71,9 +72,13 @@ enum Opens {
     /// `@forelse`'s separator, and an `@error="…"` in markup is a
     /// JavaScript framework's event binding.
     WithArgs,
-    /// `@section('sidebar')` opens a section; the two-argument
-    /// `@section('title', 'Home')` is a complete statement on its own.
-    Section,
+    /// Unless a second argument supplies the content inline:
+    /// `@section('sidebar')` opens a section, `@section('title', 'Home')`
+    /// is a complete statement on its own, and `@push`, `@prepend`, and
+    /// `@slot` take the same two shapes. Laravel only buffers a block when
+    /// the content argument is missing or empty, so `@section('x', null)`
+    /// and `@push('x', '')` still open one.
+    UnlessContent,
     /// `@lang` and `@lang(['count' => 1])` open a translation block, while
     /// `@lang('messages.welcome')` echoes one string.
     Lang,
@@ -90,13 +95,13 @@ enum Opens {
 /// compiler would accept any of them anywhere. The pairing below is the one
 /// Laravel's documentation gives and the one every Blade-aware editor
 /// checks, which is what an author means when they write it.
-struct Block {
-    opener: &'static str,
-    closers: &'static [&'static str],
+pub(crate) struct Block {
+    pub(crate) opener: &'static str,
+    pub(crate) closers: &'static [&'static str],
     opens: Opens,
 }
 
-const BLOCKS: &[Block] = &[
+pub(crate) const BLOCKS: &[Block] = &[
     Block {
         opener: "if",
         closers: &["endif"],
@@ -223,12 +228,12 @@ const BLOCKS: &[Block] = &[
     Block {
         opener: "section",
         closers: &["endsection", "stop", "show", "append", "overwrite"],
-        opens: Opens::Section,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "push",
         closers: &["endpush"],
-        opens: Opens::WithArgs,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "pushIf",
@@ -243,7 +248,7 @@ const BLOCKS: &[Block] = &[
     Block {
         opener: "prepend",
         closers: &["endprepend"],
-        opens: Opens::WithArgs,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "prependOnce",
@@ -263,7 +268,7 @@ const BLOCKS: &[Block] = &[
     Block {
         opener: "slot",
         closers: &["endslot"],
-        opens: Opens::WithArgs,
+        opens: Opens::UnlessContent,
     },
     Block {
         opener: "lang",
@@ -282,87 +287,97 @@ const BLOCKS: &[Block] = &[
     },
 ];
 
-/// Every block directive in `content` that does not pair up.
-pub(crate) fn check(content: &str) -> Vec<Imbalance> {
+/// What one walk of a template's directive stream finds.
+#[derive(Debug, Default)]
+pub(crate) struct Balance {
+    /// Every well-nested block pair, opener through closer.
+    pub(crate) pairs: Vec<BlockPair>,
+    /// Every place the block structure does not add up, in source order.
+    pub(crate) imbalances: Vec<Imbalance>,
+}
+
+/// A directive that opened a block, waiting for its closer.
+#[derive(Clone)]
+struct Opened {
+    block: &'static Block,
+    span: Span,
+    args: Option<Span>,
+}
+
+/// A closing directive: the name it was written as, and the block whose
+/// closer it is (the first, when several blocks share it), which names
+/// the opener a stray closer is missing.
+struct Closer {
+    name: &'static str,
+    block: &'static Block,
+    span: Span,
+}
+
+/// Read the directive stream once and pair it up with
+/// [`pairing::pair`], collecting both the blocks that pair and the ones
+/// that do not.
+///
+/// Pairing and reporting have to agree on what a closer closes, so both
+/// come out of this one walk: a closer that does not match the innermost
+/// open block ends that block anyway (with a report, and without a pair),
+/// so that no later closer can pair with an opener a stray closer already
+/// consumed.
+pub(crate) fn walk(content: &str) -> Balance {
+    let mut balance = Balance::default();
     if !content.contains('@') {
-        return Vec::new();
+        return balance;
     }
 
     let regions = inert_regions(content, true);
     let masked = mask_regions(content, &regions);
-    let bytes = masked.as_bytes();
 
-    let mut out: Vec<Imbalance> = Vec::new();
-    let mut stack: Vec<(&Block, Span)> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'@' {
-            i += 1;
-            continue;
-        }
-        let Some((name, args)) = directive_at(&masked, i) else {
-            i += 1;
-            continue;
-        };
-        let span = i..i + 1 + name.len();
-        // Continue past the argument list, so a directive name written
-        // inside one (`@include('partials.@endif')`) is not read as a
-        // directive of its own.
-        i = args.as_ref().map_or(span.end, |args| args.end);
-
+    let mut tokens: Vec<Token<Opened, Closer>> = Vec::new();
+    for Directive { name, span, args } in directives(&masked) {
         if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
             if opens_block(block, &masked, args.as_ref()) {
-                stack.push((block, span));
+                tokens.push(Token::Open(Opened { block, span, args }));
             }
             continue;
         }
-        let Some(block) = BLOCKS.iter().find(|block| block.closers.contains(&name)) else {
-            continue;
-        };
-        match stack
-            .iter()
-            .rposition(|(open, _)| open.closers.contains(&name))
-        {
-            // The closer belongs to a block that is open. Anything opened
-            // inside it was never closed, and nothing later can close it
-            // now, so the innermost of those is reported here and the
-            // whole run comes off the stack.
-            Some(index) => {
-                if let Some((skipped, skipped_span)) = stack.get(index + 1) {
-                    out.push(Imbalance::Mismatched {
-                        closer: span,
-                        found: name,
-                        expected: skipped.closers[0],
-                        opener: skipped.opener,
-                        opener_span: skipped_span.clone(),
-                    });
-                }
-                stack.truncate(index);
-            }
-            // No open block takes this closer: inside one, the author
-            // named the wrong end for it; outside every block, the closer
-            // stands alone.
-            None => match stack.pop() {
-                Some((open, open_span)) => out.push(Imbalance::Mismatched {
-                    closer: span,
-                    found: name,
-                    expected: open.closers[0],
-                    opener: open.opener,
-                    opener_span: open_span,
-                }),
-                None => out.push(Imbalance::Unexpected {
-                    closer: span,
-                    found: name,
-                    opener: block.opener,
-                }),
+        if let Some(block) = BLOCKS.iter().find(|block| block.closers.contains(&name)) {
+            tokens.push(Token::Close(Closer { name, block, span }));
+        }
+    }
+
+    let pairing = pairing::pair(tokens, |open: &Opened, closer: &Closer| {
+        open.block.closers.contains(&closer.name)
+    });
+
+    balance.pairs = pairing
+        .pairs
+        .into_iter()
+        .map(|Pair { opener, closer }| BlockPair {
+            opener: opener.span,
+            args: opener.args,
+            closer: closer.span,
+        })
+        .collect();
+    for stray in pairing.strays {
+        balance.imbalances.push(match stray {
+            Stray::Mismatched { closer, skipped } => Imbalance::Mismatched {
+                closer: closer.span,
+                found: closer.name,
+                expected: skipped.block.closers[0],
+                opener: skipped.block.opener,
+                opener_span: skipped.span,
             },
-        }
+            Stray::Unexpected { closer } => Imbalance::Unexpected {
+                closer: closer.span,
+                found: closer.name,
+                opener: closer.block.opener,
+            },
+        });
     }
 
     // An unterminated `@verbatim` or `@php` swallows the rest of the
     // template, so everything still open at this point is open only
     // because its closer was eaten. Report the region that ate them and
-    // leave the stack alone.
+    // leave the open blocks alone.
     let unterminated = regions
         .iter()
         .find(|region| !region.terminated && region.opener != InertOpener::Comment);
@@ -371,33 +386,62 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
             InertOpener::Verbatim => ("verbatim", "endverbatim"),
             _ => ("php", "endphp"),
         };
-        out.push(Imbalance::Unclosed {
+        balance.imbalances.push(Imbalance::Unclosed {
             opener_span: region.span.start..region.span.start + 1 + opener.len(),
             opener,
             expected,
         });
     } else {
-        for (block, span) in stack {
-            out.push(Imbalance::Unclosed {
-                opener_span: span,
-                opener: block.opener,
-                expected: block.closers[0],
+        for opened in pairing.open {
+            balance.imbalances.push(Imbalance::Unclosed {
+                opener_span: opened.span,
+                opener: opened.block.opener,
+                expected: opened.block.closers[0],
             });
         }
     }
 
-    out.sort_by_key(|imbalance| imbalance.span().start);
-    out
+    balance
+        .imbalances
+        .sort_by_key(|imbalance| imbalance.span().start);
+    balance
+}
+
+/// Every block directive in `content` that does not pair up.
+pub(crate) fn check(content: &str) -> Vec<Imbalance> {
+    walk(content).imbalances
+}
+
+/// A block directive and the closer that ends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlockPair {
+    /// The opener itself (`@section`), without its argument list.
+    pub(crate) opener: Span,
+    /// The opener's argument list, parentheses included, when it has one.
+    pub(crate) args: Option<Span>,
+    /// The directive that closes the block (`@endsection`).
+    pub(crate) closer: Span,
+}
+
+/// Every well-nested block-directive pair in `content`, covering
+/// `@directive(...)` through its matching `@enddirective`.
+///
+/// Read from the same walk as [`check`], so the two agree on what a
+/// closer closes: a closer that does not match the innermost open
+/// block (already reported by [`check`]) pairs with nothing.
+pub(crate) fn block_pairs(content: &str) -> Vec<BlockPair> {
+    walk(content).pairs
 }
 
 /// Whether an occurrence of `block`'s opener with `args` opens a block.
-fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
+pub(crate) fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
     match block.opens {
         Opens::Always => true,
         Opens::WithArgs => args.is_some(),
-        Opens::Section => {
-            args.is_some_and(|args| split_top_level_args(inside(content, args)).len() < 2)
-        }
+        Opens::UnlessContent => args.is_some_and(|args| {
+            let parts = split_top_level_args(inside(content, args));
+            parts.len() < 2 || matches!(parts[1].trim(), "null" | "''" | "\"\"")
+        }),
         Opens::Lang => args.is_none_or(|args| inside(content, args).trim_start().starts_with('[')),
         Opens::Never => false,
     }
@@ -410,6 +454,40 @@ pub(crate) fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
         .unwrap_or_default()
 }
 
+/// One directive of a template, as [`directives`] yields it.
+pub(crate) struct Directive {
+    pub(crate) name: &'static str,
+    /// The `@` and the name, without the argument list.
+    pub(crate) span: Span,
+    /// The argument list, parentheses included, when it has one.
+    pub(crate) args: Option<Span>,
+}
+
+/// Every directive in `masked`, in document order.
+///
+/// `masked` is the template with its inert regions blanked out by
+/// [`mask_regions`], so nothing written in a comment, a `@verbatim`, or a
+/// `@php` block is yielded. The scan resumes past each directive's
+/// argument list, so a name written inside one
+/// (`@include('partials.@endif')`) is not read as a directive of its own.
+pub(crate) fn directives(masked: &str) -> impl Iterator<Item = Directive> + '_ {
+    let bytes = masked.as_bytes();
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        while let Some(at) = bytes[i..].iter().position(|byte| *byte == b'@') {
+            i += at;
+            let Some((name, args)) = directive_at(masked, i) else {
+                i += 1;
+                continue;
+            };
+            let span = i..i + 1 + name.len();
+            i = args.as_ref().map_or(span.end, |args| args.end);
+            return Some(Directive { name, span, args });
+        }
+        None
+    })
+}
+
 /// The directive at `at` (which is on an `@`), and the byte range of its
 /// argument list, parentheses included, when it has one.
 ///
@@ -417,7 +495,7 @@ pub(crate) fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
 /// glued to a preceding word is not a directive: an `@production` in
 /// `admin@production.example` compiles to nothing, and `@@if` is the escape
 /// for a literal `@if`.
-pub(crate) fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
+fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
     let bytes = content.as_bytes();
     if at > 0 && (bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1])) {
         return None;
@@ -514,12 +592,24 @@ mod tests {
     }
 
     /// The two-argument `@section` is a complete statement; the
-    /// one-argument form opens a block.
+    /// one-argument form opens a block. `@push`, `@prepend`, and `@slot`
+    /// take the same two shapes, and an explicit empty content argument
+    /// still opens a block, because Laravel only buffers when the content
+    /// is missing or empty.
     #[test]
     fn a_two_argument_section_opens_nothing() {
         assert!(report("@section('title', 'Home')\n").is_empty());
         assert_eq!(report("@section('body')\n"), ["unclosed section"]);
         assert!(report("@section('body')\n@endsection\n").is_empty());
+        assert_eq!(report("@section('body', null)\n"), ["unclosed section"]);
+        assert!(report("@push('scripts', $inline)\n").is_empty());
+        assert!(report("@prepend('scripts', '<script></script>')\n").is_empty());
+        assert!(report("@slot('title', 'Home')\n").is_empty());
+        assert_eq!(report("@push('scripts', '')\n"), ["unclosed push"]);
+        assert_eq!(
+            report("@slot('title', null, ['class' => 'x'])\n"),
+            ["unclosed slot"]
+        );
     }
 
     /// `@lang('key')` echoes a string; the bare and array forms buffer a
@@ -597,5 +687,95 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The stream resumes past each argument list, so a directive name
+    /// written inside one belongs to that argument list rather than
+    /// being a directive of its own.
+    #[test]
+    fn a_directive_name_inside_an_argument_list_is_not_yielded() {
+        let blade = "@include('partials.@endif')\n@if ($ok)\n@endif\n";
+        let found: Vec<_> = directives(blade)
+            .map(|directive| {
+                (
+                    directive.name,
+                    &blade[directive.span],
+                    directive.args.map(|args| &blade[args]),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("include", "@include", Some("('partials.@endif')")),
+                ("if", "@if", Some("($ok)")),
+                ("endif", "@endif", None),
+            ]
+        );
+    }
+
+    /// `block_pairs` spans as `(name, opener_start, closer_end)` triples,
+    /// for readable assertions.
+    fn pairs(content: &str) -> Vec<(&str, usize, usize)> {
+        block_pairs(content)
+            .into_iter()
+            .map(|pair| {
+                (
+                    &content[pair.opener.start + 1..pair.opener.end],
+                    pair.opener.start,
+                    pair.closer.end,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_paired_block_spans_from_its_opener_to_its_closer() {
+        let blade = "@foreach ($rows as $row)\n<p>{{ $row }}</p>\n@endforeach\n";
+        assert_eq!(pairs(blade), [("foreach", 0, blade.len() - 1)]);
+    }
+
+    /// The argument list travels with the pair, so a reader that has to
+    /// know *which* section a block opens does not rescan for it.
+    #[test]
+    fn a_pair_carries_the_openers_argument_list() {
+        let blade = "@section('body')\n<p>hi</p>\n@endsection\n";
+        let args = block_pairs(blade)[0]
+            .args
+            .clone()
+            .expect("section has args");
+        assert_eq!(&blade[args], "('body')");
+    }
+
+    #[test]
+    fn nested_blocks_each_pair_independently() {
+        let blade = "@if ($ok)\n@foreach ($rows as $row)\n{{ $row }}\n@endforeach\n@endif\n";
+        let found = pairs(blade);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().any(|(name, ..)| *name == "if"));
+        assert!(found.iter().any(|(name, ..)| *name == "foreach"));
+    }
+
+    #[test]
+    fn a_mismatched_closer_pairs_neither_side() {
+        assert!(pairs("@foreach ($rows as $row)\n@endif\n").is_empty());
+    }
+
+    /// A stray closer ends the block it sits in for pairing as well as for
+    /// reporting, so the block's own closer, coming later, pairs with
+    /// nothing rather than reaching back past the stray one.
+    #[test]
+    fn a_stray_closer_consumes_the_block_for_pairing_too() {
+        let blade = "@foreach ($rows as $row)\n@endif\n@endforeach\n";
+        assert!(pairs(blade).is_empty());
+        assert_eq!(
+            report(blade),
+            ["mismatched endif/endforeach", "unexpected endforeach"]
+        );
+    }
+
+    #[test]
+    fn an_unclosed_block_does_not_pair() {
+        assert!(pairs("@if ($ok)\n<p>hi</p>\n").is_empty());
     }
 }

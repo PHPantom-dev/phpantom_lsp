@@ -10217,6 +10217,41 @@ function run(array $items): void {
     }
 }
 
+/// `array{…}|null` and `?array{…}` are the same type, so a branch that
+/// writes one spelling folds into the shape the other left behind instead of
+/// standing beside it as another alternative.
+#[test]
+fn hover_nullable_shape_spellings_merge_into_one_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** @return array{a: int}|null */
+function first() { return null; }
+/** @return array{a: int, b: string}|null */
+function second() { return null; }
+
+function run(bool $c): void {
+    $row = first();
+    if ($c) {
+        $row = second();
+    }
+    $row;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 5).expect("expected hover on $row");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("?array{a: int, b?: string}"),
+        "the two nullable spellings should fold into one shape, got: {text}"
+    );
+    assert_eq!(
+        text.matches("array{").count(),
+        1,
+        "the merge should leave one shape behind, not one per branch, got: {text}"
+    );
+}
+
 /// A conditional keyed write starts from `array{}`, which the write's own
 /// result covers — the merged type must not keep the empty-array snapshot
 /// alongside it.

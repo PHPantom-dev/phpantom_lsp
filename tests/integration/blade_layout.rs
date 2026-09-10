@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -42,16 +42,7 @@ mod tests {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text,
-                },
-            })
-            .await;
+        open_document(backend, &uri, "blade", &text).await;
         uri
     }
 

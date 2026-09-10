@@ -20,13 +20,20 @@ use crate::Backend;
 /// faster than a human can plausibly switch back to their editor.
 const GLOBAL_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// The `client/registerCapability` id used for the
+/// `workspace/didChangeWatchedFiles` registration built by
+/// [`Backend::build_watched_file_registration`], shared with
+/// [`Backend::reregister_watched_files_if_changed`] so it can unregister
+/// the same capability it is about to replace.
+const WATCHED_FILES_REGISTRATION_ID: &str = "workspace/didChangeWatchedFiles";
+
 impl Backend {
     /// Apply a `workspace/didChangeWatchedFiles` batch to the indexes.
     ///
-    /// Returns `true` if any PHP file, composer file, or the project's own
-    /// `.phpantom.toml` was acted on (so the caller can ask the editor to
-    /// re-pull diagnostics).  Runs entirely on a blocking thread; it parses
-    /// no files on the async runtime.
+    /// Returns `true` if any PHP/resource file, composer file, or the
+    /// project's own `.phpantom.toml` was acted on (so the caller can ask the
+    /// editor to refresh affected features). Runs entirely on a blocking
+    /// thread; it parses no files on the async runtime.
     ///
     /// Editors cannot watch the filesystem while the window is unfocused, so
     /// on refocus they resynchronise by reporting the *entire* workspace as
@@ -52,6 +59,7 @@ impl Backend {
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
+        let mut resource_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         let mut migration_discovery =
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
@@ -59,7 +67,9 @@ impl Backend {
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
+            let indexed = self.symbol_maps.read();
             let laravel_config = self.config().laravel;
+            let filters = self.index_filters();
             for change in &params.changes {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -103,18 +113,51 @@ impl Backend {
                     }
                     continue;
                 }
-                if !path_str.ends_with(".php") {
+                let uri_str = change.uri.to_string();
+                if crate::resource_navigation::is_resource_document(path_str) {
+                    if open.contains_key(&uri_str) {
+                        continue;
+                    }
+                    let Ok(file_path) = change.uri.to_file_path() else {
+                        continue;
+                    };
+                    // An excluded path is invisible to the workspace walk,
+                    // so its events are dropped here too.
+                    if filters.is_excluded_path(&file_path, false) {
+                        continue;
+                    }
+                    if change.typ == FileChangeType::CHANGED {
+                        let canonical_uri = crate::util::path_to_uri(&file_path);
+                        if !indexed.contains_key(&uri_str)
+                            && !indexed.contains_key(canonical_uri.as_str())
+                        {
+                            continue;
+                        }
+                    }
+                    resource_changes.push((uri_str, file_path, change.typ));
+                    continue;
+                }
+                let is_php = std::path::Path::new(path_str)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| filters.is_php_extension(ext));
+                if !is_php {
                     continue;
                 }
 
                 // Open files are already tracked via did_open/did_change.
-                let uri_str = change.uri.to_string();
                 if open.contains_key(&uri_str) {
                     continue;
                 }
                 let Ok(file_path) = change.uri.to_file_path() else {
                     continue;
                 };
+
+                // Excluded paths are invisible to indexing; skip their
+                // events the way the workspace scanners skip the files.
+                if filters.is_excluded_path(&file_path, false) {
+                    continue;
+                }
 
                 if change.typ == FileChangeType::CHANGED {
                     // `parsed_uris` records the editor URI for open files and
@@ -133,6 +176,7 @@ impl Backend {
         }
 
         if php_changes.is_empty()
+            && resource_changes.is_empty()
             && !composer_changed
             && !config_changed
             && !schema_full_rebuild
@@ -175,6 +219,19 @@ impl Backend {
             self.rescan_composer_indexes(root);
         }
 
+        if !resource_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} watched YAML/XML file(s) changed on disk, refreshing references",
+                resource_changes.len()
+            );
+            for (uri, path, change_type) in &resource_changes {
+                if *change_type == FileChangeType::DELETED {
+                    self.clear_file_maps(uri);
+                } else if let Ok(content) = std::fs::read_to_string(path) {
+                    self.update_resource_symbol_index(uri, &content);
+                }
+            }
+        }
         if schema_full_rebuild {
             tracing::info!("PHPantom: Laravel schema files changed, reloading schema index");
             self.reload_laravel_schema_index(root);
@@ -204,8 +261,12 @@ impl Backend {
     /// is visible to every other clone, including the long-lived one that
     /// answers LSP requests.
     pub(crate) fn reload_config(&self, root: &std::path::Path) {
+        // Captured before the reload replaces them, so the reconciliation
+        // below can tell which way the file filters moved.
+        let previous_filters = self.index_filters();
+
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
-            Ok(cfg) => *self.workspace.config.lock() = cfg,
+            Ok(cfg) => self.set_config(cfg),
             Err(e) => {
                 tracing::warn!("Failed to reload .phpantom.toml: {}", e);
                 return;
@@ -224,6 +285,135 @@ impl Backend {
         // rather than merely being read the next time something asks.
         self.start_workspace_diagnostics_on_reload();
         self.stop_workspace_diagnostics_on_reload();
+
+        // An `[indexing] extensions` entry (e.g. Drupal's `.module`)
+        // added to the config after startup needs its own watcher
+        // registered, or the client never reports its file events and
+        // the index keeps serving the last full scan.
+        self.reregister_watched_files_if_changed();
+
+        // An edit to `[indexing] exclude` or `extensions` changes what
+        // belongs in the index, not merely what the next scan will see.
+        self.reconcile_index_for_filter_change(&previous_filters);
+    }
+
+    /// Build the `workspace/didChangeWatchedFiles` registration for the
+    /// current `[indexing] extensions` config and Laravel classification.
+    ///
+    /// Shared by `initialized`'s first registration and
+    /// [`Self::reregister_watched_files_if_changed`] so a live
+    /// `.phpantom.toml` reload advertises the same watcher set a fresh
+    /// session would have started with. Returns the registration
+    /// alongside the extension list and Laravel flag it was built from,
+    /// so the caller can record what was actually registered.
+    pub(crate) fn build_watched_file_registration(&self) -> (Registration, Vec<String>, bool) {
+        let index_filters = self.index_filters();
+        let extra_extensions = index_filters.extra_extensions().to_vec();
+        let is_laravel = self.resolved_class_cache.read().is_laravel();
+
+        let mut watchers: Vec<FileSystemWatcher> = extra_extensions
+            .iter()
+            .map(|ext| FileSystemWatcher {
+                glob_pattern: GlobPattern::String(format!("**/*.{ext}")),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            })
+            .collect();
+        watchers.extend([
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.php".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}.dist".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/composer.json".to_string()),
+                kind: Some(WatchKind::Change),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
+                kind: Some(WatchKind::Change),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+        ]);
+        if is_laravel {
+            watchers.extend([
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.sql".to_string()),
+                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                },
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
+                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+                },
+            ]);
+        }
+
+        let registration = Registration {
+            id: WATCHED_FILES_REGISTRATION_ID.to_string(),
+            method: "workspace/didChangeWatchedFiles".to_string(),
+            register_options: Some(
+                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers })
+                    .unwrap(),
+            ),
+        };
+
+        (registration, extra_extensions, is_laravel)
+    }
+
+    /// Re-push the `workspace/didChangeWatchedFiles` registration when
+    /// `[indexing] extensions` or the Laravel classification has changed
+    /// since the last registration.
+    ///
+    /// Guarded on an actual change so an unrelated config edit does not
+    /// churn the client's watcher list. Before `initialized` performs the
+    /// first registration, this only records the desired state instead of
+    /// racing that initial `register_capability` call.
+    pub(crate) fn reregister_watched_files_if_changed(&self) {
+        let (registration, extra_extensions, is_laravel) = self.build_watched_file_registration();
+
+        let mut state = self.registered_watcher_state.write();
+        let Some(previous) = state.clone() else {
+            *state = Some((extra_extensions, is_laravel));
+            return;
+        };
+        if previous == (extra_extensions.clone(), is_laravel) {
+            return;
+        }
+        *state = Some((extra_extensions, is_laravel));
+        drop(state);
+
+        if self.client.is_none() {
+            return;
+        }
+        // `reload_config` is synchronous, and runs on a blocking thread
+        // for a watched-file batch and on the runtime for the global
+        // config poller.  Both carry the runtime context; a unit test
+        // calling it directly does not, and has nothing to (un)register.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let backend = self.clone_for_diagnostic_worker();
+        runtime.spawn(async move {
+            let Some(client) = &backend.client else {
+                return;
+            };
+            let _ = client
+                .unregister_capability(vec![Unregistration {
+                    id: WATCHED_FILES_REGISTRATION_ID.to_string(),
+                    method: "workspace/didChangeWatchedFiles".to_string(),
+                }])
+                .await;
+            let _ = client.register_capability(vec![registration]).await;
+        });
     }
 
     /// Poll the global config file for changes and reload on edit.
@@ -480,5 +670,149 @@ mod tests {
         backend.workspace.global_config_path = Some(global);
         backend.reload_config(&project);
         assert!(backend.config().diagnostics.extra_arguments_enabled());
+    }
+
+    /// The compiled `[indexing]` filters are cached until the config is
+    /// replaced, so a reload has to drop them. Writing the new config
+    /// straight into the mutex leaves the old globs compiled and every
+    /// scan after the reload keeps using the settings the user just
+    /// changed away from.
+    #[test]
+    fn reload_config_recompiles_the_indexing_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+        // Compile and cache the filters under the empty default config.
+        assert!(
+            !backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true)
+        );
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[indexing]\nexclude = [\"generated\"]\nextensions = [\"module\"]\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        let filters = backend.index_filters();
+        assert!(
+            filters.is_excluded_entry(&dir.path().join("generated"), true),
+            "a reload must recompile the exclude globs"
+        );
+        assert_eq!(filters.extra_extensions(), &["module".to_string()]);
+    }
+
+    /// Recompiling the filters only governs the next scan. A live
+    /// `.phpantom.toml` edit also has to reconcile the index built under
+    /// the old ones, or the tree the user just excluded keeps answering
+    /// completion and workspace symbol search until restart.
+    #[test]
+    fn reload_config_evicts_newly_excluded_classes() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+        let generated = dir.path().join("generated/Hidden.php");
+        std::fs::create_dir_all(generated.parent().unwrap()).unwrap();
+        std::fs::write(&generated, "<?php\nclass Hidden {}\n").unwrap();
+        let uri = crate::util::path_to_uri(&generated);
+        backend
+            .symbols
+            .with_class_declarations(|decls| decls.note_discovered("Hidden", uri));
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[indexing]\nexclude = [\"generated\"]\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        assert!(
+            backend.symbols.fqn_uri_index.read().get("Hidden").is_none(),
+            "a class under a newly excluded path must leave the index"
+        );
+    }
+
+    /// Adding an `[indexing] extensions` entry used to need a restart
+    /// before its files were watched: `initialized` only ever registered
+    /// the watcher list once, and a live `.phpantom.toml` reload never
+    /// revisited it. A reload must now record the new extension so the
+    /// (client-side) watcher registration can be refreshed to match.
+    #[test]
+    fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+        // Simulate the registration `initialized` performs at startup,
+        // before any `.phpantom.toml` extensions were configured.
+        backend.reregister_watched_files_if_changed();
+        assert_eq!(
+            *backend.registered_watcher_state.read(),
+            Some((Vec::new(), true))
+        );
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[indexing]\nextensions = [\"module\"]\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        assert_eq!(
+            *backend.registered_watcher_state.read(),
+            Some((vec!["module".to_string()], true)),
+            "a reload that adds an extension must update the registered watcher state"
+        );
+    }
+
+    /// An unrelated config edit that leaves `[indexing] extensions` and
+    /// the Laravel classification untouched must not appear as a change
+    /// to the registered watcher state.
+    #[test]
+    fn reload_config_leaves_the_registered_watcher_state_untouched_for_an_unrelated_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        backend.reregister_watched_files_if_changed();
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[diagnostics]\nextra-arguments = false\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        assert_eq!(
+            *backend.registered_watcher_state.read(),
+            Some((Vec::new(), true))
+        );
+    }
+
+    /// An extension the *editor* forwards needs its watcher registered
+    /// just as much as one written into `.phpantom.toml`. Without it the
+    /// client reports no events for those files and the index keeps
+    /// serving the last full scan.
+    #[test]
+    fn a_client_extension_update_updates_the_registered_watcher_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        backend.reregister_watched_files_if_changed();
+
+        backend.set_client_indexing_options(crate::config::ClientIndexingOptions {
+            exclude: Vec::new(),
+            extensions: vec!["module".to_string()],
+        });
+        backend.reregister_watched_files_if_changed();
+
+        assert_eq!(
+            *backend.registered_watcher_state.read(),
+            Some((vec!["module".to_string()], true)),
+            "a client-forwarded extension must be watched"
+        );
     }
 }

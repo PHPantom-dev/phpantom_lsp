@@ -14,6 +14,9 @@
 //!   line and the block isn't already sorted, offer to re-sort it
 //!   alphabetically within each blank-line-separated group and import
 //!   kind (plain `use` / `use function` / `use const`).
+//! - **Import qualified symbol** — replace qualified class, function, or
+//!   constant usages with an import and short name, aliasing conflicts.
+//!   A bulk variant does every qualified symbol in the namespace at once.
 //! - **Implement missing methods** — when the cursor is inside a
 //!   concrete class that extends an abstract class or implements an
 //!   interface with unimplemented methods, offer to generate stubs.
@@ -64,6 +67,11 @@
 //!   `self::CONSTANT_NAME` and a new constant declaration is inserted at
 //!   the top of the class (after any existing constants).  Offers both
 //!   single-occurrence and all-occurrences variants when duplicates exist.
+//! - **Create missing view** — when a `view('name')`-style call names a
+//!   template that resolves to nothing on disk (the `invalid_laravel_view`
+//!   diagnostic), offer to create the `.blade.php` file under the
+//!   project's configured view root (or the matching package namespace's
+//!   own view directory) and open it.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -86,6 +94,7 @@ mod convert_to_arrow_function;
 mod convert_to_closure;
 mod convert_to_instance_variable;
 mod convert_to_interpolation;
+mod create_missing_view;
 pub(crate) mod cursor_context;
 mod extract_constant;
 mod extract_function;
@@ -112,132 +121,18 @@ mod simplify_null;
 mod sort_use_statements;
 mod update_docblock;
 
-use std::collections::HashMap;
+mod docblock_edit;
+mod helpers;
 
-use mago_span::HasSpan;
-use mago_syntax::cst::class_like::member::ClassLikeMember;
-use mago_syntax::cst::sequence::Sequence;
-use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
-mod docblock_edit;
 pub(crate) use docblock_edit::{DocblockAbove, find_docblock_above_line};
-
-// ─── Shared edit builders ─────────────────────────────────────────────────────
-
-/// Build a [`WorkspaceEdit`] that applies a set of text edits to a single file.
-///
-/// Nearly every code action produces edits for exactly one document.  This
-/// wraps the `changes` map construction so handlers don't each open-code the
-/// `document_changes: None` / `change_annotations: None` boilerplate.
-pub(crate) fn single_file_edit(uri: Url, edits: Vec<TextEdit>) -> WorkspaceEdit {
-    let mut changes = HashMap::new();
-    changes.insert(uri, edits);
-    WorkspaceEdit {
-        changes: Some(changes),
-        document_changes: None,
-        change_annotations: None,
-    }
-}
-
-/// Build a [`WorkspaceEdit`] that applies a single text edit to one file.
-///
-/// Convenience wrapper over [`single_file_edit`] for the common case of one
-/// range → one replacement string.
-pub(crate) fn single_edit(uri: Url, range: Range, new_text: String) -> WorkspaceEdit {
-    single_file_edit(uri, vec![TextEdit { range, new_text }])
-}
-
-// ─── Indentation helpers ──────────────────────────────────────────────────────
-
-/// Return the leading whitespace of the line containing `offset`.
-///
-/// This is the raw indentation of that line, without adding an extra level.
-pub(crate) fn indent_of_line_at(content: &str, offset: usize) -> String {
-    let before = &content[..offset.min(content.len())];
-    let line_start = before.rfind('\n').map_or(0, |p| p + 1);
-    content[line_start..offset.min(content.len())]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect()
-}
-
-/// Detect the file's indentation unit (a tab, two spaces, or four spaces).
-///
-/// Scans lines for the first indented line and infers the convention,
-/// defaulting to four spaces when nothing indented is found.
-pub(crate) fn indent_unit(content: &str) -> &'static str {
-    for line in content.lines() {
-        if line.starts_with('\t') {
-            return "\t";
-        }
-        let spaces: usize = line.chars().take_while(|c| *c == ' ').count();
-        if spaces >= 2 {
-            if spaces.is_multiple_of(4) {
-                return "    ";
-            }
-            return "  ";
-        }
-    }
-    "    "
-}
-
-// ─── Shared helpers ─────────────────────────────────────────────────────────
-
-/// Detect indentation from the first class member's position in the source.
-///
-/// Looks at the line containing the first member to determine the
-/// indent string.  Falls back to four spaces.
-pub(super) fn detect_indent_from_members<'a>(
-    members: &Sequence<'a, ClassLikeMember<'a>>,
-    content: &str,
-) -> String {
-    if let Some(first) = members.first() {
-        let offset = first.span().start.offset as usize;
-        let line_start = content[..offset]
-            .rfind('\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
-        let line_prefix = &content[line_start..offset];
-        let indent: String = line_prefix
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect();
-        if !indent.is_empty() {
-            return indent;
-        }
-    }
-
-    // Fallback: four spaces.
-    "    ".to_string()
-}
-
-// ─── Resolve data ───────────────────────────────────────────────────────────
-
-/// Opaque data attached to a `CodeAction` for deferred edit computation.
-///
-/// Serialized into the `data` field of `CodeAction` during Phase 1.
-/// Deserialized in the `codeAction/resolve` handler (Phase 2) to
-/// recompute the workspace edit on demand.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CodeActionData {
-    /// Identifies which action this is (e.g. `"phpstan.addThrows"`,
-    /// `"refactor.extractFunction"`).
-    pub action_kind: String,
-    /// The file URI the action applies to.
-    pub uri: String,
-    /// The cursor/selection range from the original `codeAction` request.
-    pub range: Range,
-    /// Action-specific context needed to recompute the edit.
-    ///
-    /// For PHPStan actions this carries the diagnostic message,
-    /// identifier, and line number.  For refactoring actions it
-    /// carries whatever lightweight context avoids a full re-scan.
-    #[serde(default)]
-    pub extra: serde_json::Value,
-}
+pub(crate) use helpers::{
+    CodeActionData, create_file_edit, detect_indent_from_members, find_identical_occurrences,
+    indent_of_line_at, indent_unit, make_code_action_data, single_edit, single_file_edit,
+};
 
 impl Backend {
     /// Handle a `textDocument/codeAction` request.
@@ -263,7 +158,7 @@ impl Backend {
         // ── Import class ────────────────────────────────────────────────
         self.collect_import_class_actions(uri, content, params, &mut actions);
 
-        // ── Replace FQCN with import ────────────────────────────────────
+        // ── Import qualified symbol and shorten usages ─────────────────
         self.collect_replace_fqcn_actions(uri, content, params, &mut actions);
 
         // ── Import all missing classes (bulk) ───────────────────────────
@@ -344,6 +239,20 @@ impl Backend {
 
         // ── Extract interface ────────────────────────────────────────────
         self.collect_extract_interface_actions(uri, content, params, &mut actions);
+
+        // ── Create missing view ─────────────────────────────────────────
+        self.collect_create_missing_view_actions(uri, content, params, &mut actions);
+
+        // Every collector plans its edits against the PHP a template lowers
+        // to; the editor applies them to the template itself.
+        for action in &mut actions {
+            if let CodeActionOrCommand::CodeAction(CodeAction {
+                edit: Some(edit), ..
+            }) = action
+            {
+                self.translate_workspace_edit(edit);
+            }
+        }
 
         actions
     }
@@ -459,7 +368,8 @@ impl Backend {
             _ => None,
         };
 
-        if let Some(edit) = result {
+        if let Some(mut edit) = result {
+            self.translate_workspace_edit(&mut edit);
             action.edit = Some(edit);
         }
 
@@ -499,62 +409,4 @@ impl Backend {
 
         (action, republish_uri)
     }
-}
-
-/// Build a [`CodeActionData`] value and serialize it to JSON.
-pub(crate) fn make_code_action_data(
-    action_kind: &str,
-    uri: &str,
-    range: &Range,
-    extra: serde_json::Value,
-) -> serde_json::Value {
-    serde_json::to_value(CodeActionData {
-        action_kind: action_kind.to_string(),
-        uri: uri.to_string(),
-        range: *range,
-        extra,
-    })
-    .unwrap_or_default()
-}
-
-/// Find all occurrences of `needle` in `content` within the byte range
-/// `[scope_start, scope_end)` that are textually identical to the selected
-/// expression, excluding the original selection `[sel_start, sel_end)`.
-///
-/// Returns `(start, end)` byte offset pairs. Word boundaries are checked
-/// so that substrings of longer identifiers are not matched.
-pub(crate) fn find_identical_occurrences(
-    content: &str,
-    needle: &str,
-    sel_start: usize,
-    sel_end: usize,
-    scope_start: usize,
-    scope_end: usize,
-) -> Vec<(usize, usize)> {
-    if needle.is_empty() || scope_start >= scope_end || scope_end > content.len() {
-        return Vec::new();
-    }
-    let haystack = &content[scope_start..scope_end];
-    let mut results = Vec::new();
-    let mut search_from = 0;
-    while let Some(pos) = haystack[search_from..].find(needle) {
-        let abs_start = scope_start + search_from + pos;
-        let abs_end = abs_start + needle.len();
-        // Skip the original selection.
-        if abs_start != sel_start || abs_end != sel_end {
-            // Check word boundaries to avoid matching substrings.
-            let before_ok = abs_start == 0
-                || !content.as_bytes()[abs_start - 1].is_ascii_alphanumeric()
-                    && content.as_bytes()[abs_start - 1] != b'_'
-                    && content.as_bytes()[abs_start - 1] != b'$';
-            let after_ok = abs_end >= content.len()
-                || !content.as_bytes()[abs_end].is_ascii_alphanumeric()
-                    && content.as_bytes()[abs_end] != b'_';
-            if before_ok && after_ok {
-                results.push((abs_start, abs_end));
-            }
-        }
-        search_from = search_from + pos + 1;
-    }
-    results
 }

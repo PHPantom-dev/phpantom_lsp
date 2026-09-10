@@ -76,6 +76,7 @@ use std::path::{Path, PathBuf};
 use memmap2::Mmap;
 
 mod discovery;
+mod filters;
 mod lexer;
 
 pub(crate) use discovery::vendor_package_roots;
@@ -84,6 +85,7 @@ pub use discovery::{
     scan_psr4_directories_with_skip, scan_vendor_packages, scan_vendor_packages_with_skip,
     scan_workspace_fallback, scan_workspace_fallback_full,
 };
+pub use filters::IndexFilters;
 pub use lexer::{find_classes, find_symbols};
 
 // ─── File reading ────────────────────────────────────────────────────────────
