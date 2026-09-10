@@ -33,9 +33,9 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Advanced PHPDoc types<sup>6</sup>        | ✅       | 🚧🔒         | 🚧         | 🚧          | 🚧          |
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
 | **Frameworks**                           |          |              |            |             |             |
-| Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧          |
+| Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
 | Symfony & Twig                           | ❌       | ❌           | ❌         | 🚧          | 🧩         |
-| Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅          |
+| Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
 | Other frameworks<sup>7</sup>             | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
 | Rename                                   | ✅       | ✅🔒         | ✅🔒       | ✅          | ✅          |

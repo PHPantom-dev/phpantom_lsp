@@ -25,6 +25,13 @@ finished, not the peak reached during the index itself. Intelephense and Phpacto
 or Laravel's runtime magic, which makes this codebase cheaper for them
 than the numbers alone suggest.
 
+The codebase was stripped to its PHP and Blade files before each run,
+with the `.git` directory and all JS/CSS assets removed, so every tool
+indexes the same PHP-only surface. PHPStorm's baseline IDE startup time
+was measured separately and subtracted from its cold and warm start
+figures above, to keep the comparison focused on PHP indexing rather
+than general editor overhead.
+
 ## Live Charts
 
 Latency and memory usage are tracked on every commit and plotted over
