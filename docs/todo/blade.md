@@ -88,11 +88,13 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 `translate_workspace_edit` (`src/blade/translate.rs`) already runs at the
 end of `handle_code_action` and `resolve_code_action`, moving every edit
 back into the template and dropping the ones that land in the prologue.
-What remains is the server-side gate in `code_action` (`src/server.rs`),
-which still answers nothing for a template; translating the request range
-and its diagnostics into the virtual PHP before the collectors run;
-discarding an action whose edits were all dropped rather than offering a
-no-op; and the template-aware `use` insertion that B50 in
-[`bugs.md`](bugs.md) needs too, shared with completion.
+The template-aware `use` insertion exists too: `use_block_for`
+(`src/completion/use_edit.rs`) reads a template's own `@use` directives and
+writes a new import as one, so the "Import class" action already has an
+edit the template can take. What remains is the server-side gate in
+`code_action` (`src/server.rs`), which still answers nothing for a
+template; translating the request range and its diagnostics into the
+virtual PHP before the collectors run; and discarding an action whose
+edits were all dropped rather than offering a no-op.
 
 **Deliverable:** Code actions are re-enabled for `.blade.php` files.

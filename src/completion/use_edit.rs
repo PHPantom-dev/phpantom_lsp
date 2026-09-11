@@ -6,11 +6,43 @@
 //!
 //! New `use` statements are inserted at the alphabetically correct
 //! position among the existing imports so the use block stays sorted.
+//!
+//! A Blade template imports with the `@use` directive instead, and its
+//! directives live in the template's own text rather than in the virtual
+//! PHP the preprocessor lowers it to, so the block it takes is read with
+//! [`analyze_template_use_block`] and written in that syntax.
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
+use crate::Backend;
+use crate::blade::source_map::BladeSourceMap;
+use crate::blade::use_directive::{first_string_literal, imported_name, use_directive_arguments};
 use crate::util::short_name;
+
+/// Where a Blade template's imports go, in the virtual-PHP coordinates
+/// every edit is planned in.
+///
+/// A template imports with `@use('App\Models\Widget')` on a line of its
+/// own, and a new one is anchored at the **end** of the line it follows:
+/// the directive lowers to nothing, so the start of its line shares a
+/// virtual column with the text that comes after it and the trip back
+/// through the source map cannot tell the two apart.  The end of a line
+/// is unambiguous in both directions.
+#[derive(Debug, Clone)]
+pub(crate) struct TemplateUseBlock {
+    /// The end of the line each existing `@use` sits on, in the order
+    /// [`UseBlockInfo::existing`] lists them.
+    line_ends: Vec<Position>,
+    /// Where an import that precedes every existing one goes: the start of
+    /// the template, or the end of its first line when the template opens
+    /// with a directive of its own, whose line start the virtual PHP
+    /// cannot address.
+    top: Position,
+    /// Whether `top` is the start of a line, so the import is written
+    /// before what stands there rather than after it.
+    top_at_line_start: bool,
+}
 
 /// Information about a file's existing `use` block, used to compute
 /// the correct alphabetical insertion position for new imports.
@@ -28,6 +60,9 @@ pub(crate) struct UseBlockInfo {
     /// existing imports, a blank line is inserted before the first
     /// `use` statement to separate it from the `namespace` line.
     pub(crate) has_namespace: bool,
+    /// The template's own import block, when the file is a Blade
+    /// template rather than a PHP file.
+    pub(crate) template: Option<TemplateUseBlock>,
 }
 
 impl UseBlockInfo {
@@ -117,6 +152,38 @@ impl UseBlockInfo {
         Position {
             line: first_line,
             character: 0,
+        }
+    }
+
+    /// Where a new import goes in a Blade template, as the position to
+    /// write at and the text to write there.
+    ///
+    /// The import follows the last directive it sorts behind, written at
+    /// the end of that directive's line, and goes to the top of the
+    /// template when it sorts before all of them.  Anchoring on the line
+    /// that comes *before* the new import rather than the one that comes
+    /// after is what keeps the position addressable in the virtual PHP
+    /// (see [`TemplateUseBlock`]).
+    fn template_insertion(
+        &self,
+        template: &TemplateUseBlock,
+        key: &str,
+        statement: &str,
+    ) -> (Position, String) {
+        let comes_before =
+            |existing: &str| (Self::key_group(existing), existing) < (Self::key_group(key), key);
+        let anchor = self
+            .existing
+            .iter()
+            .zip(&template.line_ends)
+            .filter(|((_, existing), _)| comes_before(existing))
+            .map(|(_, end)| *end)
+            .next_back();
+
+        match (anchor, template.top_at_line_start) {
+            (Some(end), _) => (end, format!("\n{}", statement)),
+            (None, true) => (template.top, format!("{}\n", statement)),
+            (None, false) => (template.top, format!("\n{}", statement)),
         }
     }
 
@@ -290,6 +357,113 @@ pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
         existing,
         fallback_line,
         has_namespace,
+        template: None,
+    }
+}
+
+/// [`analyze_use_block`] for a Blade template, read from the template's
+/// own text.
+///
+/// A template imports with `@use('App\Models\Widget')`, which the
+/// preprocessor hoists into the virtual PHP's prologue as a real `use`
+/// statement.  Scanning the virtual PHP would therefore place a new import
+/// in the prologue, which no template text stands behind, so the
+/// directives are read from the template with the scanner in
+/// [`crate::blade::use_directive`] instead.
+///
+/// The positions recorded are the *virtual PHP* ones the template's own
+/// lines lower to, because that is the coordinate system every feature
+/// plans its edits in; `src/blade/translate.rs` moves the finished edit
+/// back into the template.  `map` is the template's source map, or `None`
+/// for a template that was never lowered, whose own coordinates are what
+/// the untranslated edit already names.
+pub(crate) fn analyze_template_use_block(
+    template: &str,
+    map: Option<&BladeSourceMap>,
+) -> UseBlockInfo {
+    let to_php = |position: Position| match map {
+        Some(map) => map.blade_to_php(position),
+        None => position,
+    };
+
+    // The end of the line `at` falls on, in the template's coordinates.
+    let line_end_at = |at: usize| {
+        let mut end = template[at..]
+            .find('\n')
+            .map_or(template.len(), |offset| at + offset);
+        if template[..end].ends_with('\r') {
+            end -= 1;
+        }
+        crate::text_position::offset_to_position(template, end)
+    };
+
+    let mut existing: Vec<(u32, String)> = Vec::new();
+    let mut line_ends: Vec<Position> = Vec::new();
+
+    for (arguments_at, arguments) in use_directive_arguments(template) {
+        let Some((_, literal)) = first_string_literal(arguments) else {
+            continue;
+        };
+        if imported_name(literal).is_none() {
+            continue;
+        }
+        // The literal is a `use` statement's body written as a string, so
+        // the scanner for a PHP import's sort key answers for it verbatim.
+        let Some(sort_key) = extract_use_sort_key(&format!("use {};", literal.trim())) else {
+            continue;
+        };
+
+        // The end of the line the directive closes on, so a multi-line
+        // argument list is followed rather than split.
+        let end = to_php(line_end_at(arguments_at + arguments.len()));
+        existing.push((end.line, sort_key));
+        line_ends.push(end);
+    }
+
+    // A template that opens with a directive of its own lowers its first
+    // columns to nothing, leaving the start of the line sharing a virtual
+    // column with the text after it; the trip back answers the latter, so
+    // the end of that line is what the import is written after instead.
+    let start = Position {
+        line: 0,
+        character: 0,
+    };
+    let top = to_php(start);
+    let top_at_line_start = map.is_none_or(|map| map.try_php_to_blade(top) == Some(start));
+
+    UseBlockInfo {
+        existing,
+        fallback_line: top.line,
+        has_namespace: false,
+        template: Some(TemplateUseBlock {
+            line_ends,
+            top: if top_at_line_start {
+                top
+            } else {
+                to_php(line_end_at(0))
+            },
+            top_at_line_start,
+        }),
+    }
+}
+
+impl Backend {
+    /// The use block a new import for `uri` joins: the file's own `use`
+    /// statements, or a template's `@use` directives.
+    ///
+    /// `content` is the text the caller analysed, which for a template is
+    /// the virtual PHP it lowers to.  A template's imports were hoisted
+    /// into the prologue of that text, so the template itself is scanned
+    /// instead ([`analyze_template_use_block`]).
+    pub(crate) fn use_block_for(&self, uri: &str, content: &str) -> UseBlockInfo {
+        if !self.is_blade_file(uri) {
+            return analyze_use_block(content);
+        }
+        let Some(template) = self.get_file_content_arc(uri) else {
+            return analyze_use_block(content);
+        };
+        let maps = self.blade_source_maps.read();
+        analyze_template_use_block(&template, maps.get(uri))
     }
 }
 
@@ -368,6 +542,22 @@ pub(crate) fn build_aliased_use_edit(
         return None;
     }
 
+    if let Some(template) = &use_block.template {
+        let statement = match alias {
+            Some(alias) => format!("@use('{}', '{}')", fqn, alias),
+            None => format!("@use('{}')", fqn),
+        };
+        let (insert_pos, new_text) =
+            use_block.template_insertion(template, &fqn.to_lowercase(), &statement);
+        return Some(vec![TextEdit {
+            range: Range {
+                start: insert_pos,
+                end: insert_pos,
+            },
+            new_text,
+        }]);
+    }
+
     let insert_pos = use_block.insert_position_for(fqn);
 
     // When there are no existing imports and the file has a namespace,
@@ -431,6 +621,22 @@ pub(crate) fn build_aliased_typed_use_edit(
     if use_block.existing.iter().any(|(_, k)| k == &sort_key) {
         return None;
     }
+
+    if let Some(template) = &use_block.template {
+        let statement = match alias {
+            Some(alias) => format!("@use('{} {}', '{}')", kind, fqn, alias),
+            None => format!("@use('{} {}')", kind, fqn),
+        };
+        let (insert_pos, new_text) = use_block.template_insertion(template, &sort_key, &statement);
+        return Some(vec![TextEdit {
+            range: Range {
+                start: insert_pos,
+                end: insert_pos,
+            },
+            new_text,
+        }]);
+    }
+
     let insert_pos = use_block.insert_position_for_key(&sort_key);
 
     // Prepend a blank line when:

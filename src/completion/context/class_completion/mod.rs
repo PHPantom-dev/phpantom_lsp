@@ -21,7 +21,7 @@ use crate::completion::use_edit;
 use crate::types::*;
 use crate::util::{short_name, strip_fqn_prefix};
 
-use crate::completion::builder::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::completion::builder::{build_use_edit, use_import_conflicts};
 
 mod attributes;
 mod context_detect;
@@ -892,7 +892,7 @@ impl Backend {
             is_attribute,
             fqn_replace_range,
             file_use_map,
-            use_block: analyze_use_block(content),
+            use_block: self.use_block_for(uri, content),
             file_namespace: effective_namespace,
             affinity_table,
             quality_prefix,

@@ -92,7 +92,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B50 | [Namespaced class completions vanish from Blade templates](todo/bugs.md#b50-namespaced-class-completions-vanish-from-blade-templates)                                          | Medium-High | Medium      |
 | B49 | [A bracket inside a PHP comment counts as a bracket in a Blade template](todo/bugs.md#b49-a-bracket-inside-a-php-comment-counts-as-a-bracket-in-a-blade-template)            | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

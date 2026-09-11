@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
 
 use crate::class_lookup::is_class_keyword;
@@ -131,7 +131,7 @@ impl Backend {
                 continue;
             }
 
-            let use_block = analyze_use_block(content);
+            let use_block = self.use_block_for(uri, content);
             let doc_uri: Url = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -293,7 +293,7 @@ impl Backend {
             // The span covers the whole `Foo::bar` expression. We only
             // want the subject part for the diagnostic range, but for
             // the code action the span range is fine.
-            let use_block = analyze_use_block(content);
+            let use_block = self.use_block_for(uri, content);
             let doc_uri: Url = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -639,7 +639,7 @@ impl Backend {
             imported_short_names.insert(alias.to_lowercase(), fqn.clone());
         }
 
-        let use_block = analyze_use_block(content);
+        let use_block = self.use_block_for(&data.uri, content);
 
         // First pass: decide which FQN to import for each unresolved name.
         let mut chosen_fqns: Vec<String> = Vec::new();

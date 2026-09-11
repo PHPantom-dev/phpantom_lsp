@@ -80,28 +80,3 @@ string literals: `//` and `#` to the end of the line, and `/* … */` to
 its terminator. `matching_paren` is shared with the signature parser, so
 the fix has to hold for a `@bladestan-signature` argument list too.
 
-### B50. Namespaced class completions vanish from Blade templates
-
-**Impact: Medium-High · Complexity: Medium**
-
-In a `.blade.php` file, class-name completion drops every candidate that
-would need a `use` import. Typing `new Widg` or `Widg` in an echo offers a
-global `Widgetry` but not `App\Models\Widget`; the same request in a PHP
-file offers both, the latter with its import edit.
-
-The item is built against the virtual PHP the template lowers to, so
-`build_use_edit` (`src/completion/use_edit.rs`) places the import where a
-PHP file would take it: the line after `<?php`, which in the virtual file
-is the preprocessor's prologue. `translate_completion_item`
-(`src/blade/translate.rs`) then finds that the additional edit has no
-template position behind it and drops the whole item rather than a
-misplaced edit, so the candidate never reaches the editor.
-
-The fix is a template-aware import edit, not a translation tweak: a
-template imports a name with `@use('App\Models\Widget')` at its top (or
-a `use` inside an existing `@php` block), written in Blade coordinates
-from the raw template text, the way `src/blade/use_directive.rs` already
-reads existing `@use` directives. It has to live in the shared use-edit
-builder so completion and the "Import class" code action (BL1) both get
-it; the code action would otherwise offer an import whose edit is dropped
-the same way.

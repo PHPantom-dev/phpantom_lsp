@@ -263,6 +263,42 @@ async fn complete_typed(
     }
 }
 
+/// Put each class in the index class-name completion searches, the way a
+/// scan of the project would.
+fn index_models(backend: &phpantom_lsp::Backend, fqns: &[&str]) {
+    let mut index = backend.fqn_uri_index().write();
+    for fqn in fqns {
+        index.insert(
+            fqn.to_string(),
+            format!("file:///app/{}.php", fqn.replace('\\', "/")),
+        );
+    }
+}
+
+/// Apply completion edits to the template they were planned against.
+fn apply(template: &str, edits: &[TextEdit]) -> String {
+    let offset = |position: Position| {
+        template
+            .split_inclusive('\n')
+            .take(position.line as usize)
+            .map(str::len)
+            .sum::<usize>()
+            + position.character as usize
+    };
+    let mut result = template.to_string();
+    let mut edits = edits.to_vec();
+    // Last first, so an earlier edit's offsets stay valid.
+    edits
+        .sort_by_key(|edit| std::cmp::Reverse((edit.range.start.line, edit.range.start.character)));
+    for edit in &edits {
+        result.replace_range(
+            offset(edit.range.start)..offset(edit.range.end),
+            &edit.new_text,
+        );
+    }
+    result
+}
+
 fn labels(items: &[CompletionItem]) -> Vec<&str> {
     items.iter().map(|i| i.label.as_str()).collect()
 }
@@ -554,5 +590,134 @@ async fn a_closed_tag_leaves_completion_to_the_rest_of_the_pipeline() {
         labels(&items).contains(&"@if"),
         "expected directive completion, got: {:?}",
         labels(&items)
+    );
+}
+
+/// A template imports with the `@use` directive, so a class-name
+/// completion that needs an import carries one written in that syntax and
+/// placed on a line of the template — an edit against the virtual PHP's
+/// prologue has no template position and takes the whole candidate with it
+/// when it is dropped.
+#[tokio::test]
+async fn a_namespaced_class_completion_imports_with_a_use_directive() {
+    let backend = create_test_backend();
+    index_models(&backend, &["App\\Models\\Widget"]);
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "<div>{{ new Widg }}</div>\n";
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 16).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Models\\Widget"))
+        .unwrap_or_else(|| panic!("expected the namespaced class, got: {:?}", labels(&items)));
+
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert_eq!(edits[0].new_text, "@use(\'App\\Models\\Widget\')\n");
+    let at_top = Position {
+        line: 0,
+        character: 0,
+    };
+    assert_eq!(
+        edits[0].range,
+        Range {
+            start: at_top,
+            end: at_top
+        },
+        "the import belongs at the top of the template"
+    );
+
+    // The directive it writes is one the preprocessor honours: reopening
+    // the template with the edit applied imports the class for real.
+    let imported = apply(template, edits);
+    assert_eq!(
+        imported,
+        "@use('App\\Models\\Widget')\n<div>{{ new Widg }}</div>\n"
+    );
+    open_document(&backend, &uri, "blade", &imported).await;
+    let virtual_php = backend
+        .blade_virtual_php(uri.as_str())
+        .expect("blade virtual content");
+    assert!(
+        virtual_php.contains("use App\\Models\\Widget;"),
+        "the directive must lower to a real import: {virtual_php}"
+    );
+}
+
+/// The directives a template already has are the block a new import joins,
+/// read from the template's own text: the preprocessor hoists them into the
+/// virtual PHP's prologue, which no template line stands behind.
+#[tokio::test]
+async fn a_new_import_sorts_among_the_templates_existing_use_directives() {
+    let backend = create_test_backend();
+    index_models(
+        &backend,
+        &[
+            "App\\Models\\Account",
+            "App\\Models\\Widget",
+            "App\\Models\\Zone",
+        ],
+    );
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "@use(\'App\\Models\\Account\')\n@use(\'App\\Models\\Zone\')\n{{ new Widg }}\n";
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 2, 11).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Models\\Widget"))
+        .unwrap_or_else(|| panic!("expected the namespaced class, got: {:?}", labels(&items)));
+
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    // Written at the end of the directive it sorts behind rather than at
+    // the start of the one it precedes: a directive lowers to nothing, so
+    // the start of its line is not addressable in the virtual PHP.
+    assert_eq!(edits[0].new_text, "\n@use(\'App\\Models\\Widget\')");
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 0,
+            character: "@use('App\\Models\\Account')".chars().count() as u32,
+        },
+        "`Widget` sorts between `Account` and `Zone`"
+    );
+    assert_eq!(
+        apply(template, edits),
+        "@use('App\\Models\\Account')\n@use('App\\Models\\Widget')\n@use('App\\Models\\Zone')\n{{ new Widg }}\n"
+    );
+}
+
+/// A template that opens with a directive has no addressable start: the
+/// directive lowers to nothing, so the virtual PHP's first template column
+/// is the one after it. An import that sorts before every existing one
+/// follows that first line rather than landing in the middle of it.
+#[tokio::test]
+async fn an_import_that_precedes_them_all_follows_a_leading_directive() {
+    let backend = create_test_backend();
+    index_models(&backend, &["App\\Models\\Account", "App\\Models\\Zone"]);
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "@use('App\\Models\\Zone')\n{{ new Acco }}\n";
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 1, 11).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Models\\Account"))
+        .unwrap_or_else(|| panic!("expected the namespaced class, got: {:?}", labels(&items)));
+
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    assert_eq!(
+        apply(template, edits),
+        "@use('App\\Models\\Zone')\n@use('App\\Models\\Account')\n{{ new Acco }}\n"
     );
 }
