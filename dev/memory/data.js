@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789124460222,
+  "lastUpdate": 1789166286314,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -27573,6 +27573,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8159d43311c14b5ae47b5f536ef61e1e187de3e6",
+          "message": "A bracket written in a PHP comment no longer closes a Blade directive's\nargument list",
+          "timestamp": "2026-09-12T00:22:30+02:00",
+          "tree_id": "312c5d56487710fd877c6a43dc84e0fc435c418c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8159d43311c14b5ae47b5f536ef61e1e187de3e6"
+        },
+        "date": 1789166279173,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.6,
             "unit": "MiB"
           }
         ]
