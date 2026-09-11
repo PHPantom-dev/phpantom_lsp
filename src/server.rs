@@ -2304,9 +2304,6 @@ impl Backend {
         position: Option<Position>,
         f: impl FnOnce(&str, Option<Position>) -> T,
     ) -> Option<T> {
-        let mut content = self.get_file_content(uri)?;
-        let mut pos = position;
-
         // A request can arrive before the file's first parse has published
         // a symbol map: an editor fires hover the instant it opens a file
         // (tower-lsp may run the request handler before `did_open` finishes
@@ -2321,18 +2318,19 @@ impl Backend {
         if !crate::resource_navigation::is_resource_document(uri)
             && !self.symbol_maps.read().contains_key(uri)
         {
+            let content = self.get_file_content(uri)?;
             self.update_ast(uri, &content);
         }
 
-        // If this is a Blade file, use the virtual PHP content and translate the position.
-        if self.is_blade_file(uri)
-            && let Some(virtual_content) = self.blade_virtual_content.read().get(uri)
-        {
-            content = virtual_content.clone();
-            if let Some(p) = position {
-                pos = Some(self.translate_blade_to_php(uri, p));
+        // A template is analysed as the virtual PHP it lowers to, with the
+        // position moved into it.
+        let (content, pos) = match position {
+            Some(position) => {
+                let (content, pos) = self.analysable_content_at(uri, position)?;
+                (content, Some(pos))
             }
-        }
+            None => (self.analysable_content(uri)?, None),
+        };
 
         // Activate the chain resolution cache so that shared chain prefixes
         // (e.g. `$model->where(...)` in `$model->where(...)->orderBy(...)`)

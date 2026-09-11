@@ -6,6 +6,8 @@ use crate::diagnostics::namespace_mismatch::{
     namespace_decl_from_content, namespace_mismatch_diagnostic,
 };
 
+use super::single_file_edit;
+
 impl Backend {
     pub(crate) fn collect_fix_namespace_actions(
         &self,
@@ -18,9 +20,11 @@ impl Backend {
             Some(r) => r,
             None => return,
         };
-        let file_path = match Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) {
-            Some(p) => p,
-            None => return,
+        let Ok(url) = Url::parse(uri) else {
+            return;
+        };
+        let Ok(file_path) = url.to_file_path() else {
+            return;
         };
         let mappings = self.psr4_mappings().read().clone();
         if mappings.is_empty() {
@@ -69,17 +73,11 @@ impl Backend {
         let expected_display = expected_ns.as_deref().unwrap_or("<global>");
         let title = format!("Fix namespace to `{}`", expected_display);
 
-        let mut changes = std::collections::HashMap::new();
-        changes.insert(Url::parse(uri).unwrap(), vec![edit]);
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title,
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: Some(vec![diag]),
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }),
+            edit: Some(single_file_edit(url, vec![edit])),
             is_preferred: Some(true),
             ..Default::default()
         }));

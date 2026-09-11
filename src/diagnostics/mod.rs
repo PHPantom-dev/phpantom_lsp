@@ -1181,9 +1181,8 @@ impl Backend {
             let content = content.to_string();
             crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_fast_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_fast_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1220,9 +1219,8 @@ impl Backend {
                     &backend.resolved_class_cache,
                 );
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_slow_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_slow_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await

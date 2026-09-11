@@ -84,4 +84,15 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 - Blade-aware code generation (e.g. insert `use` inside `@php`).
 - Filtering out actions that don't make sense in Blade context.
 
+**Current state:** the coordinate translation exists.
+`translate_workspace_edit` (`src/blade/translate.rs`) already runs at the
+end of `handle_code_action` and `resolve_code_action`, moving every edit
+back into the template and dropping the ones that land in the prologue.
+What remains is the server-side gate in `code_action` (`src/server.rs`),
+which still answers nothing for a template; translating the request range
+and its diagnostics into the virtual PHP before the collectors run;
+discarding an action whose edits were all dropped rather than offering a
+no-op; and the template-aware `use` insertion that B50 in
+[`bugs.md`](bugs.md) needs too, shared with completion.
+
 **Deliverable:** Code actions are re-enabled for `.blade.php` files.

@@ -623,22 +623,18 @@ pub fn inject_phpstan_diag(
     diag
 }
 
-/// Send a code action request at a specific line and character (point range).
-pub fn get_code_actions_at(
+/// Send a code action request for an arbitrary range.
+pub fn get_code_actions_in_range(
     backend: &Backend,
     uri: &str,
     content: &str,
-    line: u32,
-    character: u32,
+    range: Range,
 ) -> Vec<CodeActionOrCommand> {
     let params = CodeActionParams {
         text_document: TextDocumentIdentifier {
             uri: uri.parse().unwrap(),
         },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
+        range,
         context: CodeActionContext {
             diagnostics: vec![],
             only: None,
@@ -654,6 +650,18 @@ pub fn get_code_actions_at(
     backend.handle_code_action(uri, content, &params)
 }
 
+/// Send a code action request at a specific line and character (point range).
+pub fn get_code_actions_at(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    line: u32,
+    character: u32,
+) -> Vec<CodeActionOrCommand> {
+    let pos = Position::new(line, character);
+    get_code_actions_in_range(backend, uri, content, Range::new(pos, pos))
+}
+
 /// Send a code action request spanning an entire line (columns 0–80).
 pub fn get_code_actions_on_line(
     backend: &Backend,
@@ -661,27 +669,12 @@ pub fn get_code_actions_on_line(
     content: &str,
     line: u32,
 ) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, 0),
-            end: Position::new(line, 80),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-    backend.handle_code_action(uri, content, &params)
+    get_code_actions_in_range(
+        backend,
+        uri,
+        content,
+        Range::new(Position::new(line, 0), Position::new(line, 80)),
+    )
 }
 
 /// Find a code action by title prefix.
@@ -720,6 +713,13 @@ pub fn extract_edits(action: &CodeAction) -> Vec<TextEdit> {
     changes.values().flat_map(|v| v.iter()).cloned().collect()
 }
 
+/// Extract the single text edit's replacement text from a resolved code action.
+pub fn extract_edit_text(action: &CodeAction) -> String {
+    let mut edits = extract_edits(action);
+    assert_eq!(edits.len(), 1, "expected exactly one text edit");
+    edits.pop().unwrap().new_text
+}
+
 /// Apply text edits to content, producing the resulting source.
 pub fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
     let mut result = content.to_string();
@@ -737,6 +737,16 @@ pub fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
         result.replace_range(start..end, &edit.new_text);
     }
     result
+}
+
+/// Apply a workspace edit that touches a single URI to `content`.
+pub fn apply_workspace_edit(content: &str, edit: &WorkspaceEdit) -> String {
+    let changes = edit.changes.as_ref().expect("edit should have changes");
+    let edits = changes
+        .values()
+        .next()
+        .expect("should have edits for one URI");
+    apply_edits(content, edits)
 }
 
 /// Convert an LSP `Position` (line, character) to a byte offset in `content`.

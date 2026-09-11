@@ -4,41 +4,8 @@
 //! the class hierarchy, detecting missing methods, and generating the
 //! `WorkspaceEdit` with method stubs.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-/// Helper: send a code action request at the given line/character and
-/// return the list of code actions.
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
 
 /// Extract the "Implement" code action from a list of actions.
 fn find_implement_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
@@ -78,7 +45,7 @@ class Page implements Renderable {
     backend.update_ast(uri, content);
 
     // Cursor inside the Page class body (line 6, the closing brace line).
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -110,7 +77,7 @@ class Page implements Renderable {
 
     // Cursor on the `class Page implements Renderable {` line (line 5),
     // before the opening brace.
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
     let action = find_implement_action(&actions);
     assert!(
         action.is_some(),
@@ -135,7 +102,7 @@ class MyClass implements Serializable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -181,7 +148,7 @@ class Circle extends Shape {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 11, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 11, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_some(),
@@ -235,7 +202,7 @@ class Page implements Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 8, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 8, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer action for toHtml");
 
@@ -275,7 +242,7 @@ class Page implements Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_none(),
@@ -300,7 +267,7 @@ abstract class AbstractPage implements Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_none(),
@@ -325,7 +292,7 @@ interface ExtendedRenderable extends Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_none(),
@@ -347,7 +314,7 @@ trait MyTrait {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_none(),
@@ -372,7 +339,7 @@ class MyProcessor implements Processor {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -411,7 +378,7 @@ class UserFactory implements Factory {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -444,7 +411,7 @@ class Widget implements Renderable, Stringable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -481,7 +448,7 @@ class MyClass implements Child {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -518,7 +485,7 @@ class FileLogger implements Logger {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_none(),
@@ -546,7 +513,7 @@ $x = 1;
     backend.update_ast(uri, content);
 
     // Cursor on the $x = 1 line, outside any class.
-    let actions = get_code_actions(&backend, uri, content, 8, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 8, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_none(),
@@ -564,7 +531,7 @@ fn respects_tab_indentation() {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -615,7 +582,7 @@ fn implements_interface_from_another_file() {
     // Load the class file.
     backend.update_ast(&class_uri, class_file);
 
-    let actions = get_code_actions(&backend, &class_uri, class_file, 6, 0);
+    let actions = get_code_actions_at(&backend, &class_uri, class_file, 6, 0);
     let action = find_implement_action(&actions);
     assert!(
         action.is_some(),
@@ -660,7 +627,7 @@ class MyCollector implements Collector {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer implement action");
 
@@ -694,7 +661,7 @@ class UserRepository implements Repository {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some());
 
@@ -723,7 +690,7 @@ class MyParser implements Parser {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some());
 
@@ -752,7 +719,7 @@ class MyHandler implements Handler {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some());
 
@@ -786,7 +753,7 @@ class Button extends Component {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer action");
 
@@ -824,7 +791,7 @@ class Child extends ParentClass {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer action for deep chain");
 
@@ -865,7 +832,7 @@ class ConcreteService extends BaseService {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 13, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 13, 0);
     let action = find_implement_action(&actions);
     assert!(action.is_some(), "Should offer action for methodB only");
 

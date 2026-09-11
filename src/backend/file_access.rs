@@ -7,10 +7,11 @@
 //! lock-and-unwrap boilerplate that used to be duplicated across the
 //! completion handler, definition resolver, and other consumers.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Position, Url};
 
 use crate::Backend;
 use crate::types::{ClassInfo, FileContext, NamespaceSpan};
@@ -70,6 +71,38 @@ impl Backend {
         std::fs::read_to_string(path).ok()
     }
 
+    /// The text a request against `uri` analyses: the virtual PHP a
+    /// template lowers to when one has been recorded, else the file's own
+    /// content.
+    ///
+    /// A template's symbol map and types describe the virtual PHP, so every
+    /// feature that reads them has to read the same text, and answer in the
+    /// template's coordinates through `src/blade/translate.rs` afterwards.
+    pub(crate) fn analysable_content(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_php(uri)
+            .or_else(|| self.get_file_content(uri))
+    }
+
+    /// [`Self::analysable_content`] with `position` carried into the text:
+    /// a template's position is translated into its virtual PHP.
+    pub(crate) fn analysable_content_at(
+        &self,
+        uri: &str,
+        position: Position,
+    ) -> Option<(String, Position)> {
+        match self.blade_virtual_php(uri) {
+            Some(virtual_php) => Some((virtual_php, self.translate_blade_to_php(uri, position))),
+            None => Some((self.get_file_content(uri)?, position)),
+        }
+    }
+
+    /// [`Self::analysable_content`] for a caller that already holds the
+    /// file's content and only needs a template swapped for its virtual PHP.
+    pub(crate) fn analysable_content_or<'a>(&self, uri: &str, content: &'a str) -> Cow<'a, str> {
+        self.blade_virtual_php(uri)
+            .map_or(Cow::Borrowed(content), Cow::Owned)
+    }
+
     /// Retrieve file content as a cheap `Arc<String>` reference when the
     /// file is in `open_files`.  Falls back to reading from disk (which
     /// wraps the result in a new `Arc`).
@@ -106,6 +139,17 @@ impl Backend {
             .read()
             .get(uri)
             .map(|classes| classes.iter().map(|c| ClassInfo::clone(c)).collect())
+    }
+
+    /// The short names of the classes `uri` declares, for asking whether a
+    /// name is one of the file's own classes without cloning their bodies.
+    pub(crate) fn local_class_names(&self, uri: &str) -> HashSet<String> {
+        self.symbols
+            .uri_classes_index
+            .read()
+            .get(uri)
+            .map(|classes| classes.iter().map(|c| c.name.to_string()).collect())
+            .unwrap_or_default()
     }
 
     /// Gather the per-file context (classes, use-map, namespace) in one call.

@@ -1,38 +1,7 @@
 //! Integration tests for the "Convert to string interpolation" code action.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
 
 fn find_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
     actions.iter().find_map(|a| match a {
@@ -69,7 +38,7 @@ fn actions_at(content: &str, line: u32, character: u32) -> Vec<CodeActionOrComma
     let backend = create_test_backend();
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
-    get_code_actions(&backend, uri, content, line, character)
+    get_code_actions_at(&backend, uri, content, line, character)
 }
 
 #[test]

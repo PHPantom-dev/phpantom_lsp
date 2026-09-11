@@ -278,9 +278,10 @@ impl Backend {
             Err(_) => return (action, None),
         };
 
-        let content = match self.get_file_content(&data.uri) {
-            Some(c) => c,
-            None => return (action, None),
+        // A template's action was planned against its virtual PHP, so the
+        // resolve reads the same text.
+        let Some(content) = self.analysable_content(&data.uri) else {
+            return (action, None);
         };
 
         // Parse the file once and share it across the resolve handler below.

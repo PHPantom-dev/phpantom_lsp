@@ -6,41 +6,8 @@
 //! property (including readonly properties, which must be initialized
 //! in the constructor).
 
-use crate::common::{create_test_backend, lsp_pos_to_offset};
+use crate::common::{apply_workspace_edit, create_test_backend, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-/// Helper: send a code action request at the given line/character and
-/// return the list of code actions.
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
 
 /// Find the "Generate constructor" code action from a list.
 fn find_generate_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
@@ -60,33 +27,6 @@ fn find_promoted_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> 
     })
 }
 
-/// Apply a workspace edit to the content and return the result.
-fn apply_edit(content: &str, edit: &WorkspaceEdit) -> String {
-    let changes = edit.changes.as_ref().expect("edit should have changes");
-    let edits = changes
-        .values()
-        .next()
-        .expect("should have edits for one URI");
-
-    // Sort edits by start position descending so we can apply back-to-front.
-    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.range
-            .start
-            .line
-            .cmp(&a.range.start.line)
-            .then(b.range.start.character.cmp(&a.range.start.character))
-    });
-
-    let mut result = content.to_string();
-    for edit in sorted {
-        let start = lsp_pos_to_offset(&result, edit.range.start);
-        let end = lsp_pos_to_offset(&result, edit.range.end);
-        result.replace_range(start..end, &edit.new_text);
-    }
-    result
-}
-
 // ── Basic generation ────────────────────────────────────────────────────────
 
 #[test]
@@ -99,14 +39,14 @@ class Foo {
     public string $name;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer generate constructor action");
     assert_eq!(
         action.kind,
         Some(CodeActionKind::REFACTOR_REWRITE),
         "should be refactor.rewrite"
     );
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public function __construct(string $name)"),
@@ -130,9 +70,9 @@ class User {
     public string $email;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("string $name, int $age, string $email"),
@@ -164,9 +104,9 @@ class Config {
     public string $status = 'active';
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("string $status = 'active'"),
@@ -186,9 +126,9 @@ class Config {
     public int $retries = 3;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // $name (required) should come before $status and $retries (optional).
     let name_pos = result.find("$name").expect("should have $name");
@@ -245,9 +185,9 @@ class Foo {
     public ?string $label;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("?string $label"),
@@ -265,9 +205,9 @@ class Foo {
     public int|string $id;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("int|string $id"),
@@ -285,9 +225,9 @@ class Foo {
     public $data;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("($data)"),
@@ -308,9 +248,9 @@ class Foo {
     public static int $count;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Check the parameter list specifically, not the whole file
     // (the property declarations still contain "$count").
@@ -339,9 +279,9 @@ class Foo {
     public readonly int $id;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Readonly properties must be initialized in the constructor,
     // so they should be included.
@@ -374,7 +314,7 @@ class Foo {
     public readonly int $id;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions);
 
     assert!(
@@ -382,7 +322,7 @@ class Foo {
         "should offer action when all properties are readonly (they must be initialized in the constructor)"
     );
 
-    let result = apply_edit(content, action.unwrap().edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.unwrap().edit.as_ref().unwrap());
     assert!(
         result.contains("string $name, int $id"),
         "should include all readonly properties: {result}"
@@ -400,7 +340,7 @@ class Foo {
     public static int $count;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions);
 
     assert!(
@@ -425,7 +365,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions);
 
     assert!(
@@ -446,7 +386,7 @@ class Foo {
     public function __CONSTRUCT() {}
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions);
 
     assert!(
@@ -468,7 +408,7 @@ class Foo {
 }
 ";
     // Cursor directly on the property declaration.
-    let actions = get_code_actions(&backend, uri, content, 2, 4);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
     assert!(
         find_generate_action(&actions).is_some(),
         "should offer action when cursor is on property"
@@ -487,7 +427,7 @@ class Foo {
 }
 ";
     // Cursor on the static property (line 3).
-    let actions = get_code_actions(&backend, uri, content, 3, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
     assert!(
         find_generate_action(&actions).is_none(),
         "should not offer action when cursor is on a static property"
@@ -505,7 +445,7 @@ class Foo {
 }
 ";
     // Cursor on the class keyword line — not on a property.
-    let actions = get_code_actions(&backend, uri, content, 1, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 1, 0);
     assert!(
         find_generate_action(&actions).is_none(),
         "should not offer action when cursor is on class declaration"
@@ -527,7 +467,7 @@ class Foo {
 }
 ";
     // Cursor inside the method body (line 5, on "return").
-    let actions = get_code_actions(&backend, uri, content, 5, 8);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 8);
     assert!(
         find_generate_action(&actions).is_none(),
         "should not offer action when cursor is inside a method body"
@@ -546,12 +486,12 @@ abstract class Foo {
     public string $name;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions);
 
     assert!(action.is_some(), "should offer action for abstract class");
 
-    let result = apply_edit(content, action.unwrap().edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.unwrap().edit.as_ref().unwrap());
     assert!(
         result.contains("public function __construct(string $name)"),
         "should generate constructor for abstract class: {result}"
@@ -568,7 +508,7 @@ fn no_action_outside_class() {
 <?php
 $x = 1;
 ";
-    let actions = get_code_actions(&backend, uri, content, 1, 0);
+    let actions = get_code_actions_at(&backend, uri, content, 1, 0);
     let action = find_generate_action(&actions);
 
     assert!(action.is_none(), "should not offer action outside class");
@@ -589,9 +529,9 @@ class User {
     public string $email;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 10);
     let action = find_generate_action(&actions).expect("should offer action in namespace");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public function __construct(string $name, string $email)"),
@@ -613,9 +553,9 @@ class User {
 
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 10);
     let action = find_generate_action(&actions).expect("should offer action in braced namespace");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public function __construct(string $name)"),
@@ -636,9 +576,9 @@ class Foo {
     public $name;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 3, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("string $name"),
@@ -657,9 +597,9 @@ class Foo {
     public $id;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 3, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Compound docblock types are not usable as native type hints in
     // all PHP versions, so the parameter should be untyped.
@@ -685,9 +625,9 @@ class Foo {
     protected array $tags;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Should include $name, $score, $id (readonly), and $tags but not $count (static).
     let construct_pos = result.find("__construct(").unwrap();
@@ -733,9 +673,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // The constructor should appear between the properties and greet().
     let constructor_pos = result.find("__construct").expect("should have constructor");
@@ -763,9 +703,9 @@ fn detects_tab_indentation() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = "<?php\nclass Foo {\n\tpublic string $name;\n}\n";
-    let actions = get_code_actions(&backend, uri, content, 2, 5);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 5);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("\tpublic function __construct("),
@@ -789,9 +729,9 @@ class Foo {
     public array $items = [];
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_generate_action(&actions).expect("should offer action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("array $items = []"),
@@ -813,7 +753,7 @@ class Foo {
     public string $name;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     assert!(
         find_generate_action(&actions).is_some(),
         "traditional action should be offered"
@@ -835,9 +775,9 @@ class Foo {
     private int $age;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Property declarations should be removed.
     assert!(
@@ -879,9 +819,9 @@ class Foo {
     public readonly string $id;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public readonly string $id"),
@@ -900,9 +840,9 @@ class Foo {
     protected string $status = 'active';
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("protected string $status = 'active'"),
@@ -929,9 +869,9 @@ class Foo {
     public static int $count;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Static property should remain (not deleted, not promoted).
     assert!(
@@ -956,9 +896,9 @@ class Foo {
     private float $score;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public string $name"),
@@ -988,7 +928,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     assert!(
         find_promoted_action(&actions).is_none(),
         "should not offer promoted action when constructor exists"
@@ -1005,9 +945,9 @@ class Foo {
     public string $name;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Trailing comma for clean diffs.
     assert!(
@@ -1026,9 +966,9 @@ class Foo {
     public ?string $label;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public ?string $label"),
@@ -1049,9 +989,9 @@ class User {
     private string $email;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("public string $name"),
@@ -1080,9 +1020,9 @@ class Foo {
     public readonly string $id;
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 10);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
     let action = find_promoted_action(&actions).expect("should offer promoted action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // Static property should remain and appear before the constructor.
     let static_pos = result

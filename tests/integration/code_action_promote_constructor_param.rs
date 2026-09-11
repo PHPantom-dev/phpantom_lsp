@@ -5,41 +5,8 @@
 //! the `WorkspaceEdit` that removes the property declaration, removes
 //! the assignment, and adds a visibility modifier to the parameter.
 
-use crate::common::{create_test_backend, lsp_pos_to_offset};
+use crate::common::{apply_workspace_edit, create_test_backend, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-/// Helper: send a code action request at the given line/character and
-/// return the list of code actions.
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
 
 /// Find the "Promote to constructor property" code action from a list.
 fn find_promote_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
@@ -49,33 +16,6 @@ fn find_promote_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
         }
         _ => None,
     })
-}
-
-/// Apply a workspace edit to the content and return the result.
-fn apply_edit(content: &str, edit: &WorkspaceEdit) -> String {
-    let changes = edit.changes.as_ref().expect("edit should have changes");
-    let edits = changes
-        .values()
-        .next()
-        .expect("should have edits for one URI");
-
-    // Sort edits by start position descending so we can apply back-to-front.
-    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.range
-            .start
-            .line
-            .cmp(&a.range.start.line)
-            .then(b.range.start.character.cmp(&a.range.start.character))
-    });
-
-    let mut result = content.to_string();
-    for edit in sorted {
-        let start = lsp_pos_to_offset(&result, edit.range.start);
-        let end = lsp_pos_to_offset(&result, edit.range.end);
-        result.replace_range(start..end, &edit.new_text);
-    }
-    result
 }
 
 // ── Basic promotion ─────────────────────────────────────────────────────────
@@ -95,9 +35,9 @@ class Foo {
 }
 ";
     // Cursor on `$name` in the constructor parameter list (line 4, on "string $name").
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private string $name)"),
@@ -127,9 +67,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("protected int $age)"),
@@ -151,9 +91,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private readonly string $name)"),
@@ -177,9 +117,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private string $status = 'active')"),
@@ -204,9 +144,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 5, 32);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 32);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private int $bar)"),
@@ -237,9 +177,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 9, 32);
+    let actions = get_code_actions_at(&backend, uri, content, 9, 32);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         !result.contains("The bar."),
@@ -268,9 +208,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 7, 32);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 32);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("@var string"),
@@ -303,9 +243,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 5, 32);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 32);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("#[SomeAttr] private int $bar)"),
@@ -334,9 +274,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 6, 32);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 32);
     let action = find_promote_action(&actions).expect("should offer promote action");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("#[First] #[Second(name: 'bar')] private readonly int $bar)"),
@@ -364,7 +304,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions);
     assert!(action.is_none(), "should not offer for non-constructor");
 }
@@ -379,7 +319,7 @@ class Foo {
     public function __construct(private string $name) {}
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 40);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 40);
     let action = find_promote_action(&actions);
     assert!(action.is_none(), "should not offer for already-promoted");
 }
@@ -396,7 +336,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 2, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 35);
     let action = find_promote_action(&actions);
     assert!(
         action.is_none(),
@@ -419,7 +359,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions);
     assert!(
         action.is_none(),
@@ -441,7 +381,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions);
     assert!(action.is_none(), "should not offer for static property");
 }
@@ -465,9 +405,9 @@ class Foo {
 }
 ";
     // Cursor on `$age` parameter.
-    let actions = get_code_actions(&backend, uri, content, 5, 50);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 50);
     let action = find_promote_action(&actions).expect("should offer promote for $age");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // $age should be promoted.
     assert!(
@@ -503,9 +443,9 @@ class User {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 6, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 35);
     let action = find_promote_action(&actions).expect("should work in namespace");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private string $email)"),
@@ -529,9 +469,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should handle union types");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private int|string $id)"),
@@ -553,9 +493,9 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should handle nullable types");
-    let result = apply_edit(content, action.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
         result.contains("private ?string $name)"),
@@ -579,7 +519,7 @@ class Foo {
     }
 }
 ";
-    let actions = get_code_actions(&backend, uri, content, 4, 35);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 35);
     let action = find_promote_action(&actions).expect("should offer promote action");
     assert_eq!(
         action.kind,

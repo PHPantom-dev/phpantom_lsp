@@ -63,17 +63,7 @@ impl Backend {
             None => return,
         };
 
-        let local_classes: Vec<crate::types::ClassInfo> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .map(|v| {
-                v.iter()
-                    .map(|c| crate::types::ClassInfo::clone(c))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let local_classes = self.local_class_names(uri);
 
         // Convert LSP range to byte offsets for comparison with symbol spans.
         let request_start =
@@ -115,7 +105,7 @@ impl Backend {
             }
 
             // Skip if it resolves as a local class (same file).
-            if local_classes.iter().any(|c| c.name == ref_name) {
+            if local_classes.contains(ref_name) {
                 continue;
             }
 
@@ -239,7 +229,7 @@ impl Backend {
         request_end: usize,
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
-        local_classes: &[crate::types::ClassInfo],
+        local_classes: &HashSet<String>,
         symbol_map: &crate::symbol_map::SymbolMap,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
@@ -275,7 +265,7 @@ impl Backend {
             }
 
             // Local class?
-            if local_classes.iter().any(|c| c.name == subject) {
+            if local_classes.contains(subject) {
                 continue;
             }
 
@@ -561,17 +551,7 @@ impl Backend {
             None => return false,
         };
 
-        let local_classes: Vec<crate::types::ClassInfo> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .map(|v| {
-                v.iter()
-                    .map(|c| crate::types::ClassInfo::clone(c))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let local_classes = self.local_class_names(uri);
 
         let request_start =
             crate::text_position::position_to_byte_offset(content, params.range.start);
@@ -605,7 +585,7 @@ impl Backend {
             if file_use_map.contains_key(ref_name) {
                 continue;
             }
-            if local_classes.iter().any(|c| c.name == ref_name) {
+            if local_classes.contains(ref_name) {
                 continue;
             }
             if let Some(ns) = &file_namespace {
@@ -767,17 +747,7 @@ impl Backend {
             None => return Vec::new(),
         };
 
-        let local_classes: Vec<crate::types::ClassInfo> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .map(|v| {
-                v.iter()
-                    .map(|c| crate::types::ClassInfo::clone(c))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let local_classes = self.local_class_names(uri);
 
         // Compute byte ranges of `use` statement lines so we skip
         // references that are import declarations themselves.
@@ -823,7 +793,7 @@ impl Backend {
             }
 
             // Skip local classes.
-            if local_classes.iter().any(|c| c.name == ref_name) {
+            if local_classes.contains(ref_name) {
                 continue;
             }
 

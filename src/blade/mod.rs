@@ -18,6 +18,7 @@ pub mod preprocessor;
 pub(crate) mod shared_vars;
 pub(crate) mod signature;
 pub mod source_map;
+pub(crate) mod translate;
 pub(crate) mod typed_receiver;
 pub(crate) mod use_directive;
 pub(crate) mod view_call_walker;

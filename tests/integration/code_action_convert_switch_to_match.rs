@@ -1,38 +1,7 @@
 //! Integration tests for the "Convert to match expression" code action.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, extract_edit_text, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
 
 fn find_convert_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
     actions.iter().find_map(|a| match a {
@@ -41,14 +10,6 @@ fn find_convert_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
         }
         _ => None,
     })
-}
-
-fn extract_edit_text(action: &CodeAction) -> String {
-    let edit = action.edit.as_ref().unwrap();
-    let changes = edit.changes.as_ref().unwrap();
-    let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-    assert_eq!(edits.len(), 1);
-    edits[0].new_text.clone()
 }
 
 #[test]
@@ -68,7 +29,7 @@ function test($x) {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 2, 4);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
     let action = find_convert_action(&actions).expect("action should be offered");
     let text = extract_edit_text(action);
     assert!(text.contains("return match ("));
@@ -93,7 +54,7 @@ function test($status) {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 2, 4);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
     let action = find_convert_action(&actions).expect("action should be offered");
     let text = extract_edit_text(action);
     assert!(text.contains("$label = match ("));
@@ -116,7 +77,7 @@ function test($x) {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 2, 4);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
     assert!(find_convert_action(&actions).is_none());
 }
 
@@ -136,6 +97,6 @@ function test($x) {
     backend.set_php_version(phpantom_lsp::types::PhpVersion::new(7, 4));
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 2, 4);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
     assert!(find_convert_action(&actions).is_none());
 }
