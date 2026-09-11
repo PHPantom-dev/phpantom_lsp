@@ -588,34 +588,6 @@ requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.
 
-#### L24. Translation depth: JSON lang files, locales, placeholders
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-Statically recoverable translation features the Laravel LSP has and we
-still partially lack:
-
-- **JSON lang files.** `lang/{locale}.json` (the "translation string as
-  key" style) now completes and resolves go-to-definition, but the
-  definition always lands on the top of the file rather than the key's
-  actual line, and find-references does not cover JSON keys at all.
-- **Locale argument completion.** The `$locale` parameter of `__()`,
-  `trans()`, `trans_choice()`, `Lang::get()/choice()/hasForLocale()`
-  (positional or named) completes from the locale set derived from
-  `lang/*/` directories and `lang/*.json` files.
-- **Placeholder parameter completion.** The `:name` placeholders parsed
-  from the translation value complete as keys of the replacement array
-  (`__('welcome', ['name' => …])`).
-- **Multi-locale hover.** Hover already shows a translation key's value
-  for the resolved locale; show the value per locale (with a link to
-  each file) instead of just the one.
-- **Insert missing key quick-fix.** When the unknown-translation-key
-  diagnostic fires on a `group.item` key whose `lang/{locale}/group.php`
-  array file already exists, offer a quick-fix that inserts the missing
-  `'item' => '...'` entry (existing keys as siblings for placement,
-  empty string as the value). No fix when the group file itself doesn't
-  exist yet; that case still just diagnoses.
-
 #### L27. Legacy `Controller@method` action strings
 
 **Impact: Low · Complexity: Low**

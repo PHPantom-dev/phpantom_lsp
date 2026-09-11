@@ -55,6 +55,7 @@ impl Backend {
         root: &std::path::Path,
     ) -> bool {
         let mut composer_changed = false;
+        let mut translations_changed = false;
         let mut config_changed = false;
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
@@ -70,6 +71,7 @@ impl Backend {
             let indexed = self.symbol_maps.read();
             let laravel_config = self.config().laravel;
             let filters = self.index_filters();
+            let translations = self.laravel_string_key_cache.read().translations.clone();
             for change in &params.changes {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -114,6 +116,19 @@ impl Backend {
                     continue;
                 }
                 let uri_str = change.uri.to_string();
+                if is_laravel
+                    && !open.contains_key(&uri_str)
+                    && (path_str.contains("/lang/")
+                        || translations
+                            .as_ref()
+                            .is_some_and(|catalog| catalog.contains_uri(&uri_str)))
+                    && change
+                        .uri
+                        .to_file_path()
+                        .is_ok_and(|path| !filters.is_excluded_path(&path, false))
+                {
+                    translations_changed = true;
+                }
                 if crate::resource_navigation::is_resource_document(path_str) {
                     if open.contains_key(&uri_str) {
                         continue;
@@ -178,11 +193,16 @@ impl Backend {
         if php_changes.is_empty()
             && resource_changes.is_empty()
             && !composer_changed
+            && !translations_changed
             && !config_changed
             && !schema_full_rebuild
             && migration_changes.is_empty()
         {
             return false;
+        }
+
+        if translations_changed {
+            self.laravel_string_key_cache.write().translations = None;
         }
 
         if config_changed {
@@ -346,6 +366,10 @@ impl Backend {
         ]);
         if is_laravel {
             watchers.extend([
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.json".to_string()),
+                    kind: None,
+                },
                 FileSystemWatcher {
                     glob_pattern: GlobPattern::String("**/*.sql".to_string()),
                     kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),

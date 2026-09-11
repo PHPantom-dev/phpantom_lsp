@@ -83,6 +83,7 @@ pub(crate) mod laravel_request_keys;
 pub(crate) mod laravel_route_controller;
 pub(crate) mod laravel_route_params;
 pub(crate) mod laravel_string_keys;
+pub(crate) mod laravel_translation_args;
 pub mod named_args;
 pub(crate) mod resolve;
 pub(crate) mod target;

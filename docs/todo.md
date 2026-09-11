@@ -156,7 +156,6 @@ unlikely to move the needle for most users.
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low-Medium  | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
-| L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium-High |
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
 | L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |

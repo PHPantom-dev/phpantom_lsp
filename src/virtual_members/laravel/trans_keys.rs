@@ -1,7 +1,7 @@
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::Location;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -17,9 +17,9 @@ impl Backend {
     /// of lines beneath it.  A key the indexed translations do not cover
     /// falls back to [`unresolved_trans_type`].
     pub(crate) fn resolve_trans_type(&self, key: &str) -> Option<PhpType> {
-        match self.cached_trans_key_shapes().get(key) {
-            Some(false) => Some(PhpType::string()),
-            Some(true) => Some(trans_group_type()),
+        match self.cached_translations().entries.get(key) {
+            Some(entries) if entries.iter().any(|entry| entry.is_group) => Some(trans_group_type()),
+            Some(_) => Some(PhpType::string()),
             None => Some(unresolved_trans_type()),
         }
     }
@@ -53,132 +53,9 @@ pub(crate) fn unresolved_trans_type() -> PhpType {
 /// rest = array path).  For JSON files the key is looked up directly as a
 /// top-level object key (Laravel's JSON translations are flat).
 ///
-/// Falls back to the top of the file when the exact key cannot be located.
+/// Whole PHP groups resolve to the start of their file.
 pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Location> {
-    let mut results = Vec::new();
-
-    if let Some((namespace, rest)) = key.split_once("::") {
-        let file_stem = rest.split('.').next().unwrap_or(rest);
-        for res in &backend.laravel_provider_resources.read().trans_dirs {
-            if res.namespace != namespace {
-                continue;
-            }
-            let Ok(entries) = std::fs::read_dir(&res.path) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let locale_dir = entry.path();
-                if !locale_dir.is_dir() {
-                    continue;
-                }
-                let candidate = locale_dir.join(format!("{file_stem}.php"));
-                if !candidate.is_file() {
-                    continue;
-                }
-                let Ok(content) = std::fs::read_to_string(&candidate) else {
-                    continue;
-                };
-                let Ok(uri) = Url::from_file_path(&candidate) else {
-                    continue;
-                };
-                let prefix = format!("{namespace}::{file_stem}");
-                let declarations = collect_trans_declarations(&content, &prefix);
-                if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                    let pos = crate::text_position::offset_to_position(&content, decl.start);
-                    results.push(crate::definition::point_location(uri, pos));
-                    continue;
-                }
-                results.push(crate::definition::point_location(uri, Position::new(0, 0)));
-            }
-        }
-        return results;
-    }
-
-    let snapshot = backend.user_file_symbol_maps();
-
-    let file_stem = key.split('.').next().unwrap_or(key);
-    let target_suffix = format!("/{file_stem}.php");
-
-    for (file_uri, _) in &snapshot {
-        if !(file_uri.contains("/lang/") || file_uri.contains("/resources/lang/")) {
-            continue;
-        }
-
-        if file_uri.ends_with(&target_suffix) {
-            let Ok(uri) = Url::parse(file_uri) else {
-                continue;
-            };
-            let Some(content) = backend.get_file_content(file_uri) else {
-                continue;
-            };
-
-            let declarations = collect_trans_declarations(&content, file_stem);
-            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::text_position::offset_to_position(&content, decl.start);
-                results.push(crate::definition::point_location(uri, pos));
-                continue;
-            }
-
-            results.push(crate::definition::point_location(uri, Position::new(0, 0)));
-        }
-    }
-
-    if let Some(root) = backend.workspace.workspace_root.read().clone() {
-        for sub in &["lang", "resources/lang"] {
-            let dir = root.join(sub);
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json")
-                    && let Ok(content) = std::fs::read_to_string(&path)
-                    && let Ok(map) =
-                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-                    && map.contains_key(key)
-                    && let Ok(uri) = Url::from_file_path(&path)
-                {
-                    results.push(crate::definition::point_location(uri, Position::new(0, 0)));
-                }
-            }
-        }
-    }
-
-    results
-}
-
-/// The line a translation key resolves to inside the file that declares it.
-///
-/// The file is the one [`resolve_trans_definitions`] settled on, so hover
-/// quotes the string from the same locale it names, and a group (which has
-/// no single line) resolves to `None`.
-pub(crate) fn trans_line(backend: &Backend, key: &str, file_uri: &Url) -> Option<String> {
-    let path = file_uri.path();
-    if path.ends_with(".json") {
-        let content = std::fs::read_to_string(file_uri.to_file_path().ok()?).ok()?;
-        let map =
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content).ok()?;
-        return map.get(key)?.as_str().map(str::to_string);
-    }
-    let content = backend
-        .get_file_content(file_uri.as_str())
-        .or_else(|| std::fs::read_to_string(file_uri.to_file_path().ok()?).ok())?;
-    collect_trans_declarations(&content, &trans_file_prefix(key))
-        .into_iter()
-        .find(|decl| decl.key == key)?
-        .value
-}
-
-/// The prefix [`collect_trans_declarations`] flattens a file's keys under,
-/// derived from the key being looked up: the first dotted segment, or
-/// `namespace::file` for a package translation.
-fn trans_file_prefix(key: &str) -> String {
-    match key.split_once("::") {
-        Some((namespace, rest)) => {
-            format!("{namespace}::{}", rest.split('.').next().unwrap_or(rest))
-        }
-        None => key.split('.').next().unwrap_or(key).to_string(),
-    }
+    backend.translation_definitions(key)
 }
 
 // ─── Declaration extractor (mirrors config_keys logic) ───────────────────────
@@ -187,6 +64,8 @@ fn trans_file_prefix(key: &str) -> String {
 pub(crate) struct TransKeyMatch {
     pub key: String,
     pub start: usize,
+    /// Byte offset immediately after the key's source text, before its quote.
+    pub end: usize,
     /// Whether the key's value is itself a nested array (a translation
     /// group) rather than a scalar string entry.
     pub is_group: bool,
@@ -281,24 +160,32 @@ fn collect_array<'a>(
         let ArrayElement::KeyValue(kv) = element else {
             continue;
         };
-        let Some((key_text, key_start, _)) =
+        let Some((key_text, key_start, key_end)) =
             super::helpers::extract_string_literal(kv.key, content)
         else {
             continue;
         };
 
+        let key_text = literal_value(kv.key).unwrap_or(key_text);
         let mut full_path = path.to_vec();
         full_path.push(key_text.to_string());
         let dot_key = format!("{prefix}.{}", full_path.join("."));
         out.push(TransKeyMatch {
             key: dot_key,
             start: key_start,
+            end: key_end,
             is_group: value_is_group(kv.value),
-            value: super::helpers::extract_string_literal(kv.value, content)
-                .map(|(text, _, _)| text.to_string()),
+            value: literal_value(kv.value).map(str::to_string),
         });
 
         collect_expr(kv.value, content, prefix, &full_path, out);
+    }
+}
+
+fn literal_value<'a>(expression: &'a Expression<'_>) -> Option<&'a str> {
+    match expression {
+        Expression::Literal(Literal::String(string)) => string.value.map(bytes_to_str),
+        _ => None,
     }
 }
 

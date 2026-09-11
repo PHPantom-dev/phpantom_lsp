@@ -109,6 +109,7 @@ mod generate_property_hooks;
 pub(crate) mod implement_methods;
 mod import_class;
 mod inline_variable;
+mod insert_translation_key;
 mod mago;
 mod naming;
 pub(crate) mod phpstan;
@@ -242,6 +243,7 @@ impl Backend {
 
         // ── Create missing view ─────────────────────────────────────────
         self.collect_create_missing_view_actions(uri, content, params, &mut actions);
+        self.collect_insert_translation_key_actions(uri, content, params, &mut actions);
 
         // Every collector plans its edits against the PHP a template lowers
         // to; the editor applies them to the template itself.

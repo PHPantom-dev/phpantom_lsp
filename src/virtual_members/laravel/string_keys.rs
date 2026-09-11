@@ -306,7 +306,7 @@ fn find_string_key_usages(
         let Ok(parsed_uri) = Url::parse(file_uri) else {
             continue;
         };
-        let Some(content) = backend.get_file_content_arc(file_uri) else {
+        let Some(content) = backend.reference_file_content_arc(file_uri) else {
             continue;
         };
         for span in symbol_map.spans.iter().chain(extra.iter()) {
