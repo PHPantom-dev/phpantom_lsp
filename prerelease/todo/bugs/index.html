@@ -935,23 +935,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b49-a-bracket-inside-a-php-comment-counts-as-a-bracket-in-a-blade-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B49. A bracket inside a PHP comment counts as a bracket in a Blade template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1529,23 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b49-a-bracket-inside-a-php-comment-counts-as-a-bracket-in-a-blade-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B49. A bracket inside a PHP comment counts as a bracket in a Blade template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1604,25 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b49-a-bracket-inside-a-php-comment-counts-as-a-bracket-in-a-blade-template">B49. A bracket inside a PHP comment counts as a bracket in a Blade template<a class="headerlink" href="#b49-a-bracket-inside-a-php-comment-counts-as-a-bracket-in-a-blade-template" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Neither the Blade reindenter's bracket scan
-(<code>open_bracket</code>/<code>close_bracket</code> in <code>src/formatting/blade/reindent.rs</code>)
-nor <code>matching_paren</code> in <code>src/blade/signature.rs</code> skips a PHP comment, so
-a <code>)</code> or <code>]</code> written inside one closes a construct that is still open:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@props([
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    &#39;a&#39; =&gt; 1, // trailing )
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>])
-</code></pre></div>
-<p>The reindenter reads the comment's <code>)</code> as the one closing <code>@props(</code> and
-writes the real closing line one level too deep (<code>])</code>). The
-embedded-PHP pass reads the same comment the same way, so the argument
-range it hands the formatter stops short of the <code>]</code>, the snippet does not
-parse, and the fragment is left as written instead of being formatted.</p>
-<p>Both scans need the same PHP comment handling they already have for
-string literals: <code>//</code> and <code>#</code> to the end of the line, and <code>/* … */</code> to
-its terminator. <code>matching_paren</code> is shared with the signature parser, so
-the fix has to hold for a <code>@bladestan-signature</code> argument list too.</p>
+<p>No outstanding items.</p>
 
 
 
