@@ -354,31 +354,6 @@ methods, or document this as a known limitation.
 
 ---
 
-#### L12. `HasUuids` / `HasUlids` trait — `$id` typed as `string`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Models that use `Illuminate\Database\Eloquent\Concerns\HasUuids` or
-`HasUlids` have their primary key (`$id` by default) typed as
-`string` instead of `int`. Currently PHPantom does not inspect these
-traits, so `$model->id` resolves to `int` (from the default Model
-stub) instead of `string`.
-
-Larastan's `bug-2188.php` tests this: `assertType('string', $uuidModel->id)`.
-
-**Where to change:** In `LaravelModelProvider::provide`, after
-synthesizing other virtual properties, check whether the model's
-`used_traits` (recursively, including parent traits) contains
-`HasUuids` or `HasUlids`. If so, synthesize a virtual `id` property
-typed as `string` (or override the existing one). The trait also
-overrides `getKeyType()` to return `'string'` and
-`getIncrementing()` to return `false`, but for virtual property
-purposes just the `id` type is the main gap.
-
-Alternatively, if the stubs for these traits include `@property`
-tags or a typed `$id` override, the PHPDoc provider may handle it
-automatically once the traits are loaded.
-
 #### L47. Morph aliases in `*_type` column comparisons
 
 **Impact: Low-Medium · Complexity: Medium-High**
