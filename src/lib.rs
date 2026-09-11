@@ -976,6 +976,11 @@ pub struct Backend {
     /// symbol map recorded a candidate site ever get an entry.
     pub(crate) typed_receiver_view_spans_cache:
         Arc<RwLock<HashMap<String, crate::blade::typed_receiver::TypedReceiverSpans>>>,
+    /// Lazily confirmed morph-column aliases, invalidated when source or
+    /// the model metadata used to recognize their columns changes.
+    pub(crate) morph_column_spans_cache: Arc<
+        RwLock<HashMap<String, virtual_members::laravel::typed_morph_columns::MorphColumnSpans>>,
+    >,
     /// Whether the workspace directory has been fully scanned for PHP and
     /// resource files.
     ///
@@ -1219,6 +1224,7 @@ impl Backend {
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
             typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
+            morph_column_spans_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1336,6 +1342,7 @@ impl Backend {
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
             typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
+            morph_column_spans_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1993,6 +2000,7 @@ impl Backend {
             blade_uris: Arc::clone(&self.blade_uris),
             blade_injected_vars: Arc::clone(&self.blade_injected_vars),
             typed_receiver_view_spans_cache: Arc::clone(&self.typed_receiver_view_spans_cache),
+            morph_column_spans_cache: Arc::clone(&self.morph_column_spans_cache),
             workspace_indexed: Arc::clone(&self.workspace_indexed),
             workspace_index_lock: Arc::clone(&self.workspace_index_lock),
             full_index_in_progress: Arc::clone(&self.full_index_in_progress),

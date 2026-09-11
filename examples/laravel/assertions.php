@@ -1468,6 +1468,26 @@ check("url('/login') returns a string", is_string(url('/login')));
 
 \Illuminate\Container\Container::setInstance($previousContainer);
 
+// ─── Morph aliases in column comparisons ────────────────────────────────────
+
+$previousMorphMap = \Illuminate\Database\Eloquent\Relations\Relation::morphMap();
+\Illuminate\Database\Eloquent\Relations\Relation::morphMap([
+    'blog_post' => \App\Models\BlogPost::class,
+]);
+$review = new \App\Models\Review();
+$review->reviewable()->associate(new \App\Models\BlogPost());
+check('Review declares its morph type column', $review->reviewable()->getMorphType() === 'reviewable_type');
+check('An associated review stores the mapped alias', $review->reviewable_type === 'blog_post');
+check(
+    'The column alias resolves to BlogPost',
+    \Illuminate\Database\Eloquent\Relations\Relation::getMorphedModel($review->reviewable_type) === \App\Models\BlogPost::class
+);
+check(
+    'A morph column query binds its literal alias',
+    \App\Models\Review::where('reviewable_type', 'blog_post')->getBindings() === ['blog_post']
+);
+\Illuminate\Database\Eloquent\Relations\Relation::morphMap($previousMorphMap, false);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

@@ -94,6 +94,17 @@ impl Backend {
         if let Some(span) = map.lookup(offset) {
             return Some(span.clone());
         }
+        if map
+            .morph_column_sites
+            .iter()
+            .any(|site| offset >= site.start && offset < site.end)
+            && let Some(span) = self
+                .morph_column_spans_for(uri, &map)
+                .iter()
+                .find(|span| offset >= span.start && offset < span.end)
+        {
+            return Some(span.clone());
+        }
         // A view name behind a typed receiver is a gap in the map — the
         // indexer could not tell it was one — so the cursor lands in what
         // reads as a plain string literal until the receiver is typed.

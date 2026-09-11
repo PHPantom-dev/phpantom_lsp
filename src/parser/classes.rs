@@ -475,6 +475,11 @@ impl Backend {
                         &trait_def.attribute_lists,
                         doc_ctx,
                     );
+                    let laravel = crate::virtual_members::laravel::extract_laravel_trait_metadata(
+                        trait_def,
+                        &methods,
+                        doc_ctx.map_or("", |ctx| ctx.content),
+                    );
                     classes.push(ClassInfo {
                         kind: ClassLikeKind::Trait,
                         name: trait_name,
@@ -523,7 +528,7 @@ impl Backend {
                         attribute_targets: 0,
                         method_index: Default::default(),
                         indexed_method_count: 0,
-                        laravel: None,
+                        laravel,
                         fqn: None,
                     });
 

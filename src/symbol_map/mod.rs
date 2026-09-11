@@ -28,11 +28,13 @@
 
 pub(crate) mod docblock;
 mod extraction;
+mod morph_columns;
 
 use crate::atom::Atom;
 use crate::php_type::PhpType;
 
 pub(crate) use extraction::extract_symbol_map;
+pub(crate) use morph_columns::{MorphColumnReceiver, MorphColumnSite};
 
 // ─── Data structures ────────────────────────────────────────────────────────
 
@@ -875,6 +877,9 @@ pub(crate) struct SymbolMap {
     /// a mailable through something other than the spellings
     /// [`SymbolKind::LaravelStringKey`] is emitted for.
     pub view_receiver_sites: Vec<ViewReceiverSite>,
+    /// Literal comparisons whose receivers and columns must be confirmed
+    /// as Eloquent morph type columns, sorted by `start`.
+    pub morph_column_sites: Vec<MorphColumnSite>,
     /// The model argument of each gate check that named one, keyed back to
     /// its ability span by [`GateSubject::ability_start`].  Empty for every
     /// file that performs no authorization checks.

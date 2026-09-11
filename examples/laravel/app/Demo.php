@@ -884,6 +884,17 @@ class Demo
         // The same alias resolves in Relation::getMorphedModel(), where
         // completion also offers the registered aliases.
         Relation::getMorphedModel('blog_post');   // → App\Models\BlogPost
+
+        // The relation declares reviewable_type as its morph type column.
+        // Aliases in query values and property comparisons also complete,
+        // hover as BlogPost, and navigate to the model and registration.
+        Review::where('reviewable_type', 'blog_post')->get();
+        Review::query()->where('reviewable_type', '=', 'blog_post')->get();
+        $review = new Review();
+        $review->reviewable_type = 'blog_post';
+        if ($review->reviewable_type === 'blog_post') {
+            Relation::getMorphedModel('blog_post');
+        }
     }
 
 

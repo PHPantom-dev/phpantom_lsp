@@ -384,24 +384,25 @@ pub(crate) fn extract_generic_arg_from_ancestor(
 
     // If the arg type itself is already generic with the wrapper name,
     // extract directly.  E.g. argument type is `Container<Foo>`.
-    if let TypeKind::Generic(g) = arg_type.kind() {
-        let n_short = crate::util::short_name(&g.name);
-        let wrapper_short = crate::util::short_name(wrapper_name);
-        if n_short.eq_ignore_ascii_case(wrapper_short) {
-            return g.args.get(tpl_position).cloned();
-        }
+    if let TypeKind::Generic(g) = arg_type.kind()
+        && generic_wrapper_matches(&g.name, wrapper_name)
+    {
+        return g.args.get(tpl_position).cloned();
     }
 
     let class_loader = rctx.class_loader;
     let cls = class_loader(class_name)?;
+    let subs = match arg_type.kind() {
+        TypeKind::Generic(generic) => crate::inheritance::build_generic_subs(&cls, &generic.args),
+        _ => HashMap::new(),
+    };
 
-    let wrapper_short = crate::util::short_name(wrapper_name);
     let mut visited = Vec::new();
     ancestor_generic_arg(
         &cls,
-        wrapper_short,
+        wrapper_name,
         tpl_position,
-        &HashMap::new(),
+        &subs,
         &mut visited,
         class_loader,
     )
@@ -483,11 +484,20 @@ pub(super) fn find_extends_generic_arg(
         .iter()
         .chain(cls.implements_generics.iter())
     {
-        if crate::util::short_name(name) == target_short {
+        if generic_wrapper_matches(name, target_short) {
             return args.get(position).cloned();
         }
     }
     None
+}
+
+fn generic_wrapper_matches(name: &str, target: &str) -> bool {
+    if target.contains('\\') {
+        name.trim_start_matches('\\')
+            .eq_ignore_ascii_case(target.trim_start_matches('\\'))
+    } else {
+        crate::util::short_name(name).eq_ignore_ascii_case(target)
+    }
 }
 
 /// Remap constructor template substitutions from ancestor param names to child
@@ -1236,6 +1246,17 @@ pub(super) fn extract_generic_arg_at_position(ty: &PhpType, position: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn morph_builder_wrappers_match_qualified_identity_and_explicit_short_names() {
+        assert!(generic_wrapper_matches("App\\Builder", "Builder"));
+        assert!(generic_wrapper_matches("App\\Builder", "\\app\\builder"));
+        assert!(!generic_wrapper_matches(
+            "App\\Builder",
+            "Illuminate\\Database\\Eloquent\\Builder"
+        ));
+        assert!(!generic_wrapper_matches("App\\Other", "Builder"));
+    }
 
     #[test]
     fn classify_direct_param() {

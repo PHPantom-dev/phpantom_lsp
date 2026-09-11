@@ -1382,9 +1382,11 @@ impl Backend {
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.
             self.typed_receiver_view_spans_cache.write().clear();
+            self.morph_column_spans_cache.write().clear();
         } else {
             for update in &prepared {
                 self.evict_typed_receiver_view_spans(&update.uri);
+                self.morph_column_spans_cache.write().remove(&update.uri);
             }
         }
 

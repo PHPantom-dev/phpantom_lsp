@@ -283,10 +283,23 @@ fn find_string_key_usages(
         } else {
             std::sync::Arc::new(Vec::new())
         };
+        let morph_columns = (*kind == crate::symbol_map::LaravelStringKind::MorphAlias
+            && symbol_map
+                .morph_column_sites
+                .iter()
+                .any(|site| site.key == key))
+        .then(|| backend.morph_column_spans_for(file_uri, symbol_map));
 
         // First pass: check if this file even has ANY LaravelStringKey matches.
         // This avoids reading file content from disk for thousands of unrelated files.
-        let has_match = symbol_map.spans.iter().chain(extra.iter()).any(|span| {
+        let spans = || {
+            symbol_map
+                .spans
+                .iter()
+                .chain(extra.iter())
+                .chain(morph_columns.iter().flat_map(|spans| spans.iter()))
+        };
+        let has_match = spans().any(|span| {
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
                 key: span_key,
@@ -309,7 +322,7 @@ fn find_string_key_usages(
         let Some(content) = backend.get_file_content_arc(file_uri) else {
             continue;
         };
-        for span in symbol_map.spans.iter().chain(extra.iter()) {
+        for span in spans() {
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
                 key: span_key,
