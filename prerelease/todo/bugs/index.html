@@ -949,17 +949,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b50-namespaced-class-completions-vanish-from-blade-templates" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B50. Namespaced class completions vanish from Blade templates
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1554,17 +1543,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b50-namespaced-class-completions-vanish-from-blade-templates" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B50. Namespaced class completions vanish from Blade templates
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1645,27 +1623,6 @@ parse, and the fragment is left as written instead of being formatted.</p>
 string literals: <code>//</code> and <code>#</code> to the end of the line, and <code>/* … */</code> to
 its terminator. <code>matching_paren</code> is shared with the signature parser, so
 the fix has to hold for a <code>@bladestan-signature</code> argument list too.</p>
-<h3 id="b50-namespaced-class-completions-vanish-from-blade-templates">B50. Namespaced class completions vanish from Blade templates<a class="headerlink" href="#b50-namespaced-class-completions-vanish-from-blade-templates" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p>In a <code>.blade.php</code> file, class-name completion drops every candidate that
-would need a <code>use</code> import. Typing <code>new Widg</code> or <code>Widg</code> in an echo offers a
-global <code>Widgetry</code> but not <code>App\Models\Widget</code>; the same request in a PHP
-file offers both, the latter with its import edit.</p>
-<p>The item is built against the virtual PHP the template lowers to, so
-<code>build_use_edit</code> (<code>src/completion/use_edit.rs</code>) places the import where a
-PHP file would take it: the line after <code>&lt;?php</code>, which in the virtual file
-is the preprocessor's prologue. <code>translate_completion_item</code>
-(<code>src/blade/translate.rs</code>) then finds that the additional edit has no
-template position behind it and drops the whole item rather than a
-misplaced edit, so the candidate never reaches the editor.</p>
-<p>The fix is a template-aware import edit, not a translation tweak: a
-template imports a name with <code>@use('App\Models\Widget')</code> at its top (or
-a <code>use</code> inside an existing <code>@php</code> block), written in Blade coordinates
-from the raw template text, the way <code>src/blade/use_directive.rs</code> already
-reads existing <code>@use</code> directives. It has to live in the shared use-edit
-builder so completion and the "Import class" code action (BL1) both get
-it; the code action would otherwise offer an import whose edit is dropped
-the same way.</p>
 
 
 
