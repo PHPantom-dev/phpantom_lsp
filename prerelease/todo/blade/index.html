@@ -1484,6 +1484,16 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 <li>Blade-aware code generation (e.g. insert <code>use</code> inside <code>@php</code>).</li>
 <li>Filtering out actions that don't make sense in Blade context.</li>
 </ul>
+<p><strong>Current state:</strong> the coordinate translation exists.
+<code>translate_workspace_edit</code> (<code>src/blade/translate.rs</code>) already runs at the
+end of <code>handle_code_action</code> and <code>resolve_code_action</code>, moving every edit
+back into the template and dropping the ones that land in the prologue.
+What remains is the server-side gate in <code>code_action</code> (<code>src/server.rs</code>),
+which still answers nothing for a template; translating the request range
+and its diagnostics into the virtual PHP before the collectors run;
+discarding an action whose edits were all dropped rather than offering a
+no-op; and the template-aware <code>use</code> insertion that B50 in
+<a href="../bugs/"><code>bugs.md</code></a> needs too, shared with completion.</p>
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
 
 
