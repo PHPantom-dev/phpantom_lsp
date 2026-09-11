@@ -47,7 +47,7 @@ use std::ops::Range;
 
 use crate::blade::balance::{BLOCKS, opens_block};
 use crate::blade::component_tags::{is_attr_name_char, is_tag_name_char};
-use crate::blade::signature::matching_paren;
+use crate::blade::signature::{matching_paren, skip_php_comment};
 
 /// How the formatter lays a template out, from the editor's formatting
 /// options.
@@ -356,8 +356,8 @@ impl<'a> Scanner<'a> {
         None
     }
 
-    /// Scan `start..end` as code: strings, echoes, and brackets, with
-    /// nothing else special.
+    /// Scan `start..end` as code: strings, comments, echoes, and brackets,
+    /// with nothing else special.
     fn scan_code(&mut self, start: usize, end: usize) {
         let mut i = start;
         while i < end {
@@ -367,6 +367,8 @@ impl<'a> Scanner<'a> {
                 }
                 b'{' if is_echo_start(self.bytes, i) => self.scan_echo(i, end),
                 b'\'' | b'"' => self.skip_string(i, end).unwrap_or(i + 1),
+                // A bracket written in a comment closes nothing.
+                b'/' | b'#' => skip_php_comment(self.bytes, i).map_or(i + 1, |past| past.min(end)),
                 b'(' | b'[' | b'{' => self.open_bracket(i),
                 b')' | b']' | b'}' => self.close_bracket(i),
                 _ => i + 1,

@@ -606,8 +606,39 @@ fn find_directive_args(masked: &str, directive: &str) -> Option<std::ops::Range<
     None
 }
 
+/// The offset just past the PHP comment opening at `at`, or `None` when
+/// no comment opens there.
+///
+/// `//` and `#` run to the end of the line, `/* … */` to its terminator,
+/// and an unterminated block comment to the end of the input. `#[` opens
+/// a PHP attribute rather than a comment.
+pub(crate) fn skip_php_comment(bytes: &[u8], at: usize) -> Option<usize> {
+    let end_of_line = |from: usize| {
+        bytes[from..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |at| from + at)
+    };
+    match (bytes.get(at)?, bytes.get(at + 1)) {
+        (b'#', Some(b'[')) => None,
+        (b'#', _) => Some(end_of_line(at + 1)),
+        (b'/', Some(b'/')) => Some(end_of_line(at + 2)),
+        (b'/', Some(b'*')) => Some(
+            bytes[at + 2..]
+                .windows(2)
+                .position(|pair| pair == b"*/")
+                .map_or(bytes.len(), |close| at + 2 + close + 2),
+        ),
+        _ => None,
+    }
+}
+
 /// The offset of the `)` matching the `(` at `open`, or `None` when the
 /// argument list is unterminated.
+///
+/// String literals and PHP comments are skipped whole, so a bracket
+/// written inside either (`@props(['a' => 1, // trailing )`) closes
+/// nothing.
 pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
     let mut depth = 0i32;
     let mut quote: Option<u8> = None;
@@ -624,17 +655,23 @@ pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
                     quote = None;
                 }
             }
-            None => match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'(' | b'[' => depth += 1,
-                b')' | b']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(i);
-                    }
+            None => {
+                if let Some(past) = skip_php_comment(bytes, i) {
+                    i = past;
+                    continue;
                 }
-                _ => {}
-            },
+                match byte {
+                    b'\'' | b'"' => quote = Some(byte),
+                    b'(' | b'[' => depth += 1,
+                    b')' | b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(i);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
         i += 1;
     }
@@ -642,7 +679,7 @@ pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
 }
 
 /// Split a directive's argument text at its top-level commas, ignoring the
-/// ones inside nested calls, arrays, and string literals.
+/// ones inside nested calls, arrays, string literals, and comments.
 pub(crate) fn split_top_level_args(args: &str) -> Vec<&str> {
     let bytes = args.as_bytes();
     let mut parts = Vec::new();
@@ -662,16 +699,22 @@ pub(crate) fn split_top_level_args(args: &str) -> Vec<&str> {
                     quote = None;
                 }
             }
-            None => match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' => depth -= 1,
-                b',' if depth == 0 => {
-                    parts.push(&args[start..i]);
-                    start = i + 1;
+            None => {
+                if let Some(past) = skip_php_comment(bytes, i) {
+                    i = past;
+                    continue;
                 }
-                _ => {}
-            },
+                match byte {
+                    b'\'' | b'"' => quote = Some(byte),
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => depth -= 1,
+                    b',' if depth == 0 => {
+                        parts.push(&args[start..i]);
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
         }
         i += 1;
     }
@@ -980,6 +1023,46 @@ mod tests {
     fn props_span_a_bracket_inside_a_string_default() {
         assert_eq!(
             props("@props(['a' => ']', 'b' => 2])")
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn props_span_a_bracket_inside_a_comment() {
+        // A "]" or ")" written in a PHP comment closes nothing, so the
+        // scan must run past it to the real end of the argument list.
+        assert_eq!(
+            props("@props([\n    'a' => 1, // trailing )\n    'b' => 2, # and ]\n    /* and ) */\n    'c' => 3,\n])\n")
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    /// A comma inside a comment ends nothing, so the argument after it is
+    /// still the one the caller asked for by index.
+    #[test]
+    fn arguments_do_not_split_at_a_comma_inside_a_comment() {
+        assert_eq!(
+            split_top_level_args("'view', // one, two\n['a' => 1]"),
+            vec!["'view'", " // one, two\n['a' => 1]"]
+        );
+        assert_eq!(
+            split_top_level_args("'view' /* one, two */, ['a' => 1]"),
+            vec!["'view' /* one, two */", " ['a' => 1]"]
+        );
+    }
+
+    /// `#[` opens a PHP attribute, not a comment, so the scan must keep
+    /// counting brackets through it.
+    #[test]
+    fn props_span_an_attribute_rather_than_reading_it_as_a_comment() {
+        assert_eq!(
+            props("@props(['a' => foo(#[Pure] fn () => 1), 'b' => 2])")
                 .iter()
                 .map(|(n, _)| n.as_str())
                 .collect::<Vec<_>>(),

@@ -600,6 +600,32 @@ fn indentation_indents_nested_arrays_in_props() {
     );
 }
 
+/// A bracket written in a PHP comment closes nothing, so the closing
+/// line of the array is still the array's own.
+#[test]
+fn indentation_ignores_a_bracket_inside_a_line_comment() {
+    check(
+        "\n@props([\n'a' => 1, // trailing )\n'b' => 2, # and ]\n])",
+        "\n@props([\n    'a' => 1, // trailing )\n    'b' => 2, # and ]\n])",
+    );
+}
+
+#[test]
+fn indentation_ignores_a_bracket_inside_a_block_comment() {
+    check(
+        "\n@props([\n/* ) and ] */\n'a' => 1,\n])",
+        "\n@props([\n    /* ) and ] */\n    'a' => 1,\n])",
+    );
+}
+
+#[test]
+fn indentation_ignores_a_bracket_inside_a_comment_in_an_echo() {
+    check(
+        "\n<p>\n{{ __('key', [\n'name' => $name, // )\n]) }}\n</p>",
+        "\n<p>\n    {{ __('key', [\n        'name' => $name, // )\n    ]) }}\n</p>",
+    );
+}
+
 #[test]
 fn indentation_indents_multi_line_echo_arguments() {
     check(
@@ -1597,6 +1623,17 @@ fn embedded_php_formats_a_broken_props_array_without_joining_it() {
     check_embedded(
         "<div>\n@props([\n'on',\n'color'=>'blue',\n])\n</div>\n",
         "<div>\n    @props([\n        'on',\n        'color' => 'blue',\n    ])\n</div>\n",
+    );
+}
+
+/// The argument range handed to the formatter has to run past a bracket
+/// written in a comment, or the snippet it gets does not parse and the
+/// fragment is left as the author wrote it.
+#[test]
+fn embedded_php_formats_a_props_array_with_a_bracket_in_a_comment() {
+    check_embedded(
+        "@props([\n'on',\n'color'=>'blue', // trailing )\n])\n",
+        "@props([\n    'on',\n    'color' => 'blue', // trailing )\n])\n",
     );
 }
 
