@@ -148,6 +148,7 @@ mod diagnostics_undefined_variables;
 mod diagnostics_unknown_classes;
 mod diagnostics_unknown_functions;
 mod diagnostics_unknown_members;
+mod diagnostics_unreachable_code;
 mod diagnostics_unused_variables;
 mod docblock_types;
 mod document_highlight;
