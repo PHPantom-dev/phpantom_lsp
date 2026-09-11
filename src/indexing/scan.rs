@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::classify_class_origin;
+use super::{classify_class_origin, path_aliases};
 use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
@@ -48,14 +48,10 @@ impl Backend {
         // of filesystem calls.
         {
             let mut paths = self.workspace.vendor_dir_paths.lock();
-            let mut insert = |path: PathBuf| {
+            for path in path_aliases(vendor_path) {
                 if !paths.contains(&path) {
                     paths.push(path);
                 }
-            };
-            insert(vendor_path.to_path_buf());
-            if let Ok(canonical) = vendor_path.canonicalize() {
-                insert(canonical);
             }
         }
         // Store URI prefixes for URI-level skip logic (diagnostics, find
@@ -97,6 +93,7 @@ impl Backend {
             // clone before `composer install`). Register it again now so the
             // shared vendor filters cache both raw and canonical spellings.
             self.add_vendor_dir(&vendor_path);
+            let vendor_paths = path_aliases(&vendor_path);
 
             // Rebuild vendor classmap, tracking dependency provenance so
             // completion ranking stays accurate after a composer change.
@@ -131,7 +128,7 @@ impl Backend {
                             .get(&fqn)
                             .copied()
                             .unwrap_or_else(|| {
-                                classify_class_origin(&path, &vendor_path, &vendor_package_roots)
+                                classify_class_origin(&path, &vendor_paths, &vendor_package_roots)
                             });
                     origins.insert(fqn.clone(), origin);
                     idx.insert(fqn, crate::util::path_to_uri(&path));
@@ -143,7 +140,7 @@ impl Backend {
                 // Purge functions that pointed into the old vendor tree
                 // before re-inserting, so symbols removed by a
                 // `composer update` no longer resolve.
-                fi.retain(|_, v| !v.starts_with(&vendor_path));
+                fi.retain(|_, v| !vendor_paths.iter().any(|vendor| v.starts_with(vendor)));
                 for (fqn, path) in vendor_scan.function_index {
                     let origin = vendor_scan
                         .function_origins
@@ -158,7 +155,7 @@ impl Backend {
                 let mut ci = self.symbols.autoload_constant_index.write();
                 let mut origins = self.symbols.autoload_constant_origin_index.write();
                 // Same for constants from the old vendor tree.
-                ci.retain(|_, v| !v.starts_with(&vendor_path));
+                ci.retain(|_, v| !vendor_paths.iter().any(|vendor| v.starts_with(vendor)));
                 for (name, path) in vendor_scan.constant_index {
                     let origin = vendor_scan
                         .constant_origins
