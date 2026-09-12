@@ -145,22 +145,32 @@ impl Backend {
                 .iter()
                 .map(|d| d.range.start.line as usize)
                 .collect();
+            let all_ranges: Vec<Range> = fresh_diags.iter().map(|d| d.range).collect();
 
             let mut edits: Vec<TextEdit> = fresh_diags
                 .iter()
-                .map(|d| build_line_deletion_edit(content, &d.range, &removed_import_lines))
+                .map(|d| {
+                    build_line_deletion_edit(content, &d.range, &removed_import_lines, &all_ranges)
+                })
                 .collect();
 
             // Sort edits in reverse order so that byte offsets remain
-            // valid as we apply deletions from bottom to top.
+            // valid as we apply deletions from bottom to top, and drop
+            // duplicate edits produced when several diagnostics collapse
+            // to one whole-group-statement removal.
             edits.sort_by_key(|e| Reverse(e.range.start));
+            edits.dedup_by(|a, b| a.range == b.range);
 
             Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {
             let diag = &diags[0];
             let removed_import_lines = HashSet::from([diag.range.start.line as usize]);
-            let removal_edit =
-                build_line_deletion_edit(content, &diag.range, &removed_import_lines);
+            let removal_edit = build_line_deletion_edit(
+                content,
+                &diag.range,
+                &removed_import_lines,
+                std::slice::from_ref(&diag.range),
+            );
 
             Some(crate::code_actions::single_file_edit(
                 doc_uri,
@@ -225,47 +235,76 @@ pub(crate) fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
 ///
 /// When the diagnostic targets a single member inside a group `use`
 /// statement (e.g. `use Foo\{Bar, Baz};` where only `Bar` is unused),
-/// the edit removes just the member entry rather than the whole line.
+/// the edit removes just the member entry rather than the whole line —
+/// unless every member of that group is being removed in this same
+/// batch (`all_removed_ranges`), in which case the whole statement is
+/// deleted, the same way a lone `use Foo\Bar;` line would be.
 pub(crate) fn build_line_deletion_edit(
     content: &str,
     range: &Range,
     removed_import_lines: &HashSet<usize>,
+    all_removed_ranges: &[Range],
 ) -> TextEdit {
-    // Try to extend the range to cover the full group member first.
-    if let Some(edit) = extend_range_for_group_member(content, range) {
-        return edit;
+    let lines: Vec<&str> = content.lines().collect();
+    let line_idx = range.start.line as usize;
+
+    if let Some((group_start, group_end, member_count)) = group_statement_bounds(&lines, line_idx) {
+        let targeted_in_group = all_removed_ranges
+            .iter()
+            .filter(|r| {
+                let l = r.start.line as usize;
+                l >= group_start && l <= group_end
+            })
+            .count();
+
+        if targeted_in_group < member_count {
+            if let Some(edit) = extend_range_for_group_member(content, range) {
+                return edit;
+            }
+        } else {
+            return delete_line_span(
+                content,
+                &lines,
+                group_start,
+                group_end,
+                removed_import_lines,
+            );
+        }
     }
 
-    let lines: Vec<&str> = content.lines().collect();
     let start_line = range.start.line as usize;
     let end_line = range.end.line as usize;
+    delete_line_span(content, &lines, start_line, end_line, removed_import_lines)
+}
 
+/// Delete lines `start_line..=end_line` (inclusive), including the
+/// trailing newline, optionally consuming an adjoining blank line so no
+/// gap is left behind.
+fn delete_line_span(
+    content: &str,
+    lines: &[&str],
+    start_line: usize,
+    end_line: usize,
+    removed_import_lines: &HashSet<usize>,
+) -> TextEdit {
     // Compute line-start offsets from real terminator lengths so the edit
     // stays aligned on CRLF files (where `str::lines()` strips the `\r`).
-    let edit_start_offset = if should_consume_previous_blank_line(
-        lines.as_slice(),
-        start_line,
-        end_line,
-        removed_import_lines,
-    ) {
-        line_start_byte_offset(content, start_line - 1)
-    } else {
-        line_start_byte_offset(content, start_line)
-    };
+    let edit_start_offset =
+        if should_consume_previous_blank_line(lines, start_line, end_line, removed_import_lines) {
+            line_start_byte_offset(content, start_line - 1)
+        } else {
+            line_start_byte_offset(content, start_line)
+        };
 
     // Deleting through the start of the line after `end_line` consumes
     // `end_line`'s terminator. Optionally extend over a following blank
     // line as well.
-    let last_consumed_line = if should_consume_following_blank_line(
-        lines.as_slice(),
-        start_line,
-        end_line,
-        removed_import_lines,
-    ) {
-        end_line + 1
-    } else {
-        end_line
-    };
+    let last_consumed_line =
+        if should_consume_following_blank_line(lines, start_line, end_line, removed_import_lines) {
+            end_line + 1
+        } else {
+            end_line
+        };
     let end_offset = line_start_byte_offset(content, last_consumed_line + 1).min(content.len());
 
     let start_pos = offset_to_position(content, edit_start_offset);
@@ -362,12 +401,17 @@ pub(crate) fn nearest_surviving_import_line(
     None
 }
 
-/// When the diagnostic range falls inside a group `use` statement
-/// (`use Foo\{Bar, Baz};`), build an edit that removes only the
-/// identified member rather than the entire line.
-pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Option<TextEdit> {
-    let lines: Vec<&str> = content.lines().collect();
-    let line_idx = range.start.line as usize;
+/// Locate the `use Foo\{...};` group statement enclosing `line_idx`
+/// (which may itself be the opening line, for a single-line group, or
+/// any line within a multi-line group). Returns the statement's
+/// inclusive `(start_line, end_line)` span and its member count.
+///
+/// Returns `None` when `line_idx` is not part of a group `use`
+/// statement at all.
+pub(crate) fn group_statement_bounds(
+    lines: &[&str],
+    line_idx: usize,
+) -> Option<(usize, usize, usize)> {
     if line_idx >= lines.len() {
         return None;
     }
@@ -375,8 +419,8 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
     // Check if any line in the vicinity contains `{` and `}` — the
     // hallmark of a group use statement.
     let line = lines[line_idx];
-    let full_stmt = if line.contains('{') && line.contains('}') {
-        line.to_string()
+    let (start, end, full_stmt) = if line.contains('{') && line.contains('}') {
+        (line_idx, line_idx, line.to_string())
     } else {
         // Multi-line group: gather all lines from the `use` to the `};`
         let mut start = line_idx;
@@ -396,13 +440,37 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
         if end >= lines.len() {
             return None;
         }
-        lines[start..=end].join("\n")
+        (start, end, lines[start..=end].join("\n"))
     };
 
     // Must have both `{` and `}` to be a group use.
     if !full_stmt.contains('{') || !full_stmt.contains('}') {
         return None;
     }
+
+    let brace_start = full_stmt.find('{')?;
+    let brace_end = full_stmt.find('}')?;
+    let members_text = &full_stmt[brace_start + 1..brace_end];
+    let member_count = members_text
+        .split(',')
+        .filter(|m| !m.trim().is_empty())
+        .count();
+
+    Some((start, end, member_count))
+}
+
+/// When the diagnostic range falls inside a group `use` statement
+/// (`use Foo\{Bar, Baz};`), build an edit that removes only the
+/// identified member rather than the entire line.
+pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Option<TextEdit> {
+    let lines: Vec<&str> = content.lines().collect();
+    let line_idx = range.start.line as usize;
+    if line_idx >= lines.len() {
+        return None;
+    }
+    let (_, _, member_count) = group_statement_bounds(&lines, line_idx)?;
+
+    let line = lines[line_idx];
 
     // Locate the member text from the diagnostic range. The range columns
     // are UTF-16 code units; convert them to byte offsets before slicing
@@ -443,13 +511,6 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
 
     // Check if removing this member would leave the group empty.
     // If so, fall back to removing the entire line.
-    let brace_start = full_stmt.find('{')?;
-    let brace_end = full_stmt.find('}')?;
-    let members_text = &full_stmt[brace_start + 1..brace_end];
-    let member_count = members_text
-        .split(',')
-        .filter(|m| !m.trim().is_empty())
-        .count();
     if member_count <= 1 {
         return None;
     }
@@ -491,7 +552,7 @@ mod tests {
     /// diagnostic's own line as removed (single-import scenario).
     fn build_single_line_deletion_edit(content: &str, range: &Range) -> TextEdit {
         let removed = HashSet::from([range.start.line as usize]);
-        build_line_deletion_edit(content, range, &removed)
+        build_line_deletion_edit(content, range, &removed, std::slice::from_ref(range))
     }
 
     // ── Range helpers ───────────────────────────────────────────────
@@ -603,6 +664,46 @@ mod tests {
         let edit = edit.unwrap();
         // Should remove "Bar, " (the member plus the trailing comma+space).
         assert_eq!(edit.new_text, "");
+    }
+
+    #[test]
+    fn removes_whole_single_line_group_when_all_members_unused_in_batch() {
+        let content = "<?php\nuse App\\Models\\{User, Post};\n\nclass Foo {}\n";
+        let removed = HashSet::from([1usize]);
+        let user_range = Range::new(Position::new(1, 18), Position::new(1, 22));
+        let post_range = Range::new(Position::new(1, 24), Position::new(1, 28));
+        let all_ranges = [user_range, post_range];
+
+        let edit = build_line_deletion_edit(content, &user_range, &removed, &all_ranges);
+        let start = lsp_position_to_byte_offset(content, edit.range.start);
+        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let mut result = content.to_string();
+        result.replace_range(start..end, &edit.new_text);
+
+        assert_eq!(result, "<?php\nclass Foo {}\n");
+    }
+
+    #[test]
+    fn removes_whole_multiline_group_when_all_members_unused_in_batch() {
+        let content = "<?php\nuse App\\Models\\{\n    User,\n    Post,\n};\n\nclass Foo {}\n";
+        let removed = HashSet::from([2usize, 3usize]);
+        let user_range = Range::new(Position::new(2, 4), Position::new(2, 8));
+        let post_range = Range::new(Position::new(3, 4), Position::new(3, 8));
+        let all_ranges = [user_range, post_range];
+
+        let user_edit = build_line_deletion_edit(content, &user_range, &removed, &all_ranges);
+        let post_edit = build_line_deletion_edit(content, &post_range, &removed, &all_ranges);
+        assert_eq!(
+            user_edit.range, post_edit.range,
+            "both diagnostics in a fully-removed group should collapse to one edit"
+        );
+
+        let start = lsp_position_to_byte_offset(content, user_edit.range.start);
+        let end = lsp_position_to_byte_offset(content, user_edit.range.end);
+        let mut result = content.to_string();
+        result.replace_range(start..end, &user_edit.new_text);
+
+        assert_eq!(result, "<?php\nclass Foo {}\n");
     }
 
     // ── Code action offering ────────────────────────────────────────
@@ -1197,7 +1298,8 @@ use PHPMD\\Rule\\Design\\CouplingBetweenObjects;
         // Line 3 is `use PHPMD\Rule;` — the only removed import.
         let removed = HashSet::from([3usize]);
         let range = Range::new(Position::new(3, 4), Position::new(3, 14));
-        let edit = build_line_deletion_edit(content, &range, &removed);
+        let edit =
+            build_line_deletion_edit(content, &range, &removed, std::slice::from_ref(&range));
 
         let start = lsp_position_to_byte_offset(content, edit.range.start);
         let end = lsp_position_to_byte_offset(content, edit.range.end);
@@ -1226,7 +1328,8 @@ use PHPMD\\Rule;
 ";
         let removed = HashSet::from([1usize]);
         let range = Range::new(Position::new(1, 4), Position::new(1, 34));
-        let edit = build_line_deletion_edit(content, &range, &removed);
+        let edit =
+            build_line_deletion_edit(content, &range, &removed, std::slice::from_ref(&range));
 
         let start = lsp_position_to_byte_offset(content, edit.range.start);
         let end = lsp_position_to_byte_offset(content, edit.range.end);

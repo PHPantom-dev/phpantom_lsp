@@ -163,15 +163,19 @@ pub fn fix_unused_imports(
         .iter()
         .map(|d| d.range.start.line as usize)
         .collect();
+    let all_ranges: Vec<Range> = diagnostics.iter().map(|d| d.range).collect();
 
     let mut edits: Vec<TextEdit> = diagnostics
         .iter()
-        .map(|d| build_line_deletion_edit(content, &d.range, &removed_import_lines))
+        .map(|d| build_line_deletion_edit(content, &d.range, &removed_import_lines, &all_ranges))
         .collect();
 
     // Sort edits in reverse order so byte offsets remain valid as we
-    // apply deletions from bottom to top.
+    // apply deletions from bottom to top, and drop duplicate edits
+    // produced when several diagnostics collapse to one whole-group-
+    // statement removal.
     edits.sort_by_key(|b| std::cmp::Reverse(b.range.start));
+    edits.dedup_by(|a, b| a.range == b.range);
 
     let fixes: Vec<AppliedFix> = diagnostics
         .iter()
