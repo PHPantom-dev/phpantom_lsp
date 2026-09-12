@@ -939,10 +939,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b50-removing-the-last-member-of-a-group-import-leaves-the-group-behind" class="md-nav__link">
+  <a href="#b51-multi-line-group-imports-are-never-flagged-as-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B50. Removing the last member of a group import leaves the group behind
+        B51. Multi-line group imports are never flagged as unused
       </span>
     </span>
   </a>
@@ -1533,10 +1533,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b50-removing-the-last-member-of-a-group-import-leaves-the-group-behind" class="md-nav__link">
+  <a href="#b51-multi-line-group-imports-are-never-flagged-as-unused" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B50. Removing the last member of a group import leaves the group behind
+        B51. Multi-line group imports are never flagged as unused
       </span>
     </span>
   </a>
@@ -1604,28 +1604,23 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b50-removing-the-last-member-of-a-group-import-leaves-the-group-behind">B50. Removing the last member of a group import leaves the group behind<a class="headerlink" href="#b50-removing-the-last-member-of-a-group-import-leaves-the-group-behind" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Low</strong></p>
-<p>When every member of a group import is unused, <code>phpantom_lsp fix</code> turns
-a valid file into one that no longer parses:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">use App\Models\{User, Post};   // both unused</span>
+<h3 id="b51-multi-line-group-imports-are-never-flagged-as-unused">B51. Multi-line group imports are never flagged as unused<a class="headerlink" href="#b51-multi-line-group-imports-are-never-flagged-as-unused" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>find_use_statement_range</code> (<code>src/diagnostics/unused_imports.rs:415</code>)
+only recognizes a <code>use</code> statement when the same source line contains
+both <code>use</code> and <code>;</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">use App\Models\{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    User,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    Post,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">};</span>
 </code></pre></div>
-<p>becomes</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">use App\Models\{</span>
-</code></pre></div>
-<p><code>extend_range_for_group_member</code>
-(<code>src/code_actions/remove_unused_import.rs:368</code>) always returns an edit
-scoped to the one member and its separating comma. Nothing checks
-whether that member was the last one, so the <code>use App\Models\{</code> prefix
-is never removed the way a single-import statement is. The function is
-shared with the editor quick fix, so the same gap is reachable from
-<code>remove_unused_import</code> and not only from the CLI.</p>
-<p>The reason this went unnoticed is that the test covering it has never
-run: <code>tests/integration/fix_cli.rs</code> landed without a matching
-<code>mod fix_cli;</code> in <code>tests/integration/main.rs</code>, so none of its 18 tests
-are compiled. Wiring the module in is the first half of the fix;
-<code>removes_entire_group_import_when_all_unused</code> then fails on the output
-above, and the other 17 pass.</p>
+<p>The opening line (<code>use App\Models\{</code>) has no <code>;</code>, so this check never
+matches and no unused-import diagnostic is ever produced for any member
+of a multi-line group, even when every member is unused. The same
+line-bound assumption also appears in <code>is_group_import_match</code> and
+<code>find_group_member_range</code> in the same file, which likewise expect the
+whole group to fit on one line. Single-line group imports
+(<code>use App\Models\{User, Post};</code>) are unaffected.</p>
 
 
 
