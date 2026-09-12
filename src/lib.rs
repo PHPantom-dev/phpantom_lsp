@@ -1775,9 +1775,19 @@ impl Backend {
     /// access; this only restores the lightweight discovery indexes.
     ///
     /// `changes` is `(editor URI string, file path, change type)`.
-    pub(crate) fn reindex_files_batch(&self, changes: &[(String, PathBuf, FileChangeType)]) {
+    ///
+    /// Returns whether any *class declaration* was dropped, handed to a
+    /// surviving file, or discovered — i.e. whether class resolution could
+    /// now answer differently.  A batch of declaration-free files (a
+    /// generated cache artifact, a routes or config file) returns `false`,
+    /// and the caller can keep the resolved-class caches it would
+    /// otherwise have to drop.
+    pub(crate) fn reindex_files_batch(
+        &self,
+        changes: &[(String, PathBuf, FileChangeType)],
+    ) -> bool {
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         // Index values are stored under either the editor URI or the
@@ -1805,6 +1815,7 @@ impl Backend {
         // These FQNs no longer resolve, and the promoted ones resolve
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
+        let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1878,6 +1889,7 @@ impl Backend {
             }
 
             let classes = crate::classmap_scanner::scan_file(path);
+            classes_changed |= !classes.is_empty();
             self.symbols.with_class_declarations(|decls| {
                 for fqn in classes {
                     decls.note_discovered(&fqn, uri_str.clone());
@@ -1898,6 +1910,7 @@ impl Backend {
                 }
             }
         }
+        classes_changed
     }
 
     /// Create a shallow clone of this `Backend` that shares every

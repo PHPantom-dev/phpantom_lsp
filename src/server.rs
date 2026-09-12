@@ -1627,17 +1627,28 @@ impl LanguageServer for Backend {
             && let Ok(position) = serde_json::from_value::<Position>(pos_val.clone())
             && let Some(ref client) = self.client
         {
-            let _ = client
-                .show_document(ShowDocumentParams {
-                    uri,
-                    external: Some(false),
-                    take_focus: Some(true),
-                    selection: Some(Range {
-                        start: position,
-                        end: position,
-                    }),
-                })
-                .await;
+            // Detached rather than awaited here: `showDocument` is a
+            // server-to-client request, and tower-lsp aborts this handler
+            // future when the client cancels the command or sends `exit`.
+            // Dropping the request future mid-flight leaves its response
+            // channel registered, and the answer arriving afterwards
+            // panics the serve loop, killing the whole server (the same
+            // failure `request_diagnostic_refresh` avoids with its pump).
+            // Nothing here needs the result.
+            let client = client.clone();
+            tokio::spawn(async move {
+                let _ = client
+                    .show_document(ShowDocumentParams {
+                        uri,
+                        external: Some(false),
+                        take_focus: Some(true),
+                        selection: Some(Range {
+                            start: position,
+                            end: position,
+                        }),
+                    })
+                    .await;
+            });
         }
         Ok(None)
     }
