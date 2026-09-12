@@ -220,36 +220,6 @@ done refactoring work, so the formal Step 3 report still has to be
 produced in a fresh session; these are the concrete items that sweep is
 expected to confirm.
 
-## R2. Split `cond_narrowing.rs` along its clusters
-
-**What to do.**
-`src/type_engine/variable/forward_walk/cond_narrowing.rs` is 6,105 lines
-(4,386 at 0.10.0), 134 functions, and three section comments, the last of
-which ("Narrowing helpers") covers 5,600 lines. Turn it into a
-`cond_narrowing/` directory, moving functions without changing them:
-`instanceof.rs` (the `commit_chain_instanceof`,
-`commit_instanceof_narrowing`, `dynamic_instanceof_targets` group),
-`assertions.rs` (`apply_assertion_to_key`, `qualify_assertion_type`,
-`array_key_exists_target`, the `mark_*_key_present` pair),
-`property_checks.rs` (`extract_property_check`,
-`narrow_union_by_property_check`, `property_can_equal` and their
-helpers), `null_identity.rs` (`apply_identity_comparison_null_narrowing`,
-`collect_identity_comparisons`, `apply_non_null_implication_narrowing`,
-`collect_proven_non_null_exprs`, `strip_null_by_constant_identity`),
-`emptiness.rs` (`extract_count_emptiness_check`,
-`apply_literal_identity_narrowing`, `refine_non_empty_type`,
-`refine_empty_type`), and `key_types.rs` (`resolve_synthetic_key_type`,
-`resolve_static_property_key_type`, `resolve_array_key_type`,
-`resolve_member_key_type`). The `mod.rs` keeps the entry points and the
-completion-path ternary section. The inline unit tests at the bottom
-follow the function they test.
-
-**Files.** `src/type_engine/variable/forward_walk/cond_narrowing.rs`
-(becomes a directory).
-
-**Why.** It grew by 1,700 lines this sprint and is the shared walker
-every consumer depends on. Nothing else in the change set comes close.
-
 ## R3. Move the `move` CLI's end-to-end tests out of `mod.rs`
 
 **What to do.** `src/move_cli/mod.rs` holds 23 async end-to-end tests
