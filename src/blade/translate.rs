@@ -60,6 +60,42 @@ impl Backend {
         }
     }
 
+    /// Translate a range from a Blade template into the virtual PHP it
+    /// lowers to, the coordinate system every feature plans against.
+    ///
+    /// The identity for a file that is not a template, or one whose
+    /// source map has not been recorded.
+    pub(crate) fn translate_blade_range_to_php(
+        &self,
+        uri: &str,
+        range: tower_lsp::lsp_types::Range,
+    ) -> tower_lsp::lsp_types::Range {
+        tower_lsp::lsp_types::Range {
+            start: self.translate_blade_to_php(uri, range.start),
+            end: self.translate_blade_to_php(uri, range.end),
+        }
+    }
+
+    /// Translate a range from virtual PHP coordinates back to original Blade
+    /// coordinates, clamping an end that lies in the prologue to the start of
+    /// the template.
+    ///
+    /// For callers that must always answer with a range, such as the item a
+    /// hierarchy or an outline is built around.  Prefer
+    /// [`Self::try_translate_blade_range`] wherever dropping the range is an
+    /// option: a clamped prologue position points at template text that has
+    /// nothing to do with the symbol.
+    pub(crate) fn translate_blade_range(
+        &self,
+        uri: &str,
+        range: tower_lsp::lsp_types::Range,
+    ) -> tower_lsp::lsp_types::Range {
+        tower_lsp::lsp_types::Range {
+            start: self.translate_php_to_blade(uri, range.start),
+            end: self.translate_php_to_blade(uri, range.end),
+        }
+    }
+
     /// Translate a range from virtual PHP coordinates back to original Blade
     /// coordinates, dropping it when either end lies in the prologue.
     pub(crate) fn try_translate_blade_range(
@@ -174,13 +210,16 @@ impl Backend {
     /// its symbol map describes, but the editor applies the edits to the
     /// template; the prologue holds declarations no template line stands
     /// behind, so an edit landing there has no position to be applied at.
+    ///
+    /// Returns whether any edit is left to apply.  A caller offering the
+    /// edits as an action has nothing to offer when every one was dropped.
     pub(crate) fn translate_template_edits(
         &self,
         uri: &str,
         edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
-    ) {
+    ) -> bool {
         if !self.is_blade_file(uri) {
-            return;
+            return !edits.is_empty();
         }
         edits.retain_mut(
             |edit| match self.try_translate_blade_range(uri, edit.range) {
@@ -191,6 +230,7 @@ impl Backend {
                 None => false,
             },
         );
+        !edits.is_empty()
     }
 
     /// Move every template edit in a workspace edit from the virtual PHP it
@@ -200,41 +240,57 @@ impl Backend {
     /// Edits to files that are not templates are left alone, and an edit
     /// that targets a template's injected prologue is dropped, whichever
     /// shape (`changes` or `document_changes`) carries it.
-    pub(crate) fn translate_workspace_edit(&self, edit: &mut tower_lsp::lsp_types::WorkspaceEdit) {
+    ///
+    /// Returns whether the workspace edit still applies anything: a text
+    /// edit in any file, or a resource operation (which no translation
+    /// touches).  `false` means every edit was dropped and the caller has
+    /// nothing left to offer.
+    pub(crate) fn translate_workspace_edit(
+        &self,
+        edit: &mut tower_lsp::lsp_types::WorkspaceEdit,
+    ) -> bool {
         use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
 
+        let mut applies = false;
         if let Some(changes) = edit.changes.as_mut() {
             for (uri, edits) in changes.iter_mut() {
-                self.translate_template_edits(uri.as_str(), edits);
+                applies |= self.translate_template_edits(uri.as_str(), edits);
             }
         }
         let Some(document_changes) = edit.document_changes.as_mut() else {
-            return;
+            return applies;
         };
         match document_changes {
             DocumentChanges::Edits(edits) => {
                 for document in edits {
-                    self.translate_document_edit(document);
+                    applies |= self.translate_document_edit(document);
                 }
             }
             DocumentChanges::Operations(operations) => {
                 for operation in operations {
-                    if let DocumentChangeOperation::Edit(document) = operation {
-                        self.translate_document_edit(document);
+                    match operation {
+                        DocumentChangeOperation::Edit(document) => {
+                            applies |= self.translate_document_edit(document);
+                        }
+                        DocumentChangeOperation::Op(_) => applies = true,
                     }
                 }
             }
         }
+        applies
     }
 
     /// [`Self::translate_template_edits`] for the edits of one
     /// `TextDocumentEdit`, whichever of the two edit shapes each carries.
-    fn translate_document_edit(&self, document: &mut tower_lsp::lsp_types::TextDocumentEdit) {
+    fn translate_document_edit(
+        &self,
+        document: &mut tower_lsp::lsp_types::TextDocumentEdit,
+    ) -> bool {
         use tower_lsp::lsp_types::OneOf;
 
         let uri = document.text_document.uri.as_str();
         if !self.is_blade_file(uri) {
-            return;
+            return !document.edits.is_empty();
         }
         document.edits.retain_mut(|edit| {
             let range = match edit {
@@ -249,5 +305,6 @@ impl Backend {
                 None => false,
             }
         });
+        !document.edits.is_empty()
     }
 }

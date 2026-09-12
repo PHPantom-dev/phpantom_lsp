@@ -117,14 +117,17 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
         }
 
         let top_level_depth = namespace_brace_depth.map_or(0, |d| d + 1);
+        // A CRLF file's line still carries its `\r`; the statement ends
+        // before it.
+        let line_end = offset + line.trim_end_matches('\r').len();
         if let Some(start) = pending_use_start {
             if trimmed.contains(';') {
-                ranges.push((start, offset + line.len()));
+                ranges.push((start, line_end));
                 pending_use_start = None;
             }
         } else if line_brace_depth == top_level_depth && trimmed.starts_with("use ") {
             if trimmed.contains(';') {
-                ranges.push((offset, offset + line.len()));
+                ranges.push((offset, line_end));
             } else {
                 pending_use_start = Some(offset);
             }
@@ -905,5 +908,41 @@ pub(crate) fn make_diagnostic(
         related_information: None,
         tags: None,
         data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_use_line_ranges;
+
+    #[test]
+    fn use_line_ranges_lf() {
+        let content = "<?php\nuse App\\Foo;\nnew Foo();\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(&content[start..end], "use App\\Foo;");
+    }
+
+    /// The range lands exactly on the statement even though every line
+    /// carries a two-byte `\r\n` terminator, and it stops before the `\r`.
+    #[test]
+    fn use_line_ranges_crlf() {
+        let content = "<?php\r\nuse App\\Foo;\r\nnew Foo();\r\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(&content[start..end], "use App\\Foo;");
+    }
+
+    /// A `use` inside a class body is a trait import, not a namespace
+    /// import, and one under a braced namespace still counts.
+    #[test]
+    fn use_line_ranges_follow_brace_depth() {
+        let content = "<?php\nnamespace App {\n    use Foo\\Bar;\n    class A {\n        use SomeTrait;\n    }\n}\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(&content[start..end], "    use Foo\\Bar;");
     }
 }

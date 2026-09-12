@@ -153,8 +153,8 @@ impl Backend {
     /// preprocessor's prologue: that code stands behind no template text,
     /// so there is nowhere in the file to list it.
     fn translate_symbol(&self, uri: &str, symbol: DocumentSymbol) -> Option<DocumentSymbol> {
-        let range = self.translate_range(uri, symbol.range)?;
-        let selection_range = self.translate_range(uri, symbol.selection_range)?;
+        let range = self.try_translate_blade_range(uri, symbol.range)?;
+        let selection_range = self.try_translate_blade_range(uri, symbol.selection_range)?;
         let children = symbol.children.map(|children| {
             children
                 .into_iter()
@@ -167,13 +167,6 @@ impl Backend {
             children,
             ..symbol
         })
-    }
-
-    fn translate_range(&self, uri: &str, range: Range) -> Option<Range> {
-        Some(Range::new(
-            self.try_translate_php_to_blade(uri, range.start)?,
-            self.try_translate_php_to_blade(uri, range.end)?,
-        ))
     }
 }
 

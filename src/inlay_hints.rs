@@ -67,17 +67,9 @@ impl Backend {
         let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
         let ctx = self.file_context(uri);
 
-        // If this is a Blade file, the `range` is in Blade coordinates.
-        // We must translate it to virtual PHP coordinates before comparing
-        // against offsets in the symbol map.
-        let virtual_range = if self.is_blade_file(uri) {
-            Range {
-                start: self.translate_blade_to_php(uri, range.start),
-                end: self.translate_blade_to_php(uri, range.end),
-            }
-        } else {
-            range
-        };
+        // A template's request range arrives in Blade coordinates; the
+        // symbol map's offsets are in the virtual PHP.
+        let virtual_range = self.translate_blade_range_to_php(uri, range);
 
         let range_start = position_to_offset(content, virtual_range.start);
         let range_end = position_to_offset(content, virtual_range.end);

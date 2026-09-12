@@ -1276,8 +1276,7 @@ impl LanguageServer for Backend {
                 if backend.is_blade_file(&uri_clone)
                     && let Some(range) = &mut hover.range
                 {
-                    range.start = backend.translate_php_to_blade(&uri_clone, range.start);
-                    range.end = backend.translate_php_to_blade(&uri_clone, range.end);
+                    *range = backend.translate_blade_range(&uri_clone, *range);
                 }
                 Some(hover)
             })
@@ -1768,13 +1767,9 @@ impl LanguageServer for Backend {
                         items
                             .into_iter()
                             .map(|mut item| {
-                                item.range.start =
-                                    backend.translate_php_to_blade(&u, item.range.start);
-                                item.range.end = backend.translate_php_to_blade(&u, item.range.end);
-                                item.selection_range.start =
-                                    backend.translate_php_to_blade(&u, item.selection_range.start);
-                                item.selection_range.end =
-                                    backend.translate_php_to_blade(&u, item.selection_range.end);
+                                item.range = backend.translate_blade_range(&u, item.range);
+                                item.selection_range =
+                                    backend.translate_blade_range(&u, item.selection_range);
                                 item
                             })
                             .collect()

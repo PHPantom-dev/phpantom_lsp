@@ -17,6 +17,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
+use crate::diagnostics::helpers::{compute_use_line_ranges, is_offset_in_ranges};
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
 
 use crate::class_lookup::is_class_keyword;
@@ -816,54 +817,6 @@ impl Backend {
         unresolved.sort_by(|a, b| a.0.cmp(&b.0));
         unresolved
     }
-}
-
-/// Compute byte ranges `(start, end)` of top-level `use` statement lines.
-///
-/// This is used to skip `ClassReference` spans that fall on import
-/// declaration lines (they are the imports themselves, not usages).
-fn compute_use_line_ranges(content: &str) -> Vec<(u32, u32)> {
-    let mut ranges = Vec::new();
-    let mut offset: u32 = 0;
-    let mut brace_depth: u32 = 0;
-
-    // Iterate with `split_inclusive` so the terminator stays attached to
-    // each chunk. Advancing `offset` by the full chunk length keeps the
-    // byte ranges correct on CRLF files (where `str::lines()` would strip
-    // the `\r` and drift the offset by one byte per line).
-    for chunk in content.split_inclusive('\n') {
-        let line = chunk.trim_end_matches('\n').trim_end_matches('\r');
-        let trimmed = line.trim();
-        let line_start = offset;
-        let line_end = offset + line.len() as u32;
-
-        let depth_at_start = brace_depth;
-        for ch in trimmed.chars() {
-            match ch {
-                '{' => brace_depth += 1,
-                '}' => brace_depth = brace_depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-
-        if depth_at_start == 0
-            && (trimmed.starts_with("use ") || trimmed.starts_with("use\t"))
-            && !trimmed.starts_with("use (")
-            && !trimmed.starts_with("use(")
-        {
-            ranges.push((line_start, line_end));
-        }
-
-        offset += chunk.len() as u32;
-    }
-
-    ranges
-}
-
-fn is_offset_in_ranges(offset: u32, ranges: &[(u32, u32)]) -> bool {
-    ranges
-        .iter()
-        .any(|(start, end)| offset >= *start && offset < *end)
 }
 
 #[cfg(test)]
