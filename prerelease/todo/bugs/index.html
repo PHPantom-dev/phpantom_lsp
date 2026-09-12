@@ -836,6 +836,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b52-subjecttextas_str-slices-a-span-against-the-wrong-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B52. <code>SubjectText::as_str</code> slices a span against the wrong content
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -934,23 +951,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b51-multi-line-group-imports-are-never-flagged-as-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B51. Multi-line group imports are never flagged as unused
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1430,6 +1430,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b52-subjecttextas_str-slices-a-span-against-the-wrong-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B52. <code>SubjectText::as_str</code> slices a span against the wrong content
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1529,23 +1546,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b51-multi-line-group-imports-are-never-flagged-as-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B51. Multi-line group imports are never flagged as unused
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1586,7 +1586,27 @@ task, or sweeps of the sample projects under <code>projects/</code>. Entries are
 grouped by the mechanism that has to change, not by the symptom that
 surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b52-subjecttextas_str-slices-a-span-against-the-wrong-content">B52. <code>SubjectText::as_str</code> slices a span against the wrong content<a class="headerlink" href="#b52-subjecttextas_str-slices-a-span-against-the-wrong-content" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium</strong></p>
+<p><code>SubjectText::as_str</code> (<code>src/symbol_map/mod.rs:217</code>) indexes <code>content</code>
+with the byte span recorded when the symbol map was built. When the two
+disagree the slice panics and takes the worker thread with it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>thread &#39;fix-worker&#39; panicked at src/symbol_map/mod.rs:217:51:
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>end byte index 8602 is out of bounds for string of length 8600
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>start byte index 1058 is out of bounds for string of length 781
+</code></pre></div>
+<p>Reproduce with <code>phpantom_lsp fix --dry-run --rule unused_import
+--project-root &lt;a large Laravel project&gt;</code>: several workers die and the
+run finishes reporting "No fixable issues found" for the files they
+were holding, so a crash is indistinguishable from a clean result.</p>
+<p>The spans and the string come from different revisions of the same
+file. The symbol map is cached per URI while the content is passed in
+by the caller, and at least one path hands in content the cached map
+was not built from (a stale map that survived an <code>update_ast</code>, or a map
+built from the Blade virtual PHP being sliced against the raw template).
+The fix is to make the pairing explicit rather than to bounds-check the
+slice: a symbol map should carry the content revision it was extracted
+from so a consumer cannot pair it with a different one.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
@@ -1604,23 +1624,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b51-multi-line-group-imports-are-never-flagged-as-unused">B51. Multi-line group imports are never flagged as unused<a class="headerlink" href="#b51-multi-line-group-imports-are-never-flagged-as-unused" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>find_use_statement_range</code> (<code>src/diagnostics/unused_imports.rs:415</code>)
-only recognizes a <code>use</code> statement when the same source line contains
-both <code>use</code> and <code>;</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">use App\Models\{</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    User,</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    Post,</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">};</span>
-</code></pre></div>
-<p>The opening line (<code>use App\Models\{</code>) has no <code>;</code>, so this check never
-matches and no unused-import diagnostic is ever produced for any member
-of a multi-line group, even when every member is unused. The same
-line-bound assumption also appears in <code>is_group_import_match</code> and
-<code>find_group_member_range</code> in the same file, which likewise expect the
-whole group to fit on one line. Single-line group imports
-(<code>use App\Models\{User, Post};</code>) are unaffected.</p>
+<p>No outstanding items.</p>
 
 
 
