@@ -1811,23 +1811,7 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>Found by a sweep of every source file touched since 0.10.0 (the whole
-0.11.0 change set, not only BL1). Filed from a session that had already
-done refactoring work, so the formal Step 3 report still has to be
-produced in a fresh session; these are the concrete items that sweep is
-expected to confirm.</p>
-<h2 id="r3-move-the-move-clis-end-to-end-tests-out-of-modrs">R3. Move the <code>move</code> CLI's end-to-end tests out of <code>mod.rs</code><a class="headerlink" href="#r3-move-the-move-clis-end-to-end-tests-out-of-modrs" title="Permanent link">&para;</a></h2>
-<p><strong>What to do.</strong> <code>src/move_cli/mod.rs</code> holds 23 async end-to-end tests
-(temp-dir projects driven through the whole move) from line 470 to the
-end of the file, about 750 of its 1,218 lines. Move them to a new
-<code>tests/integration/move_cli.rs</code> driving the public <code>move_cli::run</code> (no
-<code>move</code> integration tests exist yet), and move the remaining logic out of
-<code>mod.rs</code> into <code>src/move_cli/run.rs</code> so the <code>mod.rs</code> is the declaration
-layer the other CLI modules have.</p>
-<p><strong>Files.</strong> <code>src/move_cli/mod.rs</code>, <code>src/move_cli/run.rs</code> (new),
-<code>tests/integration/move_cli.rs</code> (new), <code>tests/integration/main.rs</code>.</p>
-<p><strong>Why.</strong> Integration-level tests in <code>src/</code>, in a <code>mod.rs</code>, for a module
-that shipped this sprint.</p>
+<p>No outstanding items.</p>
 
 
 
