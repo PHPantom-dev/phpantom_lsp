@@ -214,24 +214,4 @@ Each item must include:
 
 # Outstanding items
 
-Found by a sweep of every source file touched since 0.10.0 (the whole
-0.11.0 change set, not only BL1). Filed from a session that had already
-done refactoring work, so the formal Step 3 report still has to be
-produced in a fresh session; these are the concrete items that sweep is
-expected to confirm.
-
-## R3. Move the `move` CLI's end-to-end tests out of `mod.rs`
-
-**What to do.** `src/move_cli/mod.rs` holds 23 async end-to-end tests
-(temp-dir projects driven through the whole move) from line 470 to the
-end of the file, about 750 of its 1,218 lines. Move them to a new
-`tests/integration/move_cli.rs` driving the public `move_cli::run` (no
-`move` integration tests exist yet), and move the remaining logic out of
-`mod.rs` into `src/move_cli/run.rs` so the `mod.rs` is the declaration
-layer the other CLI modules have.
-
-**Files.** `src/move_cli/mod.rs`, `src/move_cli/run.rs` (new),
-`tests/integration/move_cli.rs` (new), `tests/integration/main.rs`.
-
-**Why.** Integration-level tests in `src/`, in a `mod.rs`, for a module
-that shipped this sprint.
+No outstanding items.
