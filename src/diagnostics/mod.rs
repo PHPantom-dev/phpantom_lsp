@@ -1139,10 +1139,6 @@ impl Backend {
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
 
-/// How long to wait for a client to acknowledge a diagnostic refresh
-/// before giving up on it.
-const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-
 impl Backend {
     /// Deliver diagnostics for a single file.
     ///
@@ -1444,20 +1440,34 @@ impl Backend {
     /// directly.  LSP has no per-document refresh, so this invalidates
     /// the client's whole workspace result set: only call it when
     /// something actually changed (see [`Self::assemble_and_push`]).
+    ///
+    /// The refresh is signalled to a pump task rather than sent here.
+    /// `workspace/diagnostic/refresh` is a server-to-client *request*,
+    /// and tower-lsp panics the serve loop — killing the whole server —
+    /// if the client's response arrives after the future awaiting it was
+    /// dropped, so it must never be raced against a timeout or awaited
+    /// from anything cancellable.  The pump owns each request from send
+    /// to response; callers return immediately, a busy client parks
+    /// nothing but the pump itself, and signals landing while a refresh
+    /// is in flight coalesce into a single follow-up.
     pub(crate) async fn request_diagnostic_refresh(&self) {
         if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
             return;
         }
-        if let Some(client) = &self.client {
-            // A server-to-client request, so a client that is busy (or
-            // that never answers at all) would otherwise park this task
-            // indefinitely, and the background workspace pass awaits
-            // this as it streams results.  A refresh is best-effort
-            // (the editor re-pulls on its own schedule too), so timing
-            // out costs nothing.
-            let _ =
-                tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh()).await;
+        let Some(client) = &self.client else {
+            return;
+        };
+        if !self.diag.refresh_pump_started.swap(true, Ordering::AcqRel) {
+            let client = client.clone();
+            let notify = std::sync::Arc::clone(&self.diag.refresh_notify);
+            tokio::spawn(async move {
+                loop {
+                    notify.notified().await;
+                    let _ = client.workspace_diagnostic_refresh().await;
+                }
+            });
         }
+        self.diag.refresh_notify.notify_one();
     }
 
     /// Assemble a URI's diagnostics and ask the editor to re-pull when
@@ -1788,24 +1798,11 @@ impl Backend {
         // Always push empty diagnostics to clear any Phase 1 snapshot.
         client.publish_diagnostics(uri, Vec::new(), None).await;
 
-        if self.supports_pull_diagnostics.load(Ordering::Acquire) {
-            // Tell the editor to re-pull diagnostics.  We spawn this
-            // as a detached task instead of awaiting it because
-            // workspace_diagnostic_refresh is a server-to-client
-            // *request* that blocks until the client responds.  When
-            // the editor closes many files in a burst, each didClose
-            // handler would await a response while the client is busy
-            // sending more messages, deadlocking the tower-lsp
-            // service loop.  The detached task still gets the same cap
-            // as `request_diagnostic_refresh`, so a client that never
-            // answers leaves no task parked for the session.
-            let client = client.clone();
-            tokio::spawn(async move {
-                let _ =
-                    tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh())
-                        .await;
-            });
-        }
+        // Tell the editor to re-pull diagnostics.  Signalling the pump
+        // returns immediately, so a burst of didClose notifications
+        // cannot deadlock the service loop the way awaiting each
+        // response here would.
+        self.request_diagnostic_refresh().await;
 
         // Recompute the file's workspace diagnostics from disk so the
         // closed file's entry reflects the saved state (the startup

@@ -194,6 +194,7 @@ mod laravel_trans_loader;
 mod laravel_trans_types;
 mod laravel_validated_shape;
 mod lsp_concurrency;
+mod lsp_refresh_resilience;
 mod narrowing_condition_proofs;
 mod narrowing_flow_tracking;
 mod narrowing_nested_short_circuit;
