@@ -1816,32 +1816,6 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 done refactoring work, so the formal Step 3 report still has to be
 produced in a fresh session; these are the concrete items that sweep is
 expected to confirm.</p>
-<h2 id="r2-split-cond_narrowingrs-along-its-clusters">R2. Split <code>cond_narrowing.rs</code> along its clusters<a class="headerlink" href="#r2-split-cond_narrowingrs-along-its-clusters" title="Permanent link">&para;</a></h2>
-<p><strong>What to do.</strong>
-<code>src/type_engine/variable/forward_walk/cond_narrowing.rs</code> is 6,105 lines
-(4,386 at 0.10.0), 134 functions, and three section comments, the last of
-which ("Narrowing helpers") covers 5,600 lines. Turn it into a
-<code>cond_narrowing/</code> directory, moving functions without changing them:
-<code>instanceof.rs</code> (the <code>commit_chain_instanceof</code>,
-<code>commit_instanceof_narrowing</code>, <code>dynamic_instanceof_targets</code> group),
-<code>assertions.rs</code> (<code>apply_assertion_to_key</code>, <code>qualify_assertion_type</code>,
-<code>array_key_exists_target</code>, the <code>mark_*_key_present</code> pair),
-<code>property_checks.rs</code> (<code>extract_property_check</code>,
-<code>narrow_union_by_property_check</code>, <code>property_can_equal</code> and their
-helpers), <code>null_identity.rs</code> (<code>apply_identity_comparison_null_narrowing</code>,
-<code>collect_identity_comparisons</code>, <code>apply_non_null_implication_narrowing</code>,
-<code>collect_proven_non_null_exprs</code>, <code>strip_null_by_constant_identity</code>),
-<code>emptiness.rs</code> (<code>extract_count_emptiness_check</code>,
-<code>apply_literal_identity_narrowing</code>, <code>refine_non_empty_type</code>,
-<code>refine_empty_type</code>), and <code>key_types.rs</code> (<code>resolve_synthetic_key_type</code>,
-<code>resolve_static_property_key_type</code>, <code>resolve_array_key_type</code>,
-<code>resolve_member_key_type</code>). The <code>mod.rs</code> keeps the entry points and the
-completion-path ternary section. The inline unit tests at the bottom
-follow the function they test.</p>
-<p><strong>Files.</strong> <code>src/type_engine/variable/forward_walk/cond_narrowing.rs</code>
-(becomes a directory).</p>
-<p><strong>Why.</strong> It grew by 1,700 lines this sprint and is the shared walker
-every consumer depends on. Nothing else in the change set comes close.</p>
 <h2 id="r3-move-the-move-clis-end-to-end-tests-out-of-modrs">R3. Move the <code>move</code> CLI's end-to-end tests out of <code>mod.rs</code><a class="headerlink" href="#r3-move-the-move-clis-end-to-end-tests-out-of-modrs" title="Permanent link">&para;</a></h2>
 <p><strong>What to do.</strong> <code>src/move_cli/mod.rs</code> holds 23 async end-to-end tests
 (temp-dir projects driven through the whole move) from line 470 to the
