@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789182767287,
+  "lastUpdate": 1789183870376,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -27811,6 +27811,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "264f0f7000d6b485104a068d52ca99a607456c80",
+          "message": "Fix editor answering slowly no longer brings the whole server down",
+          "timestamp": "2026-09-12T05:13:53+02:00",
+          "tree_id": "f48ca8a349b277bed2f3a23f77ca523df20a9cd5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/264f0f7000d6b485104a068d52ca99a607456c80"
+        },
+        "date": 1789183862664,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.8,
             "unit": "MiB"
           }
         ]
