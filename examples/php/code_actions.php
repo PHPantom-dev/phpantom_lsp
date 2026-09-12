@@ -73,6 +73,19 @@ class RemoveUnusedImportDemo
 }
 
 
+// ── Code Action: Remove Unused Member Of A Wrapped Group Import ─────────────
+// A group import written across several lines is checked member by member,
+// the same as a single-line `use Foo\{Bar, Baz};` is. Neither engine below is
+// used, so both names appear dimmed.
+// Ctrl+. on either → "Remove unused import" takes that member's line with it;
+// "Remove all unused imports" removes the whole statement instead.
+
+use Random\Engine\{
+    Mt19937,
+    Secure,
+};
+
+
 // ── Code Action: Sort Use Statements ────────────────────────────────────────
 // The two imports below are out of alphabetical order. Place cursor on either
 // one and press Ctrl+. → "Sort use statements" reorders them so `ArrayObject`

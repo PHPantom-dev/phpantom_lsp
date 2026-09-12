@@ -519,6 +519,24 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
         return None;
     }
 
+    // In a wrapped group the member usually sits alone on its line, so
+    // removing just the member text would leave an empty line inside the
+    // braces.  Delete the whole line instead.  A trailing comma left
+    // before the closing brace is legal PHP.
+    if line[..removal_start].trim().is_empty()
+        && line[removal_end..].trim().is_empty()
+        && !line.contains('{')
+        && !line.contains('}')
+    {
+        return Some(TextEdit {
+            range: Range {
+                start: Position::new(range.start.line, 0),
+                end: Position::new(range.start.line + 1, 0),
+            },
+            new_text: String::new(),
+        });
+    }
+
     let start_pos = Position::new(
         range.start.line,
         crate::text_position::byte_offset_to_utf16_col(line, removal_start),

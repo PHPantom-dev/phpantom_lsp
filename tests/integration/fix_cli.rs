@@ -539,3 +539,138 @@ class Foo {
         "Removing the last import should not leave a blank line"
     );
 }
+
+// ── Multi-line group imports ────────────────────────────────────────────────
+
+#[test]
+fn removes_unused_member_from_multiline_group_import() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use App\Models\{
+    User,
+    Post,
+};
+
+class Foo {
+    public function bar(): User {
+        return new User();
+    }
+}
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///test.php", content);
+
+    assert!(
+        result.contains("User"),
+        "Used member (User) should be preserved. Got:\n{result}"
+    );
+    assert!(
+        !result.contains("Post"),
+        "Unused member (Post) should be removed from group. Got:\n{result}"
+    );
+    assert!(
+        !result.contains("\n\n    \n") && !result.contains("{\n\n"),
+        "Removing a member should not leave a blank line in the group. Got:\n{result}"
+    );
+}
+
+#[test]
+fn removes_entire_multiline_group_import_when_all_unused() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use App\Models\{
+    User,
+    Post,
+};
+
+class Foo {}
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///test.php", content);
+
+    assert!(
+        !result.contains("use App\\Models"),
+        "Entire group import should be removed. Got:\n{result}"
+    );
+    assert!(
+        result.contains("class Foo {}"),
+        "Class declaration should remain. Got:\n{result}"
+    );
+}
+
+#[test]
+fn removes_sole_unused_member_of_multiline_group_import() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use App\Models\{
+    Post,
+};
+
+class Foo {}
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///test.php", content);
+
+    assert!(
+        !result.contains("use App\\Models"),
+        "A one-member group should be removed outright. Got:\n{result}"
+    );
+}
+
+#[test]
+fn preserves_used_members_of_multiline_group_import() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use App\Models\{
+    User,
+    Post,
+};
+
+class Foo {
+    public function bar(User $u, Post $p): void {}
+}
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///test.php", content);
+    assert_eq!(result, content);
+}
+
+#[test]
+fn removes_unused_aliased_member_from_group_import() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use App\Models\{User, Post as BlogPost};
+
+class Foo {
+    public function bar(): User {
+        return new User();
+    }
+}
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///test.php", content);
+
+    assert!(
+        !result.contains("BlogPost"),
+        "Unused aliased member should be removed. Got:\n{result}"
+    );
+    assert!(
+        result.contains("use App\\Models\\{User}"),
+        "Used member should be preserved. Got:\n{result}"
+    );
+}
