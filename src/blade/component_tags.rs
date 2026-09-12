@@ -495,12 +495,14 @@ pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
 /// `kind` named `name`.
 ///
 /// Every tag closes under its own name, with one exception Blade's own
-/// compiler carves out: a named slot (`<x-slot:title>`, or the legacy
-/// `<x-slot name="title">`) still closes with the bare `</x-slot>`, never
-/// repeating the slot's own name in the closing tag.
+/// compiler carves out: any `</x-slot…>` ends the open slot, whatever
+/// name either side carries, so `<x-slot:title>` closes with the bare
+/// `</x-slot>`, with `</x-slot:title>`, and even with a closer naming a
+/// different slot (the compiler's `@endslot` rewrite never reads the
+/// closing tag's name).
 fn closer_matches(kind: TagKind, name: &str, closer_name: &str) -> bool {
     if kind == TagKind::Blade && is_slot_tag_name(name) {
-        closer_name == "slot"
+        is_slot_tag_name(closer_name)
     } else {
         name == closer_name
     }
@@ -1555,5 +1557,18 @@ mod tests {
     #[test]
     fn a_properly_closed_named_slot_reports_nothing() {
         assert!(tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot>\n</x-card>\n").is_empty());
+    }
+
+    /// A closing tag that does repeat the slot's name is just as valid:
+    /// Blade's compiler ends the open slot on any `</x-slot…>`, whatever
+    /// name it carries.
+    #[test]
+    fn a_named_slot_closed_under_its_own_name_reports_nothing() {
+        assert!(
+            tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot:title>\n</x-card>\n").is_empty()
+        );
+        assert!(
+            tag_report("<x-card>\n<x-slot:title>\nHi\n</x-slot:footer>\n</x-card>\n").is_empty()
+        );
     }
 }
