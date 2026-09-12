@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789177626644,
+  "lastUpdate": 1789180182315,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -27743,6 +27743,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "95f817d0bfbfc7f10048fa5b257f0252f1afb3ea",
+          "message": "Removing every member of a group import no longer leaves broken syntax\nbehind",
+          "timestamp": "2026-09-12T04:14:39+02:00",
+          "tree_id": "655f042ac65ccd54bb97359c3d233d6d39556729",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/95f817d0bfbfc7f10048fa5b257f0252f1afb3ea"
+        },
+        "date": 1789180174883,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.6,
             "unit": "MiB"
           }
         ]
