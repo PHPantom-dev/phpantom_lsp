@@ -904,6 +904,13 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
     let mut closure_scope = ScopeState::new();
 
     seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
+    seed_closure_this(
+        &mut closure_scope,
+        Some(scope),
+        closure.span().start.offset,
+        closure.body.span().start.offset,
+        ctx,
+    );
 
     seed_closure_params(
         &mut closure_scope,

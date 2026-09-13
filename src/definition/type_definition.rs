@@ -123,10 +123,13 @@ impl Backend {
                     .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
                     .unwrap_or_default(),
                 SelfStaticParentKind::This => {
-                    if let Some(override_cls) =
+                    if let Some(override_classes) =
                         self.resolve_closure_this_override(uri, content, offset)
                     {
-                        vec![PhpType::named(override_cls.fqn())]
+                        override_classes
+                            .into_iter()
+                            .map(|class| PhpType::named(class.fqn()))
+                            .collect()
                     } else {
                         current_class
                             .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])

@@ -2496,8 +2496,32 @@ pub(super) fn resolve_rhs_static_call(
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     // `Cls::{$expr}()` / `Cls::$name()` — see `runtime_named_member_type`.
-    if !matches!(static_call.method, ClassLikeMemberSelector::Identifier(_)) {
+    let ClassLikeMemberSelector::Identifier(ident) = &static_call.method else {
         return super::runtime_named_member_type();
+    };
+
+    if matches!(
+        static_call.class,
+        Expression::Self_(_) | Expression::Static(_)
+    ) {
+        let rctx = ctx.as_resolution_ctx();
+        let owners = crate::type_engine::resolver::resolve_static_owner_classes("self", &rctx);
+        let method_name = bytes_to_str(ident.value);
+        let mut results = Vec::new();
+        for owner in owners {
+            ResolvedType::extend_unique(
+                &mut results,
+                resolve_rhs_static_call_on_owner(
+                    &owner,
+                    method_name,
+                    static_call,
+                    true,
+                    &owner,
+                    ctx,
+                ),
+            );
+        }
+        return results;
     }
 
     let current_class_name: &str = &ctx.current_class.name;
@@ -2689,83 +2713,93 @@ pub(super) fn resolve_rhs_static_call(
                     .map(|c| ClassInfo::clone(c))
             });
         if let Some(ref owner) = owner {
-            let concrete_owner = crate::type_engine::call_resolution::facade_concrete_owner(
+            return resolve_rhs_static_call_on_owner(
                 owner,
                 &method_name,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-                ctx.backend,
-            );
-            let owner = concrete_owner.as_ref().unwrap_or(owner);
-
-            if let Some(result) = try_resolve_config_method_type(
-                &owner.fqn(),
-                &method_name,
-                &static_call.argument_list,
+                static_call,
+                forwards_lsb,
+                ctx.current_class,
                 ctx,
-            ) {
-                return result;
-            }
-
-            if let Some(result) = try_resolve_trans_method_type(
-                &owner.fqn(),
-                &method_name,
-                &static_call.argument_list,
-                ctx,
-            ) {
-                return result;
-            }
-
-            let arg_texts =
-                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
-                    &static_call.argument_list,
-                    ctx.content,
-                );
-            let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-            let rctx = ctx.as_resolution_ctx();
-            let template_subs =
-                Backend::build_method_template_subs(owner, &method_name, &arg_refs, &rctx);
-            let owner_key = owner.fqn();
-            // An explicit `A::` on a non-static method is PHP's pre-8
-            // instance-forwarding form, which keeps `$this` (and with it late
-            // static binding) bound, so only a `static` method written out
-            // fixes the class.
-            let target_is_static = method_is_static(owner, &method_name, ctx);
-            let lsb_class = (forwards_lsb || !target_is_static).then(|| ctx.current_class.fqn());
-            let self_replace =
-                |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
-
-            let mut results = resolve_owner_method_call(
-                owner,
-                &method_name,
-                &static_call.argument_list,
-                ctx,
-                true,
-                &template_subs,
-                &self_replace,
             );
-            // `Model::factory(…)`, `UserFactory::times(3)` and
-            // `UserFactory::new()` open a factory chain, and what they
-            // were opened with is what the `create()` at the far end of
-            // it builds.  `factory($count)` only settles that once its
-            // argument is resolved, which is why the type is fetched
-            // lazily rather than for every static call in the file.
-            let first_arg_type = || {
-                let arg = static_call.argument_list.arguments.first()?;
-                let resolved = resolve_rhs_expression(arg.value(), ctx);
-                (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
-            };
-            crate::virtual_members::laravel::tag_static_factory_call(
-                &mut results,
-                &method_name,
-                arg_refs.first().copied(),
-                &first_arg_type,
-                &rctx,
-            );
-            return results;
         }
     }
     vec![]
+}
+
+/// Apply static-call return inference to one resolved owner.
+fn resolve_rhs_static_call_on_owner(
+    owner: &ClassInfo,
+    method_name: &str,
+    static_call: &StaticMethodCall<'_>,
+    forwards_lsb: bool,
+    calling_class: &ClassInfo,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let concrete_owner = crate::type_engine::call_resolution::facade_concrete_owner(
+        owner,
+        method_name,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+        ctx.backend,
+    );
+    let owner = concrete_owner.as_ref().unwrap_or(owner);
+
+    if let Some(result) =
+        try_resolve_config_method_type(&owner.fqn(), method_name, &static_call.argument_list, ctx)
+    {
+        return result;
+    }
+
+    if let Some(result) =
+        try_resolve_trans_method_type(&owner.fqn(), method_name, &static_call.argument_list, ctx)
+    {
+        return result;
+    }
+
+    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        &static_call.argument_list,
+        ctx.content,
+    );
+    let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
+    let rctx = ctx.as_resolution_ctx();
+    let template_subs = Backend::build_method_template_subs(owner, method_name, &arg_refs, &rctx);
+    let owner_key = owner.fqn();
+    // An explicit `A::` on a non-static method is PHP's pre-8
+    // instance-forwarding form, which keeps `$this` (and with it late
+    // static binding) bound, so only a `static` method written out
+    // fixes the class.
+    let target_is_static = method_is_static(owner, method_name, ctx);
+    let lsb_class = (forwards_lsb || !target_is_static).then(|| calling_class.fqn());
+    let self_replace = |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
+
+    let mut results = resolve_owner_method_call(
+        owner,
+        method_name,
+        &static_call.argument_list,
+        ctx,
+        true,
+        &template_subs,
+        &self_replace,
+    );
+    // `Model::factory(…)`, `UserFactory::times(3)` and
+    // `UserFactory::new()` open a factory chain, and what they
+    // were opened with is what the `create()` at the far end of
+    // it builds.  `factory($count)` only settles that once its
+    // argument is resolved, which is why the type is fetched
+    // lazily rather than for every static call in the file.
+    let first_arg_type = || {
+        let arg = static_call.argument_list.arguments.first()?;
+        let resolved = resolve_rhs_expression(arg.value(), ctx);
+        (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+    };
+    crate::virtual_members::laravel::tag_static_factory_call(
+        &mut results,
+        method_name,
+        arg_refs.first().copied(),
+        &first_arg_type,
+        &rctx,
+    );
+    results
 }
 
 /// The array shape a Laravel `validated()` / `validate()` /

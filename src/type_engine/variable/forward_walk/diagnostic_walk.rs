@@ -159,6 +159,13 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // `resolve_variable_types` and a captured path keeps whatever
             // the code above the closure proved about it.
             seed_closure_captures(&mut closure_scope, outer_scope, closure.use_clause.as_ref());
+            seed_closure_this(
+                &mut closure_scope,
+                Some(outer_scope),
+                closure.span().start.offset,
+                closure.body.span().start.offset,
+                ctx,
+            );
 
             // Seed with parameter types, using callable inference when
             // available.  Filter out any inferred params whose base
@@ -199,6 +206,13 @@ pub(crate) fn walk_closures_in_expr<'b>(
         Expression::ArrowFunction(arrow) => {
             // Arrow functions inherit the enclosing scope.
             let mut arrow_scope = outer_scope.clone();
+            seed_closure_this(
+                &mut arrow_scope,
+                Some(outer_scope),
+                arrow.span().start.offset,
+                arrow.arrow.start.offset,
+                ctx,
+            );
 
             // Seed with parameter types, using callable inference when
             // available.

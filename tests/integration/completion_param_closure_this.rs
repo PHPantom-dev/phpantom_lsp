@@ -1028,3 +1028,343 @@ fn test_extract_param_closure_this_coexists_with_param() {
         (PhpType::parse("$this"), "$callback".to_string())
     );
 }
+
+#[tokio::test]
+async fn param_closure_this_union_members_and_chains() {
+    for call in ["bindContext", "(new Binder())->bind", "Binder::bind"] {
+        for body in [
+            "function () { $this->MARK; }",
+            "fn() => $this->MARK",
+            "function () { $this->next()->MARK; }",
+        ] {
+            let backend = create_test_backend();
+            let uri = Url::parse("file:///test/closure_union.php").unwrap();
+            let src = format!(
+                r#"<?php
+trait ContextTrait {{ public function fromTrait(): void {{}} }}
+class BaseContext {{ public function fromBase(): void {{}} }}
+class FirstContext extends BaseContext {{
+    use ContextTrait;
+    public string $firstProperty;
+    public function firstOnly(): void {{}}
+    public function next(): self {{ return $this; }}
+}}
+class SecondContext {{
+    public string $secondProperty;
+    public function secondOnly(): void {{}}
+    public function next(): self {{ return $this; }}
+}}
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {{}}
+class Binder {{
+    /** @param-closure-this FirstContext|SecondContext $callback */
+    public static function bind(\Closure $callback): void {{}}
+}}
+class Host {{
+    public function lexicalOnly(): void {{}}
+    public function run(): void {{ {call}({body}); }}
+}}
+"#
+            );
+            let position = marker_position(&src);
+            let src = src.replace("MARK", "");
+            let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+            let names = method_names(&items);
+            assert!(
+                !names.contains(&"lexicalOnly"),
+                "lexical binding leaked: {names:?}"
+            );
+            for expected in ["firstOnly", "secondOnly", "fromBase", "fromTrait"] {
+                assert!(
+                    names.contains(&expected),
+                    "{call}, {body}: missing {expected}: {names:?}"
+                );
+            }
+            let properties = property_names(&items);
+            for expected in ["firstProperty", "secondProperty"] {
+                assert!(
+                    properties.contains(&expected),
+                    "{call}, {body}: missing {expected}: {properties:?}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn param_closure_this_union_narrowing_and_nested_override() {
+    for (body, expected, absent) in [
+        (
+            "assert($this instanceof FirstContext); $this->MARK;",
+            "firstOnly",
+            "secondOnly",
+        ),
+        (
+            "bindInner(function () { $this->MARK; });",
+            "innerOnly",
+            "firstOnly",
+        ),
+    ] {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///test/closure_union_scope.php").unwrap();
+        let src = format!(
+            r#"<?php
+class FirstContext {{ public function firstOnly(): void {{}} }}
+class SecondContext {{ public function secondOnly(): void {{}} }}
+class InnerContext {{ public function innerOnly(): void {{}} }}
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {{}}
+/** @param-closure-this InnerContext $callback */
+function bindInner(\Closure $callback): void {{}}
+bindContext(function () {{ {body} }});
+"#
+        );
+        let position = marker_position(&src);
+        let src = src.replace("MARK", "");
+        let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+        let names = method_names(&items);
+        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        assert!(!names.contains(&absent), "unexpected {absent}: {names:?}");
+    }
+}
+
+#[tokio::test]
+async fn param_closure_this_union_uses_declaring_imports() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        &[
+            (
+                "src/Support/Binder.php",
+                r#"<?php
+namespace App\Support;
+use App\One\Context as First;
+use App\Two\Context as Second;
+class Binder {
+    /** @param-closure-this First|Second $callback */
+    public function bind(\Closure $callback): void {}
+}
+"#,
+            ),
+            (
+                "src/One/Context.php",
+                "<?php\nnamespace App\\One;\nclass Context { public function firstOnly(): void {} }",
+            ),
+            (
+                "src/Two/Context.php",
+                "<?php\nnamespace App\\Two;\nclass Context { public function secondOnly(): void {} }",
+            ),
+        ],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let src =
+        "<?php\nnamespace App;\n(new \\App\\Support\\Binder())->bind(function () { $this->\n});\n";
+    let items = complete_at(
+        &backend,
+        &uri,
+        src,
+        2,
+        src.lines().nth(2).unwrap().len() as u32,
+    )
+    .await;
+    let names = method_names(&items);
+    assert!(names.contains(&"firstOnly"), "{names:?}");
+    assert!(names.contains(&"secondOnly"), "{names:?}");
+}
+
+#[tokio::test]
+async fn param_closure_this_union_relative_and_unresolved_members() {
+    for annotation in [
+        "self|OtherContext",
+        "static|OtherContext",
+        "$this|OtherContext",
+        "Binder|OtherContext|MissingContext",
+    ] {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///test/closure_union_relative.php").unwrap();
+        let src = format!(
+            r#"<?php
+class OtherContext {{ public function otherOnly(): void {{}} }}
+class Binder {{
+    public function ownerOnly(): void {{}}
+    /** @param-closure-this {annotation} $callback */
+    public function bind(\Closure $callback): void {{}}
+}}
+(new Binder())->bind(function () {{ $this->MARK; }});
+"#
+        );
+        let position = marker_position(&src);
+        let src = src.replace("MARK", "");
+        let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+        let names = method_names(&items);
+        assert!(names.contains(&"ownerOnly"), "{annotation}: {names:?}");
+        assert!(names.contains(&"otherOnly"), "{annotation}: {names:?}");
+    }
+}
+
+fn marker_position(src: &str) -> Position {
+    let (line, text) = src
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("MARK"))
+        .unwrap();
+    Position::new(line as u32, text.find("MARK").unwrap() as u32)
+}
+
+#[tokio::test]
+async fn param_closure_this_union_does_not_narrow_to_lexical_member() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_union_lexical_member.php").unwrap();
+    let src = r#"<?php
+class FirstContext {
+    public function firstOnly(): void {}
+    public function run(): void {
+        bindContext(function () { $this->MARK; });
+    }
+}
+class SecondContext { public function secondOnly(): void {} }
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {}
+"#;
+    let position = marker_position(src);
+    let src = src.replace("MARK", "");
+    let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+    let names = method_names(&items);
+    assert!(names.contains(&"firstOnly"), "{names:?}");
+    assert!(names.contains(&"secondOnly"), "{names:?}");
+}
+
+#[tokio::test]
+async fn param_closure_this_union_guards() {
+    for lexical in ["Host", "FirstContext"] {
+        for (body, expected, absent) in [
+            (
+                "assert($this instanceof FirstContext); $this->MARK;",
+                "firstOnly",
+                "secondOnly",
+            ),
+            (
+                "if ($this instanceof FirstContext) {} else { $this->MARK; }",
+                "secondOnly",
+                "firstOnly",
+            ),
+            (
+                "if ($this instanceof FirstContext) { return; } $this->MARK;",
+                "secondOnly",
+                "firstOnly",
+            ),
+            (
+                "if ($this instanceof FirstContext) { $nested = function () { $this->MARK; }; }",
+                "firstOnly",
+                "secondOnly",
+            ),
+        ] {
+            let backend = create_test_backend();
+            let uri = Url::parse("file:///test/closure_union_guards.php").unwrap();
+            let run =
+                format!("public function run(): void {{ bindContext(function () {{ {body} }}); }}");
+            let src = format!(
+                r#"<?php
+class FirstContext {{ public function firstOnly(): void {{}} {} }}
+class SecondContext {{ public function secondOnly(): void {{}} }}
+class Host {{ {} }}
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {{}}
+"#,
+                if lexical == "FirstContext" { &run } else { "" },
+                if lexical == "Host" { &run } else { "" }
+            );
+            let position = marker_position(&src);
+            let src = src.replace("MARK", "");
+            let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+            let names = method_names(&items);
+            assert!(names.contains(&expected), "{lexical}, {body}: {names:?}");
+            assert!(!names.contains(&absent), "{lexical}, {body}: {names:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn param_closure_this_union_static_chains() {
+    for keyword in ["self", "static"] {
+        for expression in [
+            format!("{keyword}::next()->MARK;"),
+            format!("$next = {keyword}::next(); $next->MARK;"),
+        ] {
+            let backend = create_test_backend();
+            let uri = Url::parse("file:///test/closure_union_static.php").unwrap();
+            let src = format!(
+                r#"<?php
+class FirstContext {{
+    public function firstOnly(): void {{}}
+    public static function next(): self {{ return new self(); }}
+}}
+class SecondContext {{
+    public function secondOnly(): void {{}}
+    public static function next(): self {{ return new self(); }}
+}}
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {{}}
+bindContext(function () {{ {expression} }});
+"#
+            );
+            let position = marker_position(&src);
+            let src = src.replace("MARK", "");
+            let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+            let names = method_names(&items);
+            assert!(names.contains(&"firstOnly"), "{expression}: {names:?}");
+            assert!(names.contains(&"secondOnly"), "{expression}: {names:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn param_closure_this_union_nested_receivers() {
+    for receiver in ["$this->", "$this?->", "self::", "static::"] {
+        for annotation in ["FirstContext|SecondContext", "SecondContext|FirstContext"] {
+            let backend = create_test_backend();
+            let uri = Url::parse("file:///test/closure_union_nested_receivers.php").unwrap();
+            let src = format!(
+                r#"<?php
+class FirstContext {{
+    public function firstOnly(): void {{}}
+    /** @param-closure-this FirstContext $callback */
+    public static function bind(\Closure $callback): void {{}}
+}}
+class SecondContext {{
+    public function secondOnly(): void {{}}
+    /** @param-closure-this SecondContext $callback */
+    public static function bind(\Closure $callback): void {{}}
+}}
+/** @param-closure-this {annotation} $callback */
+function bindContext(\Closure $callback): void {{}}
+bindContext(function () {{ {receiver}bind(function () {{ $this->MARK; }}); }});
+"#
+            );
+            let position = marker_position(&src);
+            let src = src.replace("MARK", "");
+            let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+            let names = method_names(&items);
+            assert!(names.contains(&"firstOnly"), "{annotation}: {names:?}");
+            assert!(names.contains(&"secondOnly"), "{annotation}: {names:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn param_closure_this_union_arrow_guard() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_union_arrow.php").unwrap();
+    let src = r#"<?php
+class FirstContext { public function firstOnly(): void {} }
+class SecondContext { public function secondOnly(): void {} }
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {}
+bindContext(fn() => $this instanceof FirstContext ? null : $this->MARK);
+"#;
+    let position = marker_position(src);
+    let src = src.replace("MARK", "");
+    let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+    let names = method_names(&items);
+    assert!(names.contains(&"secondOnly"), "{names:?}");
+    assert!(!names.contains(&"firstOnly"), "{names:?}");
+}

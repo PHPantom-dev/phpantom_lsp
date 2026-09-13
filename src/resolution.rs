@@ -1488,7 +1488,7 @@ impl Backend {
 
     /// Check whether `cursor_offset` is inside a closure whose
     /// enclosing call site declares `@param-closure-this`, and if so
-    /// return the overridden class.
+    /// return the overridden class alternatives.
     ///
     /// This is a convenience wrapper that builds the [`ResolutionCtx`]
     /// and calls [`find_closure_this_override`] so that callers (hover,
@@ -1499,7 +1499,7 @@ impl Backend {
         uri: &str,
         content: &str,
         cursor_offset: u32,
-    ) -> Option<ClassInfo> {
+    ) -> Option<Vec<Arc<ClassInfo>>> {
         use crate::class_lookup::find_class_at_offset;
         use crate::type_engine::resolver::ResolutionCtx;
 
@@ -1510,13 +1510,13 @@ impl Backend {
             let target = self.facade_macro_concrete(&target).unwrap_or(target);
             if let Some(class) = self.find_or_load_class(&target) {
                 let class_loader = self.class_loader(&ctx);
-                return Some(Arc::unwrap_or_clone(
+                return Some(vec![
                     crate::virtual_members::resolve_class_fully_maybe_cached(
                         &class,
                         &class_loader,
                         Some(&self.resolved_class_cache),
                     ),
-                ));
+                ]);
             }
         }
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
