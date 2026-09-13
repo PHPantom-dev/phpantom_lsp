@@ -396,10 +396,9 @@ fn resolve_target_classes_expr_inner(
 
             this_types
         }
-        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_class(ctx)
-            .map(ResolvedType::from_class)
-            .into_iter()
-            .collect(),
+        SubjectExpr::SelfKw | SubjectExpr::StaticKw => {
+            ResolvedType::from_classes(resolve_self_static_classes(ctx))
+        }
 
         // ── `parent::` — resolve to the current class's parent ──
         SubjectExpr::Parent => {
@@ -440,10 +439,7 @@ fn resolve_target_classes_expr_inner(
             // class names, so find_class_by_name / class_loader won't
             // find them.
             let owner_classes: Vec<Arc<ClassInfo>> = if is_self_or_static(class) {
-                resolve_self_static_class(ctx)
-                    .map(Arc::new)
-                    .into_iter()
-                    .collect()
+                resolve_self_static_classes(ctx)
             } else if let Some(parent_name) = resolve_class_keyword(class, current_class) {
                 // parent — resolve via all_classes first, then class_loader
                 if let Some(cls) = find_class_by_name(all_classes, &parent_name) {
@@ -1041,9 +1037,8 @@ fn resolve_call_raw_return_type(
             raw_return_type_with_magic_fallback(&base_classes, method, "__call", ctx)
         }
         SubjectExpr::StaticMethodCall { class, method } => {
-            let owner = resolve_static_owner_class(class, ctx);
-            let owner = owner.as_slice();
-            raw_return_type_with_magic_fallback(owner, method, "__callStatic", ctx)
+            let owners = resolve_static_owner_classes(class, ctx);
+            raw_return_type_with_magic_fallback(&owners, method, "__callStatic", ctx)
         }
         SubjectExpr::FunctionCall(fn_name) => {
             if let Some(fl) = ctx.function_loader
@@ -1784,38 +1779,47 @@ fn resolve_variable_fallback(
 /// runtime binds the closure with the target class as its scope
 /// (`Closure::bind`), so `self::` and `static::` refer to the bound
 /// target rather than the class that lexically encloses the closure.
-fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
-    super::variable::closure_resolution::find_closure_this_override(ctx)
-        .or_else(|| ctx.current_class.cloned())
+fn resolve_self_static_classes(ctx: &ResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
+    super::variable::closure_resolution::find_closure_this_override(ctx).unwrap_or_else(|| {
+        ctx.current_class
+            .map(|class| Arc::new(class.clone()))
+            .into_iter()
+            .collect()
+    })
 }
 
 /// Resolve a static class reference (`self`, `static`, `parent`, or a
-/// class name) to its `ClassInfo`.
+/// class name) to the classes it may name.
 ///
 /// Handles the `self`/`static`/`parent` keywords and falls back to
 /// `class_loader` then `resolve_target_classes` for named classes.
-pub(in crate::type_engine) fn resolve_static_owner_class(
+/// Only `self`/`static` inside a closure bound to a union can yield
+/// more than one class.
+pub(in crate::type_engine) fn resolve_static_owner_classes(
     class: &str,
     rctx: &ResolutionCtx<'_>,
-) -> Option<Arc<ClassInfo>> {
+) -> Vec<Arc<ClassInfo>> {
     if is_self_or_static(class) {
-        resolve_self_static_class(rctx).map(Arc::new)
+        resolve_self_static_classes(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
-        (rctx.class_loader)(&resolved_name)
+        (rctx.class_loader)(&resolved_name).into_iter().collect()
     } else {
         let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
         let fqn =
             crate::util::resolve_source_class_name(class, ns, rctx.all_classes, rctx.class_loader);
-        (rctx.class_loader)(&fqn).or_else(|| {
-            resolved_to_arcs(resolve_target_classes(
-                class,
-                crate::AccessKind::DoubleColon,
-                rctx,
-            ))
+        (rctx.class_loader)(&fqn)
+            .or_else(|| {
+                resolved_to_arcs(resolve_target_classes(
+                    class,
+                    crate::AccessKind::DoubleColon,
+                    rctx,
+                ))
+                .into_iter()
+                .next()
+            })
             .into_iter()
-            .next()
-        })
+            .collect()
     }
 }
 

@@ -91,18 +91,16 @@ use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType
 /// Check whether the cursor is inside a closure that is passed as an
 /// argument to a function/method whose parameter carries a
 /// `@param-closure-this` annotation.  If so, resolve the declared type
-/// and return it as a `ClassInfo`.
+/// and return its class alternatives.
 ///
 /// This is the static-analysis equivalent of `Closure::bindTo()`:
 /// frameworks like Laravel rebind closures so that `$this` inside the
 /// closure body refers to a different object.  The
 /// `@param-closure-this` PHPDoc tag declares what `$this` should
 /// resolve to.
-pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
-    find_closure_this_types(ctx)?
-        .into_iter()
-        .find_map(|rt| rt.class_info)
-        .map(Arc::unwrap_or_clone)
+pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<Vec<Arc<ClassInfo>>> {
+    let classes = ResolvedType::into_arced_classes(find_closure_this_types(ctx)?);
+    (!classes.is_empty()).then_some(classes)
 }
 
 /// What `$this` is bound to inside the closure at the cursor, when a call
@@ -539,8 +537,8 @@ fn cursor_inside_closure_body(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) ->
     }
 }
 
-fn bound_this(cls: ClassInfo) -> Vec<ResolvedType> {
-    vec![ResolvedType::from_class(cls)]
+fn bound_this(classes: Vec<Arc<ClassInfo>>) -> Vec<ResolvedType> {
+    ResolvedType::from_classes(classes)
 }
 
 fn is_closure_like(expr: &Expression<'_>) -> bool {
@@ -609,7 +607,7 @@ fn closure_this_from_function_params(
     fi: &FunctionInfo,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<Arc<ClassInfo>>> {
     let param = fi.parameters.get(arg_idx)?;
     let php_type = param.closure_this_type.as_ref()?;
     resolve_closure_this_type(php_type, None, ctx)
@@ -688,10 +686,22 @@ fn closure_this_from_receiver(
     method_name: &str,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<Arc<ClassInfo>>> {
     let receiver_classes =
         ResolvedType::into_arced_classes(resolve_receiver_types(obj_start, obj_end, ctx));
-    for cls in &receiver_classes {
+    closure_this_from_owners(&receiver_classes, method_name, arg_idx, ctx)
+}
+
+/// The union of what each possible owner's `method_name` declares its
+/// closure argument at `arg_idx` is bound to.
+fn closure_this_from_owners(
+    owners: &[Arc<ClassInfo>],
+    method_name: &str,
+    arg_idx: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<Arc<ClassInfo>>> {
+    let mut bindings = Vec::new();
+    for cls in owners {
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,
             ctx.class_loader,
@@ -701,10 +711,10 @@ fn closure_this_from_receiver(
             && let Some(result) =
                 closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
         {
-            return Some(result);
+            ClassInfo::extend_unique_arc(&mut bindings, result);
         }
     }
-    None
+    (!bindings.is_empty()).then_some(bindings)
 }
 
 /// Look up `closure_this_type` on a static method's parameter at
@@ -714,7 +724,7 @@ fn closure_this_from_static_receiver(
     method_name: &str,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<Arc<ClassInfo>>> {
     let class_name = static_receiver_class_name(class_expr, ctx.current_class)?;
 
     if method_name.eq_ignore_ascii_case("macro")
@@ -722,69 +732,87 @@ fn closure_this_from_static_receiver(
         && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
         && let Some(owner) = resolve_macro_this(&class_name)
     {
-        return Some(Arc::unwrap_or_clone(
+        return Some(vec![
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
             ),
-        ));
+        ]);
     }
 
-    let owner = find_owner_by_name(&class_name, ctx.all_classes, ctx.class_loader)?;
-
-    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-        &owner,
-        ctx.class_loader,
-        ctx.resolved_class_cache,
-    );
-    let method = resolved.get_method(method_name)?;
-    closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+    // `self::`/`static::` inside a closure that is itself bound to a union
+    // may name any of the bound classes, resolved where the receiver sits.
+    let owners = if matches!(class_expr, Expression::Self_(_) | Expression::Static(_)) {
+        let receiver_ctx = ResolutionCtx {
+            cursor_offset: class_expr.span().start.offset,
+            ..*ctx
+        };
+        crate::type_engine::resolver::resolve_static_owner_classes("self", &receiver_ctx)
+    } else {
+        vec![Arc::new(find_owner_by_name(
+            &class_name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )?)]
+    };
+    closure_this_from_owners(&owners, method_name, arg_idx, ctx)
 }
 
 /// Extract `closure_this_type` from a method's parameter at `arg_idx`
-/// and resolve it to a `ClassInfo`.
+/// and resolve its class alternatives.
 fn closure_this_from_method_params(
     method: &MethodInfo,
     arg_idx: usize,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<Arc<ClassInfo>>> {
     let param = method.parameters.get(arg_idx)?;
     let php_type = param.closure_this_type.as_ref()?;
     resolve_closure_this_type(php_type, owner, ctx)
 }
 
-/// Resolve a raw `@param-closure-this` type string to a `ClassInfo`.
+/// Resolve a `@param-closure-this` type to the classes it names, keeping
+/// every alternative of a union.
 ///
-/// Handles `$this`, `static`, and `self` by mapping them to the
-/// declaring class (owner), and resolves fully-qualified class names
-/// through the class loader.
+/// `$this`, `static`, and `self` (alone or as a union member) map to the
+/// declaring class (owner), or the current class for a function.
 fn resolve_closure_this_type(
     php_type: &PhpType,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<Arc<ClassInfo>>> {
     if php_type.is_self_like() {
-        return owner.cloned().or_else(|| ctx.current_class.cloned());
+        return match owner {
+            Some(owner) => Some(vec![Arc::clone(owner)]),
+            None => ctx.current_class.map(|cc| vec![Arc::new(cc.clone())]),
+        };
     }
-
-    // Extract the base class name without stringifying.
-    let type_str = php_type.base_name()?;
-
-    // Try local classes first, then the cross-file loader.
-    if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == type_str) {
-        return Some(ClassInfo::clone(cls));
+    let owner_name = match owner {
+        Some(owner) => owner.fqn(),
+        None => ctx.current_class.map(ClassInfo::fqn).unwrap_or_default(),
+    };
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        php_type,
+        &owner_name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    if classes.is_empty() {
+        return None;
     }
-
-    let resolved = (ctx.class_loader)(type_str)?;
-    Some(Arc::unwrap_or_clone(
-        crate::virtual_members::resolve_class_fully_maybe_cached(
-            &resolved,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        ),
-    ))
+    Some(
+        classes
+            .into_iter()
+            .map(|class| {
+                crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &class,
+                    ctx.class_loader,
+                    ctx.resolved_class_cache,
+                )
+            })
+            .collect(),
+    )
 }
 
 /// Check whether the inferred callable-signature type is a more specific

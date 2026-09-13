@@ -293,46 +293,44 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
-        let owner_class = if class.starts_with('$') {
-            // Variable holding a class-string (e.g. `$cls::make()`).
-            // May resolve to multiple classes for union class-strings.
-            let all_owners: Vec<Arc<ClassInfo>> = ResolvedType::into_arced_classes(
-                crate::type_engine::resolver::resolve_target_classes(
-                    class,
-                    AccessKind::DoubleColon,
-                    ctx,
-                ),
-            );
-            // When there are multiple possible classes, resolve the
-            // method return type through each and union the results.
-            if all_owners.len() > 1 {
-                let mut union_results: Vec<Arc<ClassInfo>> = Vec::new();
-                for owner in &all_owners {
-                    let split_args = split_text_args(text_args);
-                    let arg_refs = split_args.to_vec();
-                    let template_subs =
-                        Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
-                    let var_resolver = build_var_resolver(ctx);
-                    let mr_ctx =
-                        MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, true);
-                    ClassInfo::extend_unique_arc(
-                        &mut union_results,
-                        Self::resolve_method_return_types_with_args(
-                            owner,
-                            method_name,
-                            text_args,
-                            &mr_ctx,
-                        ),
-                    );
-                }
-                if !union_results.is_empty() {
-                    return union_results;
-                }
-            }
-            all_owners.into_iter().next()
+        // A variable holding a class-string (e.g. `$cls::make()`) may
+        // resolve to several classes for a union class-string, and so may
+        // `self::`/`static::` inside a closure bound to a union.
+        let all_owners: Vec<Arc<ClassInfo>> = if class.starts_with('$') {
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                class,
+                AccessKind::DoubleColon,
+                ctx,
+            ))
         } else {
-            crate::type_engine::resolver::resolve_static_owner_class(class, ctx)
+            crate::type_engine::resolver::resolve_static_owner_classes(class, ctx)
         };
+        // When there are multiple possible classes, resolve the
+        // method return type through each and union the results.
+        if all_owners.len() > 1 {
+            let mut union_results: Vec<Arc<ClassInfo>> = Vec::new();
+            for owner in &all_owners {
+                let split_args = split_text_args(text_args);
+                let arg_refs = split_args.to_vec();
+                let template_subs =
+                    Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
+                let var_resolver = build_var_resolver(ctx);
+                let mr_ctx = MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, true);
+                ClassInfo::extend_unique_arc(
+                    &mut union_results,
+                    Self::resolve_method_return_types_with_args(
+                        owner,
+                        method_name,
+                        text_args,
+                        &mr_ctx,
+                    ),
+                );
+            }
+            if !union_results.is_empty() {
+                return union_results;
+            }
+        }
+        let owner_class = all_owners.into_iter().next();
 
         if let Some(ref owner) = owner_class {
             // A static call through a Laravel facade is typed by the

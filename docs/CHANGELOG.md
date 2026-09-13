@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
+- **A `@param-closure-this` naming a union binds `$this` to every alternative.** `@param-closure-this FirstContext|SecondContext` used to bind the closure to the first class only. Completion, diagnostics, hover, and navigation now offer both, and an `instanceof` check narrows between them. Contributed by @ace-of-aces.
 
 ## [0.11.0] - 2026-10-05
 
