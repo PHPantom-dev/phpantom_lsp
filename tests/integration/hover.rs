@@ -15092,3 +15092,13 @@ function tick(): void
         "a static local's initialiser should type it, got: {text}"
     );
 }
+
+#[test]
+fn hover_param_closure_this_union() {
+    let backend = create_test_backend();
+    let content = "<?php\nclass FirstContext {}\nclass SecondContext {}\n/** @param-closure-this FirstContext|SecondContext $callback */\nfunction bindContext(\\Closure $callback): void {}\nbindContext(function () { $this; });\n";
+    let hover = hover_at(&backend, "file:///closure_union_hover.php", content, 5, 27)
+        .expect("expected hover on union-bound $this");
+    let text = hover_text(&hover);
+    assert!(text.contains("FirstContext|SecondContext"), "{text}");
+}

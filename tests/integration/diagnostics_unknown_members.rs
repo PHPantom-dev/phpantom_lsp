@@ -14300,3 +14300,69 @@ class Registry {
         "an assignment used as a call receiver must resolve to what it assigned, got: {diags:?}",
     );
 }
+
+#[test]
+fn param_closure_this_union_diagnostics() {
+    let backend = create_test_backend();
+    let src = r#"<?php
+class FirstContext { public function firstOnly(): void {} }
+class SecondContext { public function secondOnly(): void {} }
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {}
+bindContext(function () {
+    $this->firstOnly();
+    $this->secondOnly();
+    $this->missing();
+});
+"#;
+    let diagnostics = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        "file:///closure_union_diagnostics.php",
+        src,
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(
+        diagnostics[0].message.contains("missing"),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn param_closure_this_union_narrowed_diagnostics() {
+    let backend = create_test_backend();
+    let src = r#"<?php
+class FirstContext {
+    public function firstOnly(): void {}
+    public function run(): void {
+        bindContext(function () {
+            assert($this instanceof FirstContext);
+            $this->firstOnly();
+            $this->secondOnly();
+        });
+    }
+}
+class SecondContext { public function secondOnly(): void {} }
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {}
+bindContext(function () {
+    if ($this instanceof FirstContext) { return; }
+    $this->secondOnly();
+    $this->firstOnly();
+});
+bindContext(fn() => $this instanceof FirstContext ? $this->firstOnly() : $this->secondOnly());
+"#;
+    let diagnostics = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        "file:///closure_union_narrowed_diagnostics.php",
+        src,
+    );
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains("secondOnly")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains("firstOnly")),
+        "{diagnostics:?}"
+    );
+}

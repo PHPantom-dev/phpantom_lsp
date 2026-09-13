@@ -4925,6 +4925,27 @@ class ParamClosureThisDemo
             $this->getDefaultDriver();    // resolves Router::getDefaultDriver()
         });
 
+        // A union binding offers members from both possible contexts.
+        $router->eachContext(function () {
+            // Try: $this-> offers Route::prefix() and Resource::only().
+            if ($this instanceof Scaffolding\ScaffoldingClosureThisRoute) {
+                $this->prefix('/union');  // narrowed to Route
+            } else {
+                $this->only('index');     // narrowed to Resource
+            }
+        });
+
+        $router->eachContext(function () {
+            // Try: self::next()-> offers members from both contexts.
+            self::next()->withContext(function () {
+                // The nested callback keeps both possible bindings too.
+                if ($this instanceof Scaffolding\ScaffoldingClosureThisRoute) {
+                    return;
+                }
+                $this->only('index');     // early return leaves only Resource
+            });
+        });
+
         // The tag names the base class, so an assertion is how a closure
         // body says which subclass it was actually bound to. Narrowing
         // refines the tag rather than being overruled by it.

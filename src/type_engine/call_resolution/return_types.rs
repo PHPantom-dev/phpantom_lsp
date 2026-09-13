@@ -805,61 +805,13 @@ impl Backend {
             SubjectExpr::StaticMethodCall { class, method } => {
                 let method_name = method.as_str();
 
-                let owner_class = if class.starts_with('$') {
-                    // Variable holding a class-string (e.g. `$cls::make()`).
-                    // May resolve to multiple classes for union class-strings.
-                    let all_owners: Vec<Arc<ClassInfo>> = ResolvedType::into_arced_classes(
-                        crate::type_engine::resolver::resolve_target_classes(
-                            class,
-                            AccessKind::DoubleColon,
-                            ctx,
-                        ),
-                    );
-                    // When there are multiple possible classes, resolve the
-                    // method return type through each and union the results.
-                    if all_owners.len() > 1 {
-                        let mut union_results: Vec<Arc<ClassInfo>> = Vec::new();
-                        for owner in &all_owners {
-                            let split_args = split_text_args(text_args);
-                            let arg_refs = split_args.to_vec();
-                            let template_subs = Self::build_method_template_subs(
-                                owner,
-                                method_name,
-                                &arg_refs,
-                                ctx,
-                            );
-                            let var_resolver = build_var_resolver(ctx);
-                            let mr_ctx = MethodReturnCtx {
-                                all_classes: ctx.all_classes,
-                                class_loader: ctx.class_loader,
-                                backend: ctx.backend,
-                                template_subs: &template_subs,
-                                var_resolver: Some(&var_resolver),
-                                cache: ctx.resolved_class_cache,
-                                calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
-                                is_static: true,
-                                call_args: None,
-                            };
-                            ClassInfo::extend_unique_arc(
-                                &mut union_results,
-                                Self::resolve_method_return_types_with_args(
-                                    owner,
-                                    method_name,
-                                    text_args,
-                                    &mr_ctx,
-                                ),
-                            );
-                        }
-                        if !union_results.is_empty() {
-                            return union_results;
-                        }
-                    }
-                    all_owners.into_iter().next()
-                } else {
-                    crate::type_engine::resolver::resolve_static_owner_class(class, ctx)
-                };
-
-                if let Some(ref owner) = owner_class {
+                let owners = crate::type_engine::resolver::resolve_static_owner_classes(class, ctx);
+                let mut results = Vec::new();
+                let split_args = split_text_args(text_args);
+                let arg_refs = split_args.to_vec();
+                let var_resolver = build_var_resolver(ctx);
+                let mut return_hints = Vec::new();
+                for owner in &owners {
                     // A static call through a Laravel facade is typed by the
                     // container class the facade forwards to, so that
                     // `App::make(Foo::class)->…` sees the same
@@ -886,12 +838,11 @@ impl Backend {
                         ctx.resolved_class_cache,
                     );
 
-                    let split_args = split_text_args(text_args);
-                    let arg_refs = split_args.to_vec();
                     let template_subs =
                         Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
 
-                    if let Some(ref mut hint_out) = return_type_hint_out
+                    let mut owner_hint = None;
+                    if return_type_hint_out.is_some()
                         && let Some(m) = merged.get_method_ci(method_name)
                         && let Some(ref ret) = m.return_type
                     {
@@ -922,7 +873,7 @@ impl Backend {
                         } else {
                             substituted
                         };
-                        **hint_out = Some(
+                        owner_hint = Some(
                             crate::virtual_members::laravel::replace_eloquent_collections_in_type(
                                 &resolved_hint,
                                 ctx.class_loader,
@@ -931,7 +882,6 @@ impl Backend {
                         );
                     }
 
-                    let var_resolver = build_var_resolver(ctx);
                     let mr_ctx = MethodReturnCtx {
                         all_classes: ctx.all_classes,
                         class_loader: ctx.class_loader,
@@ -946,19 +896,35 @@ impl Backend {
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
                     {
-                        if let Some(ref mut hint_out) = return_type_hint_out {
-                            **hint_out = Some(date_return_type);
+                        if return_type_hint_out.is_some() {
+                            owner_hint = Some(date_return_type);
                         }
-                        return vec![date_class];
+                        ClassInfo::push_unique_arc(&mut results, date_class);
+                    } else {
+                        ClassInfo::extend_unique_arc(
+                            &mut results,
+                            Self::resolve_method_return_types_with_args(
+                                &merged,
+                                method_name,
+                                text_args,
+                                &mr_ctx,
+                            ),
+                        );
                     }
-                    return Self::resolve_method_return_types_with_args(
-                        &merged,
-                        method_name,
-                        text_args,
-                        &mr_ctx,
-                    );
+                    if let Some(hint) = owner_hint {
+                        return_hints.push(hint);
+                    }
                 }
-                vec![]
+                if let Some(hint_out) = return_type_hint_out
+                    && !return_hints.is_empty()
+                {
+                    *hint_out = if return_hints.len() == 1 {
+                        return_hints.pop()
+                    } else {
+                        Some(PhpType::union(return_hints))
+                    };
+                }
+                results
             }
 
             // ── Standalone function call: app(…) / myHelper(…) ──────

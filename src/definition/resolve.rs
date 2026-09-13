@@ -308,9 +308,29 @@ impl Backend {
                     .map(|loc| vec![loc])
             }
 
-            SymbolKind::SelfStaticParent(ssp_kind) => self
-                .resolve_self_static_parent(uri, content, position, *ssp_kind)
-                .map(|loc| vec![loc]),
+            SymbolKind::SelfStaticParent(ssp_kind) => {
+                if *ssp_kind == SelfStaticParentKind::This
+                    && let Some(classes) =
+                        self.resolve_closure_this_override(uri, content, cursor_offset)
+                {
+                    return Some(
+                        classes
+                            .iter()
+                            .filter_map(|class| {
+                                self.resolve_class_reference(
+                                    uri,
+                                    content,
+                                    &class.fqn(),
+                                    true,
+                                    cursor_offset,
+                                )
+                            })
+                            .collect(),
+                    );
+                }
+                self.resolve_self_static_parent(uri, content, position, *ssp_kind)
+                    .map(|loc| vec![loc])
+            }
 
             SymbolKind::ClassReference { name, is_fqn, .. } => self
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
@@ -1169,22 +1189,6 @@ impl Backend {
             ssp_kind,
             SelfStaticParentKind::Self_ | SelfStaticParentKind::Static | SelfStaticParentKind::This
         ) {
-            // For `$this`, check `@param-closure-this` override first:
-            // when the cursor is inside a closure whose enclosing call
-            // site declares `@param-closure-this`, jump to the
-            // overridden class definition instead of the lexical class.
-            if ssp_kind == SelfStaticParentKind::This
-                && let Some(override_cls) =
-                    self.resolve_closure_this_override(uri, content, cursor_offset)
-            {
-                let fqn = override_cls.fqn();
-                if let Some(loc) =
-                    self.resolve_class_reference(uri, content, &fqn, true, cursor_offset)
-                {
-                    return Some(loc);
-                }
-            }
-
             // Jump to the enclosing class definition in the current file.
             if current_class.keyword_offset == 0 {
                 return None;

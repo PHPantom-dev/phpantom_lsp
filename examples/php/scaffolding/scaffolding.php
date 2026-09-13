@@ -948,6 +948,14 @@ class ScaffoldingPipeline
 // binds the callback with Closure::call() so the runtime matches the tag.
 class ScaffoldingClosureThisRoute
 {
+    public static function next(): self { return new self(); }
+
+    /** @param-closure-this self $callback */
+    public function withContext(\Closure $callback): void
+    {
+        $callback->call($this);
+    }
+
     public function middleware(string $m): self { return $this; }
     public function prefix(string $p): self { return $this; }
 
@@ -962,6 +970,14 @@ class ScaffoldingClosureThisRoute
 
 class ScaffoldingClosureThisResource
 {
+    public static function next(): self { return new self(); }
+
+    /** @param-closure-this self $callback */
+    public function withContext(\Closure $callback): void
+    {
+        $callback->call($this);
+    }
+
     public function only(string $action): self { return $this; }
 }
 
@@ -982,6 +998,15 @@ class ScaffoldingClosureThisRouter
     public function group(\Closure $callback): void
     {
         $callback->call(new ScaffoldingClosureThisRoute());
+    }
+
+    /**
+     * @param-closure-this ScaffoldingClosureThisRoute|ScaffoldingClosureThisResource $callback
+     */
+    public function eachContext(\Closure $callback): void
+    {
+        $callback->call(new ScaffoldingClosureThisRoute());
+        $callback->call(new ScaffoldingClosureThisResource());
     }
 
     /**

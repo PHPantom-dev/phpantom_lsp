@@ -259,7 +259,7 @@ impl Backend {
     /// Resolve a static class reference + method name to a
     /// [`ResolvedCallableTarget`].
     ///
-    /// Resolves the class via [`crate::type_engine::resolver::resolve_static_owner_class`], merges
+    /// Resolves the class via [`crate::type_engine::resolver::resolve_static_owner_classes`], merges
     /// via `resolve_class_fully`, and looks up `method_name`.
     fn resolve_static_method_callable(
         class: &str,
@@ -267,8 +267,46 @@ impl Backend {
         rctx: &ResolutionCtx<'_>,
         args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
-        let owner = crate::type_engine::resolver::resolve_static_owner_class(class, rctx)?;
+        let owners = crate::type_engine::resolver::resolve_static_owner_classes(class, rctx);
+        let mut result: Option<ResolvedCallableTarget> = None;
+        let mut returns = Vec::new();
+        for owner in &owners {
+            if let Some(target) = Self::resolve_static_method_callable_for_owner(
+                class,
+                method_name,
+                owner,
+                rctx,
+                args_text,
+            ) {
+                if owners.len() > 1
+                    && let Some(ret) = &target.return_type
+                {
+                    returns.push(ret.replace_self(&owner.fqn()));
+                }
+                if result.is_none() {
+                    result = Some(target);
+                }
+            }
+        }
+        if let Some(target) = &mut result
+            && !returns.is_empty()
+        {
+            target.return_type = if returns.len() == 1 {
+                returns.pop()
+            } else {
+                Some(PhpType::union(returns))
+            };
+        }
+        result
+    }
 
+    fn resolve_static_method_callable_for_owner(
+        class: &str,
+        method_name: &str,
+        owner: &Arc<ClassInfo>,
+        rctx: &ResolutionCtx<'_>,
+        args_text: Option<&str>,
+    ) -> Option<ResolvedCallableTarget> {
         // When the class has template params, try to substitute them with
         // concrete types. For `parent::` calls, use the child's @extends
         // generics to get the concrete type arguments. Otherwise fall back
@@ -287,16 +325,16 @@ impl Backend {
             } else {
                 None
             };
-            let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(&owner));
+            let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(owner));
             crate::virtual_members::resolve_class_fully_with_type_args(
-                &owner,
+                owner,
                 rctx.class_loader,
                 rctx.resolved_class_cache,
                 &args,
             )
         } else {
             crate::virtual_members::resolve_class_fully_maybe_cached(
-                &owner,
+                owner,
                 rctx.class_loader,
                 rctx.resolved_class_cache,
             )

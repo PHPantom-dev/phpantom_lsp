@@ -450,9 +450,26 @@ impl Backend {
                     SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => {
                         current_class.cloned()
                     }
-                    SelfStaticParentKind::This => self
-                        .resolve_closure_this_override(uri, content, cursor_offset)
-                        .or_else(|| current_class.cloned()),
+                    SelfStaticParentKind::This => {
+                        if let Some(classes) =
+                            self.resolve_closure_this_override(uri, content, cursor_offset)
+                        {
+                            if classes.len() > 1 {
+                                let ty = PhpType::union(
+                                    classes
+                                        .iter()
+                                        .map(|class| PhpType::named(class.fqn()))
+                                        .collect(),
+                                );
+                                return Some(make_hover(format!(
+                                    "```php\n<?php\n$this = {ty}\n```"
+                                )));
+                            }
+                            classes.into_iter().next().map(Arc::unwrap_or_clone)
+                        } else {
+                            current_class.cloned()
+                        }
+                    }
                     SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
                         .and_then(|parent_name| {

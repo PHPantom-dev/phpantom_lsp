@@ -306,8 +306,6 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => {
-            use crate::type_engine::variable::forward_walk;
-
             // `$this` is not available inside static methods.
             if current_class.is_some() && ctx.is_in_static_method {
                 return vec![];
@@ -325,32 +323,14 @@ fn resolve_target_classes_expr_inner(
             // `current_class` below.
             let from_scope = resolve_this_from_scope(ctx);
 
-            // `@param-closure-this` override: when the cursor is inside a
-            // closure passed as an argument to a function whose parameter
-            // carries the tag, `$this` is the declared type rather than the
-            // lexical class.  The tag states what the closure is *bound* to,
-            // so a narrowing proof inside the body still refines it — a
-            // `assert($this instanceof AppTestCase)` in a Pest closure whose
-            // `test()` parameter declares `@param-closure-this TestCase`
-            // means `$this` is the subclass.  The scope only wins when it is
-            // strictly narrower; otherwise it holds the lexically captured
-            // `$this` the tag is there to replace.
-            if let Some(override_cls) =
-                super::variable::closure_resolution::find_closure_this_override(ctx)
+            // The walker seeds closure bindings before applying guards, so its
+            // result already includes both rebinding and narrowing. Consult the
+            // annotation only when no scope was available.
+            if from_scope.is_none()
+                && let Some(classes) =
+                    super::variable::closure_resolution::find_closure_this_override(ctx)
             {
-                let narrowed = from_scope.filter(|types| {
-                    !types.is_empty()
-                        && types.iter().all(|rt| {
-                            rt.class_info.as_ref().is_some_and(|ci| {
-                                forward_walk::is_subclass_of(
-                                    &ci.fqn(),
-                                    &override_cls.fqn(),
-                                    class_loader,
-                                )
-                            })
-                        })
-                });
-                return narrowed.unwrap_or_else(|| vec![ResolvedType::from_class(override_cls)]);
+                return ResolvedType::from_classes(classes);
             }
 
             let mut this_types = if let Some(scope_types) = from_scope {
@@ -379,10 +359,9 @@ fn resolve_target_classes_expr_inner(
 
             this_types
         }
-        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_class(ctx)
-            .map(ResolvedType::from_class)
-            .into_iter()
-            .collect(),
+        SubjectExpr::SelfKw | SubjectExpr::StaticKw => {
+            ResolvedType::from_classes(resolve_self_static_classes(ctx))
+        }
 
         // ── `parent::` — resolve to the current class's parent ──
         SubjectExpr::Parent => {
@@ -423,10 +402,7 @@ fn resolve_target_classes_expr_inner(
             // class names, so find_class_by_name / class_loader won't
             // find them.
             let owner_classes: Vec<Arc<ClassInfo>> = if is_self_or_static(class) {
-                resolve_self_static_class(ctx)
-                    .map(Arc::new)
-                    .into_iter()
-                    .collect()
+                resolve_self_static_classes(ctx)
             } else if let Some(parent_name) = resolve_class_keyword(class, current_class) {
                 // parent — resolve via all_classes first, then class_loader
                 if let Some(cls) = find_class_by_name(all_classes, &parent_name) {
@@ -1046,8 +1022,9 @@ fn resolve_call_raw_return_type(
             None
         }
         SubjectExpr::StaticMethodCall { class, method } => {
-            let owner = resolve_static_owner_class(class, ctx);
-            if let Some(ref cls) = owner {
+            let owners = resolve_static_owner_classes(class, ctx);
+            let mut returns = Vec::new();
+            for cls in &owners {
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     cls,
                     ctx.class_loader,
@@ -1056,12 +1033,17 @@ fn resolve_call_raw_return_type(
                 let found = merged.get_method_ci(method);
                 if let Some(m) = found {
                     if let Some(ref ret) = m.return_type {
-                        return Some(ret.clone());
+                        returns.push(if owners.len() > 1 {
+                            ret.replace_self(&cls.fqn())
+                        } else {
+                            ret.clone()
+                        });
+                        continue;
                     }
                     // Method exists but has no return type.
                     // Only fall through to __callStatic for virtual methods.
                     if !m.is_virtual {
-                        return None;
+                        continue;
                     }
                 }
                 // __callStatic fallback: method not found, or virtual
@@ -1069,10 +1051,19 @@ fn resolve_call_raw_return_type(
                 if let Some(m) = merged.get_method_ci("__callStatic")
                     && let Some(ref ret) = m.return_type
                 {
-                    return Some(ret.clone());
+                    returns.push(if owners.len() > 1 {
+                        ret.replace_self(&cls.fqn())
+                    } else {
+                        ret.clone()
+                    });
+                    continue;
                 }
             }
-            None
+            match returns.len() {
+                0 => None,
+                1 => returns.pop(),
+                _ => Some(PhpType::union(returns)),
+            }
         }
         SubjectExpr::FunctionCall(fn_name) => {
             if let Some(fl) = ctx.function_loader
@@ -1709,9 +1700,13 @@ fn resolve_variable_fallback(
 /// runtime binds the closure with the target class as its scope
 /// (`Closure::bind`), so `self::` and `static::` refer to the bound
 /// target rather than the class that lexically encloses the closure.
-fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
-    super::variable::closure_resolution::find_closure_this_override(ctx)
-        .or_else(|| ctx.current_class.cloned())
+fn resolve_self_static_classes(ctx: &ResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
+    super::variable::closure_resolution::find_closure_this_override(ctx).unwrap_or_else(|| {
+        ctx.current_class
+            .map(|class| Arc::new(class.clone()))
+            .into_iter()
+            .collect()
+    })
 }
 
 /// Resolve a static class reference (`self`, `static`, `parent`, or a
@@ -1719,28 +1714,21 @@ fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
 ///
 /// Handles the `self`/`static`/`parent` keywords and falls back to
 /// `class_loader` then `resolve_target_classes` for named classes.
-pub(in crate::type_engine) fn resolve_static_owner_class(
+pub(in crate::type_engine) fn resolve_static_owner_classes(
     class: &str,
     rctx: &ResolutionCtx<'_>,
-) -> Option<Arc<ClassInfo>> {
+) -> Vec<Arc<ClassInfo>> {
     if is_self_or_static(class) {
-        resolve_self_static_class(rctx).map(Arc::new)
+        resolve_self_static_classes(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
-        // parent — load via class_loader so we get the full parent ClassInfo
-        (rctx.class_loader)(&resolved_name)
+        (rctx.class_loader)(&resolved_name).into_iter().collect()
+    } else if let Some(owner) = find_class_by_name(rctx.all_classes, class)
+        .map(Arc::clone)
+        .or_else(|| (rctx.class_loader)(class))
+    {
+        vec![owner]
     } else {
-        find_class_by_name(rctx.all_classes, class)
-            .map(Arc::clone)
-            .or_else(|| (rctx.class_loader)(class))
-            .or_else(|| {
-                resolved_to_arcs(resolve_target_classes(
-                    class,
-                    crate::AccessKind::DoubleColon,
-                    rctx,
-                ))
-                .into_iter()
-                .next()
-            })
+        resolved_to_arcs(resolve_target_classes(class, AccessKind::DoubleColon, rctx))
     }
 }
 

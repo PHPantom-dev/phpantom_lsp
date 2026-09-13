@@ -717,3 +717,26 @@ async fn test_parameter_type_definition() {
     assert!(result.is_some(), "Should resolve parameter type definition");
     assert_single_location(result.unwrap(), 1); // Request on line 1
 }
+
+#[tokio::test]
+async fn param_closure_this_union_navigation() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///closure_union_navigation.php").unwrap();
+    let content = "<?php\nclass FirstContext {}\nclass SecondContext {}\n/** @param-closure-this FirstContext|SecondContext $callback */\nfunction bindContext(\\Closure $callback): void {}\nbindContext(function () { $this; });\n";
+    open_php(&backend, &uri, content).await;
+    let response = goto_type_definition(&backend, &uri, 5, 27).await.unwrap();
+    assert_multiple_locations(response, &[1, 2]);
+    let response = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(5, 27),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_multiple_locations(response, &[1, 2]);
+}

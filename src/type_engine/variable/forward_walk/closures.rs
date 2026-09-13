@@ -156,6 +156,36 @@ pub(crate) fn seed_closure_captures(
     }
 }
 
+/// Install a closure's declared `$this` before walking its guards. The
+/// receiving call is resolved against the outer scope, where its variables
+/// still refer to their values before entering the callback.
+pub(crate) fn seed_closure_this(
+    scope: &mut ScopeState,
+    outer: Option<&ScopeState>,
+    closure_start: u32,
+    body_start: u32,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let outer = outer.unwrap_or(scope);
+    let scope_resolver = |name: &str| outer.get(name).to_vec();
+    let macro_resolver = ctx
+        .backend
+        .map(|backend| backend.laravel_macro_this_resolver(ctx.class_loader));
+    let rctx = crate::type_engine::resolver::ResolutionCtx {
+        cursor_offset: body_start,
+        scope_var_resolver: Some(&scope_resolver),
+        laravel_macro_this_resolver: macro_resolver.as_ref().map(|resolver| resolver as &_),
+        ..ctx.as_resolution_ctx()
+    };
+    if let Some(classes) =
+        super::super::closure_resolution::closure_this_binding_at(&rctx, closure_start)
+    {
+        scope.invalidate_dependent_keys("$this");
+        scope.invalidate_proofs("$this");
+        scope.set("$this", ResolvedType::from_classes(classes));
+    }
+}
+
 /// Try to enter a closure or arrow function if the cursor is inside one.
 ///
 /// Returns `true` if the cursor was inside a closure and the scope was
@@ -245,6 +275,13 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 let mut closure_scope = ScopeState::new();
 
                 seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
+                seed_closure_this(
+                    &mut closure_scope,
+                    Some(scope),
+                    closure.span().start.offset,
+                    body_span.start.offset,
+                    ctx,
+                );
 
                 // Seed with parameter types, using callable inference
                 // when available.
@@ -273,6 +310,13 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 && ctx.cursor_offset <= body_span.end.offset
             {
                 // Arrow functions inherit the enclosing scope.
+                seed_closure_this(
+                    scope,
+                    None,
+                    arrow.span().start.offset,
+                    arrow.arrow.start.offset,
+                    ctx,
+                );
                 // Seed with parameter types, using callable inference
                 // when available.
                 let inferred = inferred_params.unwrap_or(&[]);
