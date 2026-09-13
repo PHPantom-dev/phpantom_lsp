@@ -749,6 +749,7 @@ impl Backend {
     ) -> Option<(String, AccessKind)> {
         let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
+        let source = map.source(content)?;
         let span = map.lookup(offset)?;
         match &span.kind {
             crate::symbol_map::SymbolKind::MemberAccess {
@@ -761,7 +762,7 @@ impl Backend {
                 } else {
                     AccessKind::Arrow
                 };
-                Some((subject_text.as_str(content).to_string(), access_kind))
+                Some((subject_text.as_str(source).to_string(), access_kind))
             }
             _ => None,
         }

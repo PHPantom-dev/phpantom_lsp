@@ -249,6 +249,10 @@ impl Backend {
         ctx: &crate::types::FileContext,
         mode: SemanticTokensMode,
     ) -> Vec<AbsoluteToken> {
+        let Some(source) = symbol_map.source(content) else {
+            return Vec::new();
+        };
+
         let mut tokens = Vec::with_capacity(symbol_map.spans.len());
 
         // Precompute line starts once: converting each span's byte offset to a
@@ -325,7 +329,7 @@ impl Backend {
                     // Verify the member exists on the resolved subject class
                     // and pick up deprecated/static modifiers from it.
                     match self.resolve_member_semantics(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         member_name,
                         *is_static,
                         *is_method_call,

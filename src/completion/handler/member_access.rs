@@ -571,6 +571,11 @@ impl Backend {
     ) -> Option<CompletionTarget> {
         let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
+        // The map's offsets describe the text it was extracted from; a
+        // buffer edited since then is a different file as far as they are
+        // concerned, and the caller's text-based extraction is the right
+        // answer for it.
+        let source = map.source(content)?;
         let cursor_offset = position_to_offset(content, position);
 
         // The cursor may be at the end of a partially-typed member name
@@ -627,7 +632,7 @@ impl Backend {
             };
             return Some(CompletionTarget {
                 access_kind,
-                subject: subject_text.as_str(content).to_string(),
+                subject: subject_text.as_str(source).to_string(),
             });
         }
 

@@ -18,33 +18,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.
 
 ## Crashes
 
-### B52. `SubjectText::as_str` slices a span against the wrong content
-
-**Impact: High · Complexity: Medium**
-
-`SubjectText::as_str` (`src/symbol_map/mod.rs:217`) indexes `content`
-with the byte span recorded when the symbol map was built. When the two
-disagree the slice panics and takes the worker thread with it:
-
-```
-thread 'fix-worker' panicked at src/symbol_map/mod.rs:217:51:
-end byte index 8602 is out of bounds for string of length 8600
-start byte index 1058 is out of bounds for string of length 781
-```
-
-Reproduce with `phpantom_lsp fix --dry-run --rule unused_import
---project-root <a large Laravel project>`: several workers die and the
-run finishes reporting "No fixable issues found" for the files they
-were holding, so a crash is indistinguishable from a clean result.
-
-The spans and the string come from different revisions of the same
-file. The symbol map is cached per URI while the content is passed in
-by the caller, and at least one path hands in content the cached map
-was not built from (a stale map that survived an `update_ast`, or a map
-built from the Blade virtual PHP being sliced against the raw template).
-The fix is to make the pairing explicit rather than to bounds-check the
-slice: a symbol map should carry the content revision it was extracted
-from so a consumer cannot pair it with a different one.
+No outstanding items.
 
 ## Type comparison
 

@@ -36,7 +36,14 @@ impl Backend {
         }
 
         // ── Gather the symbol map ───────────────────────────────────────
+        // `content` must be the text the map was extracted from: a Blade
+        // template's map describes the virtual PHP it lowers to, and every
+        // offset below (the span slices, the `use`-line ranges) is read
+        // against the same string.
         let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return;
+        };
+        let Some(source) = symbol_map.source(content) else {
             return;
         };
 
@@ -93,7 +100,7 @@ impl Backend {
                     ..
                 } => {
                     // Static access: `Foo::bar()` — subject_text is `"Foo"`
-                    let trimmed = subject_text.as_str(content).trim();
+                    let trimmed = subject_text.as_str(source).trim();
                     if !trimmed.starts_with('$')
                         && trimmed != "self"
                         && trimmed != "static"

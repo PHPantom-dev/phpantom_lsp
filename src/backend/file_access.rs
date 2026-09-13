@@ -355,6 +355,20 @@ impl Backend {
         self.symbol_maps.read().get(uri).cloned()
     }
 
+    /// Pair a file's cached symbol map with `content`, for a caller that
+    /// needs to slice a span but does not hold the map itself.
+    ///
+    /// `None` when the file has never been parsed, or when the map was
+    /// extracted from different text than `content` — see
+    /// [`MappedSource`](crate::symbol_map::MappedSource).
+    pub(crate) fn symbol_map_source<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> Option<crate::symbol_map::MappedSource<'a>> {
+        self.symbol_maps.read().get(uri)?.source(content)
+    }
+
     /// Remove a file's entries from every per-URI map populated while it
     /// was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the

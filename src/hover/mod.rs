@@ -196,9 +196,10 @@ impl Backend {
                     AccessKind::Arrow
                 };
 
+                let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         access_kind,
                         &rctx,
                     ),

@@ -297,11 +297,14 @@ impl Backend {
                         if file_content.is_none() {
                             file_content = self.reference_file_content_arc(file_uri);
                         }
-                        match &file_content {
-                            Some(content) => {
+                        match file_content
+                            .as_ref()
+                            .and_then(|c| Some((c, symbol_map.source(c)?)))
+                        {
+                            Some((content, source)) => {
                                 let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
                                 self.resolve_subject_to_fqns(
-                                    subject_text.as_str(content),
+                                    subject_text.as_str(source),
                                     *is_static,
                                     ctx,
                                     span.start,

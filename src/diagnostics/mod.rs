@@ -1098,12 +1098,10 @@ impl Backend {
             // The subject is stored as a range into the text the map was
             // built from, so a map built from older text would slice the
             // wrong bytes (or none at all).
-            if !map.matches_source(content) {
-                return None;
-            }
+            let source = map.source(content)?;
             let subject = map.gate_subject(span_start)?;
             (
-                subject.subject_text.as_str(content).to_string(),
+                subject.subject_text.as_str(source).to_string(),
                 subject.is_static,
             )
         };

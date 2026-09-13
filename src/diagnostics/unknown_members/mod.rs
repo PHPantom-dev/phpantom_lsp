@@ -178,6 +178,9 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         let file_use_map = &ctx.file.use_map;
         let file_namespace = &ctx.file.namespace;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -268,7 +271,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
             let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────

@@ -57,6 +57,10 @@ impl Backend {
             }
         };
 
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
+
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
         // Every span considered below overlaps the request range, so the
         // namespace block covering its start is the right one for all of
@@ -146,7 +150,7 @@ impl Backend {
 
                     // Resolve the subject to find the method's replacement template.
                     let base_class = resolve_subject_to_class(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         *is_static,
                         &file_ctx,
                         span.start,
@@ -205,7 +209,7 @@ impl Backend {
                         continue;
                     };
 
-                    let subject = Some(subject_text.as_str(content).trim().to_string());
+                    let subject = Some(subject_text.as_str(source).trim().to_string());
                     let replacement =
                         expand_template(&replacement_template, &args_text, subject.as_deref());
 

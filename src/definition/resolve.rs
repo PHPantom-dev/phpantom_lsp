@@ -299,7 +299,7 @@ impl Backend {
                 };
                 let mctx = MemberDefinitionCtx {
                     member_name,
-                    subject: subject_text.as_str(content),
+                    subject: subject_text.as_str(self.symbol_map_source(uri, content)?),
                     access_kind,
                     access_hint,
                 };

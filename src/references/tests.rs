@@ -2222,22 +2222,26 @@ async fn test_macro_registration_references_include_unresolved_chain_call() {
     open_file(&backend, &caller_uri, caller_text).await;
     seed_macro_index(&backend, &provider_uri, provider_text);
 
-    let shine_subject = backend
-        .symbol_maps
-        .read()
-        .get(caller_uri.as_str())
-        .expect("caller symbol map should exist")
-        .spans
-        .iter()
-        .find_map(|span| match &span.kind {
-            crate::symbol_map::SymbolKind::MemberAccess {
-                member_name,
-                subject_text,
-                ..
-            } if member_name == "shine" => Some(subject_text.as_str(caller_text).to_string()),
-            _ => None,
-        })
-        .expect("expected member-access span for unresolved chain call");
+    let shine_subject = {
+        let maps = backend.symbol_maps.read();
+        let map = maps
+            .get(caller_uri.as_str())
+            .expect("caller symbol map should exist");
+        let source = map
+            .source(caller_text)
+            .expect("caller symbol map should describe the caller text");
+        map.spans
+            .iter()
+            .find_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::MemberAccess {
+                    member_name,
+                    subject_text,
+                    ..
+                } if member_name == "shine" => Some(subject_text.as_str(source).to_string()),
+                _ => None,
+            })
+            .expect("expected member-access span for unresolved chain call")
+    };
     assert!(
         shine_subject.contains("pluck"),
         "expected chain subject text, got {shine_subject:?}"

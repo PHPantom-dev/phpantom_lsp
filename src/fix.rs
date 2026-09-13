@@ -151,7 +151,12 @@ pub fn fix_unused_imports(
     content: &str,
 ) -> (String, Vec<AppliedFix>) {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
-    backend.collect_unused_import_diagnostics(uri, content, &mut diagnostics);
+    // A template is analysed as the virtual PHP it lowers to (the text its
+    // symbol map was extracted from), exactly as `analyse` and the LSP do.
+    // The diagnostic ranges come back in template coordinates, so the edits
+    // below are still built against the file's own bytes.
+    let analysable = backend.analysable_content_or(uri, content);
+    backend.collect_unused_import_diagnostics(uri, &analysable, &mut diagnostics);
 
     if diagnostics.is_empty() {
         return (content.to_string(), Vec::new());

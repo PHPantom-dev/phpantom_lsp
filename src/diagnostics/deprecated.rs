@@ -102,6 +102,13 @@ impl Backend {
             function_loader: &function_loader,
         };
 
+        // A map extracted from different text than `content` describes a
+        // file this pass cannot report on: every offset it holds would
+        // land somewhere else.
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
+
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
             match &span.kind {
@@ -170,7 +177,7 @@ impl Backend {
                     ..
                 } => {
                     // Resolve the subject type to a class.
-                    let subject_str = subject_text.as_str(content);
+                    let subject_str = subject_text.as_str(source);
                     let base_class = resolve_subject_to_class_name(
                         subject_str,
                         *is_static,

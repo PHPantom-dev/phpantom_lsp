@@ -70,7 +70,15 @@ impl Backend {
             let Ok(parsed_uri) = Url::parse(file_uri) else {
                 continue;
             };
-            let Some(content) = self.get_file_content_arc(file_uri) else {
+            // The rest of Find References reads a template as the virtual
+            // PHP its symbol map describes, and `try_translate_location`
+            // maps the results back; reading the template's own bytes here
+            // would slice every span against text the map knows nothing
+            // about.
+            let Some(content) = self.reference_file_content_arc(file_uri) else {
+                continue;
+            };
+            let Some(source) = symbol_map.source(&content) else {
                 continue;
             };
             let file_ctx = self.file_context(file_uri);
@@ -90,14 +98,14 @@ impl Backend {
                     continue;
                 }
 
-                let matches_macro = if subject_text.as_str(&content).contains('(') {
+                let matches_macro = if subject_text.as_str(source).contains('(') {
                     // Chained call receivers like `$query->pluck(...)->macroName()`
                     // are expensive to resolve precisely here and are the main
                     // real-world macro-registration rename case.
                     true
                 } else {
                     let subject_fqns = self.resolve_subject_to_fqns(
-                        subject_text.as_str(&content),
+                        subject_text.as_str(source),
                         *is_static,
                         &file_ctx,
                         span.start,
@@ -271,6 +279,9 @@ impl Backend {
             let Some(content) = self.reference_file_content_arc(file_uri) else {
                 return Vec::new();
             };
+            let Some(source) = symbol_map.source(&content) else {
+                return Vec::new();
+            };
             let needs_receiver = prepared.iter().any(|query| query.hierarchy.is_some());
             let resolved_file = needs_receiver.then(|| {
                 self.resolved_member_file(file_uri, symbol_map)
@@ -300,7 +311,7 @@ impl Backend {
                             else {
                                 return false;
                             };
-                            let subject = subject_text.as_str(&content).trim_start();
+                            let subject = subject_text.as_str(source).trim_start();
                             subject.starts_with('$') && !subject.starts_with("$this")
                         });
                         if needs_variable_scopes {
@@ -343,7 +354,7 @@ impl Backend {
                                 };
                                 let targets = self
                                     .resolve_subject_to_fqns(
-                                        subject_text.as_str(&content),
+                                        subject_text.as_str(source),
                                         *is_static,
                                         &file_ctx,
                                         span.start,
@@ -581,10 +592,13 @@ impl Backend {
                             let Some(ref content) = file_content else {
                                 break;
                             };
+                            let Some(source) = symbol_map.source(content) else {
+                                break;
+                            };
 
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let subject_fqns = self.resolve_subject_to_fqns(
-                                subject_text.as_str(content),
+                                subject_text.as_str(source),
                                 *is_static,
                                 ctx,
                                 span.start,

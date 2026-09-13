@@ -674,3 +674,32 @@ class Foo {
         "Used member should be preserved. Got:\n{result}"
     );
 }
+
+// ── Blade templates ─────────────────────────────────────────────────────────
+
+#[test]
+fn blade_template_imports_are_fixed_against_the_template() {
+    let backend = create_test_backend();
+    let content = r#"@php
+use App\Models\User;
+use App\Models\Post;
+@endphp
+
+<div>{{ User::query()->count() }}</div>
+"#;
+
+    let result = fix_unused_imports(&backend, "file:///views/test.blade.php", content);
+
+    assert!(
+        result.contains("use App\\Models\\User;"),
+        "Used import should be preserved. Got:\n{result}"
+    );
+    assert!(
+        !result.contains("use App\\Models\\Post;"),
+        "Unused import should be removed. Got:\n{result}"
+    );
+    assert!(
+        result.contains("<div>{{ User::query()->count() }}</div>"),
+        "The template's markup should be untouched. Got:\n{result}"
+    );
+}

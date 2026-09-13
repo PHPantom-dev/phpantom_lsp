@@ -236,6 +236,9 @@ impl Backend {
     ) {
         let affinity_table =
             crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         for span in &symbol_map.spans {
             if !span_matches_request(
                 span.start as usize,
@@ -251,7 +254,7 @@ impl Backend {
                     subject_text,
                     is_static: true,
                     ..
-                } => subject_text.as_str(content),
+                } => subject_text.as_str(source),
                 _ => continue,
             };
 
@@ -558,6 +561,10 @@ impl Backend {
             crate::text_position::position_to_byte_offset(content, params.range.start);
         let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
+        let Some(source) = symbol_map.source(content) else {
+            return false;
+        };
+
         for span in &symbol_map.spans {
             if span.start as usize >= request_end || span.end as usize <= request_start {
                 continue;
@@ -574,11 +581,11 @@ impl Backend {
                     is_static: true,
                     ..
                 } if {
-                    let s = subject_text.as_str(content);
+                    let s = subject_text.as_str(source);
                     !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
                 } =>
                 {
-                    subject_text.as_str(content)
+                    subject_text.as_str(source)
                 }
                 _ => continue,
             };
@@ -754,6 +761,10 @@ impl Backend {
         // references that are import declarations themselves.
         let use_line_ranges = compute_use_line_ranges(content);
 
+        let Some(source) = symbol_map.source(content) else {
+            return Vec::new();
+        };
+
         let mut seen: HashSet<String> = HashSet::new();
         let mut unresolved: Vec<(String, ClassRefContext)> = Vec::new();
 
@@ -774,11 +785,11 @@ impl Backend {
                     is_static: true,
                     ..
                 } if {
-                    let s = subject_text.as_str(content);
+                    let s = subject_text.as_str(source);
                     !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
                 } =>
                 {
-                    (subject_text.as_str(content), ClassRefContext::Other)
+                    (subject_text.as_str(source), ClassRefContext::Other)
                 }
                 _ => continue,
             };
