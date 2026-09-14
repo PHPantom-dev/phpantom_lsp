@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789342411225,
+  "lastUpdate": 1789346234309,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -27879,6 +27879,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "16e16daa00dbc45a3077a903cdb42b1c3fc23f1b",
+          "message": "Renaming or moving a class updates a group import instead of leaving it\nbehind",
+          "timestamp": "2026-09-14T02:20:01+02:00",
+          "tree_id": "15524cfd6bb9a8dd6c5219ba2eca233fa7677473",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/16e16daa00dbc45a3077a903cdb42b1c3fc23f1b"
+        },
+        "date": 1789346227612,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.1,
             "unit": "MiB"
           }
         ]
