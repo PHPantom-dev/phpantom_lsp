@@ -1,5 +1,5 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend_with_full_stubs,
+    complete_at, create_psr4_workspace, create_test_backend_with_full_stubs,
     create_test_backend_with_function_stubs, create_test_backend_with_stubs,
 };
 use phpantom_lsp::Backend;
@@ -11,45 +11,6 @@ use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Open a file in the backend and request completion at the given position.
-async fn complete_at(
-    backend: &Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
 
 /// Filter completion items to only those with kind == CLASS.
 fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {

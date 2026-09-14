@@ -1089,8 +1089,8 @@ impl Backend {
         // A Blade file's symbol map is built from the preprocessed virtual
         // PHP, so every offset in it — including the subject's — indexes that
         // text rather than the template the caller handed us.
-        let virtual_php = self.blade_virtual_php(uri);
-        let content = virtual_php.as_deref().unwrap_or(content);
+        let virtual_php = self.blade_virtual_php_arc(uri);
+        let content = virtual_php.as_ref().map_or(content, |php| php.as_str());
 
         let (subject_text, is_static) = {
             let maps = self.symbol_maps.read();

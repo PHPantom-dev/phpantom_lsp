@@ -7,7 +7,6 @@
 //! lock-and-unwrap boilerplate that used to be duplicated across the
 //! completion handler, definition resolver, and other consumers.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -78,9 +77,13 @@ impl Backend {
     /// A template's symbol map and types describe the virtual PHP, so every
     /// feature that reads them has to read the same text, and answer in the
     /// template's coordinates through `src/blade/translate.rs` afterwards.
-    pub(crate) fn analysable_content(&self, uri: &str) -> Option<String> {
-        self.blade_virtual_php(uri)
-            .or_else(|| self.get_file_content(uri))
+    ///
+    /// Shared rather than copied: a template's virtual PHP is fetched on
+    /// every completion, hover, go-to-definition, code-action and
+    /// diagnostic request against it.
+    pub(crate) fn analysable_content(&self, uri: &str) -> Option<Arc<String>> {
+        self.blade_virtual_php_arc(uri)
+            .or_else(|| self.get_file_content_arc(uri))
     }
 
     /// [`Self::analysable_content`] with `position` carried into the text:
@@ -89,18 +92,24 @@ impl Backend {
         &self,
         uri: &str,
         position: Position,
-    ) -> Option<(String, Position)> {
-        match self.blade_virtual_php(uri) {
+    ) -> Option<(Arc<String>, Position)> {
+        match self.blade_virtual_php_arc(uri) {
             Some(virtual_php) => Some((virtual_php, self.translate_blade_to_php(uri, position))),
-            None => Some((self.get_file_content(uri)?, position)),
+            None => Some((self.get_file_content_arc(uri)?, position)),
         }
     }
 
     /// [`Self::analysable_content`] for a caller that already holds the
     /// file's content and only needs a template swapped for its virtual PHP.
-    pub(crate) fn analysable_content_or<'a>(&self, uri: &str, content: &'a str) -> Cow<'a, str> {
-        self.blade_virtual_php(uri)
-            .map_or(Cow::Borrowed(content), Cow::Owned)
+    pub(crate) fn analysable_content_or<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> AnalysableContent<'a> {
+        match self.blade_virtual_php_arc(uri) {
+            Some(virtual_php) => AnalysableContent::Shared(virtual_php),
+            None => AnalysableContent::Borrowed(content),
+        }
     }
 
     /// Retrieve file content as a cheap `Arc<String>` reference when the
@@ -396,6 +405,28 @@ impl Backend {
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+}
+
+/// The text a caller should analyse: either the buffer it already holds,
+/// or the shared virtual PHP a template lowers to.
+///
+/// Returned by [`Backend::analysable_content_or`] so that swapping a
+/// template for its virtual PHP costs an `Arc` bump rather than a copy of
+/// the whole lowered file. Deref to `&str` to read it.
+pub(crate) enum AnalysableContent<'a> {
+    Borrowed(&'a str),
+    Shared(Arc<String>),
+}
+
+impl std::ops::Deref for AnalysableContent<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match self {
+            AnalysableContent::Borrowed(text) => text,
+            AnalysableContent::Shared(text) => text,
+        }
     }
 }
 

@@ -282,6 +282,10 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 /// existing `use` block, which supports alphabetical insertion via
 /// [`UseBlockInfo::insert_position_for`].
 ///
+/// This answers "where does a *new* import go?".  To find the statement
+/// that already imports a given class, use
+/// [`crate::diagnostics::helpers::find_use_statement`] instead.
+///
 /// The scanning logic distinguishes top-level `use` imports from trait
 /// `use` statements inside class/enum/trait bodies by tracking brace
 /// depth.

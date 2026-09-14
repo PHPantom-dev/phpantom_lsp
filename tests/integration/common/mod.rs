@@ -31,6 +31,133 @@ pub async fn open_php(backend: &Backend, uri: &Url, text: &str) {
     open_document(backend, uri, "php", text).await;
 }
 
+// ─── Completion ─────────────────────────────────────────────────────────────
+
+/// Send a `textDocument/completion` request for a document that is already
+/// open.  The one place these helpers build `CompletionParams`.
+async fn completion_response(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    context: Option<CompletionContext>,
+) -> Option<CompletionResponse> {
+    backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context,
+        })
+        .await
+        .unwrap()
+}
+
+/// Flatten a completion response into its items, keeping "the server had
+/// nothing to offer" (`None`) distinct from "the server offered an empty
+/// list".
+fn response_items(response: Option<CompletionResponse>) -> Option<Vec<CompletionItem>> {
+    match response {
+        Some(CompletionResponse::Array(items)) => Some(items),
+        Some(CompletionResponse::List(list)) => Some(list.items),
+        None => None,
+    }
+}
+
+fn item_labels(items: Vec<CompletionItem>) -> Vec<String> {
+    items.into_iter().map(|item| item.label).collect()
+}
+
+/// Open `text` as PHP and return the raw completion response at the position.
+pub async fn complete_response_at(
+    backend: &Backend,
+    uri: &Url,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Option<CompletionResponse> {
+    open_php(backend, uri, text).await;
+    completion_response(backend, uri, line, character, None).await
+}
+
+/// [`complete_at`] that distinguishes no response from an empty one.
+pub async fn complete_at_raw(
+    backend: &Backend,
+    uri: &Url,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Option<Vec<CompletionItem>> {
+    response_items(complete_response_at(backend, uri, text, line, character).await)
+}
+
+/// Open `text` as PHP and return the completion items offered at the position.
+pub async fn complete_at(
+    backend: &Backend,
+    uri: &Url,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Vec<CompletionItem> {
+    complete_at_raw(backend, uri, text, line, character)
+        .await
+        .unwrap_or_default()
+}
+
+/// [`complete_at`] reduced to the item labels.
+pub async fn complete_labels_at(
+    backend: &Backend,
+    uri: &Url,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Vec<String> {
+    item_labels(complete_at(backend, uri, text, line, character).await)
+}
+
+/// [`complete_at`] for a document the test opened itself, which is what
+/// tests that open with a non-PHP language id or exercise edits before
+/// completing need.
+pub async fn complete_at_opened(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Vec<CompletionItem> {
+    response_items(completion_response(backend, uri, line, character, None).await)
+        .unwrap_or_default()
+}
+
+/// [`complete_at_opened`] reduced to the item labels.
+pub async fn complete_labels_at_opened(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Vec<String> {
+    item_labels(complete_at_opened(backend, uri, line, character).await)
+}
+
+/// [`complete_at_opened`] for a request an editor sends because the user just
+/// typed `trigger_character`, rather than an explicitly invoked completion.
+pub async fn complete_at_opened_with_trigger(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    trigger_character: &str,
+) -> Vec<CompletionItem> {
+    let context = CompletionContext {
+        trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+        trigger_character: Some(trigger_character.to_string()),
+    };
+    response_items(completion_response(backend, uri, line, character, Some(context)).await)
+        .unwrap_or_default()
+}
+
 /// Run an async LSP request on a thread sized like the server's own
 /// AST-walking threads.
 ///
@@ -759,4 +886,158 @@ pub fn lsp_pos_to_offset(content: &str, pos: Position) -> usize {
         offset += line.len() + 1;
     }
     content.len()
+}
+
+// ── Shared rename test helpers ──────────────────────────────────────────────
+
+/// Tell the backend the client accepts `RenameFile` and `CreateFile`
+/// resource operations in a workspace edit, the way an editor's
+/// `initialize` handshake does.
+///
+/// A class rename only emits the `RenameFile` operation that moves the
+/// declaring file when the client advertises it here.
+pub async fn initialize_with_resource_operations(backend: &Backend) {
+    backend
+        .initialize(InitializeParams {
+            capabilities: ClientCapabilities {
+                workspace: Some(WorkspaceClientCapabilities {
+                    workspace_edit: Some(WorkspaceEditClientCapabilities {
+                        resource_operations: Some(vec![
+                            ResourceOperationKind::Rename,
+                            ResourceOperationKind::Create,
+                        ]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect("initialize should succeed");
+}
+
+/// Helper: send a prepare-rename request and return the response.
+pub async fn prepare_rename(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Option<PrepareRenameResponse> {
+    let params = TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        position: Position { line, character },
+    };
+
+    backend.prepare_rename(params).await.unwrap()
+}
+
+/// Helper: send a rename request and return the workspace edit.
+pub async fn rename(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    new_name: &str,
+) -> Option<WorkspaceEdit> {
+    rename_result(backend, uri, line, character, new_name)
+        .await
+        .expect("rename was refused")
+}
+
+/// Like [`rename`] but keeps the refusal, so a test can assert on the
+/// message the user is shown.
+pub async fn rename_result(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    new_name: &str,
+) -> std::result::Result<Option<WorkspaceEdit>, String> {
+    let params = RenameParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position { line, character },
+        },
+        new_name: new_name.to_string(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+
+    backend
+        .rename(params)
+        .await
+        .map_err(|e| e.message.to_string())
+}
+
+/// Line and character of the first occurrence of `needle` in `haystack`.
+pub fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
+    for (line_idx, line) in haystack.lines().enumerate() {
+        if let Some(char_idx) = line.find(needle) {
+            return (line_idx as u32, char_idx as u32);
+        }
+    }
+    panic!("needle not found: {needle}");
+}
+
+/// Collect all text edits for a given URI from a WorkspaceEdit.
+pub fn edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
+    if let Some(changes) = edit.changes.as_ref() {
+        return changes.get(uri).cloned().unwrap_or_default();
+    }
+    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+        return Vec::new();
+    };
+    ops.iter()
+        .filter_map(|op| match op {
+            DocumentChangeOperation::Edit(e) if e.text_document.uri == *uri => Some(&e.edits),
+            _ => None,
+        })
+        .flatten()
+        .map(|e| match e {
+            OneOf::Left(e) => e.clone(),
+            OneOf::Right(e) => e.text_edit.clone(),
+        })
+        .collect()
+}
+
+/// Extract the `RenameFile` operation from a `WorkspaceEdit`, if any.
+pub fn extract_rename_file(edit: &WorkspaceEdit) -> Option<&RenameFile> {
+    let doc_changes = edit.document_changes.as_ref()?;
+    match doc_changes {
+        DocumentChanges::Operations(ops) => {
+            for op in ops {
+                if let DocumentChangeOperation::Op(ResourceOp::Rename(rf)) = op {
+                    return Some(rf);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Collect all text edits for a given URI from a `WorkspaceEdit` that uses
+/// `document_changes` (the `DocumentChanges::Operations` variant).
+pub fn doc_change_edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
+    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for op in ops {
+        if let DocumentChangeOperation::Edit(tde) = op
+            && tde.text_document.uri == *uri
+        {
+            for e in &tde.edits {
+                match e {
+                    OneOf::Left(te) => result.push(te.clone()),
+                    OneOf::Right(ate) => result.push(TextEdit {
+                        range: ate.text_edit.range,
+                        new_text: ate.text_edit.new_text.clone(),
+                    }),
+                }
+            }
+        }
+    }
+    result
 }

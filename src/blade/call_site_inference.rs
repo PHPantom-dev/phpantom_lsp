@@ -439,8 +439,7 @@ impl Backend {
                             "\\Illuminate\\View\\ComponentSlot",
                         )));
                 }
-                let Some(virtual_php) = self.blade_virtual_content.read().get(file_uri).cloned()
-                else {
+                let Some(virtual_php) = self.blade_virtual_php_arc(file_uri) else {
                     continue;
                 };
                 for vars in
@@ -626,11 +625,11 @@ impl Backend {
     /// buffer: re-inferring a template rewrites its prologue, so the map a
     /// reader holds may have been built for a shorter text than the one the
     /// pass has since written.
-    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<String> {
+    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<Arc<String>> {
         if !is_blade {
-            return self.get_file_content(uri);
+            return self.get_file_content_arc(uri);
         }
-        let content = self.blade_virtual_content.read().get(uri).cloned()?;
+        let content = self.blade_virtual_php_arc(uri)?;
         map.matches_source(&content).then_some(content)
     }
 

@@ -6,7 +6,7 @@
 //! are flagged.  Own arguments/options complete against the enclosing
 //! command's signature.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -61,34 +61,19 @@ fn position_after(content: &str, needle: &str) -> Position {
     Position { line, character }
 }
 
-fn completion_labels(response: Option<CompletionResponse>) -> Vec<String> {
-    match response {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
-        None => Vec::new(),
-    }
-}
-
+/// Labels offered at `position` of the already-open `uri`.
 async fn complete_at(
     backend: &phpantom_lsp::Backend,
     uri: &str,
     position: Position,
 ) -> Vec<String> {
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-    completion_labels(result)
+    complete_labels_at_opened(
+        backend,
+        &Url::parse(uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await
 }
 
 #[tokio::test]

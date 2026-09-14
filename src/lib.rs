@@ -957,7 +957,11 @@ pub struct Backend {
     /// to 60 seconds.
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     /// Virtual PHP content generated from Blade files.
-    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
+    ///
+    /// Shared rather than owned: every request against a template reads
+    /// this text, and a template's virtual PHP is several times the size
+    /// of the template itself.
+    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, Arc<String>>>>,
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
@@ -1472,6 +1476,13 @@ impl Backend {
     /// integration tests to diagnose the virtual content the way the
     /// live pipeline does).
     pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_php_arc(uri)
+            .map(|php| String::clone(&php))
+    }
+
+    /// [`Self::blade_virtual_php`] without the copy, for the request paths
+    /// that only need to read the text.
+    pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
         self.blade_virtual_content.read().get(uri).cloned()
     }
 

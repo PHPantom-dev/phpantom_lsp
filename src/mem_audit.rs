@@ -1529,7 +1529,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     {
         let m = backend.blade_virtual_content.read();
         n_blade = m.len();
-        misc += map_buckets::<String, String>(m.capacity());
+        misc += map_buckets::<String, Arc<String>>(m.capacity());
         for (k, v) in m.iter() {
             blade.add(k.capacity());
             blade.add(v.capacity());

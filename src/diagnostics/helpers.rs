@@ -62,15 +62,38 @@ impl FileDiagnosticContext {
     }
 }
 
-/// Compute the byte ranges of all namespace-level `use` import lines.
+// ─── `use` statement scanning ───────────────────────────────────────────────
+//
+// One scanner, three questions.  `scan_use_statements` walks the file once;
+// the two wrappers below present its result in the two shapes callers ask
+// for.  A fourth reader, `completion::use_edit::analyze_use_block`, answers
+// a different question entirely — where a *new* import should be inserted —
+// and stays separate.
+
+/// One `use` import statement.
+struct UseStatementScan {
+    /// Byte offset of the start of the statement's first line, leading
+    /// indentation included.
+    line_start: usize,
+    /// Byte offset of the `use` keyword itself.
+    keyword_start: usize,
+    /// Byte offset of the end of the statement's last line, excluding a
+    /// CRLF file's `\r`.
+    end: usize,
+    /// Whether the statement sits at import depth: brace depth 0, or depth
+    /// 1 inside a `namespace Foo { … }` block.  A trait `use` in a class
+    /// body is deeper, and so is the `@php use …;` a Blade template writes,
+    /// since the virtual PHP inlines an island inside the wrapper function.
+    top_level: bool,
+}
+
+/// Scan `content` for `use` imports.
 ///
-/// Returns a sorted list of `(line_start, line_end)` byte offset pairs.
-/// Only matches `use` lines at brace depth 0 (or depth 1 when inside a
-/// `namespace Foo { … }` block).  Trait `use` statements inside class
-/// bodies are at depth >= 1 (or >= 2 under a braced namespace) and are
-/// excluded.
-pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
-    let mut ranges = Vec::new();
+/// A statement may wrap over several lines: a group import (`use Foo\{`
+/// through its closing `};`), or a plain import split across lines without
+/// braces.  Either way it is followed until its terminating `;`.
+fn scan_use_statements(content: &str) -> Vec<UseStatementScan> {
+    let mut statements = Vec::new();
     let mut offset: usize = 0;
     // Track brace depth so we can distinguish namespace-level `use`
     // imports (depth 0, or depth 1 inside `namespace Foo { … }`) from
@@ -78,7 +101,8 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
     // or >= 2 under a braced namespace).
     let mut brace_depth: usize = 0;
     let mut namespace_brace_depth: Option<usize> = None;
-    let mut pending_use_start: Option<usize> = None;
+    let mut pending: Option<(usize, usize, bool)> = None;
+    let mut pending_is_group = false;
 
     for line in content.split('\n') {
         let line_brace_depth = brace_depth;
@@ -120,22 +144,63 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
         // A CRLF file's line still carries its `\r`; the statement ends
         // before it.
         let line_end = offset + line.trim_end_matches('\r').len();
-        if let Some(start) = pending_use_start {
+
+        if let Some((line_start, keyword_start, top_level)) = pending {
             if trimmed.contains(';') {
-                ranges.push((start, line_end));
-                pending_use_start = None;
+                statements.push(UseStatementScan {
+                    line_start,
+                    keyword_start,
+                    end: line_end,
+                    top_level,
+                });
+                pending = None;
+            } else if pending_is_group && trimmed.contains('}') {
+                // A group import closes on `};`.  A `}` on its own means
+                // the `use … {` we latched onto was a trait import with a
+                // conflict-resolution block, so stop following it rather
+                // than running on to some later statement's semicolon.
+                pending = None;
+            } else if trimmed.contains('{') {
+                pending_is_group = true;
             }
-        } else if line_brace_depth == top_level_depth && trimmed.starts_with("use ") {
+        } else if trimmed.starts_with("use ") {
+            let keyword_start = offset + (line.len() - trimmed.len());
+            let top_level = line_brace_depth == top_level_depth;
             if trimmed.contains(';') {
-                ranges.push((offset, line_end));
+                statements.push(UseStatementScan {
+                    line_start: offset,
+                    keyword_start,
+                    end: line_end,
+                    top_level,
+                });
             } else {
-                pending_use_start = Some(offset);
+                pending = Some((offset, keyword_start, top_level));
+                pending_is_group = trimmed.contains('{');
             }
         }
-        offset += line.len() + 1; // +1 for '\n'
+
+        offset += line.len() + 1; // +1 for the '\n' that `split` consumed
     }
 
-    ranges
+    statements
+}
+
+/// Which byte ranges of the file are occupied by its namespace-level `use`
+/// imports.
+///
+/// Answers "is this offset part of an import statement?" for callers that
+/// need to suppress a diagnostic on the class name an import spells out.
+/// Each range starts at the beginning of the statement's first line
+/// (indentation included), so `is_offset_in_ranges` covers the whole line.
+///
+/// Deeper `use` statements are left out: a trait import inside a class body
+/// is a real reference to the trait and must keep its diagnostics.
+pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
+    scan_use_statements(content)
+        .into_iter()
+        .filter(|stmt| stmt.top_level)
+        .map(|stmt| (stmt.line_start, stmt.end))
+        .collect()
 }
 
 pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
@@ -145,58 +210,24 @@ pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
         .any(|&(start, end)| offset >= start && offset < end)
 }
 
-// ─── `use` statement scanning ───────────────────────────────────────────────
-//
-// Shared by the unused-import fixer and the class-rename/move edit builder,
-// so both agree on what counts as "the import for this class" whether it is
-// written as its own statement or folded into a group.
-
-/// Compute the byte spans of the file's `use` statements.
+/// Where each of the file's `use` statements begins and ends.
 ///
-/// Each span starts at the `use` keyword (leading indentation excluded) and
-/// ends at the end of the statement's last line. A statement may wrap over
-/// several lines: a group import (`use Foo\{` through its closing `};`), or
-/// a plain import split across lines without braces, and is followed until
-/// its terminating `;`.
+/// Answers "which statements are the imports?" for callers that go on to
+/// pick one apart with [`find_use_statement`].  Each span starts at the
+/// `use` keyword (leading indentation excluded) and ends at the end of the
+/// statement's last line.
+///
+/// Unlike [`compute_use_line_ranges`] this keeps the deeper statements
+/// too, because a Blade template's `@php use App\Models\Post; @endphp`
+/// lands inside the wrapper function of its virtual PHP and is still the
+/// import a rename or an unused-import fix has to edit.  Callers pair this
+/// with an alias from the file's import table, so a trait `use` in a class
+/// body is only ever reached when no real import matched.
 pub(crate) fn compute_use_statement_spans(content: &str) -> Vec<ByteRange> {
-    let mut spans = Vec::new();
-    let mut offset: usize = 0;
-    let mut pending_start: Option<usize> = None;
-    let mut pending_is_group = false;
-
-    for line in content.split('\n') {
-        let trimmed = line.trim_start();
-        // A CRLF file's line still carries its `\r`; the statement ends
-        // before it.
-        let line_end = offset + line.trim_end_matches('\r').len();
-
-        if let Some(start) = pending_start {
-            if trimmed.contains(';') {
-                spans.push((start, line_end));
-                pending_start = None;
-            } else if pending_is_group && trimmed.contains('}') {
-                // A group import closes on `};`.  A `}` on its own means
-                // the `use … {` we latched onto was a trait import with a
-                // conflict-resolution block, so stop following it rather
-                // than running on to some later statement's semicolon.
-                pending_start = None;
-            } else if trimmed.contains('{') {
-                pending_is_group = true;
-            }
-        } else if trimmed.starts_with("use ") {
-            let start = offset + (line.len() - trimmed.len());
-            if trimmed.contains(';') {
-                spans.push((start, line_end));
-            } else {
-                pending_start = Some(start);
-                pending_is_group = trimmed.contains('{');
-            }
-        }
-
-        offset += line.len() + 1; // +1 for the '\n' that `split` consumed
-    }
-
-    spans
+    scan_use_statements(content)
+        .into_iter()
+        .map(|stmt| (stmt.keyword_start, stmt.end))
+        .collect()
 }
 
 /// Strip the leading `use` keyword and any `function` / `const` modifier

@@ -217,7 +217,7 @@ impl Backend {
 
         let content_to_parse = self
             .record_blade_virtual_php(uri, content)
-            .unwrap_or_else(|| content.to_string());
+            .unwrap_or_else(|| Arc::new(content.to_string()));
 
         self.laravel_string_key_cache
             .write()
@@ -344,7 +344,7 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<String> {
+    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<Arc<String>> {
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -371,9 +371,10 @@ impl Backend {
         self.blade_source_maps
             .write()
             .insert(uri.to_string(), source_map);
+        let virtual_php = Arc::new(virtual_php);
         self.blade_virtual_content
             .write()
-            .insert(uri.to_string(), virtual_php.clone());
+            .insert(uri.to_string(), Arc::clone(&virtual_php));
         Some(virtual_php)
     }
 
@@ -400,7 +401,7 @@ impl Backend {
         } else {
             None
         };
-        let content = preprocessed.as_deref().unwrap_or(content);
+        let content = preprocessed.as_ref().map_or(content, |php| php.as_str());
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)

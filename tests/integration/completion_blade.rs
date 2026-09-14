@@ -2,35 +2,11 @@
 //! directive name after an `@`, and the component name and attribute names
 //! of a `<x-…>` / `<livewire:…>` tag.
 
-use crate::common::{create_psr4_workspace, create_test_backend, open_document};
+use crate::common::{
+    complete_at_opened_with_trigger, create_psr4_workspace, create_test_backend, open_document,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some("@".to_string()),
-        }),
-    };
-
-    match backend.completion(params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => Vec::new(),
-    }
-}
 
 #[tokio::test]
 async fn at_sign_in_html_position_offers_all_known_directives() {
@@ -38,7 +14,7 @@ async fn at_sign_in_html_position_offers_all_known_directives() {
     let uri = Url::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "<div>@</div>").await;
 
-    let items = complete_at(&backend, &uri, 0, 6).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 6, "@").await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     assert!(
@@ -54,7 +30,7 @@ async fn the_if_completion_inserts_the_documented_snippet() {
     let uri = Url::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "<div>@</div>").await;
 
-    let items = complete_at(&backend, &uri, 0, 6).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 6, "@").await;
     let if_item = items
         .iter()
         .find(|i| i.label == "@if")
@@ -74,7 +50,7 @@ async fn a_partial_directive_name_filters_the_list() {
     open_document(&backend, &uri, "blade", "<div>@for</div>").await;
 
     // Cursor right after "@for".
-    let items = complete_at(&backend, &uri, 0, 9).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 9, "@").await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     assert!(labels.contains(&"@for"), "got: {:?}", labels);
@@ -96,7 +72,7 @@ async fn an_unknown_directive_name_still_short_circuits_with_an_empty_list() {
     // (e.g.) class-name completion.
     open_document(&backend, &uri, "blade", "<div>@zzz</div>").await;
 
-    let items = complete_at(&backend, &uri, 0, 9).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 9, "@").await;
     assert!(
         items.is_empty(),
         "expected an empty (short-circuited) list, got: {:?}",
@@ -111,7 +87,7 @@ async fn no_directive_completion_inside_echo_braces() {
     open_document(&backend, &uri, "blade", "{{ @ }}").await;
 
     // Cursor right after "@" inside `{{ ... }}`.
-    let items = complete_at(&backend, &uri, 0, 4).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 4, "@").await;
     assert!(
         items.is_empty(),
         "directive completion must not fire inside {{{{ }}}}, got: {:?}",
@@ -127,7 +103,7 @@ async fn no_directive_completion_inside_a_php_block() {
 
     // Cursor right after the trailing "@" on the first line, still inside
     // the `@php ... @endphp` block.
-    let items = complete_at(&backend, &uri, 0, 14).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 14, "@").await;
     assert!(
         items.is_empty(),
         "directive completion must not fire inside a @php block, got: {:?}",
@@ -143,7 +119,7 @@ async fn directive_completion_still_fires_inside_an_open_block() {
     // a nested directive must still complete.
     open_document(&backend, &uri, "blade", "@if ($x)\n    @\n@endif").await;
 
-    let items = complete_at(&backend, &uri, 1, 5).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 1, 5, "@").await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"@foreach"),

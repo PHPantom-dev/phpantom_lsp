@@ -19,12 +19,12 @@
 //!
 //! The fixer pipeline is:
 //!
-//! 1. **Init** — same headless `Backend` setup as `analyse`.
-//! 2. **Discover** — reuses `analyse::discover_user_files`.
-//! 3. **Parse** — parallel `update_ast` pass (identical to analyse Phase 1).
-//! 4. **Fix** — for each file, run the selected diagnostic collectors,
+//! 1. **Open** — `analyse::open_project` runs the same headless
+//!    `Backend` setup as `analyze` and discovers the files to fix.
+//! 2. **Parse** — parallel `update_ast` pass (identical to analyse Phase 1).
+//! 3. **Fix** — for each file, run the selected diagnostic collectors,
 //!    compute the corresponding code-action edits, and apply them.
-//! 5. **Write** — write modified files back to disk (unless `--dry-run`).
+//! 4. **Write** — write modified files back to disk (unless `--dry-run`).
 //!
 //! Rules are identified by their diagnostic code string. Native rules
 //! use bare identifiers (`unused_import`, `deprecated`). PHPStan-based
@@ -39,7 +39,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::analyse::{OutputFormat, print_success_box, progress_bar};
+use crate::analyse::{
+    OpenedProject, OutputFormat, note_plain_php_project, open_project, print_success_box,
+    progress_bar,
+};
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
 use crate::text_position::position_to_byte_offset;
@@ -220,16 +223,7 @@ fn apply_text_edits(content: &str, edits: &[TextEdit]) -> String {
 pub async fn run(options: FixOptions) -> i32 {
     let root = &options.workspace_root;
 
-    // A missing composer.json is not an error: plain PHP trees fix
-    // fine — classes are indexed by scanning the tree and files are
-    // discovered by walking the root.  Note it on stderr so a mistyped
-    // --project-root does not silently fix the wrong directory.
-    if !root.join("composer.json").is_file() {
-        eprintln!(
-            "Note: no composer.json found in {} — treating it as a plain PHP project.",
-            root.display()
-        );
-    }
+    note_plain_php_project(root, "treating it as a plain PHP project.");
 
     // ── Validate rules ──────────────────────────────────────────────
     let rule_errors = validate_rules(&options.rules, options.with_phpstan);
@@ -246,20 +240,13 @@ pub async fn run(options: FixOptions) -> i32 {
         return 0;
     }
 
-    // ── 1. Load config ──────────────────────────────────────────────
+    // ── 1. Open the project and discover the files to fix ───────────
     let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
-
-    // ── 2. Index project ────────────────────────────────────────────
-    let backend = Backend::new_headless();
-    crate::analyse::open_headless_project(&backend, root, cfg).await;
-
-    // ── 3. Discover files ───────────────────────────────────────────
-    let files = crate::analyse::discover_user_files(&backend, root, options.path_filter.as_slice());
-
-    if files.is_empty() {
-        eprintln!("No PHP files found.");
+    let Some(OpenedProject { backend, files }) =
+        open_project(root, cfg, options.path_filter.as_slice()).await
+    else {
         return 0;
-    }
+    };
 
     let file_count = files.len();
     let use_colour = options.use_colour;
@@ -268,7 +255,7 @@ pub async fn run(options: FixOptions) -> i32 {
         .map(|n| n.get())
         .unwrap_or(4);
 
-    // ── Phase 1: Parse all files (parallel) ─────────────────────────
+    // ── 2. Parse all files (parallel) ───────────────────────────────
     if use_colour && output_format == OutputFormat::Table {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Parsing"));
     }
@@ -284,7 +271,7 @@ pub async fn run(options: FixOptions) -> i32 {
     // driven by false-positive diagnostics.
     crate::analyse::discover_laravel_resources(&backend);
 
-    // ── Phase 2: Fix files (parallel) ───────────────────────────────
+    // ── 3. Fix files (parallel) ─────────────────────────────────────
     if use_colour && output_format == OutputFormat::Table {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Fixing"));
     }
@@ -379,7 +366,7 @@ pub async fn run(options: FixOptions) -> i32 {
         );
     }
 
-    // ── Phase 3: Write results ──────────────────────────────────────
+    // ── 4. Write results ────────────────────────────────────────────
     let mut sorted_results: Vec<FileFixResult> =
         results.into_iter().filter(|r| r.changed).collect();
     sorted_results.sort_by(|a, b| a.display_path.cmp(&b.display_path));
