@@ -1811,7 +1811,154 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<p>Filed by the Sprint 7 gate analysis of 2026-09-14, scoped to the 264
+<code>src/</code> files the sprint changed rather than to BL1's modules alone.</p>
+<h2 id="r1-split-preprocess_with_vars-out-of-the-blade-preprocessors-modrs">R1. Split <code>preprocess_with_vars</code> out of the Blade preprocessor's <code>mod.rs</code><a class="headerlink" href="#r1-split-preprocess_with_vars-out-of-the-blade-preprocessors-modrs" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> <code>preprocess_with_vars</code> is a single 1,109-line function
+(lines 247-1356) and <code>mod.rs</code> is 1,498 lines in a directory that already
+holds <code>component_call.rs</code>. Lift the per-construct handling out of the
+match into sibling modules and leave <code>mod.rs</code> as the driver plus its
+re-exports: the <code>@</code>-directive arm, the <code>{{ }}</code>/<code>{!! !!}</code>/<code>@{{ }}</code> echo
+arms, the component-tag arm, and the <code>&lt;?php</code>/<code>@php</code> island arm each read
+as a separate concern already, and the small helpers at the bottom
+(<code>flush_buffer</code>, <code>push_comment_text</code>, <code>build_use_statement</code>,
+<code>build_inject_statement</code>) go with whichever arm owns them.</p>
+<p><strong>Which files to change.</strong> <code>src/blade/preprocessor/mod.rs</code>, new siblings
+under <code>src/blade/preprocessor/</code>.</p>
+<p><strong>Why it matters for the sprint.</strong> This is the sprint's highest-churn
+file (3,722 lines changed) and the one BL1 has to reason about when it
+decides which code actions make sense in a template and where their
+edits land. A function this long cannot be read against the source map
+it emits.</p>
+<h2 id="r2-move-the-laravel-self-scan-subsystem-out-of-serverrs">R2. Move the Laravel self-scan subsystem out of <code>server.rs</code><a class="headerlink" href="#r2-move-the-laravel-self-scan-subsystem-out-of-serverrs" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> <code>src/server.rs</code> is 3,871 lines doing two jobs: the
+<code>LanguageServer</code> trait dispatch (lines 104-2000) and, from line 2466 to
+3,790, a Laravel index-building subsystem (<code>build_laravel_macro_index</code>,
+<code>build_laravel_command_index</code>, <code>build_laravel_morph_map_index</code>,
+<code>build_laravel_gate_index</code>, <code>build_laravel_date_class</code>,
+<code>build_provider_resources</code>, <code>scan_provider_resources</code>,
+<code>publish_provider_resources</code>, <code>refresh_laravel_*</code>,
+<code>infer_laravel_macro_return_types</code>, <code>infer_storage_driver_return_types</code>,
+<code>reload_laravel_schema_index</code>, <code>update_laravel_migrations</code> and their
+private helpers). Move that block to its own module next to the code it
+serves. The generic request plumbing above it (<code>with_file_content</code>,
+<code>handle_with_position</code>, <code>handle_with_uri</code>, <code>coalesced_whole_file</code>, and
+the coalescing tests) belongs with <code>src/backend/</code>, not with the Laravel
+scan.</p>
+<p><strong>Which files to change.</strong> <code>src/server.rs</code>, new
+<code>src/backend/laravel_scan.rs</code> (or <code>src/virtual_members/laravel/scan.rs</code>),
+<code>src/backend/mod.rs</code>, <code>src/lib.rs</code>.</p>
+<p><strong>Why it matters for the sprint.</strong> BL1 edits the <code>code_action</code> gate in
+this file, and the sprint already put 1,086 lines of churn through it.
+Adding Blade gating to a file that also owns Laravel provider scanning
+makes the LSP surface harder to find every time.</p>
+<h2 id="r3-split-cond_narrowingmodrs">R3. Split <code>cond_narrowing/mod.rs</code><a class="headerlink" href="#r3-split-cond_narrowingmodrs" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> The directory already has six sibling modules
+(<code>assertions.rs</code>, <code>emptiness.rs</code>, <code>instanceof.rs</code>, <code>key_types.rs</code>,
+<code>null_identity.rs</code>, <code>property_checks.rs</code>) and <code>mod.rs</code> still holds 4,120
+lines. Split along the seams the file already has: the <code>extract_*</code>
+condition predicates (lines 2636-3100), the <code>preg_match</code> group
+(<code>apply_preg_match_narrowing</code>, <code>record_preg_outcome</code>,
+<code>preg_outcome_alias</code>), the <code>in_array</code> group
+(<code>apply_in_array_narrowing</code>, <code>narrow_value_by_element</code>,
+<code>resolve_in_array_element_type_fw</code>), and
+<code>apply_phpstan_assert_condition_narrowing</code> with its helpers. <code>mod.rs</code>
+keeps <code>apply_condition_narrowing</code>, its inverse, and the re-exports.</p>
+<p><strong>Which files to change.</strong>
+<code>src/type_engine/variable/forward_walk/cond_narrowing/mod.rs</code>, new
+siblings in the same directory.</p>
+<p><strong>Why it matters for the sprint.</strong> Second-highest churn of the sprint
+(2,274 lines changed) and the shared narrowing path every feature reads
+through. It is the file a future correctness fix lands in, and it is
+currently the one place in the tree where a <code>mod.rs</code> outweighs all its
+siblings combined.</p>
+<h2 id="r4-break-up-analyserunrun">R4. Break up <code>analyse::run::run</code><a class="headerlink" href="#r4-break-up-analyserunrun" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> <code>run()</code> is one 505-line function (lines 31-536) that
+parses options, discovers the project, builds the index, spawns the
+diagnostic workers, collects results, and reports. <code>fix::run</code>
+(<code>src/fix.rs</code>, 223 lines) now shares its parse phase, so the shared
+stages should be named functions both call rather than a block one of
+them owns.</p>
+<p><strong>Which files to change.</strong> <code>src/analyse/run.rs</code>, <code>src/fix.rs</code>.</p>
+<p><strong>Why it matters for the sprint.</strong> <code>analyze</code> and <code>fix</code> grew a shared
+parse phase this sprint and <code>format</code> was added beside them; the next
+change to any of the three has to be read against a function that does
+six things.</p>
+<h2 id="r5-give-the-integration-suite-one-complete_at-helper">R5. Give the integration suite one <code>complete_at</code> helper<a class="headerlink" href="#r5-give-the-integration-suite-one-complete_at-helper" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> 37 files under <code>tests/integration/</code> each define their
+own <code>async fn complete_at</code>, in three signature variants
+(<code>&amp;Backend</code> vs <code>&amp;phpantom_lsp::Backend</code>, with and without a <code>text</code>
+argument, one taking a <code>Position</code>). <code>tests/integration/common/mod.rs</code>
+has no completion helper at all. Add one there and delete the copies.</p>
+<p><strong>Which files to change.</strong> <code>tests/integration/common/mod.rs</code> and the 37
+<code>tests/integration/*.rs</code> files that define the helper.</p>
+<p><strong>Why it matters for the sprint.</strong> Eight of those files were edited this
+sprint, and a completion test for a Blade template has to be written
+against whichever variant its file happens to carry. This is a
+project-wide rewrite: run it as the sole active agent or in batches of
+non-overlapping files.</p>
+<h2 id="r6-move-the-rename-suite-to-testsintegration">R6. Move the rename suite to <code>tests/integration/</code><a class="headerlink" href="#r6-move-the-rename-suite-to-testsintegration" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> <code>src/rename/tests.rs</code> is 6,363 lines, the largest file
+in the tree, and every test in it drives a real <code>Backend</code> through
+<code>did_open</code> + <code>prepare_rename</code>/<code>rename</code> (148 <code>Backend</code> references).
+<code>tests/integration/</code> has no <code>rename*.rs</code> at all. Move it out, splitting
+by subject the way the code-action tests are split (class, namespace,
+member, variable, Laravel). The private API it reaches for is small:
+<code>crate::composer::Psr</code>, <code>crate::test_fixtures::apply_edits</code>,
+<code>extract_macro_registrations</code>, <code>backend.laravel_macros</code>, <code>backend.psr</code>,
+<code>parse_and_cache_content</code>, <code>update_ast</code>, <code>supports_file_rename</code> -
+<code>tests/integration/common/mod.rs</code> already exposes equivalents for most
+of these, and <code>laravel_references.rs</code> already seeds the macro index from
+outside the crate.</p>
+<p><code>src/references/tests.rs</code> (3,028 lines) stays where it is: it reaches
+into <code>indexing::preload</code>, <code>progress::ScanProgress</code>,
+<code>reference_index::ReferenceIndexKey</code>, and <code>workspace_index_lock</code>, which
+are white-box tests of the indexing machinery rather than LSP-level
+tests, and moving them would mean making that machinery public.</p>
+<p><strong>Which files to change.</strong> <code>src/rename/tests.rs</code> (delete), new
+<code>tests/integration/rename_*.rs</code>, <code>src/rename/mod.rs</code>,
+<code>tests/integration/common/mod.rs</code>.</p>
+<p><strong>Why it matters for the sprint.</strong> The 2026-09-12 pass moved
+<code>import_class_tests.rs</code> out for exactly this reason; this is the same
+problem an order of magnitude larger, in a module the sprint changed
+(1,432 lines of churn) and that B51 is about to change again.</p>
+<h2 id="r7-consolidate-the-use-statement-scanners">R7. Consolidate the <code>use</code>-statement scanners<a class="headerlink" href="#r7-consolidate-the-use-statement-scanners" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> Four scanners read a file's <code>use</code> statements and they no
+longer agree: <code>compute_use_line_ranges</code> (<code>src/diagnostics/helpers.rs</code>)
+and <code>find_use_statement_range</code> (<code>src/diagnostics/unused_imports.rs</code>)
+read a <code>use</code> as a whole statement and understand group imports;
+<code>find_use_line_range</code> (<code>src/rename/class.rs</code>) is line-based and
+understands neither; <code>analyze_use_block</code>
+(<code>src/completion/use_edit.rs</code>) reads the block to decide where a new
+import goes. Fold the rename path onto the shared statement scanner and
+keep <code>analyze_use_block</code> as the one insertion-point reader, documenting
+at each what it answers.</p>
+<p><strong>Which files to change.</strong> <code>src/rename/class.rs</code>,
+<code>src/diagnostics/helpers.rs</code>, <code>src/diagnostics/unused_imports.rs</code>,
+<code>src/completion/use_edit.rs</code>.</p>
+<p><strong>Why it matters for the sprint.</strong> The divergence is already a
+user-visible bug: B51 (<code>docs/todo/bugs.md</code>), where renaming a class
+imported through <code>use App\Models\{User, Post};</code> leaves the import
+behind. The sprint taught one copy about group and multi-line imports
+and left the other on line matching. Delete the B51 entry when this
+lands.</p>
+<h2 id="r8-stop-deep-cloning-a-templates-virtual-php-on-every-request">R8. Stop deep-cloning a template's virtual PHP on every request<a class="headerlink" href="#r8-stop-deep-cloning-a-templates-virtual-php-on-every-request" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> <code>blade_virtual_content</code> is
+<code>Arc&lt;RwLock&lt;HashMap&lt;String, String&gt;&gt;&gt;</code> and <code>blade_virtual_php</code>
+(<code>src/lib.rs</code>) hands out <code>.cloned()</code>, so <code>analysable_content</code>,
+<code>analysable_content_at</code>, and <code>analysable_content_or</code>
+(<code>src/backend/file_access.rs</code>) copy the whole virtual PHP string on
+every completion, hover, go-to-definition, code-action, and diagnostic
+request against a template. PHP files have <code>get_file_content_arc</code> for
+exactly this; templates have no equivalent. Store <code>Arc&lt;String&gt;</code> in the
+map and add the <code>Arc</code> accessors beside the cloning ones.</p>
+<p><strong>Which files to change.</strong> <code>src/lib.rs</code>, <code>src/backend/file_access.rs</code>,
+<code>src/parser/ast_update.rs</code> (<code>record_blade_virtual_php</code>),
+<code>src/server.rs</code>, <code>src/completion/handler/mod.rs</code>,
+<code>src/code_actions/mod.rs</code>, <code>src/diagnostics/mod.rs</code>, <code>src/fix.rs</code>.</p>
+<p><strong>Why it matters for the sprint.</strong> BL1 adds <code>code_actions/mod.rs</code> to the
+list of per-keystroke consumers, on files (Blade templates) that are
+already the slowest path in the server.</p>
 
 
 
