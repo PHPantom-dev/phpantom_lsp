@@ -544,6 +544,15 @@ impl Backend {
                 false,
             ));
         }
+        for site in &symbol_map.morph_column_sites {
+            entries.push((
+                ReferenceIndexKey::LaravelString {
+                    kind: crate::symbol_map::LaravelStringKind::MorphAlias,
+                    key: site.key.clone(),
+                },
+                false,
+            ));
+        }
 
         if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in classes {

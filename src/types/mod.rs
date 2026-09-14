@@ -1680,6 +1680,11 @@ pub struct LaravelMetadata {
     /// resolved to an FQN in the name-resolution pass.  Used to surface the
     /// custom pivot class and extra pivot columns in hover.
     pub belongs_to_many_pivots: Vec<PivotRelation>,
+    /// Relation method names and discriminator columns recovered from
+    /// returned `$this->morphTo()` calls. A missing column derives its name
+    /// from the effective method name, including trait aliases. Kept on the
+    /// declaring class or trait so lookup respects method overrides.
+    pub morph_type_columns: Vec<(Atom, Option<Atom>)>,
     /// What this class's `getFacadeAccessor()` returns, when it declares
     /// one.
     ///
