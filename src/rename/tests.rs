@@ -1964,6 +1964,290 @@ async fn rename_class_cross_file_use_import_multiple_refs() {
 }
 
 #[tokio::test]
+async fn rename_class_updates_group_import_member() {
+    // Renaming a class imported through a multi-member group statement
+    // should rewrite only that member, leaving its siblings alone.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\{TaskResource, TaskDto};\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "TaskResourceService").await;
+    let ws = edit.expect("Expected a workspace edit for class rename");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert!(
+        result.contains("use Acme\\Tasks\\Resources\\{TaskResourceService, TaskDto};"),
+        "Only the renamed member should change, sibling preserved; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("TaskResourceService::class"),
+        "got:\n{}",
+        result
+    );
+    assert!(!result.contains("TaskResource::class"), "got:\n{}", result);
+}
+
+#[tokio::test]
+async fn rename_class_updates_wrapped_group_import_member() {
+    // The same as above, but the group is wrapped over several lines the
+    // way a long member list usually is.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\{\n",
+        "    TaskResource,\n",
+        "    TaskDto,\n",
+        "};\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "TaskResourceService").await;
+    let ws = edit.expect("Expected a workspace edit for class rename");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert!(
+        result.contains("    TaskResourceService,\n"),
+        "got:\n{}",
+        result
+    );
+    assert!(result.contains("    TaskDto,\n"), "got:\n{}", result);
+    assert!(!result.contains("TaskResource,\n"), "got:\n{}", result);
+}
+
+#[tokio::test]
+async fn rename_class_collapses_a_single_member_group_import() {
+    // A one-member group has nothing left to keep, so it is rewritten as
+    // a plain `use` statement rather than an empty `{}`.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\{TaskResource};\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "TaskResourceService").await;
+    let ws = edit.expect("Expected a workspace edit for class rename");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert!(
+        result.contains("use Acme\\Tasks\\Resources\\TaskResourceService;"),
+        "got:\n{}",
+        result
+    );
+    assert!(!result.contains("Resources\\{"), "got:\n{}", result);
+}
+
+#[tokio::test]
+async fn rename_class_move_within_group_prefix_updates_member() {
+    // A move that stays under the group's shared prefix rewrites the
+    // member's relative name in place.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\{TaskResource, TaskDto};\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(
+        &backend,
+        &uri_decl,
+        3,
+        6,
+        "Acme\\Tasks\\Resources\\V2\\TaskResource",
+    )
+    .await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert!(
+        result.contains("use Acme\\Tasks\\Resources\\{V2\\TaskResource, TaskDto};"),
+        "got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_out_of_group_prefix_splits_the_import() {
+    // A move whose new namespace no longer fits the group's shared prefix
+    // cannot stay a member of that group: it is dropped from the group
+    // (keeping the sibling) and re-added as its own `use` statement.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\{TaskResource, TaskDto};\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "Vendor\\Other\\Task2").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert!(
+        result.contains("use Acme\\Tasks\\Resources\\{TaskDto};")
+            || result.contains("use Acme\\Tasks\\Resources\\{TaskDto}"),
+        "The sibling should stay imported without the moved member; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("use Vendor\\Other\\Task2;"),
+        "The moved class should get its own import; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("Task2::class"),
+        "In-code reference should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        !result.contains("TaskResource"),
+        "The old name should not remain anywhere; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_updates_a_brace_less_comma_import_list() {
+    // A plain multi-import statement without braces
+    // (`use Foo\Bar, Baz\Qux;`) is a group in spirit even without the
+    // `{}` syntax: only the renamed item should change.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Tasks;\n",
+        "\n",
+        "use Acme\\Tasks\\Resources\\TaskResource, Acme\\Tasks\\Resources\\TaskDto;\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "TaskResourceService").await;
+    let ws = edit.expect("Expected a workspace edit for class rename");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert!(
+        result.contains(
+            "use Acme\\Tasks\\Resources\\TaskResourceService, Acme\\Tasks\\Resources\\TaskDto;"
+        ),
+        "Only the renamed item should change, sibling preserved; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("TaskResourceService::class"),
+        "got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn rename_class_fqn_inline_reference() {
     // When a file uses the class via an inline FQN (no use statement),
     // only the last segment should be renamed.

@@ -15,7 +15,10 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
-use super::helpers::{ByteRange, compute_use_line_ranges, is_offset_in_ranges};
+use super::helpers::{
+    ByteRange, compute_use_line_ranges, compute_use_statement_spans, find_use_statement,
+    is_offset_in_ranges,
+};
 
 impl Backend {
     /// Collect unused-import diagnostics for a single file.
@@ -224,50 +227,6 @@ fn compute_declaration_line_ranges(content: &str) -> Vec<ByteRange> {
     ranges
 }
 
-/// Compute the byte spans of the file's `use` statements.
-///
-/// Each span starts at the `use` keyword (leading indentation excluded)
-/// and ends at the end of the statement's last line.  A group import may
-/// wrap over several lines, so a `use … {` line without a `;` is joined
-/// with the lines up to the one closing it.
-fn compute_use_statement_spans(content: &str) -> Vec<ByteRange> {
-    let mut spans = Vec::new();
-    let mut offset: usize = 0;
-    let mut pending_start: Option<usize> = None;
-
-    for line in content.split('\n') {
-        let trimmed = line.trim_start();
-        // A CRLF file's line still carries its `\r`; the statement ends
-        // before it.
-        let line_end = offset + line.trim_end_matches('\r').len();
-
-        if let Some(start) = pending_start {
-            if trimmed.contains(';') {
-                spans.push((start, line_end));
-                pending_start = None;
-            } else if trimmed.contains('}') {
-                // A group import closes on `};`.  A `}` on its own means
-                // the `use … {` we latched onto was a trait import with a
-                // conflict-resolution block, so stop following it rather
-                // than running on to some later statement's semicolon.
-                pending_start = None;
-            }
-        } else if trimmed.starts_with("use ") {
-            let start = offset + (line.len() - trimmed.len());
-            if trimmed.contains(';') {
-                spans.push((start, line_end));
-            } else if trimmed.contains('{') {
-                // `use App\Models\{` — the members follow on later lines.
-                pending_start = Some(start);
-            }
-        }
-
-        offset += line.len() + 1; // +1 for the '\n' that `split` consumed
-    }
-
-    spans
-}
-
 /// Extract the first segment of a potentially qualified name.
 ///
 /// - `"Foo"` → `"Foo"`
@@ -417,161 +376,6 @@ fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b > 0x7F
 }
 
-/// Strip the leading `use` keyword and any `function` / `const` modifier
-/// from a `use` statement, returning the remainder.
-fn use_statement_body(stmt: &str) -> Option<&str> {
-    let body = stmt.strip_prefix("use ")?.trim_start();
-    Some(
-        body.strip_prefix("function ")
-            .or_else(|| body.strip_prefix("const "))
-            .unwrap_or(body)
-            .trim_start(),
-    )
-}
-
-/// Whether joining a group import's prefix and a member name yields `fqn`.
-///
-/// Compared segment-for-segment without allocating, so `App\Models` +
-/// `User` matches `App\Models\User` but not `App\Models\SuperUser`.
-fn joined_name_matches(prefix: &str, name: &str, fqn: &str) -> bool {
-    let name = name.trim_start_matches('\\');
-    if prefix.is_empty() {
-        return fqn == name;
-    }
-    fqn.len() == prefix.len() + 1 + name.len()
-        && fqn.starts_with(prefix)
-        && fqn.as_bytes()[prefix.len()] == b'\\'
-        && fqn.ends_with(name)
-}
-
-/// Whether a simple (non-group, non-alias) `use` statement imports exactly
-/// `fqn`.
-///
-/// Extracts the imported name from the statement (handling `use function` /
-/// `use const`) and compares it to `fqn` segment-for-segment, ignoring a
-/// leading namespace separator on either side. This avoids matching
-/// `use App\FooBar;` when looking for `use App\Foo;`.
-fn simple_use_imports_exact(stmt: &str, fqn: &str) -> bool {
-    let Some(body) = use_statement_body(stmt) else {
-        return false;
-    };
-    let name = match body.split(';').next() {
-        Some(n) => n.trim(),
-        None => return false,
-    };
-    // A simple import has no alias clause; reject if one is present so the
-    // dedicated alias path handles it.
-    if name.contains(" as ") {
-        return false;
-    }
-    name.trim_start_matches('\\') == fqn.trim_start_matches('\\')
-}
-
-/// Trim whitespace and comments from both ends of a group import member,
-/// returning the span of what is left within `item`.
-///
-/// A wrapped group may carry comments between its members, as in
-/// `Nonexistent, // could be namespace`, and the comment belongs to
-/// whichever member `split(',')` happened to attach it to.
-fn member_content_span(item: &str) -> (usize, usize) {
-    let mut start = 0;
-
-    loop {
-        let rest = &item[start..];
-        start += rest.len() - rest.trim_start().len();
-
-        let rest = &item[start..];
-        let skipped = if rest.starts_with("//") || rest.starts_with('#') {
-            rest.find('\n').map(|i| i + 1)
-        } else if rest.starts_with("/*") {
-            rest.find("*/").map(|i| i + 2)
-        } else {
-            break;
-        };
-
-        match skipped {
-            Some(n) => start += n,
-            // An unterminated comment swallows the rest of the member.
-            None => return (item.len(), item.len()),
-        }
-    }
-
-    let tail = &item[start..];
-    let content_len = ["//", "#", "/*"]
-        .iter()
-        .filter_map(|opener| tail.find(opener))
-        .min()
-        .unwrap_or(tail.len());
-    (start, start + tail[..content_len].trim_end().len())
-}
-
-/// Locate the member of a group import (`use Foo\{Bar, Baz as B};`) that
-/// imports `fqn` under `alias`.
-///
-/// Returns the member's byte span within `decl` (covering any `as` clause)
-/// along with the number of members in the group.  `decl` may span several
-/// lines, since PHP allows the group body to be wrapped.
-fn find_group_member(decl: &str, fqn: &str, alias: &str) -> Option<(usize, usize, usize)> {
-    let brace_open = decl.find('{')?;
-    let brace_close = decl.rfind('}')?;
-    if brace_close < brace_open {
-        return None;
-    }
-
-    let body = use_statement_body(decl)?;
-    let body_start = decl.len() - body.len();
-    // Everything between the `use` keyword and the `{` is the shared
-    // prefix: `use App\Models\{` → `App\Models`.
-    let prefix = decl
-        .get(body_start..brace_open)?
-        .trim()
-        .trim_end_matches('\\')
-        .trim_start_matches('\\');
-    let fqn = fqn.trim_start_matches('\\');
-
-    let mut member_count = 0;
-    let mut found = None;
-    let mut offset = brace_open + 1;
-
-    for item in decl[brace_open + 1..brace_close].split(',') {
-        let item_start = offset;
-        offset += item.len() + 1; // +1 for the comma `split` consumed
-
-        let (content_start, content_end) = member_content_span(item);
-        let entry = &item[content_start..content_end];
-        if entry.is_empty() {
-            // A trailing comma before the closing brace is legal PHP, and
-            // so is a comment sitting on a line of its own.
-            continue;
-        }
-        member_count += 1;
-
-        if found.is_some() {
-            continue;
-        }
-
-        // A mixed group spells the modifier per member:
-        // `use Foo\{function bar, const BAZ, Qux};`
-        let entry = entry
-            .strip_prefix("function ")
-            .or_else(|| entry.strip_prefix("const "))
-            .unwrap_or(entry)
-            .trim_start();
-        let (name, member_alias) = match entry.split_once(" as ") {
-            Some((n, a)) => (n.trim(), Some(a.trim())),
-            None => (entry, None),
-        };
-        let short_name = name.rsplit('\\').next().unwrap_or(name);
-
-        if joined_name_matches(prefix, name, fqn) && member_alias.unwrap_or(short_name) == alias {
-            found = Some((item_start + content_start, item_start + content_end));
-        }
-    }
-
-    let (start, end) = found?;
-    Some((start, end, member_count))
-}
-
 /// Find the source range of the `use` statement that imports a given FQN
 /// (or alias).
 ///
@@ -590,61 +394,22 @@ fn find_use_statement_range(
     fqn: &str,
     use_ranges: &[ByteRange],
 ) -> Option<Range> {
-    // The FQN's last segment or the alias — what appears in the `use` line.
-    let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
-    let has_alias = short_name != alias;
-
-    for &(stmt_start, stmt_end) in use_ranges {
-        let Some(stmt) = content.get(stmt_start..stmt_end) else {
-            continue;
-        };
-
-        // Match against the declaration only, so a trailing comment can't
-        // be mistaken for a group body.
-        let decl = stmt.split(';').next().unwrap_or(stmt);
-
-        if decl.contains('{') {
-            let Some((member_start, member_end, member_count)) =
-                find_group_member(decl, fqn, alias)
-            else {
-                continue;
-            };
-
-            // A one-member group has nothing left to keep, so highlight the
-            // whole statement the way a plain `use Foo\Bar;` line would be.
-            if member_count > 1 {
-                return backend.offset_range_to_lsp_range(
-                    uri,
-                    content,
-                    stmt_start + member_start,
-                    stmt_start + member_end,
-                );
-            }
-        } else {
-            let is_match = if has_alias {
-                // `use Foo\Bar as Alias;`
-                decl.contains(fqn) && decl.contains(&format!("as {}", alias))
-            } else {
-                // Simple: `use Foo\Bar;`. Compare the imported name exactly
-                // rather than by substring so `use App\Foo;` is not matched
-                // by the `use App\FooBar;` line that shares its prefix.
-                simple_use_imports_exact(decl, fqn)
-            };
-
-            if !is_match {
-                continue;
-            }
-        }
-
-        return backend.offset_range_to_lsp_range(uri, content, stmt_start, stmt_end);
-    }
-
-    None
+    let location = find_use_statement(content, use_ranges, fqn, alias)?;
+    // A one-member group (or an ordinary single-class import) has nothing
+    // left to keep, so the whole statement is highlighted; otherwise just
+    // the unused member.
+    let (start, end) = if location.member_count > 1 {
+        location.member
+    } else {
+        location.statement
+    };
+    backend.offset_range_to_lsp_range(uri, content, start, end)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::helpers::find_use_member;
 
     /// Helper: no use-statement or declaration ranges to exclude.
     fn referenced(content: &str, alias: &str) -> bool {
@@ -724,38 +489,39 @@ class Dto {
     #[test]
     fn finds_member_in_single_line_group() {
         let decl = "use App\\Models\\{User, Post}";
-        let (start, end, count) = find_group_member(decl, "App\\Models\\Post", "Post").unwrap();
-        assert_eq!(&decl[start..end], "Post");
-        assert_eq!(count, 2);
+        let m = find_use_member(decl, "App\\Models\\Post", "Post").unwrap();
+        assert_eq!(&decl[m.start..m.end], "Post");
+        assert_eq!(m.member_count, 2);
+        assert_eq!(m.prefix, "App\\Models");
     }
 
     #[test]
     fn finds_member_in_multiline_group() {
         let decl = "use App\\Models\\{\n    User,\n    Post,\n}";
-        let (start, end, count) = find_group_member(decl, "App\\Models\\User", "User").unwrap();
-        assert_eq!(&decl[start..end], "User");
-        assert_eq!(count, 2, "a trailing comma does not add a member");
+        let m = find_use_member(decl, "App\\Models\\User", "User").unwrap();
+        assert_eq!(&decl[m.start..m.end], "User");
+        assert_eq!(m.member_count, 2, "a trailing comma does not add a member");
     }
 
     #[test]
     fn group_member_span_covers_alias_clause() {
         let decl = "use App\\Models\\{User, Post as BlogPost}";
-        let (start, end, _) = find_group_member(decl, "App\\Models\\Post", "BlogPost").unwrap();
-        assert_eq!(&decl[start..end], "Post as BlogPost");
+        let m = find_use_member(decl, "App\\Models\\Post", "BlogPost").unwrap();
+        assert_eq!(&decl[m.start..m.end], "Post as BlogPost");
     }
 
     #[test]
     fn group_member_matches_nested_name() {
         let decl = "use App\\{Models\\User, Post}";
-        let (start, end, _) = find_group_member(decl, "App\\Models\\User", "User").unwrap();
-        assert_eq!(&decl[start..end], "Models\\User");
+        let m = find_use_member(decl, "App\\Models\\User", "User").unwrap();
+        assert_eq!(&decl[m.start..m.end], "Models\\User");
     }
 
     #[test]
     fn group_member_matches_per_member_modifier() {
         let decl = "use App\\{function helper, const LIMIT}";
-        let (start, end, _) = find_group_member(decl, "App\\LIMIT", "LIMIT").unwrap();
-        assert_eq!(&decl[start..end], "const LIMIT");
+        let m = find_use_member(decl, "App\\LIMIT", "LIMIT").unwrap();
+        assert_eq!(&decl[m.start..m.end], "const LIMIT");
     }
 
     #[test]
@@ -763,28 +529,28 @@ class Dto {
         // `App\Models\SuperUser` must not be matched when looking for
         // `App\Models\User`.
         let decl = "use App\\Models\\{SuperUser}";
-        assert!(find_group_member(decl, "App\\Models\\User", "User").is_none());
+        assert!(find_use_member(decl, "App\\Models\\User", "User").is_none());
     }
 
     #[test]
     fn group_member_requires_matching_alias() {
         let decl = "use App\\Models\\{Post as BlogPost}";
-        assert!(find_group_member(decl, "App\\Models\\Post", "Post").is_none());
+        assert!(find_use_member(decl, "App\\Models\\Post", "Post").is_none());
     }
 
     #[test]
     fn group_member_after_a_comment_is_still_found() {
         let decl = "use Uses\\{\n\tBar,\n\tNonexistent, // could be namespace\n\tfunction Foo as fooAgain,\n\tconst MY_CONSTANT\n}";
-        let (start, end, count) = find_group_member(decl, "Uses\\Foo", "fooAgain").unwrap();
-        assert_eq!(&decl[start..end], "function Foo as fooAgain");
-        assert_eq!(count, 4);
+        let m = find_use_member(decl, "Uses\\Foo", "fooAgain").unwrap();
+        assert_eq!(&decl[m.start..m.end], "function Foo as fooAgain");
+        assert_eq!(m.member_count, 4);
     }
 
     #[test]
     fn group_member_trailing_comment_is_not_part_of_the_name() {
         let decl = "use Uses\\{\n\tBar, // keep\n\tBaz\n}";
-        let (start, end, _) = find_group_member(decl, "Uses\\Bar", "Bar").unwrap();
-        assert_eq!(&decl[start..end], "Bar");
+        let m = find_use_member(decl, "Uses\\Bar", "Bar").unwrap();
+        assert_eq!(&decl[m.start..m.end], "Bar");
     }
 
     // ── Statement spans ─────────────────────────────────────────────
@@ -821,7 +587,16 @@ class Dto {
 
     #[test]
     fn simple_import_does_not_match_longer_sibling() {
-        assert!(simple_use_imports_exact("use App\\Foo;", "App\\Foo"));
-        assert!(!simple_use_imports_exact("use App\\FooBar;", "App\\Foo"));
+        assert!(find_use_member("use App\\Foo", "App\\Foo", "Foo").is_some());
+        assert!(find_use_member("use App\\FooBar", "App\\Foo", "Foo").is_none());
+    }
+
+    #[test]
+    fn brace_less_comma_list_matches_one_item_at_a_time() {
+        let decl = "use App\\Models\\User, App\\Models\\Post";
+        let m = find_use_member(decl, "App\\Models\\Post", "Post").unwrap();
+        assert_eq!(&decl[m.start..m.end], "App\\Models\\Post");
+        assert_eq!(m.member_count, 2);
+        assert_eq!(m.prefix, "");
     }
 }

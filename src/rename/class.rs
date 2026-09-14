@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::completion::use_edit::UseBlockInfo;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
-use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
+use crate::text_position::{offset_to_position, ranges_overlap};
 use crate::util::{build_fqn, strip_fqn_prefix};
 
 use super::RenameOutcome;
@@ -304,16 +304,26 @@ impl Backend {
                 }
             };
 
-            // When the file has an import for the old class, find the
-            // use-statement range so we can (a) skip the FQN reference
-            // that falls inside it (we replace the whole statement
-            // instead) and (b) generate a proper whole-statement edit
-            // that can add/remove aliases.
-            let use_line_range = if import_info.is_some() {
-                find_use_line_range(&file_content, old_fqn_normalized)
-            } else {
-                None
-            };
+            // When the file has an import for the old class, plan its
+            // update so we can (a) skip the reference location that falls
+            // inside it (the plan's own edit(s) handle it instead) and (b)
+            // append those edits below.
+            let use_statement_edit = import_info.as_ref().and_then(|info| {
+                build_use_statement_edit(
+                    &file_content,
+                    old_fqn_normalized,
+                    &RenameTarget {
+                        new_fqn: &new_fqn,
+                        new_short_name,
+                        has_collision,
+                    },
+                    info,
+                    &file_use_map,
+                    // A pure rename never changes the namespace, so the
+                    // group prefix (if any) always still fits.
+                    None,
+                )
+            });
 
             let mut file_edits: Vec<TextEdit> = Vec::new();
 
@@ -327,10 +337,10 @@ impl Backend {
                     .unwrap_or("")
                     .to_string();
 
-                // If this reference falls inside the use-statement line,
-                // skip it — the whole-line edit below will handle it.
-                if let Some(ref ul) = use_line_range
-                    && ranges_overlap(&loc.range, &ul.range)
+                // If this reference falls inside the use-statement's
+                // coverage, skip it — the edit(s) above handle it instead.
+                if let Some((skip_range, _)) = &use_statement_edit
+                    && ranges_overlap(&loc.range, skip_range)
                 {
                     continue;
                 }
@@ -370,15 +380,8 @@ impl Backend {
                 }
             }
 
-            if let Some(ref info) = import_info
-                && let Some(ref ul) = use_line_range
-            {
-                let new_line =
-                    build_use_line(&new_fqn, info, has_collision, new_short_name, &file_use_map);
-                file_edits.push(TextEdit {
-                    range: ul.range,
-                    new_text: new_line,
-                });
+            if let Some((_, edits)) = use_statement_edit {
+                file_edits.extend(edits);
             }
 
             self.rewrite_template_edits(
@@ -544,11 +547,20 @@ impl Backend {
 
             let rewrite_short_refs = class_name_changed || new_import_alias.is_some();
 
-            let use_line_range = if import_info.is_some() {
-                find_use_line_range(&file_content, old_fqn_normalized)
-            } else {
-                None
-            };
+            let use_statement_edit = import_info.as_ref().and_then(|info| {
+                build_use_statement_edit(
+                    &file_content,
+                    old_fqn_normalized,
+                    &RenameTarget {
+                        new_fqn: &new_fqn_normalized,
+                        new_short_name,
+                        has_collision,
+                    },
+                    info,
+                    &file_use_map,
+                    file_namespace.as_deref(),
+                )
+            });
 
             let mut file_edits: Vec<TextEdit> = Vec::new();
             let mut has_short_name_ref = false;
@@ -684,8 +696,8 @@ impl Backend {
                     .unwrap_or("")
                     .to_string();
 
-                if let Some(ref ul) = use_line_range
-                    && ranges_overlap(&loc.range, &ul.range)
+                if let Some((skip_range, _)) = &use_statement_edit
+                    && ranges_overlap(&loc.range, skip_range)
                 {
                     continue;
                 }
@@ -721,20 +733,8 @@ impl Backend {
                 }
             }
 
-            if let Some(ref info) = import_info
-                && let Some(ref ul) = use_line_range
-            {
-                let new_line = build_use_line(
-                    &new_fqn_normalized,
-                    info,
-                    has_collision,
-                    new_short_name,
-                    &file_use_map,
-                );
-                file_edits.push(TextEdit {
-                    range: ul.range,
-                    new_text: new_line,
-                });
+            if let Some((_, edits)) = use_statement_edit {
+                file_edits.extend(edits);
             }
 
             // Only worth importing when the file actually spells the
@@ -1201,12 +1201,6 @@ fn build_sibling_import_edits(content: &str, imports: &[SiblingImport]) -> Vec<T
 
 // ─── Import analysis helpers ────────────────────────────────────────────────
 
-/// The range of a `use` statement in a file, from its `use` keyword to
-/// its terminating semicolon.
-struct UseLineRange {
-    range: Range,
-}
-
 /// Information about how a class is imported in a file.
 struct ImportInfo {
     /// The alias (short name) used in code.  For `use Ns\Foo;` this is
@@ -1300,54 +1294,153 @@ fn pick_collision_alias(base_name: &str, use_map: &HashMap<String, String>) -> S
     format!("{}Alias99", base_name)
 }
 
-/// Find the LSP range of the `use` statement that imports `old_fqn`,
-/// excluding the indentation and any trailing whitespace around it.
-fn find_use_line_range(content: &str, old_fqn: &str) -> Option<UseLineRange> {
-    let old_fqn_normalized = strip_fqn_prefix(old_fqn);
-
-    for (line_idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with("use ") {
-            continue;
-        }
-
-        let rest = trimmed.strip_prefix("use ")?.trim();
-        let rest = rest.strip_suffix(';').unwrap_or(rest).trim();
-
-        let (fqn_part, _) = if let Some(as_pos) = rest.find(" as ") {
-            (rest[..as_pos].trim(), Some(&rest[as_pos + 4..]))
-        } else {
-            (rest, None)
-        };
-
-        if !fqn_part.eq_ignore_ascii_case(old_fqn_normalized) {
-            continue;
-        }
-
-        // The statement, not the line it sits on: an import written
-        // inside a braced `namespace {}` block or a Blade `@php` block is
-        // indented, and replacing from column zero would flatten it.
-        let indent = line.len() - line.trim_start().len();
-        let statement_start_byte = line_start_byte_offset(content, line_idx) + indent;
-        let statement_end_byte = statement_start_byte + trimmed.len();
-
-        let start_pos = offset_to_position(content, statement_start_byte);
-        let end_pos = offset_to_position(content, statement_end_byte);
-
-        return Some(UseLineRange {
-            range: Range {
-                start: start_pos,
-                end: end_pos,
-            },
-        });
-    }
-
-    None
+/// What a class is being renamed/moved to, bundled so
+/// [`build_use_statement_edit`] stays under clippy's argument-count limit.
+struct RenameTarget<'a> {
+    new_fqn: &'a str,
+    new_short_name: &'a str,
+    /// Whether the new short name collides with another import already in
+    /// the file, so the rewritten import needs an alias.
+    has_collision: bool,
 }
 
-/// Build the replacement text for a `use` statement line.
-fn build_use_line(
-    new_fqn: &str,
+/// Plan the edit(s) needed to bring a file's `use` import for a renamed or
+/// moved class up to date, together with the byte range those edits
+/// already cover (so a per-reference edit can skip a location that falls
+/// inside it instead of double-covering it).
+///
+/// Locates the import through the same statement scanner the unused-import
+/// fixer uses ([`find_use_statement`] in `diagnostics/helpers`), so a group
+/// import (`use App\Models\{User, Post};`) and a brace-less multi-import
+/// list wrapped over several lines are both found, not just a whole
+/// trimmed `use ... ;` line.
+///
+/// Two shapes are handled:
+/// - A statement with only one item left after the rename (an ordinary
+///   `use Old\Fqn [as Alias];`, or a group/list with a single member): one
+///   `TextEdit` replacing the whole statement.
+/// - One member of a multi-item group or list whose relative name still
+///   fits under the shared prefix (empty for a brace-less list): a
+///   `TextEdit` touching only that member. When it no longer fits (only
+///   possible for a class *move*, which can change the namespace), the
+///   member is dropped from the group instead and re-added as its own
+///   `use` statement.
+fn build_use_statement_edit(
+    content: &str,
+    old_fqn: &str,
+    target: &RenameTarget,
+    info: &ImportInfo,
+    use_map: &HashMap<String, String>,
+    file_namespace: Option<&str>,
+) -> Option<(Range, Vec<TextEdit>)> {
+    let &RenameTarget {
+        new_fqn,
+        new_short_name,
+        has_collision,
+    } = target;
+
+    // The import may spell the class in different casing than its
+    // canonical declared FQN (PHP class names are case-insensitive), so
+    // the statement is located by the exact text the file wrote rather
+    // than by `old_fqn`.
+    let source_fqn = use_map
+        .get(&info.alias)
+        .map(String::as_str)
+        .unwrap_or(old_fqn);
+
+    let use_statement_spans = crate::diagnostics::helpers::compute_use_statement_spans(content);
+    let location = crate::diagnostics::helpers::find_use_statement(
+        content,
+        &use_statement_spans,
+        source_fqn,
+        &info.alias,
+    )?;
+
+    let whole_statement_edit = |range: Range| {
+        let new_line = format!(
+            "use {};",
+            build_member_text(new_fqn, info, has_collision, new_short_name, use_map)
+        );
+        (
+            range,
+            vec![TextEdit {
+                range,
+                new_text: new_line,
+            }],
+        )
+    };
+
+    // A one-member group (or an ordinary single-class import) has nothing
+    // left to keep, so it is rewritten as a plain statement the way a lone
+    // `use Foo\Bar;` would be.
+    if location.member_count <= 1 {
+        let range = Range {
+            start: offset_to_position(content, location.statement.0),
+            end: offset_to_position(content, location.statement.1),
+        };
+        return Some(whole_statement_edit(range));
+    }
+
+    let member_range = Range {
+        start: offset_to_position(content, location.member.0),
+        end: offset_to_position(content, location.member.1),
+    };
+
+    if let Some(relative) = strip_matching_prefix(new_fqn, location.prefix) {
+        let new_text = build_member_text(relative, info, has_collision, new_short_name, use_map);
+        return Some((
+            member_range,
+            vec![TextEdit {
+                range: member_range,
+                new_text,
+            }],
+        ));
+    }
+
+    // The new namespace no longer fits the group's shared prefix (only
+    // reachable from a class move): drop the member from the group and
+    // re-add it as its own `use` statement.
+    let (del_start, del_end) =
+        list_item_delete_range(content, location.member.0, location.member.1);
+    let delete_range = Range {
+        start: offset_to_position(content, del_start),
+        end: offset_to_position(content, del_end),
+    };
+    let mut edits = vec![TextEdit {
+        range: delete_range,
+        new_text: String::new(),
+    }];
+
+    let alias_for_new = if has_collision {
+        Some(pick_collision_alias(new_short_name, use_map))
+    } else if info.has_explicit_alias {
+        Some(info.alias.clone())
+    } else {
+        None
+    };
+    let use_block = crate::completion::use_edit::analyze_use_block(content);
+    let file_namespace_owned = file_namespace.map(str::to_string);
+    if let Some(import_edits) = crate::completion::use_edit::build_aliased_use_edit(
+        new_fqn,
+        alias_for_new.as_deref(),
+        &use_block,
+        &file_namespace_owned,
+    ) {
+        edits.extend(import_edits);
+    }
+
+    let skip_range = Range {
+        start: offset_to_position(content, location.statement.0),
+        end: offset_to_position(content, location.statement.1),
+    };
+    Some((skip_range, edits))
+}
+
+/// Build the text for one `use` import target: either a whole statement's
+/// FQN or one group member's relative name, with the `as` clause a
+/// collision or an explicit alias requires.
+fn build_member_text(
+    name: &str,
     import_info: &ImportInfo,
     has_collision: bool,
     new_short_name: &str,
@@ -1355,12 +1448,74 @@ fn build_use_line(
 ) -> String {
     if has_collision {
         let alias = pick_collision_alias(new_short_name, use_map);
-        format!("use {} as {};", new_fqn, alias)
+        format!("{} as {}", name, alias)
     } else if import_info.has_explicit_alias {
-        format!("use {} as {};", new_fqn, import_info.alias)
+        format!("{} as {}", name, import_info.alias)
     } else {
-        format!("use {};", new_fqn)
+        name.to_string()
     }
+}
+
+/// Strip a group import's shared prefix from `fqn`, comparing
+/// case-insensitively (namespaces are case-insensitive in PHP).
+///
+/// Returns `None` when `fqn` does not fall under `prefix`, in which case
+/// the class can no longer be named as a member of that group.
+fn strip_matching_prefix<'a>(fqn: &'a str, prefix: &str) -> Option<&'a str> {
+    // A brace-less list item (`use Foo\Bar, Baz\Qux;`) has no shared
+    // prefix and already spells its own full name, with no separator to
+    // consume.
+    if prefix.is_empty() {
+        return Some(fqn);
+    }
+    if !fqn.is_char_boundary(prefix.len()) {
+        return None;
+    }
+    let (head, rest) = fqn.split_at(prefix.len());
+    if !head.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    rest.strip_prefix('\\')
+}
+
+/// The byte range to delete from `content` to remove a comma-separated
+/// list item spanning `item_start..item_end` (a group import member),
+/// taking the trailing comma when present or the leading one otherwise,
+/// along with the item's own indentation, so what remains reads as a valid
+/// list with no blank line left where the item used to be.
+fn list_item_delete_range(content: &str, item_start: usize, item_end: usize) -> (usize, usize) {
+    let bytes = content.as_bytes();
+
+    let mut start = item_start;
+    while start > 0 && matches!(bytes[start - 1], b' ' | b'\t') {
+        start -= 1;
+    }
+
+    let mut after = item_end;
+    while bytes.get(after).is_some_and(u8::is_ascii_whitespace) {
+        after += 1;
+    }
+    if bytes.get(after) == Some(&b',') {
+        after += 1;
+        while bytes.get(after).is_some_and(|b| matches!(b, b' ' | b'\t')) {
+            after += 1;
+        }
+        if bytes.get(after) == Some(&b'\n') {
+            after += 1;
+        }
+        return (start, after);
+    }
+
+    // No following comma: this was the last member, so the preceding one
+    // goes instead.
+    let mut before = start;
+    while before > 0 && bytes[before - 1].is_ascii_whitespace() {
+        before -= 1;
+    }
+    if before > 0 && bytes[before - 1] == b',' {
+        before -= 1;
+    }
+    (before, item_end)
 }
 
 /// Compute the PSR-4 file path for a given namespace + class name.
