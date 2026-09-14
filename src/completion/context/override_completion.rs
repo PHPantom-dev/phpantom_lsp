@@ -22,7 +22,8 @@ use crate::code_actions::implement_methods::{
     native_param_hint,
 };
 use crate::php_type::PhpType;
-use crate::text_position::position_to_offset;
+use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_scan::{skip_block_comment, skip_line_comment};
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, PhpVersion, PropertyInfo, PropertySource,
     Visibility,
@@ -860,26 +861,6 @@ pub(crate) fn extract_method_name_partial(
     ))
 }
 
-fn offset_to_position(content: &str, byte_offset: usize) -> Position {
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i >= byte_offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    Position {
-        line,
-        character: col,
-    }
-}
-
 /// Whether the cursor is after the `function` keyword (not `const`/`case`).
 pub(crate) fn is_after_function_keyword(content: &str, position: Position) -> bool {
     after_keyword(content, position, "function")
@@ -1118,26 +1099,6 @@ pub(crate) fn class_body_partial_starts_with_dollar(content: &str, cursor: usize
         i -= 1;
     }
     i > 0 && bytes[i - 1] == b'$'
-}
-
-/// Offset just past the end of the `//` or `#` comment starting at `i`.
-fn skip_line_comment(bytes: &[u8], i: usize) -> usize {
-    match bytes[i..].iter().position(|&b| b == b'\n') {
-        Some(n) => i + n + 1,
-        None => bytes.len(),
-    }
-}
-
-/// Offset just past the end of the `/* … */` comment starting at `i`.
-fn skip_block_comment(bytes: &[u8], i: usize) -> usize {
-    let mut k = i + 2;
-    while k + 1 < bytes.len() {
-        if bytes[k] == b'*' && bytes[k + 1] == b'/' {
-            return k + 2;
-        }
-        k += 1;
-    }
-    bytes.len()
 }
 
 /// Offset just past the closing `]` of the `#[…]` attribute at `i`,

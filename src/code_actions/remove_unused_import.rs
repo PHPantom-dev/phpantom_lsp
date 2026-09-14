@@ -26,6 +26,7 @@ use tower_lsp::lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
+use crate::diagnostics::helpers::scan_use_statements;
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 
 impl Backend {
@@ -180,54 +181,24 @@ impl Backend {
     }
 }
 
-/// Check whether the cursor line is a namespace-level `use` import line.
+/// Check whether the cursor line belongs to a namespace-level `use` import.
 ///
-/// Returns `true` when the line starts with `use ` (after optional
-/// whitespace) and is NOT inside a class/trait body (where `use` means
-/// a trait import, not a namespace import).
+/// Returns `true` for any line of the statement, including the wrapped
+/// members of a group import, and `false` for a trait `use` inside a
+/// class/trait body.
 pub(crate) fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    let idx = line as usize;
-    if idx >= lines.len() {
-        return false;
-    }
-
-    let trimmed = lines[idx].trim();
-    if !trimmed.starts_with("use ") {
-        return false;
-    }
-
-    // Heuristic: if we're inside a class/trait/enum body, this is a
-    // trait `use`, not a namespace import.  We track brace depth and
-    // account for braced `namespace Foo { … }` blocks (where depth 1
-    // is still "top level" for import purposes).
-    let mut depth: usize = 0;
-    let mut namespace_brace_depth: Option<usize> = None;
-    for l in &lines[..idx] {
-        let code = l.split("//").next().unwrap_or(l);
-        let code = code.split('#').next().unwrap_or(code);
-        let ltrimmed = l.trim_start();
-
-        if ltrimmed.starts_with("namespace ") && code.contains('{') {
-            namespace_brace_depth = Some(depth);
-        }
-
-        for ch in code.chars() {
-            match ch {
-                '{' => depth += 1,
-                '}' => {
-                    depth = depth.saturating_sub(1);
-                    if namespace_brace_depth == Some(depth) {
-                        namespace_brace_depth = None;
-                    }
-                }
-                _ => {}
-            }
+    // The byte offset the line starts at; a line past the end of the file
+    // rests on nothing.
+    let mut offset = 0usize;
+    for _ in 0..line {
+        match content[offset..].find('\n') {
+            Some(newline) => offset += newline + 1,
+            None => return false,
         }
     }
-
-    let top_level_depth = namespace_brace_depth.map_or(0, |d| d + 1);
-    depth <= top_level_depth
+    scan_use_statements(content).iter().any(|statement| {
+        statement.top_level && statement.line_start <= offset && offset <= statement.end
+    })
 }
 
 /// Build a `TextEdit` that deletes the full line(s) covered by `range`,
@@ -562,10 +533,6 @@ mod tests {
     use super::*;
     use crate::text_position::position_to_byte_offset;
 
-    fn lsp_position_to_byte_offset(content: &str, pos: Position) -> usize {
-        position_to_byte_offset(content, pos)
-    }
-
     /// Test-only wrapper: builds a deletion edit treating only the
     /// diagnostic's own line as removed (single-import scenario).
     fn build_single_line_deletion_edit(content: &str, range: &Range) -> TextEdit {
@@ -610,8 +577,8 @@ mod tests {
         let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n";
         let range = Range::new(Position::new(1, 4), Position::new(1, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Foo\\Bar;\n");
     }
 
@@ -623,8 +590,8 @@ mod tests {
         let content = "<?php\r\nuse Foo\\Bar;\r\nuse Baz\\Qux;\r\n";
         let range = Range::new(Position::new(1, 4), Position::new(1, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Foo\\Bar;\r\n");
     }
 
@@ -633,8 +600,8 @@ mod tests {
         let content = "<?php\nuse Foo\\Bar;\n\nclass Test {}\n";
         let range = Range::new(Position::new(1, 4), Position::new(1, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Foo\\Bar;\n\n");
     }
 
@@ -643,8 +610,8 @@ mod tests {
         let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass Test extends Qux {}\n";
         let range = Range::new(Position::new(2, 4), Position::new(2, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Baz\\Qux;\n");
     }
 
@@ -653,8 +620,8 @@ mod tests {
         let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nuse Quux\\Quuz;\n";
         let range = Range::new(Position::new(2, 4), Position::new(2, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Baz\\Qux;\n\n");
     }
 
@@ -663,8 +630,8 @@ mod tests {
         let content = "<?php\nuse Foo\\Bar;\n\nuse Baz\\Qux;\nuse Quux\\Quuz;\n";
         let range = Range::new(Position::new(3, 4), Position::new(3, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
 
         let mut result = content.to_string();
         result.replace_range(start..end, &edit.new_text);
@@ -693,8 +660,8 @@ mod tests {
         let all_ranges = [user_range, post_range];
 
         let edit = build_line_deletion_edit(content, &user_range, &removed, &all_ranges);
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         let mut result = content.to_string();
         result.replace_range(start..end, &edit.new_text);
 
@@ -716,247 +683,12 @@ mod tests {
             "both diagnostics in a fully-removed group should collapse to one edit"
         );
 
-        let start = lsp_position_to_byte_offset(content, user_edit.range.start);
-        let end = lsp_position_to_byte_offset(content, user_edit.range.end);
+        let start = position_to_byte_offset(content, user_edit.range.start);
+        let end = position_to_byte_offset(content, user_edit.range.end);
         let mut result = content.to_string();
         result.replace_range(start..end, &user_edit.new_text);
 
         assert_eq!(result, "<?php\nclass Foo {}\n");
-    }
-
-    // ── Code action offering ────────────────────────────────────────
-
-    #[test]
-    fn remove_action_offered_for_unused_import() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass Test extends Qux {}\n";
-
-        backend.update_ast(uri, content);
-
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(1, 4),
-                end: Position::new(1, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let remove_action = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Remove unused import"),
-            _ => false,
-        });
-
-        assert!(
-            remove_action.is_some(),
-            "should offer 'Remove unused import' action"
-        );
-    }
-
-    #[test]
-    fn no_remove_action_for_used_import() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\n\nclass Test extends Bar {}\n";
-
-        backend.update_ast(uri, content);
-
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(1, 4),
-                end: Position::new(1, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let remove_action = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Remove unused import"),
-            _ => false,
-        });
-
-        assert!(
-            remove_action.is_none(),
-            "should NOT offer remove action for used import"
-        );
-    }
-
-    #[test]
-    fn bulk_remove_offered_when_multiple_unused() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n";
-
-        backend.update_ast(uri, content);
-
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(1, 4),
-                end: Position::new(1, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title == "Remove all unused imports",
-            _ => false,
-        });
-
-        assert!(
-            bulk.is_some(),
-            "should offer 'Remove all unused imports' when multiple unused"
-        );
-    }
-
-    #[test]
-    fn bulk_remove_offered_for_single_unused_import() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\n\nclass Test {}\n";
-
-        backend.update_ast(uri, content);
-
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(1, 4),
-                end: Position::new(1, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title == "Remove all unused imports",
-            _ => false,
-        });
-
-        assert!(
-            bulk.is_some(),
-            "should offer 'Remove all unused imports' even for a single unused import"
-        );
-    }
-
-    #[test]
-    fn bulk_remove_not_offered_when_cursor_outside_import_block() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\n\nclass Test {}\n";
-
-        backend.update_ast(uri, content);
-
-        // Cursor on "class Test" line, not on a `use` line.
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(3, 0),
-                end: Position::new(3, 0),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title == "Remove all unused imports",
-            _ => false,
-        });
-
-        let single = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.starts_with("Remove unused import"),
-            _ => false,
-        });
-
-        assert!(
-            bulk.is_none(),
-            "should NOT offer bulk remove when cursor is not on a use line"
-        );
-        assert!(
-            single.is_none(),
-            "should NOT offer single remove when cursor is not on the unused import"
-        );
-    }
-
-    #[test]
-    fn bulk_remove_offered_when_cursor_on_used_import() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass Test extends Qux {}\n";
-
-        backend.update_ast(uri, content);
-
-        // Cursor on the used import (Baz\Qux), not the unused one.
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(2, 4),
-                end: Position::new(2, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions.iter().find(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title == "Remove all unused imports",
-            _ => false,
-        });
-
-        assert!(
-            bulk.is_some(),
-            "should offer bulk remove when cursor is on any use line"
-        );
     }
 
     // ── cursor_on_use_import_line ────────────────────────────────────
@@ -989,317 +721,6 @@ mod tests {
         assert!(cursor_on_use_import_line(content, 2));
     }
 
-    #[test]
-    fn bulk_remove_deletes_both_widely_separated_unused_imports() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "\
-<?php
-
-use App\\UnusedA;
-use App\\UsedB;
-
-class Foo extends UsedB
-{
-    public function bar(): void
-    {
-        // some code
-    }
-}
-
-use App\\UnusedC;
-";
-
-        backend.update_ast(uri, content);
-        backend
-            .open_files
-            .write()
-            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
-
-        // Cursor on the first use line
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(2, 4),
-                end: Position::new(2, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions
-            .iter()
-            .find_map(|a| match a {
-                CodeActionOrCommand::CodeAction(ca) if ca.title == "Remove all unused imports" => {
-                    Some(ca)
-                }
-                _ => None,
-            })
-            .expect("should offer bulk remove");
-
-        // Phase 1: no edit, has data.
-        assert!(bulk.edit.is_none(), "Phase 1 should not have an edit");
-        assert!(bulk.data.is_some(), "Phase 1 should have data");
-
-        // Phase 2: resolve.
-        let (resolved, _) = backend.resolve_code_action(bulk.clone());
-        let edit = resolved
-            .edit
-            .as_ref()
-            .expect("resolve should produce an edit");
-        let changes = edit.changes.as_ref().unwrap();
-        let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-
-        // Should have edits for both unused imports (UnusedA and UnusedC).
-        assert!(
-            edits.len() >= 2,
-            "should delete both unused imports, got {} edits",
-            edits.len()
-        );
-    }
-
-    #[test]
-    fn bulk_remove_in_braced_namespace_with_class_bodies_between() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "\
-<?php
-use App\\UnusedAlpha;
-use App\\UsedBravo;
-use App\\UnusedCharlie;
-
-class Demo extends UsedBravo
-{
-    public function method(): void
-    {
-    }
-}
-";
-
-        backend.update_ast(uri, content);
-        backend
-            .open_files
-            .write()
-            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
-
-        // Cursor on the first use line
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(1, 4),
-                end: Position::new(1, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions
-            .iter()
-            .find_map(|a| match a {
-                CodeActionOrCommand::CodeAction(ca) if ca.title == "Remove all unused imports" => {
-                    Some(ca)
-                }
-                _ => None,
-            })
-            .expect("should offer bulk remove");
-
-        // Phase 2: resolve.
-        let (resolved, _) = backend.resolve_code_action(bulk.clone());
-        let edit = resolved
-            .edit
-            .as_ref()
-            .expect("resolve should produce an edit");
-        let changes = edit.changes.as_ref().unwrap();
-        let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-
-        // Should have edits for both unused imports.
-        assert!(
-            edits.len() >= 2,
-            "should delete both unused imports, got {} edits",
-            edits.len()
-        );
-
-        // Apply the edits to verify the result.
-        let mut result = content.to_string();
-        let mut sorted: Vec<&TextEdit> = edits.clone();
-        sorted.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-        for edit in sorted {
-            let start = lsp_position_to_byte_offset(&result, edit.range.start);
-            let end = lsp_position_to_byte_offset(&result, edit.range.end);
-            result.replace_range(start..end, &edit.new_text);
-        }
-
-        assert!(
-            !result.contains("UnusedAlpha"),
-            "UnusedAlpha should be removed:\n{result}"
-        );
-        assert!(
-            !result.contains("UnusedCharlie"),
-            "UnusedCharlie should be removed:\n{result}"
-        );
-        assert!(
-            result.contains("UsedBravo"),
-            "UsedBravo should be kept:\n{result}"
-        );
-    }
-
-    #[test]
-    fn bulk_remove_consumes_separator_when_import_block_becomes_empty() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass Test {}\n";
-
-        backend.update_ast(uri, content);
-        backend
-            .open_files
-            .write()
-            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
-
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(1, 4),
-                end: Position::new(1, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions
-            .iter()
-            .find_map(|a| match a {
-                CodeActionOrCommand::CodeAction(ca) if ca.title == "Remove all unused imports" => {
-                    Some(ca)
-                }
-                _ => None,
-            })
-            .expect("should offer bulk remove");
-
-        let (resolved, _) = backend.resolve_code_action(bulk.clone());
-        let edit = resolved
-            .edit
-            .as_ref()
-            .expect("resolve should produce an edit");
-        let changes = edit.changes.as_ref().unwrap();
-        let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-
-        let mut result = content.to_string();
-        let mut sorted: Vec<&TextEdit> = edits.clone();
-        sorted.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-        for edit in sorted {
-            let start = lsp_position_to_byte_offset(&result, edit.range.start);
-            let end = lsp_position_to_byte_offset(&result, edit.range.end);
-            result.replace_range(start..end, &edit.new_text);
-        }
-
-        assert_eq!(result, "<?php\nclass Test {}\n");
-    }
-
-    #[test]
-    fn bulk_remove_collapses_gap_when_unused_import_is_between_used_ones() {
-        let backend = crate::Backend::new_test();
-        let uri = "file:///test.php";
-        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nuse Quux\\Quuz;\n\nclass Test extends Bar\n{\n    public function make(): Quuz\n    {\n        return new Quuz();\n    }\n}\n";
-
-        backend.update_ast(uri, content);
-        backend
-            .open_files
-            .write()
-            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
-
-        let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: uri.parse().unwrap(),
-            },
-            range: Range {
-                start: Position::new(2, 4),
-                end: Position::new(2, 4),
-            },
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let actions = backend.handle_code_action(uri, content, &params);
-        let bulk = actions
-            .iter()
-            .find_map(|a| match a {
-                CodeActionOrCommand::CodeAction(ca) if ca.title == "Remove all unused imports" => {
-                    Some(ca)
-                }
-                _ => None,
-            })
-            .expect("should offer bulk remove");
-
-        let (resolved, _) = backend.resolve_code_action(bulk.clone());
-        let edit = resolved
-            .edit
-            .as_ref()
-            .expect("resolve should produce an edit");
-        let changes = edit.changes.as_ref().unwrap();
-        let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-
-        let mut result = content.to_string();
-        let mut sorted: Vec<&TextEdit> = edits.clone();
-        sorted.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-        for edit in sorted {
-            let start = lsp_position_to_byte_offset(&result, edit.range.start);
-            let end = lsp_position_to_byte_offset(&result, edit.range.end);
-            result.replace_range(start..end, &edit.new_text);
-        }
-
-        assert_eq!(
-            result,
-            "<?php\nuse Foo\\Bar;\nuse Quux\\Quuz;\n\nclass Test extends Bar\n{\n    public function make(): Quuz\n    {\n        return new Quuz();\n    }\n}\n"
-        );
-    }
-
     // ── Contiguous block blank-line regression ──────────────────────
 
     #[test]
@@ -1319,8 +740,8 @@ use PHPMD\\Rule\\Design\\CouplingBetweenObjects;
         let edit =
             build_line_deletion_edit(content, &range, &removed, std::slice::from_ref(&range));
 
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         let mut result = content.to_string();
         result.replace_range(start..end, &edit.new_text);
 
@@ -1349,8 +770,8 @@ use PHPMD\\Rule;
         let edit =
             build_line_deletion_edit(content, &range, &removed, std::slice::from_ref(&range));
 
-        let start = lsp_position_to_byte_offset(content, edit.range.start);
-        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        let start = position_to_byte_offset(content, edit.range.start);
+        let end = position_to_byte_offset(content, edit.range.end);
         let mut result = content.to_string();
         result.replace_range(start..end, &edit.new_text);
 

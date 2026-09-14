@@ -10,6 +10,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
+use crate::text_scan::find_matching_forward_bytes;
 use crate::types::{ClassInfo, FileContext};
 
 /// A byte range `[start, end)` in the source.
@@ -64,27 +65,27 @@ impl FileDiagnosticContext {
 
 // ─── `use` statement scanning ───────────────────────────────────────────────
 //
-// One scanner, three questions.  `scan_use_statements` walks the file once;
-// the two wrappers below present its result in the two shapes callers ask
-// for.  A fourth reader, `completion::use_edit::analyze_use_block`, answers
-// a different question entirely — where a *new* import should be inserted —
-// and stays separate.
+// One scanner, several questions.  `scan_use_statements` walks the file
+// once; the wrappers below present its result in the shapes the diagnostics
+// ask for, `completion::use_edit::analyze_use_block` reads it to place a
+// *new* import, and `code_actions::cursor_on_use_import_line` to tell
+// whether the cursor rests on one.
 
 /// One `use` import statement.
-struct UseStatementScan {
+pub(crate) struct UseStatementScan {
     /// Byte offset of the start of the statement's first line, leading
     /// indentation included.
-    line_start: usize,
+    pub(crate) line_start: usize,
     /// Byte offset of the `use` keyword itself.
-    keyword_start: usize,
+    pub(crate) keyword_start: usize,
     /// Byte offset of the end of the statement's last line, excluding a
     /// CRLF file's `\r`.
-    end: usize,
+    pub(crate) end: usize,
     /// Whether the statement sits at import depth: brace depth 0, or depth
     /// 1 inside a `namespace Foo { … }` block.  A trait `use` in a class
     /// body is deeper, and so is the `@php use …;` a Blade template writes,
     /// since the virtual PHP inlines an island inside the wrapper function.
-    top_level: bool,
+    pub(crate) top_level: bool,
 }
 
 /// Scan `content` for `use` imports.
@@ -92,7 +93,7 @@ struct UseStatementScan {
 /// A statement may wrap over several lines: a group import (`use Foo\{`
 /// through its closing `};`), or a plain import split across lines without
 /// braces.  Either way it is followed until its terminating `;`.
-fn scan_use_statements(content: &str) -> Vec<UseStatementScan> {
+pub(crate) fn scan_use_statements(content: &str) -> Vec<UseStatementScan> {
     let mut statements = Vec::new();
     let mut offset: usize = 0;
     // Track brace depth so we can distinguish namespace-level `use`
@@ -163,7 +164,7 @@ fn scan_use_statements(content: &str) -> Vec<UseStatementScan> {
             } else if trimmed.contains('{') {
                 pending_is_group = true;
             }
-        } else if trimmed.starts_with("use ") {
+        } else if trimmed.starts_with("use ") || trimmed.starts_with("use\t") {
             let keyword_start = offset + (line.len() - trimmed.len());
             let top_level = line_brace_depth == top_level_depth;
             if trimmed.contains(';') {
@@ -477,7 +478,8 @@ pub(crate) fn compute_isset_empty_argument_ranges(content: &str) -> Vec<ByteRang
                 let paren_start = skip_ws(bytes, after_name);
                 if paren_start < len
                     && bytes[paren_start] == b'('
-                    && let Some(paren_end) = find_matching_paren(bytes, paren_start)
+                    && let Some(paren_end) =
+                        find_matching_forward_bytes(bytes, paren_start, b'(', b')')
                 {
                     ranges.push((paren_start + 1, paren_end));
                     i = paren_end + 1;
@@ -672,7 +674,7 @@ fn find_negated_guard_range(
         return None;
     }
 
-    let cond_end = find_matching_paren(bytes, paren_start)?;
+    let cond_end = find_matching_forward_bytes(bytes, paren_start, b'(', b')')?;
 
     let body_start_pos = skip_ws(bytes, cond_end + 1);
     if body_start_pos >= len {
@@ -912,7 +914,7 @@ fn find_guarded_range(bytes: &[u8], call_start: usize, call_end: usize) -> Optio
         let paren_start = skip_ws(bytes, if_pos + 2); // skip "if"
         if paren_start < len
             && bytes[paren_start] == b'('
-            && let Some(cond_end) = find_matching_paren(bytes, paren_start)
+            && let Some(cond_end) = find_matching_forward_bytes(bytes, paren_start, b'(', b')')
         {
             let body_start_pos = skip_ws(bytes, cond_end + 1);
             if body_start_pos < len {
@@ -967,41 +969,6 @@ fn find_preceding_if(bytes: &[u8], pos: usize) -> Option<usize> {
         if j == 0 {
             break;
         }
-    }
-    None
-}
-
-/// Find matching `)` for `(` at `pos`.
-fn find_matching_paren(bytes: &[u8], pos: usize) -> Option<usize> {
-    let len = bytes.len();
-    if pos >= len || bytes[pos] != b'(' {
-        return None;
-    }
-    let mut depth = 0u32;
-    let mut i = pos;
-    while i < len {
-        match bytes[i] {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            b'\'' | b'"' => {
-                // Skip string literals.
-                let quote = bytes[i];
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
     }
     None
 }

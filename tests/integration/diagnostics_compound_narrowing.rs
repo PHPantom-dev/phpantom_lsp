@@ -7,26 +7,8 @@
 //! subjects, inline assignments in the condition, and `@phpstan-assert`
 //! on property/array subjects.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, unknown_member_diagnostics_with_scope_cache};
 use tower_lsp::lsp_types::*;
-
-/// Run slow diagnostics (activates the forward-walker scope cache) and
-/// keep only `unknown_member` diagnostics.
-fn unknown_member_diagnostics(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 /// Shared scaffolding: a wide `Expr` interface, a `StringExpr` subtype
 /// with a `value` property, an unrelated subtype, and holders.
@@ -68,7 +50,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Narrowing from the first `&&` conjunct should apply to the \
@@ -93,7 +75,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "After the `||` guard, both `$arg` and `$arg->value` should be \
@@ -119,7 +101,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "The integer-indexed element `$stmts[0]` should narrow to \
@@ -145,7 +127,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`$args[0]->value` should narrow to StringExpr after the guard, \
@@ -171,7 +153,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`$constants['C']` should narrow to StringExpr after the guard, \
@@ -195,7 +177,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "The inline-assigned `$node` should narrow to StringExpr inside \
@@ -219,7 +201,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "The repeated `$h->getReturnType()` call should carry the \
@@ -248,7 +230,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Checking a `StringExpr` return against the wider `Expr` should \
@@ -277,7 +259,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         !diags.is_empty(),
         "`first()` being a `StringExpr` says nothing about `second()`, \
@@ -300,7 +282,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`@phpstan-assert StringExpr` on `$arg->value` should narrow the \
@@ -326,7 +308,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags
             .iter()
@@ -364,7 +346,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Inside the `elseif`, `$args[0]->value` should narrow to \
@@ -413,7 +395,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Each branch's own check decides what `$f->data()` is inside it, \
@@ -442,7 +424,7 @@ class Ord {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`if ($this->getSub())` should leave the repeated call non-null, \
@@ -469,7 +451,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert_eq!(
         diags.len(),
         1,
@@ -497,7 +479,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert_eq!(
         diags.len(),
         1,
@@ -524,7 +506,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A reassignment before the check must not disturb narrowing, \

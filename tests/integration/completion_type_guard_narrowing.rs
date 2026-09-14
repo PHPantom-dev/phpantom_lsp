@@ -1,13 +1,5 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{complete_at, create_test_backend, method_names};
 use tower_lsp::lsp_types::*;
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
 
 // ── is_array narrowing with PHPDoc generic list ─────────────────────────
 

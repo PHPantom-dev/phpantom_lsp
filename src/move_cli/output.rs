@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use crate::analyse::{format_github_message, json_escape};
+use crate::analyse::{format_github_message, github_annotation, json_escape};
 
 use super::{MoveSummary, MoveWarning};
 
@@ -55,13 +55,21 @@ pub(super) fn print_table(summary: &MoveSummary, use_colour: bool) {
 /// annotates the lines a move could not reach.
 pub(super) fn print_github_annotations(summary: &MoveSummary) {
     for warning in &summary.warnings {
-        let message = format_github_message(&warning.message);
         match &warning.file {
             Some(file) => println!(
-                "::warning file={file},line={line},col=0,title={IDENTIFIER}::{message}",
-                line = warning.line.unwrap_or(1),
+                "{}",
+                github_annotation(
+                    "warning",
+                    file,
+                    warning.line.unwrap_or(1),
+                    IDENTIFIER,
+                    &warning.message,
+                )
             ),
-            None => println!("::warning title={IDENTIFIER}::{message}"),
+            None => println!(
+                "::warning title={IDENTIFIER}::{}",
+                format_github_message(&warning.message)
+            ),
         }
     }
 }

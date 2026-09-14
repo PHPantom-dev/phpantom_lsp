@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_test_backend, open_document, open_php};
+    use crate::common::{create_test_backend, hover_text_at, open_document, open_php};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -419,7 +419,9 @@ mod tests {
         );
 
         // The declared types resolve, so members on them are known.
-        let hover = hover_text(&backend, &uri, 0, 8).await;
+        let hover = hover_text_at(&backend, &uri, 0, 8)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("ComponentAttributeBag"),
             "$attributes must be typed as the attribute bag, got: {}",
@@ -462,7 +464,9 @@ mod tests {
             undefined
         );
 
-        let hover = hover_text(&backend, &uri, 3, 9).await;
+        let hover = hover_text_at(&backend, &uri, 3, 9)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("$caption = ''"),
             "$caption should resolve to its '' default, got: {}",
@@ -502,28 +506,6 @@ mod tests {
         );
     }
 
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
-        match result.map(|h| h.contents) {
-            Some(HoverContents::Markup(m)) => m.value,
-            _ => String::new(),
-        }
-    }
-
     /// A `@var` block at the top of a template stays in scope for the
     /// whole raw `<?php` region, even when a line comment separates it
     /// from the first statement and the use site sits in a later sibling
@@ -541,7 +523,9 @@ mod tests {
         open_document(&backend, &uri, "blade", body).await;
 
         // `'ratingValue' => $model->ratingScore,` — the deepest use site.
-        let hover = hover_text(&backend, &uri, 15, 26).await;
+        let hover = hover_text_at(&backend, &uri, 15, 26)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("ShowViewModel"),
             "$model must still be typed inside the nested array literal, got: {}",
@@ -611,7 +595,9 @@ mod tests {
         );
 
         for (line, name) in [(8u32, "$poster"), (9, "$video")] {
-            let hover = hover_text(&backend, &uri, line, 12).await;
+            let hover = hover_text_at(&backend, &uri, line, 12)
+                .await
+                .unwrap_or_default();
             assert!(
                 hover.contains("string"),
                 "{name} must keep its declared type, got: {hover}"
@@ -630,7 +616,9 @@ mod tests {
         open_document(&backend, &uri, "blade", body).await;
 
         for (line, expected) in [(1u32, "'info'"), (2, "false"), (3, "array")] {
-            let hover = hover_text(&backend, &uri, line, 5).await;
+            let hover = hover_text_at(&backend, &uri, line, 5)
+                .await
+                .unwrap_or_default();
             assert!(
                 hover.contains(expected),
                 "line {line} should be typed {expected}, got: {hover}"
@@ -639,7 +627,9 @@ mod tests {
 
         // A required prop must not read as `null`: that would make every use
         // of it a type error against whatever the caller really passes.
-        let hover = hover_text(&backend, &uri, 4, 5).await;
+        let hover = hover_text_at(&backend, &uri, 4, 5)
+            .await
+            .unwrap_or_default();
         assert!(
             !hover.contains("null"),
             "a required prop must not be typed null, got: {hover}"
@@ -710,7 +700,9 @@ mod tests {
         open_document(&backend, &uri, "blade", body).await;
 
         // `{{ $user->name }}` — hover on `$user`.
-        let hover = hover_text(&backend, &uri, 4, 9).await;
+        let hover = hover_text_at(&backend, &uri, 4, 9)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("$user = User") && !hover.contains("?User"),
             "the doubly negated guard must narrow $user the way `@if ($user)` does, got: {}",

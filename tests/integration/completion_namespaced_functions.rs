@@ -12,17 +12,13 @@
 
 use crate::common::{
     complete_at, create_psr4_workspace, create_test_backend,
-    create_test_backend_with_function_stubs,
+    create_test_backend_with_function_stubs, labels,
 };
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::FunctionInfo;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
 
 /// Register a namespaced helper function in the global_functions map.
 fn register_namespaced_function(

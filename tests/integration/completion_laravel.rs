@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, method_names, property_names};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -525,22 +525,6 @@ async fn complete_at(
 ) -> Vec<CompletionItem> {
     let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
     crate::common::complete_at(backend, &uri, content, line, character).await
-}
-
-fn property_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
 }
 
 // ─── HasMany relationship produces virtual property ─────────────────────────

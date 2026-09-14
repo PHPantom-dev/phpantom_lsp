@@ -1,11 +1,5 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{complete_at, create_test_backend, labels};
 use tower_lsp::lsp_types::*;
-
-// ─── Helper ─────────────────────────────────────────────────────────────────
-
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 

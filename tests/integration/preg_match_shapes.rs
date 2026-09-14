@@ -7,56 +7,10 @@
 //! apart, and a read that neither branch covers carries the `null` a missing
 //! key yields.
 
-use crate::common::create_test_backend_with_full_stubs;
-use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
-
-/// The type shown for the variable assigned on the line whose trimmed text
-/// starts with `$name = `, read off the hover response.
-fn assigned_type(backend: &Backend, uri: &str, content: &str, name: &str) -> String {
-    let needle = format!("{name} = ");
-    let line = content
-        .lines()
-        .position(|l| l.trim_start().starts_with(&needle))
-        .unwrap_or_else(|| panic!("no assignment to {name} in the fixture")) as u32;
-    let character = content
-        .lines()
-        .nth(line as usize)
-        .unwrap()
-        .find(name)
-        .unwrap() as u32
-        + 1;
-    backend.update_ast(uri, content);
-    let hover = backend
-        .handle_hover(
-            uri,
-            content,
-            Position {
-                line,
-                character: character + 1,
-            },
-        )
-        .unwrap_or_else(|| panic!("no hover on {name}"));
-    let HoverContents::Markup(markup) = &hover.contents else {
-        panic!("expected MarkupContent");
-    };
-    markup
-        .value
-        .lines()
-        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
-        .unwrap_or_else(|| panic!("no assignment in hover on {name}: {}", markup.value))
-}
+use crate::common::assert_assigned_types;
 
 /// Assert the type of each assignment in `content`, keyed by the variable it
 /// assigns to.
-fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
-    let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///preg_match_shapes.php";
-    for (var, want) in expected {
-        assert_eq!(&assigned_type(&backend, uri, content, var), want, "{var}");
-    }
-}
-
 /// A named group contributes its name as a key, so reading it needs no cast
 /// and no `??` — and the numbered key it also gets resolves the same.
 #[test]

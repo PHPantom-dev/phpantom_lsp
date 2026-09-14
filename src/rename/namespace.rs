@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::{document_changes_edit, multi_file_edit};
 use crate::composer;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
@@ -229,30 +230,23 @@ impl Backend {
             && !ops.is_empty()
             && self.supports_file_rename.load(Ordering::Acquire)
         {
-            let mut doc_ops: Vec<DocumentChangeOperation> = Vec::new();
+            let renames = ops.iter().map(|(old_uri, new_uri)| {
+                ResourceOp::Rename(RenameFile {
+                    old_uri: old_uri.clone(),
+                    new_uri: new_uri.clone(),
+                    options: None,
+                    annotation_id: None,
+                })
+            });
 
-            // Add directory/file rename operations first.
-            for (old_uri, new_uri) in &ops {
-                doc_ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
-                    RenameFile {
-                        old_uri: old_uri.clone(),
-                        new_uri: new_uri.clone(),
-                        options: None,
-                        annotation_id: None,
-                    },
-                )));
-            }
-
-            // Convert text edits to document changes. Rewrite URIs
-            // that fall inside a renamed directory.
-            for (uri, edits) in changes {
-                // A directory operation carries every file beneath it,
-                // so its edits have to follow.  The remainder has to
-                // start at a path separator or `src/Internal` would also
-                // claim `src/InternalOther/Thing.php`.  A per-file
-                // operation matches outright and leaves the remainder
-                // empty; a file no operation names keeps its own URI,
-                // which is what leaves a skipped file edited in place.
+            // A directory operation carries every file beneath it, so its
+            // edits have to follow.  The remainder has to start at a path
+            // separator or `src/Internal` would also claim
+            // `src/InternalOther/Thing.php`.  A per-file operation matches
+            // outright and leaves the remainder empty; a file no operation
+            // names keeps its own URI, which is what leaves a skipped file
+            // edited in place.
+            let edits = changes.into_iter().map(|(uri, edits)| {
                 let target_uri = ops
                     .iter()
                     .find_map(|(old_u, new_u)| {
@@ -263,29 +257,13 @@ impl Backend {
                         Url::parse(&format!("{}{}", new_u.as_str(), rest)).ok()
                     })
                     .unwrap_or(uri);
+                (target_uri, edits)
+            });
 
-                let text_doc_edit = TextDocumentEdit {
-                    text_document: OptionalVersionedTextDocumentIdentifier {
-                        uri: target_uri,
-                        version: None,
-                    },
-                    edits: edits.into_iter().map(OneOf::Left).collect(),
-                };
-                doc_ops.push(DocumentChangeOperation::Edit(text_doc_edit));
-            }
-
-            return Ok(Some(WorkspaceEdit {
-                changes: None,
-                document_changes: Some(DocumentChanges::Operations(doc_ops)),
-                change_annotations: None,
-            }));
+            return Ok(Some(document_changes_edit(renames, edits)));
         }
 
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }))
+        Ok(Some(multi_file_edit(changes)))
     }
 
     /// Collect text edits for `namespace` declaration lines where the

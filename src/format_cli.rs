@@ -40,7 +40,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::analyse::{OutputFormat, print_success_box, progress_bar};
+use crate::analyse::{OutputFormat, github_annotation, print_success_box, progress_bar};
 use crate::config::FormattingConfig;
 use crate::formatting::blade::{BladeFormatOptions, BladeFormattingStrategy};
 use crate::formatting::{FormattingStrategy, Tool};
@@ -554,17 +554,14 @@ fn github_annotations(
     };
     reformatted
         .iter()
-        .map(|file| {
-            format!(
-                "::{level} file={path},line=1,col=0,title=format::{message}",
-                path = file.display_path,
-            )
-        })
+        .map(|file| github_annotation(level, &file.display_path, 1, "format", message))
         .chain(failures.iter().map(|failure| {
-            format!(
-                "::error file={path},line=1,col=0,title=format::{message}",
-                path = failure.display_path,
-                message = crate::analyse::format_github_message(&failure.message),
+            github_annotation(
+                "error",
+                &failure.display_path,
+                1,
+                "format",
+                &failure.message,
             )
         }))
         .collect()

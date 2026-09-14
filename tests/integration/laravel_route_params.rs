@@ -5,7 +5,7 @@
 //! the name was declared on.  The same applies to `to_route()`,
 //! `signedRoute()`, and `temporarySignedRoute()`.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, open_php, position_after, response_labels};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -30,33 +30,6 @@ Route::resource('photos.comments', CommentController::class);
 Route::apiResource('categories', CategoryController::class)
     ->parameters(['categories' => 'slug']);
 ";
-
-/// Position of the cursor immediately after the first occurrence of `needle`.
-fn position_after(content: &str, needle: &str) -> Position {
-    let idx = content.find(needle).expect("needle not found") + needle.len();
-    let mut line = 0u32;
-    let mut character = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i == idx {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-    Position { line, character }
-}
-
-fn completion_labels(response: Option<CompletionResponse>) -> Vec<String> {
-    match response {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
-        None => Vec::new(),
-    }
-}
 
 /// Open a workspace holding `ROUTES` plus a consumer file, and complete at the
 /// first position after `needle` in the consumer.
@@ -85,7 +58,7 @@ async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
         })
         .await
         .unwrap();
-    completion_labels(result)
+    response_labels(result)
 }
 
 fn consumer(body: &str) -> String {

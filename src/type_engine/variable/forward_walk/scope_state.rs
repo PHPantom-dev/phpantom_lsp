@@ -915,7 +915,9 @@ fn is_definitely_non_null(scope: &ScopeState, key: &Atom) -> bool {
 }
 
 /// Whether `null` is one of the values this type spans.
-fn type_admits_null(ty: &PhpType) -> bool {
+/// Whether `ty` can hold `null`: `?T`, a union with a nullable member,
+/// `null` itself, or `mixed`.
+pub(crate) fn type_admits_null(ty: &PhpType) -> bool {
     match ty.kind() {
         crate::php_type::TypeKind::Nullable(_) => true,
         crate::php_type::TypeKind::Union(members) => members.iter().any(type_admits_null),

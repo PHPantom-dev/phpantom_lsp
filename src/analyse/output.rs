@@ -24,20 +24,31 @@ pub(super) fn print_github_annotations(file_diagnostics: &[(String, Vec<FileDiag
                 DiagnosticSeverity::WARNING => "warning",
                 _ => "notice",
             };
-            let message = format_github_message(&diag.message);
             let title = diag.identifier.as_deref().unwrap_or("");
-            if title.is_empty() {
-                println!(
-                    "::{level} file={path},line={line},col=0::{message}",
-                    line = diag.line,
-                );
-            } else {
-                println!(
-                    "::{level} file={path},line={line},col=0,title={title}::{message}",
-                    line = diag.line,
-                );
-            }
+            println!(
+                "{}",
+                github_annotation(level, path, diag.line, title, &diag.message)
+            );
         }
+    }
+}
+
+/// One GitHub Actions workflow command annotating `file` at `line` with
+/// `message`, at `level` (`error`, `warning`, or `notice`).
+///
+/// An empty `title` is left out rather than written as `title=`.
+pub(crate) fn github_annotation(
+    level: &str,
+    file: &str,
+    line: impl std::fmt::Display,
+    title: &str,
+    message: &str,
+) -> String {
+    let message = format_github_message(message);
+    if title.is_empty() {
+        format!("::{level} file={file},line={line},col=0::{message}")
+    } else {
+        format!("::{level} file={file},line={line},col=0,title={title}::{message}")
     }
 }
 

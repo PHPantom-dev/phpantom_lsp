@@ -1,36 +1,34 @@
 use crate::common::{
-    create_test_backend, create_test_backend_with_full_stubs,
+    collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
     create_test_backend_with_function_stubs,
 };
+use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn collect(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
 }
 
 fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend_with_function_stubs();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend_with_function_stubs(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
 }
 
 fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
 }
 
 /// Collect diagnostics through the full slow-diagnostic pipeline so that
@@ -38,12 +36,11 @@ fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
 /// and LSP requests).  Needed for tests that exercise cross-call-site
 /// caching behaviour.
 fn collect_slow(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_slow_diagnostics,
+    )
 }
 
 fn has_type_error(diags: &[Diagnostic]) -> bool {

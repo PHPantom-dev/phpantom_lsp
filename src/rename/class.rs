@@ -13,6 +13,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::{document_changes_edit, multi_file_edit};
 use crate::completion::use_edit::UseBlockInfo;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{offset_to_position, ranges_overlap};
@@ -161,53 +162,29 @@ impl Backend {
         Some((def_url, new_url))
     }
 
-    /// Convert a `changes` map into `document_changes` with a file rename.
-    ///
-    /// When the rename response needs to include a `RenameFile` operation,
-    /// the `WorkspaceEdit` must use `document_changes` (an array of
-    /// `DocumentChangeOperation`) instead of the simpler `changes` map,
-    /// because the `changes` map does not support file operations.
-    ///
-    /// Text edits targeting the old file URI are rewritten to target the
-    /// new URI so editors apply them after the rename.
-    fn convert_to_document_changes(
+    /// The edit for a class rename: plain per-file changes, or, when the
+    /// declaring file moves with the class, the same changes carried as
+    /// document changes alongside the file rename.
+    fn class_rename_workspace_edit(
         changes: HashMap<Url, Vec<TextEdit>>,
-        old_uri: &Url,
-        new_uri: &Url,
-    ) -> DocumentChanges {
-        let mut ops: Vec<DocumentChangeOperation> = Vec::new();
-
-        // Add the file rename operation first.
-        ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
-            RenameFile {
-                old_uri: old_uri.clone(),
-                new_uri: new_uri.clone(),
-                options: None,
-                annotation_id: None,
-            },
-        )));
-
-        for (uri, edits) in changes {
-            // Edits that target the old file URI need to reference the
-            // new URI instead, because the rename happens first.
-            let target_uri = if uri == *old_uri {
-                new_uri.clone()
-            } else {
-                uri
-            };
-
-            let text_doc_edit = TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier {
-                    uri: target_uri,
-                    version: None,
-                },
-                edits: edits.into_iter().map(OneOf::Left).collect(),
-            };
-
-            ops.push(DocumentChangeOperation::Edit(text_doc_edit));
-        }
-
-        DocumentChanges::Operations(ops)
+        file_move: Option<(Url, Url)>,
+    ) -> WorkspaceEdit {
+        let Some((old_uri, new_uri)) = file_move else {
+            return multi_file_edit(changes);
+        };
+        let rename = ResourceOp::Rename(RenameFile {
+            old_uri: old_uri.clone(),
+            new_uri: new_uri.clone(),
+            options: None,
+            annotation_id: None,
+        });
+        // Edits that target the old file URI need to reference the new
+        // URI instead, because the rename happens first.
+        let edits = changes.into_iter().map(|(uri, edits)| {
+            let target_uri = if uri == old_uri { new_uri.clone() } else { uri };
+            (target_uri, edits)
+        });
+        document_changes_edit([rename], edits)
     }
 
     /// Build a `WorkspaceEdit` for a class rename that correctly handles
@@ -400,23 +377,8 @@ impl Backend {
             return None;
         }
 
-        if let Some((old_file_uri, new_file_uri)) =
-            self.should_rename_file(old_fqn_normalized, new_short_name)
-        {
-            let doc_changes =
-                Self::convert_to_document_changes(changes, &old_file_uri, &new_file_uri);
-            return Some(WorkspaceEdit {
-                changes: None,
-                document_changes: Some(doc_changes),
-                change_annotations: None,
-            });
-        }
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        let file_move = self.should_rename_file(old_fqn_normalized, new_short_name);
+        Some(Self::class_rename_workspace_edit(changes, file_move))
     }
 
     /// Build a `WorkspaceEdit` that moves a class to a new FQN.
@@ -769,23 +731,7 @@ impl Backend {
         }
 
         let file_move = self.compute_class_file_move(old_fqn_normalized, &new_fqn_normalized);
-
-        if let Some((old_uri, new_uri)) = file_move
-            && self.supports_file_rename.load(Ordering::Acquire)
-        {
-            let doc_changes = Self::convert_to_document_changes(changes, &old_uri, &new_uri);
-            return Ok(Some(WorkspaceEdit {
-                changes: None,
-                document_changes: Some(doc_changes),
-                change_annotations: None,
-            }));
-        }
-
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }))
+        Ok(Some(Self::class_rename_workspace_edit(changes, file_move)))
     }
 
     /// The imports the moved file needs for the names it used to reach

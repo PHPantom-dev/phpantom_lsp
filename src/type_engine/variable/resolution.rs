@@ -650,9 +650,10 @@ fn check_param_list(
         let docblock_type =
             docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
                 .or_else(|| {
-                    // Try extracting from docblock text directly.
-                    find_method_docblock_text(content, method_start_offset)
-                        .and_then(|doc| docblock::extract_param_raw_type(&doc, pname))
+                    content
+                        .get(..method_start_offset)
+                        .and_then(extract_preceding_docblock)
+                        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
                 });
 
         let effective =
@@ -664,18 +665,6 @@ fn check_param_list(
         return native_type;
     }
     None
-}
-
-/// Extract the raw docblock text preceding a method/function.
-fn find_method_docblock_text(content: &str, method_start: usize) -> Option<String> {
-    let before = content.get(..method_start)?;
-    let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    let doc_end = trimmed.len();
-    let doc_start = trimmed.rfind("/**")?;
-    Some(trimmed[doc_start..doc_end].to_string())
 }
 
 /// Check if the cursor is on a catch variable binding and return its type.

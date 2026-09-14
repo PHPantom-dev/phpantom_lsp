@@ -9,7 +9,7 @@
 //! edit to an unrelated file must never override the project's real
 //! configuration.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, open_php_str};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -42,10 +42,6 @@ class AppServiceProvider {
     }
 }
 ";
-
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
-}
 
 /// Read the configured date class the backend currently resolves to.
 ///
@@ -82,7 +78,7 @@ async fn removing_date_use_from_provider_clears_configured_class() {
     let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
-    open(&backend, &provider_uri, PROVIDER_WITHOUT_USE).await;
+    open_php_str(&backend, &provider_uri, PROVIDER_WITHOUT_USE).await;
 
     assert_eq!(
         configured_date_class(&backend),
@@ -126,7 +122,7 @@ class AppServiceProvider {
     let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
-    open(&backend, &provider_uri, changed).await;
+    open_php_str(&backend, &provider_uri, changed).await;
 
     assert_eq!(
         configured_date_class(&backend),
@@ -167,7 +163,7 @@ class Helper {
     }
 }
 ";
-    open(&backend, "file:///src/Helper.php", unrelated).await;
+    open_php_str(&backend, "file:///src/Helper.php", unrelated).await;
 
     assert_eq!(
         configured_date_class(&backend),

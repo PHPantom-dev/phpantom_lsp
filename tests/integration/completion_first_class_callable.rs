@@ -1,23 +1,9 @@
 use std::collections::HashMap;
 
-use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
+use crate::common::{
+    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+};
 use tower_lsp::lsp_types::*;
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
-
-fn property_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
 
 // ─── Function first-class callable ──────────────────────────────────────────
 

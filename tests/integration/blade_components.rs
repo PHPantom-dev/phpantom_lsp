@@ -3,30 +3,16 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
-    use tower_lsp::LanguageServer;
+    use crate::common::{
+        BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+        complete_labels_at_opened_with_trigger, create_psr4_workspace, markup_hover_at,
+        open_document,
+    };
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-        "App\\": "app/",
-        "Illuminate\\": "stubs/Illuminate/",
-        "Livewire\\": "stubs/Livewire/"
-    }}}"#;
-
-    const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-        abstract class Component {\n\
-            public $attributes;\n\
-            public function render() {}\n\
-        }\n";
 
     const ANONYMOUS_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
         class AnonymousComponent extends Component {\n\
             public function anonymousMarker(): string { return ''; }\n\
-        }\n";
-
-    const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
         }\n";
 
     /// One component class per naming shape the index has to cover: a
@@ -34,14 +20,17 @@ mod tests {
     /// (`Card\Card`, which `<x-card>` reaches).
     fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
         let (backend, dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
                 (
                     "stubs/Illuminate/View/AnonymousComponent.php",
                     ANONYMOUS_STUB,
                 ),
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 // Laravel's own container helper, which is how the virtual
                 // PHP says "the container builds this parameter".
                 (
@@ -136,62 +125,6 @@ mod tests {
         uri
     }
 
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
-        match result {
-            Some(Hover {
-                contents: HoverContents::Markup(m),
-                ..
-            }) => m.value,
-            other => panic!("expected markup hover, got {other:?}"),
-        }
-    }
-
-    async fn completion_labels(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> Vec<String> {
-        let items = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: Some(CompletionContext {
-                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                    trigger_character: Some(">".to_string()),
-                }),
-            })
-            .await
-            .unwrap();
-        match items {
-            Some(CompletionResponse::Array(items)) => items,
-            Some(CompletionResponse::List(list)) => list.items,
-            None => Vec::new(),
-        }
-        .into_iter()
-        .map(|item| item.label)
-        .collect()
-    }
-
     /// Method labels carry a trailing `()`; property labels do not.
     fn has_member(labels: &[String], name: &str) -> bool {
         labels
@@ -210,7 +143,7 @@ mod tests {
         open_document(&backend, &uri, "blade", template).await;
 
         // Column 18 is inside the `$kind` in the attribute value.
-        let hover = hover_text(&backend, &uri, 1, 18).await;
+        let hover = markup_hover_at(&backend, &uri, 1, 18).await;
         assert!(
             hover.contains("$kind"),
             "hovering the bound expression should describe it: {hover}"
@@ -225,7 +158,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let labels = completion_labels(&backend, &uri, 1, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
         assert!(
             has_member(&labels, "severity"),
             "expected the Alert members, got: {labels:?}"
@@ -242,7 +175,7 @@ mod tests {
             let (backend, _dir, uri) = workspace(&template);
             open_document(&backend, &uri, "blade", &template).await;
 
-            let labels = completion_labels(&backend, &uri, 1, 15).await;
+            let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
             assert!(
                 has_member(&labels, member),
                 "<x-{tag}> should resolve to the class declaring {member}, got: {labels:?}"
@@ -257,7 +190,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let labels = completion_labels(&backend, &uri, 1, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
         assert!(
             has_member(&labels, "increment") && has_member(&labels, "count"),
             "expected the Counter members, got: {labels:?}"
@@ -272,7 +205,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let labels = completion_labels(&backend, &uri, 1, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
         assert!(
             has_member(&labels, "anonymousMarker"),
             "an anonymous component is an AnonymousComponent, got: {labels:?}"
@@ -302,7 +235,7 @@ mod tests {
             "no component may be resolved for a dynamic tag: {virtual_php}"
         );
 
-        let hover = hover_text(&backend, &uri, 2, 8).await;
+        let hover = markup_hover_at(&backend, &uri, 2, 8).await;
         assert!(
             hover.contains("$kind"),
             "the rest of the template must still resolve, got: {hover}"
@@ -456,7 +389,7 @@ mod tests {
         )
         .await;
 
-        let hover = hover_text(&backend, &banner, 0, 10).await;
+        let hover = markup_hover_at(&backend, &banner, 0, 10).await;
         assert!(
             hover.contains("42") && !hover.contains("danger"),
             "$headline is what its own tag passes, not what the tag before \

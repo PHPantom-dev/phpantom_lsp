@@ -8,7 +8,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{
+        blade_undefined_variables, create_psr4_workspace, markup_hover_at, open_blade_template,
+        open_document,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -99,49 +102,7 @@ class ProfileComposer
         relative: &str,
     ) -> Url {
         backend.initialized(InitializedParams {}).await;
-        let path = dir.path().join(relative);
-        let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
-        open_document(backend, &uri, "blade", &text).await;
-        uri
-    }
-
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
-        match result {
-            Some(Hover {
-                contents: HoverContents::Markup(m),
-                ..
-            }) => m.value,
-            other => panic!("expected markup hover, got {other:?}"),
-        }
-    }
-
-    fn undefined_variables(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<String> {
-        let virtual_php = backend
-            .blade_virtual_php(uri.as_str())
-            .expect("blade virtual content");
-        let mut diags = Vec::new();
-        backend.collect_undefined_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        diags
-            .into_iter()
-            .filter(|d| d.message.contains("Undefined variable"))
-            .map(|d| d.message)
-            .collect()
+        open_blade_template(backend, dir.path(), relative).await
     }
 
     /// A shared variable reaches a template no caller and no composer
@@ -152,13 +113,15 @@ class ProfileComposer
         let uri = open_template(&backend, &dir, "resources/views/about.blade.php").await;
 
         assert!(
-            hover_text(&backend, &uri, 0, 7).await.contains("string"),
+            markup_hover_at(&backend, &uri, 0, 7)
+                .await
+                .contains("string"),
             "the shared value's own type must reach the template"
         );
         assert!(
-            undefined_variables(&backend, &uri).is_empty(),
+            blade_undefined_variables(&backend, &uri).is_empty(),
             "a shared variable is defined: {:?}",
-            undefined_variables(&backend, &uri)
+            blade_undefined_variables(&backend, &uri)
         );
     }
 
@@ -170,7 +133,7 @@ class ProfileComposer
             workspace(&[("resources/views/about.blade.php", "{{ $menu->items() }}\n")]);
         let uri = open_template(&backend, &dir, "resources/views/about.blade.php").await;
 
-        let hover = hover_text(&backend, &uri, 0, 5).await;
+        let hover = markup_hover_at(&backend, &uri, 0, 5).await;
         assert!(
             hover.contains("App\\Support") && hover.contains("Menu"),
             "the container form of share() must resolve too, got: {hover}"
@@ -187,15 +150,15 @@ class ProfileComposer
         ]);
         let profile = open_template(&backend, &dir, "resources/views/profile.blade.php").await;
 
-        let hover = hover_text(&backend, &profile, 0, 5).await;
+        let hover = markup_hover_at(&backend, &profile, 0, 5).await;
         assert!(
             hover.contains("App\\Models") && hover.contains("User"),
             "the composer's own expression types the variable, got: {hover}"
         );
         assert!(
-            undefined_variables(&backend, &profile).is_empty(),
+            blade_undefined_variables(&backend, &profile).is_empty(),
             "the targeted view has the composer's data: {:?}",
-            undefined_variables(&backend, &profile)
+            blade_undefined_variables(&backend, &profile)
         );
 
         let about =
@@ -204,7 +167,7 @@ class ProfileComposer
             std::fs::read_to_string(dir.path().join("resources/views/about.blade.php")).unwrap();
         open_document(&backend, &about, "blade", &text).await;
         assert!(
-            undefined_variables(&backend, &about)
+            blade_undefined_variables(&backend, &about)
                 .iter()
                 .any(|m| m.contains("$user")),
             "a view the composer does not target never receives its data"
@@ -220,7 +183,7 @@ class ProfileComposer
         )]);
         let uri = open_template(&backend, &dir, "resources/views/partials/header.blade.php").await;
 
-        let hover = hover_text(&backend, &uri, 0, 5).await;
+        let hover = markup_hover_at(&backend, &uri, 0, 5).await;
         assert!(
             hover.contains("App\\Support") && hover.contains("Menu"),
             "an inline closure composer types its data too, got: {hover}"
@@ -237,7 +200,7 @@ class ProfileComposer
         )]);
         let uri = open_template(&backend, &dir, "resources/views/about.blade.php").await;
 
-        let hover = hover_text(&backend, &uri, 3, 5).await;
+        let hover = markup_hover_at(&backend, &uri, 3, 5).await;
         assert!(
             hover.contains("User"),
             "the template's own annotation decides the type, got: {hover}"

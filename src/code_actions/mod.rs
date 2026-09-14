@@ -130,8 +130,9 @@ use crate::Backend;
 
 pub(crate) use docblock_edit::{DocblockAbove, find_docblock_above_line};
 pub(crate) use helpers::{
-    CodeActionData, create_file_edit, detect_indent_from_members, find_identical_occurrences,
-    indent_of_line_at, indent_unit, make_code_action_data, single_edit, single_file_edit,
+    CodeActionData, create_file_edit, detect_indent_from_members, document_changes_edit,
+    find_identical_occurrences, indent_of_line_at, indent_unit, make_code_action_data,
+    multi_file_edit, single_edit, single_file_edit,
 };
 
 impl Backend {

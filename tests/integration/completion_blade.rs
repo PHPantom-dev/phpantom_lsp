@@ -3,7 +3,9 @@
 //! of a `<x-…>` / `<livewire:…>` tag.
 
 use crate::common::{
-    complete_at_opened_with_trigger, create_psr4_workspace, create_test_backend, open_document,
+    BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+    complete_at_opened_with_trigger, create_psr4_workspace, create_test_backend, labels,
+    open_document,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -130,32 +132,18 @@ async fn directive_completion_still_fires_inside_an_open_block() {
 
 // ── Component tag and attribute completion ──────────────────────────────
 
-const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-    "App\\": "app/",
-    "Illuminate\\": "stubs/Illuminate/",
-    "Livewire\\": "stubs/Livewire/"
-}}}"#;
-
-const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-    abstract class Component {\n\
-        public $attributes;\n\
-        public function render() {}\n\
-    }\n";
-
-const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-    abstract class Component {\n\
-        public function render() {}\n\
-    }\n";
-
 /// A project with one component of every shape the index answers for: a
 /// class-based one, a nested class-based one, an anonymous template, and a
 /// Livewire class.
 fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        BLADE_COMPONENT_COMPOSER,
         &[
-            ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
-            ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+            (
+                "stubs/Illuminate/View/Component.php",
+                ILLUMINATE_COMPONENT_STUB,
+            ),
+            ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
             (
                 "app/View/Components/Alert.php",
                 "<?php\nnamespace App\\View\\Components;\n\
@@ -273,10 +261,6 @@ fn apply(template: &str, edits: &[TextEdit]) -> String {
         );
     }
     result
-}
-
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
 }
 
 #[tokio::test]

@@ -6,7 +6,9 @@
 //! are flagged.  Own arguments/options complete against the enclosing
 //! command's signature.
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
+use crate::common::{
+    complete_labels_at_opened, create_psr4_workspace, open_php_str, position_after,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -37,29 +39,6 @@ class ReportCommand extends Command
     public function handle(): void {}
 }
 ";
-
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
-}
-
-/// Position of the cursor immediately after the first occurrence of `needle`.
-fn position_after(content: &str, needle: &str) -> Position {
-    let idx = content.find(needle).expect("needle not found") + needle.len();
-    let mut line = 0u32;
-    let mut character = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i == idx {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-    Position { line, character }
-}
 
 /// Labels offered at `position` of the already-open `uri`.
 async fn complete_at(
@@ -101,7 +80,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let position = position_after(consumer, "Artisan::call('");
     let labels = complete_at(&backend, &uri, position).await;
@@ -139,7 +118,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     // Cursor on `app:sync` inside the string.
     let position = position_after(consumer, "Artisan::call('app");
@@ -195,7 +174,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -259,7 +238,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -300,7 +279,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -347,7 +326,7 @@ class SyncCommand extends Command
     let uri = Url::from_file_path(dir.path().join("src/Console/Commands/SyncCommand.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, edited).await;
+    open_php_str(&backend, &uri, edited).await;
 
     let position = position_after(edited, "$this->option('");
     let labels = complete_at(&backend, &uri, position).await;
@@ -386,7 +365,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let position = position_after(consumer, "/* don't ( */ '");
     let labels = complete_at(&backend, &uri, position).await;
@@ -422,7 +401,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let position = position_after(consumer, "[\n            '");
     let labels = complete_at(&backend, &uri, position).await;
@@ -453,7 +432,7 @@ class SyncCommand extends Command
     let uri = Url::from_file_path(dir.path().join("src/Console/Commands/SyncCommand.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, edited).await;
+    open_php_str(&backend, &uri, edited).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, edited, &mut diags);
@@ -518,7 +497,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -581,7 +560,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -653,7 +632,7 @@ class Runner {
     let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -751,7 +730,7 @@ async fn signature_types_argument_and_option_accessors() {
     let uri = Url::from_file_path(dir.path().join("src/Console/Commands/TypedCommand.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, TYPED_COMMAND).await;
+    open_php_str(&backend, &uri, TYPED_COMMAND).await;
 
     for (needle, expected) in [
         // `{user}` is required, so it always arrives.
@@ -802,7 +781,7 @@ async fn an_attribute_declared_signature_types_the_accessors_too() {
     )
     .unwrap()
     .to_string();
-    open(&backend, &uri, ATTRIBUTE_TYPED_COMMAND).await;
+    open_php_str(&backend, &uri, ATTRIBUTE_TYPED_COMMAND).await;
 
     let position = position_after(ATTRIBUTE_TYPED_COMMAND, "$days");
     let hover = backend
@@ -855,7 +834,7 @@ class OverridingCommand extends Command
     )
     .unwrap()
     .to_string();
-    open(&backend, &uri, OVERRIDING_COMMAND).await;
+    open_php_str(&backend, &uri, OVERRIDING_COMMAND).await;
 
     let position = position_after(OVERRIDING_COMMAND, "$flag");
     let hover = backend
@@ -911,7 +890,7 @@ class GuardedCommand extends Command
     let uri = Url::from_file_path(dir.path().join("src/Console/Commands/GuardedCommand.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, GUARDED_COMMAND).await;
+    open_php_str(&backend, &uri, GUARDED_COMMAND).await;
 
     let position = position_after(GUARDED_COMMAND, "        if ($markets");
     let hover = backend

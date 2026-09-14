@@ -1,4 +1,4 @@
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, definition_uri};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -167,15 +167,6 @@ fn definition_line(response: &GotoDefinitionResponse) -> u32 {
         GotoDefinitionResponse::Scalar(location) => location.range.start.line,
         GotoDefinitionResponse::Array(locations) => locations[0].range.start.line,
         GotoDefinitionResponse::Link(links) => links[0].target_range.start.line,
-    }
-}
-
-/// Extract the target URI from a definition response.
-fn definition_uri(response: &GotoDefinitionResponse) -> &Url {
-    match response {
-        GotoDefinitionResponse::Scalar(location) => &location.uri,
-        GotoDefinitionResponse::Array(locations) => &locations[0].uri,
-        GotoDefinitionResponse::Link(links) => &links[0].target_uri,
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::type_engine::variable::forward_walk::scope_state::type_admits_null;
 
 /// Strip `null` from a subject that an identity comparison has matched
 /// against a value that cannot be `null`.
@@ -355,13 +356,4 @@ pub(super) fn strip_null_by_constant_identity(
         return;
     }
     strip_null_from_scope(var_name, scope);
-}
-
-/// Whether a type has a `null` among the values it describes.
-fn type_admits_null(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Nullable(_) => true,
-        TypeKind::Union(members) => members.iter().any(type_admits_null),
-        _ => ty.is_null() || ty.is_mixed(),
-    }
 }

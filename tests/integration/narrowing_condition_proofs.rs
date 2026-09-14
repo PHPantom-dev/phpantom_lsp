@@ -9,25 +9,11 @@
 //! an array element records the element that was checked, not the whole
 //! array's value type.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, hover_at, hover_text};
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-fn hover_at(backend: &Backend, uri: &str, content: &str, line: u32, character: u32) -> Hover {
-    backend.update_ast(uri, content);
-    backend
-        .handle_hover(uri, content, Position { line, character })
-        .expect("expected hover")
-}
-
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
 
 /// Hover on the variable that the marker line `// <-- here` points at.
 ///
@@ -40,7 +26,7 @@ fn hover_marked(backend: &Backend, uri: &str, content: &str) -> String {
         .expect("fixture should carry a `// <-- here` marker") as u32;
     let text = content.lines().nth(line as usize).unwrap();
     let column = text.find('$').expect("marked line should name a variable") as u32 + 1;
-    hover_text(&hover_at(backend, uri, content, line, column)).to_string()
+    hover_text(&hover_at(backend, uri, content, line, column).expect("expected hover")).to_string()
 }
 
 const SCAFFOLD: &str = r#"
@@ -548,7 +534,7 @@ function f(array $frame): void {
         "the key may be absent, and reading a missing offset is null: {text}"
     );
 
-    let required = hover_at(&backend, uri, content, 3, 5);
+    let required = hover_at(&backend, uri, content, 3, 5).expect("expected hover");
     let required = hover_text(&required);
     assert!(
         !required.contains("null"),

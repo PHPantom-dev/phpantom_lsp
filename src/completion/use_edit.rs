@@ -18,6 +18,8 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::blade::source_map::BladeSourceMap;
 use crate::blade::use_directive::{first_string_literal, imported_name, use_directive_arguments};
+use crate::diagnostics::helpers::scan_use_statements;
+use crate::text_position::LineIndex;
 use crate::util::short_name;
 
 /// Where a Blade template's imports go, in the virtual-PHP coordinates
@@ -286,72 +288,34 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 /// that already imports a given class, use
 /// [`crate::diagnostics::helpers::find_use_statement`] instead.
 ///
-/// The scanning logic distinguishes top-level `use` imports from trait
-/// `use` statements inside class/enum/trait bodies by tracking brace
-/// depth.
+/// The imports are read by [`scan_use_statements`], which tells a
+/// namespace-level import from a trait `use` inside a class, enum, or
+/// trait body.
 pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
-    let mut existing: Vec<(u32, String)> = Vec::new();
     let mut namespace_line: Option<u32> = None;
     let mut php_open_line: Option<u32> = None;
 
-    // Track brace depth so we can distinguish top-level `use` imports
-    // from trait `use` statements inside class/enum/trait bodies.
-    //
-    // With semicolon-style namespaces (`namespace Foo;`), imports live
-    // at depth 0 and class bodies are at depth 1.
-    //
-    // With brace-style namespaces (`namespace Foo { ... }`), imports
-    // live at depth 1 and class bodies are at depth 2.
-    //
-    // We compute depth at the START of each line and track whether we
-    // saw a brace-style namespace to set the right threshold.
-    let mut brace_depth: u32 = 0;
-    let mut uses_brace_namespace = false;
-
     for (i, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-
-        // The depth at the start of this line (before counting its braces).
-        let depth_at_start = brace_depth;
-
-        // Update brace depth for the NEXT line.
-        for ch in trimmed.chars() {
-            match ch {
-                '{' => brace_depth += 1,
-                '}' => brace_depth = brace_depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-
         if trimmed.starts_with("<?php") && php_open_line.is_none() {
             php_open_line = Some(i as u32);
         }
-
         // Match `namespace Foo\Bar;` or `namespace Foo\Bar {`
         // but not `namespace\something` (which is a different construct).
         if trimmed.starts_with("namespace ") || trimmed.starts_with("namespace\t") {
             namespace_line = Some(i as u32);
-            if trimmed.contains('{') {
-                uses_brace_namespace = true;
-            }
-        }
-
-        // The maximum brace depth at which `use` statements are still
-        // namespace imports (not trait imports inside a class body).
-        let max_import_depth = if uses_brace_namespace { 1 } else { 0 };
-
-        // Match `use Foo\Bar;`, `use Foo\{Bar, Baz};`, etc.
-        // Only at the import level — deeper means trait `use` inside a
-        // class/enum/trait body.
-        if depth_at_start <= max_import_depth
-            && (trimmed.starts_with("use ") || trimmed.starts_with("use\t"))
-            && !trimmed.starts_with("use (")
-            && !trimmed.starts_with("use(")
-            && let Some(sort_key) = extract_use_sort_key(trimmed)
-        {
-            existing.push((i as u32, sort_key));
         }
     }
+
+    let index = LineIndex::new(content);
+    let existing = scan_use_statements(content)
+        .into_iter()
+        .filter(|statement| statement.top_level)
+        .filter_map(|statement| {
+            let sort_key = extract_use_sort_key(&content[statement.keyword_start..statement.end])?;
+            Some((index.position(statement.line_start).line, sort_key))
+        })
+        .collect();
 
     // Fallback: insert after `namespace`, or after `<?php`.
     let fallback_line = namespace_line.or(php_open_line).map(|l| l + 1).unwrap_or(0);

@@ -27,12 +27,13 @@ pub(crate) fn ranges_overlap(a: &Range, b: &Range) -> bool {
 /// This is the inverse of [`position_to_byte_offset`].  Characters are
 /// counted as UTF-16 code units per the LSP specification.
 /// If `offset` is past the end of `content`, the position at the end of
-/// the file is returned.
+/// the file is returned.  An offset inside a multi-byte character answers
+/// the position after that character, rather than never matching.
 pub(crate) fn offset_to_position(content: &str, offset: usize) -> Position {
     let mut line = 0u32;
     let mut col = 0u32;
     for (i, ch) in content.char_indices() {
-        if i == offset {
+        if i >= offset {
             return Position {
                 line,
                 character: col,
@@ -321,5 +322,46 @@ mod tests {
     fn line_start_byte_offset_past_end_returns_len() {
         let content = "one\ntwo";
         assert_eq!(line_start_byte_offset(content, 5), content.len());
+    }
+
+    #[test]
+    fn offset_to_position_start_of_file() {
+        let content = "<?php\necho 'hello';\n";
+        assert_eq!(offset_to_position(content, 0), Position::new(0, 0));
+    }
+
+    #[test]
+    fn offset_to_position_second_line() {
+        let content = "<?php\necho 'hello';\n";
+        // Offset 6 is the 'e' of 'echo' on line 1.
+        assert_eq!(offset_to_position(content, 6), Position::new(1, 0));
+    }
+
+    #[test]
+    fn offset_to_position_mid_line() {
+        let content = "<?php\necho 'hello';\n";
+        // Offset 10 is the '\'' before 'hello' (line 1, col 4).
+        assert_eq!(offset_to_position(content, 10), Position::new(1, 4));
+    }
+
+    #[test]
+    fn offset_to_position_end_of_content() {
+        let content = "ab\ncd";
+        // Offset 5 is past the last character.
+        assert_eq!(offset_to_position(content, 5), Position::new(1, 2));
+    }
+
+    #[test]
+    fn offset_to_position_multibyte_char() {
+        // '€' is 3 bytes in UTF-8 but 1 code unit in UTF-16.
+        let content = "€x";
+        assert_eq!(offset_to_position(content, 3), Position::new(0, 1));
+    }
+
+    #[test]
+    fn offset_to_position_inside_a_multibyte_char() {
+        // An offset between the bytes of '€' answers the position after it.
+        let content = "€x";
+        assert_eq!(offset_to_position(content, 1), Position::new(0, 1));
     }
 }

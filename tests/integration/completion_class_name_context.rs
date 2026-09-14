@@ -1,4 +1,6 @@
-use crate::common::{complete_at, create_test_backend, create_test_backend_with_stubs};
+use crate::common::{
+    class_items, complete_at, create_test_backend, create_test_backend_with_stubs, labels,
+};
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
@@ -8,19 +10,6 @@ use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Filter completion items to only those with kind == CLASS.
-fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
-        .collect()
-}
-
-/// Extract labels from a list of completion items.
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
 
 /// Find a completion item by its FQN (stored in the `detail` field).
 fn find_by_fqn<'a>(items: &'a [&CompletionItem], fqn: &str) -> Option<&'a CompletionItem> {

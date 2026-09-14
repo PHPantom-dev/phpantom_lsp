@@ -62,11 +62,12 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Deserialize;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
 use crate::composer::ComposerPackage;
 use crate::config::MagoConfig;
-use crate::process::paths_match;
+use crate::process::{auto_detect_binary, paths_match};
+use crate::text_position::offset_to_position;
 
 /// Composer package name Mago is distributed under.
 const MAGO_PACKAGE: &str = "carthage-software/mago";
@@ -116,19 +117,11 @@ pub(crate) fn resolve_mago(
             path: PathBuf::from(cmd),
         }),
         None => {
+            // Only a project that depends on Mago has a vendored copy to
+            // prefer over the one on `$PATH`.
             let depends_on_mago =
                 composer_json.is_some_and(|pkg| crate::composer::has_dependency(pkg, MAGO_PACKAGE));
-
-            if depends_on_mago && let Some(root) = workspace_root {
-                let bin = bin_dir.unwrap_or("vendor/bin");
-                let candidate = root.join(bin).join("mago");
-                if candidate.is_file() {
-                    return Some(ResolvedMago { path: candidate });
-                }
-            }
-
-            crate::process::which("mago")
-                .ok()
+            auto_detect_binary(workspace_root.filter(|_| depends_on_mago), bin_dir, "mago")
                 .map(|path| ResolvedMago { path })
         }
     }
@@ -698,8 +691,8 @@ fn parse_mago_issue(
             .and_then(|o| o.as_u64())
             .unwrap_or(start_offset as u64) as usize;
 
-        let start_pos = byte_offset_to_position(content, start_offset);
-        let end_pos = byte_offset_to_position(content, end_offset);
+        let start_pos = offset_to_position(content, start_offset);
+        let end_pos = offset_to_position(content, end_offset);
 
         range = Some(Range {
             start: start_pos,
@@ -789,28 +782,6 @@ fn parse_mago_issue(
     })
 }
 
-/// Convert a byte offset within `content` to an LSP `Position`
-/// (0-based line, UTF-16 character offset).
-pub(crate) fn byte_offset_to_position(content: &str, offset: usize) -> Position {
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16() as u32;
-        }
-    }
-    Position {
-        line,
-        character: col,
-    }
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -856,52 +827,6 @@ mod tests {
             Some("mago-lint"),
             "workspace results carry the same source as per-file runs"
         );
-    }
-
-    // ── byte_offset_to_position ─────────────────────────────────────
-
-    #[test]
-    fn byte_offset_to_position_start_of_file() {
-        let content = "<?php\necho 'hello';\n";
-        let pos = byte_offset_to_position(content, 0);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-    }
-
-    #[test]
-    fn byte_offset_to_position_second_line() {
-        let content = "<?php\necho 'hello';\n";
-        // Offset 6 is the 'e' of 'echo' on line 1.
-        let pos = byte_offset_to_position(content, 6);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
-    }
-
-    #[test]
-    fn byte_offset_to_position_mid_line() {
-        let content = "<?php\necho 'hello';\n";
-        // Offset 10 is the '\'' before 'hello' (line 1, col 4).
-        let pos = byte_offset_to_position(content, 10);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 4);
-    }
-
-    #[test]
-    fn byte_offset_to_position_end_of_content() {
-        let content = "ab\ncd";
-        // Offset 5 is past the last character.
-        let pos = byte_offset_to_position(content, 5);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 2);
-    }
-
-    #[test]
-    fn byte_offset_to_position_multibyte_char() {
-        // '€' is 3 bytes in UTF-8 but 1 code unit in UTF-16.
-        let content = "€x";
-        let pos = byte_offset_to_position(content, 3); // byte offset of 'x'
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 1);
     }
 
     // ── parse_mago_json — lint issues ───────────────────────────────

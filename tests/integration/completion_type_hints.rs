@@ -1,26 +1,13 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{class_items, complete_at, create_test_backend, labels};
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Extract labels from completion items.
-fn labels(items: &[CompletionItem]) -> Vec<String> {
-    items.iter().map(|i| i.label.clone()).collect()
-}
 
 /// Filter to only KEYWORD-kind items (native types).
 fn keyword_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
     items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
-        .collect()
-}
-
-/// Filter to only CLASS-kind items.
-fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
         .collect()
 }
 

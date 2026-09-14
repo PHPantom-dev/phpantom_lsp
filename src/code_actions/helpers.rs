@@ -20,6 +20,12 @@ use tower_lsp::lsp_types::*;
 pub(crate) fn single_file_edit(uri: Url, edits: Vec<TextEdit>) -> WorkspaceEdit {
     let mut changes = HashMap::new();
     changes.insert(uri, edits);
+    multi_file_edit(changes)
+}
+
+/// Build a [`WorkspaceEdit`] that applies text edits to any number of
+/// files, none of which is created, renamed, or deleted.
+pub(crate) fn multi_file_edit(changes: HashMap<Url, Vec<TextEdit>>) -> WorkspaceEdit {
     WorkspaceEdit {
         changes: Some(changes),
         document_changes: None,
@@ -35,51 +41,63 @@ pub(crate) fn single_edit(uri: Url, range: Range, new_text: String) -> Workspace
     single_file_edit(uri, vec![TextEdit { range, new_text }])
 }
 
-/// Build a `WorkspaceEdit` that creates `uri` holding `content`, followed
-/// by `edits` to files that already exist.
+/// Build a `WorkspaceEdit` whose `document_changes` carries `ops` (file
+/// creations, renames, deletions) followed by one `TextDocumentEdit` per
+/// entry of `edits`.
 ///
-/// A file creation is a resource operation, which only `document_changes`
-/// can carry, so the accompanying edits travel in the same list rather than
-/// in `changes`. Offer an action built this way only when the client has
-/// advertised `create` among its resource operations
-/// (`Backend::supports_file_create`); one that has not ignores the whole
+/// A resource operation only travels in `document_changes`, so the text
+/// edits that accompany one go in the same list rather than in `changes`.
+/// Offer an edit built this way only when the client has advertised the
+/// operations it carries (`Backend::supports_file_create`,
+/// `Backend::supports_file_rename`); one that has not ignores the whole
 /// edit.
-pub(crate) fn create_file_edit(
-    uri: Url,
-    content: String,
-    edits: Vec<(Url, Vec<TextEdit>)>,
+pub(crate) fn document_changes_edit(
+    ops: impl IntoIterator<Item = ResourceOp>,
+    edits: impl IntoIterator<Item = (Url, Vec<TextEdit>)>,
 ) -> WorkspaceEdit {
-    let mut operations = vec![DocumentChangeOperation::Op(ResourceOp::Create(
-        CreateFile {
-            uri: uri.clone(),
-            options: Some(CreateFileOptions {
-                overwrite: Some(false),
-                ignore_if_exists: Some(true),
-            }),
-            annotation_id: None,
-        },
-    ))];
-    // An empty file is complete once created; only content needs an edit.
-    if !content.is_empty() {
-        operations.push(DocumentChangeOperation::Edit(TextDocumentEdit {
-            text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
-            edits: vec![OneOf::Left(TextEdit {
-                range: Range::default(),
-                new_text: content,
-            })],
-        }));
-    }
-    operations.extend(edits.into_iter().map(|(uri, edits)| {
-        DocumentChangeOperation::Edit(TextDocumentEdit {
-            text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
-            edits: edits.into_iter().map(OneOf::Left).collect(),
-        })
-    }));
+    let operations = ops
+        .into_iter()
+        .map(DocumentChangeOperation::Op)
+        .chain(edits.into_iter().map(|(uri, edits)| {
+            DocumentChangeOperation::Edit(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
+                edits: edits.into_iter().map(OneOf::Left).collect(),
+            })
+        }))
+        .collect();
     WorkspaceEdit {
         changes: None,
         document_changes: Some(DocumentChanges::Operations(operations)),
         change_annotations: None,
     }
+}
+
+/// Build a `WorkspaceEdit` that creates `uri` holding `content`, followed
+/// by `edits` to files that already exist.
+pub(crate) fn create_file_edit(
+    uri: Url,
+    content: String,
+    edits: Vec<(Url, Vec<TextEdit>)>,
+) -> WorkspaceEdit {
+    let create = ResourceOp::Create(CreateFile {
+        uri: uri.clone(),
+        options: Some(CreateFileOptions {
+            overwrite: Some(false),
+            ignore_if_exists: Some(true),
+        }),
+        annotation_id: None,
+    });
+    // An empty file is complete once created; only content needs an edit.
+    let content_edit = (!content.is_empty()).then(|| {
+        (
+            uri,
+            vec![TextEdit {
+                range: Range::default(),
+                new_text: content,
+            }],
+        )
+    });
+    document_changes_edit([create], content_edit.into_iter().chain(edits))
 }
 
 // ─── Indentation helpers ──────────────────────────────────────────────────────

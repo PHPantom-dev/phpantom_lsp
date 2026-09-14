@@ -46,7 +46,7 @@ pub(crate) fn skip_block_comment(bytes: &[u8], pos: usize) -> usize {
         }
         i += 1;
     }
-    i
+    bytes.len()
 }
 
 /// Skip backward past a string literal ending at position `end` (which
@@ -350,7 +350,17 @@ pub(crate) fn find_matching_forward(
     open: u8,
     close: u8,
 ) -> Option<usize> {
-    let bytes = text.as_bytes();
+    find_matching_forward_bytes(text.as_bytes(), open_pos, open, close)
+}
+
+/// [`find_matching_forward`] over a byte slice, for scanners that already
+/// work on bytes.
+pub(crate) fn find_matching_forward_bytes(
+    bytes: &[u8],
+    open_pos: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
     let len = bytes.len();
     if open_pos >= len || bytes[open_pos] != open {
         return None;

@@ -50,7 +50,7 @@ use tempfile::NamedTempFile;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::config::PhpStanConfig;
-use crate::process::paths_match;
+use crate::process::{auto_detect_binary, paths_match};
 
 /// Default PHPStan timeout in milliseconds (60 seconds).
 const DEFAULT_TIMEOUT_MS: u64 = 60_000;
@@ -144,17 +144,14 @@ pub(crate) fn resolve_phpstan(
                 || composer_json
                     .is_some_and(|pkg| crate::composer::has_dependency(pkg, "phpstan/phpstan"));
 
-            if depends_on_phpstan && let Some(root) = workspace_root {
-                let bin = bin_dir.unwrap_or("vendor/bin");
-                let candidate = root.join(bin).join("phpstan");
-                if candidate.is_file() {
-                    return Some(ResolvedPhpStan { path: candidate });
-                }
-            }
-
-            crate::process::which("phpstan")
-                .ok()
-                .map(|path| ResolvedPhpStan { path })
+            // Only a project that depends on PHPStan has a vendored copy
+            // to prefer over the one on `$PATH`.
+            auto_detect_binary(
+                workspace_root.filter(|_| depends_on_phpstan),
+                bin_dir,
+                "phpstan",
+            )
+            .map(|path| ResolvedPhpStan { path })
         }
     }
 }

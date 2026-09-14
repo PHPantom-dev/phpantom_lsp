@@ -7,7 +7,7 @@
 //! `hasForLocale()`, a config key inside `getMany()`, and an environment
 //! variable behind `Env::get()`.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, markup_hover_at, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -15,30 +15,6 @@ const COMPOSER: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
     "autoload": { "psr-4": { "App\\": "app/" } }
 }"#;
-
-/// The Markdown a hover at `line`/`character` of an already-open `uri` holds.
-async fn hover_text(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> String {
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()
-        .expect("the position should hover");
-    match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
-        other => panic!("expected markup hover, got {other:?}"),
-    }
-}
 
 /// Every location go-to-definition offers at `line`/`character` of `relative`.
 async fn definitions(
@@ -321,19 +297,19 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
     open_php(&backend, &uri, caller).await;
 
-    let declared = hover_text(&backend, &uri, 4, 16).await;
+    let declared = markup_hover_at(&backend, &uri, 4, 16).await;
     assert!(
         declared.contains("`log`") && declared.contains("Declared in `.env`"),
         "got {declared}"
     );
 
-    let secret = hover_text(&backend, &uri, 5, 16).await;
+    let secret = markup_hover_at(&backend, &uri, 5, 16).await;
     assert!(
         !secret.contains("sk_test_123") && secret.contains("Value hidden"),
         "got {secret}"
     );
 
-    let empty = hover_text(&backend, &uri, 6, 16).await;
+    let empty = markup_hover_at(&backend, &uri, 6, 16).await;
     assert!(empty.contains("Set to an empty value"), "got {empty}");
 }
 
@@ -400,14 +376,14 @@ async fn translation_hover_shows_the_translated_line() {
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
     open_php(&backend, &uri, caller).await;
 
-    let leaf = hover_text(&backend, &uri, 4, 16).await;
+    let leaf = markup_hover_at(&backend, &uri, 4, 16).await;
     assert!(
         leaf.contains("`Explore :name`") && leaf.contains("Defined in `lang/en/boards.php`"),
         "got {leaf}"
     );
 
     // A group has no single line, so the hover keeps naming only the file.
-    let group = hover_text(&backend, &uri, 5, 16).await;
+    let group = markup_hover_at(&backend, &uri, 5, 16).await;
     assert!(
         group.contains("Defined in `lang/en/boards.php`"),
         "got {group}"

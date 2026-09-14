@@ -6,7 +6,10 @@
 //! find-references links every usage, and — when the project calls
 //! `enforceMorphMap()` — an unregistered alias is flagged.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{
+    create_psr4_workspace, definition_locations, goto_definition_at, hover_text_at, open_php_str,
+    position_after,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -79,29 +82,6 @@ class AppServiceProvider extends ServiceProvider
     )
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
-}
-
-/// Position of the cursor immediately after the first occurrence of `needle`.
-fn position_after(content: &str, needle: &str) -> Position {
-    let idx = content.find(needle).expect("needle not found") + needle.len();
-    let mut line = 0u32;
-    let mut character = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i == idx {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-    Position { line, character }
-}
-
 /// Build a workspace with the provider, both models, and `src/Consumer.php`.
 async fn workspace(
     enforce: bool,
@@ -124,42 +104,8 @@ async fn workspace(
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
     (backend, dir, uri)
-}
-
-async fn hover_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    position: Position,
-) -> Option<String> {
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()?;
-    match hover.contents {
-        HoverContents::Markup(markup) => Some(markup.value),
-        HoverContents::Scalar(MarkedString::String(s)) => Some(s),
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => Some(ls.value),
-        HoverContents::Array(items) => Some(
-            items
-                .into_iter()
-                .map(|item| match item {
-                    MarkedString::String(s) => s,
-                    MarkedString::LanguageString(ls) => ls.value,
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
-    }
 }
 
 async fn definition_uris(
@@ -167,30 +113,12 @@ async fn definition_uris(
     uri: &str,
     position: Position,
 ) -> Vec<String> {
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
-    match result {
-        None => Vec::new(),
-        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc.uri.to_string()],
-        Some(GotoDefinitionResponse::Array(locs)) => {
-            locs.into_iter().map(|l| l.uri.to_string()).collect()
-        }
-        Some(GotoDefinitionResponse::Link(links)) => links
-            .into_iter()
-            .map(|l| l.target_uri.to_string())
-            .collect(),
-    }
+    let uri = Url::parse(uri).unwrap();
+    let response = goto_definition_at(backend, &uri, position.line, position.character).await;
+    definition_locations(response)
+        .into_iter()
+        .map(|location| location.uri.to_string())
+        .collect()
 }
 
 fn morph_diagnostics(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
@@ -218,9 +146,14 @@ async fn hover_on_a_morph_alias_names_the_mapped_model() {
     let (backend, _dir, uri) = workspace(false, WHERE_HAS_MORPH_CONSUMER).await;
 
     let position = position_after(WHERE_HAS_MORPH_CONSUMER, "['po");
-    let hover = hover_at(&backend, &uri, position)
-        .await
-        .expect("morph alias should hover");
+    let hover = hover_text_at(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await
+    .expect("morph alias should hover");
     assert!(
         hover.contains("App\\Models\\Post"),
         "hover should name the mapped model, got: {hover}"
@@ -397,7 +330,7 @@ class Consumer {
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -421,7 +354,7 @@ async fn find_references_links_usages_to_the_registration() {
     let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
-    open(&backend, &provider_uri, &provider_src).await;
+    open_php_str(&backend, &provider_uri, &provider_src).await;
 
     // Search from the registration's own alias key.
     let position = position_after(&provider_src, "'po");

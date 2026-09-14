@@ -11,7 +11,8 @@
 //! docblocks, and cross-method calls.
 
 use crate::common::{
-    complete_labels_at_opened, create_psr4_workspace, create_test_backend, open_php,
+    complete_labels_at_opened, create_psr4_workspace, create_test_backend, definition_locations,
+    goto_definition_at, hover_text_at, open_php,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -54,36 +55,6 @@ async fn open_file(backend: &phpantom_lsp::Backend, uri_str: &str, content: &str
     uri
 }
 
-/// Fire a hover request and return the hover text (if any).
-async fn hover_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Option<String> {
-    let params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-    let result = backend.hover(params).await.unwrap()?;
-    Some(match result.contents {
-        HoverContents::Markup(mc) => mc.value,
-        HoverContents::Scalar(MarkedString::String(s)) => s,
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value,
-        HoverContents::Array(items) => items
-            .into_iter()
-            .map(|ms| match ms {
-                MarkedString::String(s) => s,
-                MarkedString::LanguageString(ls) => ls.value,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    })
-}
-
 /// Fire a go-to-definition request and return the locations.
 async fn definition_at(
     backend: &phpantom_lsp::Backend,
@@ -91,27 +62,7 @@ async fn definition_at(
     line: u32,
     character: u32,
 ) -> Vec<Location> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    let result = backend.goto_definition(params).await.unwrap();
-    match result {
-        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
-        Some(GotoDefinitionResponse::Array(locs)) => locs,
-        Some(GotoDefinitionResponse::Link(links)) => links
-            .into_iter()
-            .map(|link| Location {
-                uri: link.target_uri,
-                range: link.target_selection_range,
-            })
-            .collect(),
-        None => Vec::new(),
-    }
+    definition_locations(goto_definition_at(backend, uri, line, character).await)
 }
 
 /// Fire a signature help request and return the result.
@@ -662,7 +613,7 @@ $r = new <>Router();
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(hover.is_some(), "Hover on class name should return content");
     let text = hover.unwrap();
     assert!(
@@ -693,7 +644,7 @@ $calc-><>add(1, 2);
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(
         hover.is_some(),
         "Hover on method call should return content"
@@ -722,7 +673,7 @@ $u-><>name;
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(
         hover.is_some(),
         "Hover on property access should return content"
@@ -750,7 +701,7 @@ $db = new Database();
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(hover.is_some(), "Hover on variable should return content");
     let text = hover.unwrap();
     assert!(
@@ -780,7 +731,7 @@ class HvApp {
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(
         hover.is_some(),
         "Hover on write() after ($this->formatter)() should return content"

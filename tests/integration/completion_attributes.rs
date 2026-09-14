@@ -1,4 +1,4 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{class_items, complete_at, create_test_backend, labels};
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use tower_lsp::LanguageServer;
@@ -30,17 +30,6 @@ fn create_builtin_attribute_backend() -> Backend {
     class_stubs.insert("Attribute", BUILTIN_ATTRIBUTE_STUB);
     class_stubs.insert("Override", BUILTIN_ATTRIBUTE_STUB);
     Backend::new_test_with_all_stubs(class_stubs, HashMap::new(), HashMap::new())
-}
-
-fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
-        .collect()
-}
-
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
 }
 
 /// Load scaffolding classes into the backend's ast_map.

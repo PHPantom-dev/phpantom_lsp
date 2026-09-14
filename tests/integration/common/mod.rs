@@ -3,6 +3,7 @@
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -69,6 +70,12 @@ fn response_items(response: Option<CompletionResponse>) -> Option<Vec<Completion
 
 fn item_labels(items: Vec<CompletionItem>) -> Vec<String> {
     items.into_iter().map(|item| item.label).collect()
+}
+
+/// The labels a completion response offered, none when the server had
+/// nothing to say.
+pub fn response_labels(response: Option<CompletionResponse>) -> Vec<String> {
+    item_labels(response_items(response).unwrap_or_default())
 }
 
 /// Open `text` as PHP and return the raw completion response at the position.
@@ -143,6 +150,19 @@ pub async fn complete_labels_at_opened(
 
 /// [`complete_at_opened`] for a request an editor sends because the user just
 /// typed `trigger_character`, rather than an explicitly invoked completion.
+/// [`complete_at_opened_with_trigger`], reduced to the labels offered.
+pub async fn complete_labels_at_opened_with_trigger(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    trigger_character: &str,
+) -> Vec<String> {
+    item_labels(
+        complete_at_opened_with_trigger(backend, uri, line, character, trigger_character).await,
+    )
+}
+
 pub async fn complete_at_opened_with_trigger(
     backend: &Backend,
     uri: &Url,
@@ -1040,4 +1060,345 @@ pub fn doc_change_edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit
         }
     }
     result
+}
+
+// ─── Shared assertions helpers ──────────────────────────────────────────────
+
+/// [`open_php`] for a URI written as a string.
+pub async fn open_php_str(backend: &Backend, uri: &str, text: &str) {
+    open_php(backend, &Url::parse(uri).unwrap(), text).await;
+}
+
+/// The labels of `items`, in the order they were offered.
+pub fn labels(items: &[CompletionItem]) -> Vec<&str> {
+    items.iter().map(|i| i.label.as_str()).collect()
+}
+
+/// The method items among `items`, by the name completion inserts.
+pub fn method_names(items: &[CompletionItem]) -> Vec<&str> {
+    items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+        .collect()
+}
+
+/// The property items among `items`, by the name completion inserts.
+pub fn property_names(items: &[CompletionItem]) -> Vec<&str> {
+    items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+        .collect()
+}
+
+/// The position just past the first occurrence of `needle` in `content`,
+/// in LSP coordinates (UTF-16 code units from the start of the line).
+pub fn position_after(content: &str, needle: &str) -> Position {
+    let offset = content
+        .find(needle)
+        .unwrap_or_else(|| panic!("needle not found: {needle}"))
+        + needle.len();
+    offset_position(content, offset)
+}
+
+/// The position of the first occurrence of `needle` in `content`, in LSP
+/// coordinates.
+pub fn position_of(content: &str, needle: &str) -> Position {
+    let offset = content
+        .find(needle)
+        .unwrap_or_else(|| panic!("needle not found: {needle}"));
+    offset_position(content, offset)
+}
+
+fn offset_position(content: &str, offset: usize) -> Position {
+    let before = &content[..offset];
+    let line = before.matches('\n').count() as u32;
+    let character = before
+        .rsplit('\n')
+        .next()
+        .unwrap_or(before)
+        .encode_utf16()
+        .count() as u32;
+    Position { line, character }
+}
+
+// ─── Hover ──────────────────────────────────────────────────────────────────
+
+/// Parse `content` as `uri` and answer the hover at the position, going
+/// through the handler directly (no LSP round trip).
+pub fn hover_at(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    line: u32,
+    character: u32,
+) -> Option<Hover> {
+    backend.update_ast(uri, content);
+    backend.handle_hover(uri, content, Position { line, character })
+}
+
+/// The markdown of a hover; panics on any other content kind.
+pub fn hover_text(hover: &Hover) -> &str {
+    match &hover.contents {
+        HoverContents::Markup(markup) => &markup.value,
+        other => panic!("expected markup hover, got {other:?}"),
+    }
+}
+
+/// Send a `textDocument/hover` request for a document that is already
+/// open and return its text, whichever content kind it came as.  `None`
+/// when nothing hovers.
+pub async fn hover_text_at(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Option<String> {
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()?;
+    Some(match hover.contents {
+        HoverContents::Markup(markup) => markup.value,
+        HoverContents::Scalar(MarkedString::String(s)) => s,
+        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value,
+        HoverContents::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                MarkedString::String(s) => s,
+                MarkedString::LanguageString(ls) => ls.value,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    })
+}
+
+/// [`hover_text_at`] for a position that must hover.
+pub async fn markup_hover_at(backend: &Backend, uri: &Url, line: u32, character: u32) -> String {
+    hover_text_at(backend, uri, line, character)
+        .await
+        .unwrap_or_else(|| panic!("expected a hover at {line}:{character}"))
+}
+
+/// The class items among `items`.
+pub fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
+    items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .collect()
+}
+
+/// Send a `textDocument/definition` request for a document that is
+/// already open.
+pub async fn goto_definition_at(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Option<GotoDefinitionResponse> {
+    backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+}
+
+/// The "Undefined variable" messages reported on an open Blade template,
+/// read against the virtual PHP it lowers to.
+pub fn blade_undefined_variables(backend: &Backend, uri: &Url) -> Vec<String> {
+    let virtual_php = backend
+        .blade_virtual_php(uri.as_str())
+        .expect("blade virtual content");
+    let mut diags = Vec::new();
+    backend.collect_undefined_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+    diags
+        .into_iter()
+        .filter(|d| d.message.contains("Undefined variable"))
+        .map(|d| d.message)
+        .collect()
+}
+
+/// Parse `text` as `uri` and return the `unknown_member` diagnostics the
+/// slow pass reports, with its per-file scope cache live.
+pub fn unknown_member_diagnostics_with_scope_cache(
+    backend: &Backend,
+    uri: &str,
+    text: &str,
+) -> Vec<Diagnostic> {
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    out.retain(|d| {
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+    });
+    out
+}
+
+// ─── Go-to-definition ───────────────────────────────────────────────────────
+
+/// The targets of a go-to-definition response as plain locations, whatever
+/// shape the server answered in.
+pub fn definition_locations(response: Option<GotoDefinitionResponse>) -> Vec<Location> {
+    match response {
+        None => Vec::new(),
+        Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
+        Some(GotoDefinitionResponse::Array(locations)) => locations,
+        Some(GotoDefinitionResponse::Link(links)) => links
+            .into_iter()
+            .map(|link| Location {
+                uri: link.target_uri,
+                range: link.target_selection_range,
+            })
+            .collect(),
+    }
+}
+
+/// The URI of the first target of a go-to-definition response.
+pub fn definition_uri(response: &GotoDefinitionResponse) -> &Url {
+    match response {
+        GotoDefinitionResponse::Scalar(location) => &location.uri,
+        GotoDefinitionResponse::Array(locations) => &locations[0].uri,
+        GotoDefinitionResponse::Link(links) => &links[0].target_uri,
+    }
+}
+
+// ─── Blade ──────────────────────────────────────────────────────────────────
+
+/// The `composer.json` of a workspace holding an application under `app/`
+/// plus stubs of the two component base classes, laid out where
+/// [`ILLUMINATE_COMPONENT_STUB`] and [`LIVEWIRE_COMPONENT_STUB`] expect
+/// to be written (`stubs/Illuminate/View/Component.php` and
+/// `stubs/Livewire/Component.php`).
+pub const BLADE_COMPONENT_COMPOSER: &str = r#"{"autoload": {"psr-4": {
+    "App\\": "app/",
+    "Illuminate\\": "stubs/Illuminate/",
+    "Livewire\\": "stubs/Livewire/"
+}}}"#;
+
+/// A stand-in for `Illuminate\View\Component`, the base class of a
+/// class-based Blade component. Besides `render()`, it carries the
+/// framework members a component inherits but never exposes to its
+/// template.
+pub const ILLUMINATE_COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
+    abstract class Component {\n\
+        public $componentName;\n\
+        public $attributes;\n\
+        public function render() {}\n\
+        public function data() {}\n\
+        public function shouldRender() {}\n\
+    }\n";
+
+/// A stand-in for `Livewire\Component`, the base class of a Livewire
+/// component.
+pub const LIVEWIRE_COMPONENT_STUB: &str = "<?php\nnamespace Livewire;\n\
+    abstract class Component {\n\
+        public function render() {}\n\
+        public function dispatch(string $event) {}\n\
+    }\n";
+
+/// Open the Blade template at `root/relative` from disk, the way an editor
+/// opening it with language id `blade` would, and hand back its URI.
+pub async fn open_blade_template(backend: &Backend, root: &Path, relative: &str) -> Url {
+    let path = root.join(relative);
+    let text = fs::read_to_string(&path).unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+    open_document(backend, &uri, "blade", &text).await;
+    uri
+}
+
+// ─── Diagnostics ────────────────────────────────────────────────────────────
+
+/// Parse `php` as `file:///test.php` on `backend` and run one diagnostic
+/// collector over it, e.g. `Backend::collect_unused_variable_diagnostics`.
+pub fn collect_diagnostics_with(
+    backend: &Backend,
+    php: &str,
+    collect: impl Fn(&Backend, &str, &str, &mut Vec<Diagnostic>),
+) -> Vec<Diagnostic> {
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    collect(backend, uri, php, &mut out);
+    out
+}
+
+// ─── Types read off hovers ──────────────────────────────────────────────────
+
+/// The type a hover reports for the assignment at `position`: the text
+/// after ` = ` on the first hover line that has one.
+pub fn hover_assigned_type(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    position: Position,
+) -> String {
+    let Position { line, character } = position;
+    let hover = hover_at(backend, uri, content, line, character)
+        .unwrap_or_else(|| panic!("no hover at {line}:{character}"));
+    let text = hover_text(&hover);
+    text.lines()
+        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
+        .unwrap_or_else(|| panic!("no assignment in hover at {line}:{character}: {text}"))
+}
+
+/// The type of the assignment to `var` (`$name`): the line whose trimmed
+/// text starts with `$name = `, hovered on the variable.
+pub fn assigned_type(backend: &Backend, uri: &str, content: &str, var: &str) -> String {
+    let needle = format!("{var} = ");
+    let (line, text) = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim_start().starts_with(&needle))
+        .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"));
+    let indent = (text.len() - text.trim_start().len()) as u32;
+    let position = Position {
+        line: line as u32,
+        character: indent + 1,
+    };
+    hover_assigned_type(backend, uri, content, position)
+}
+
+/// Assert the type each named variable is assigned in `content`, as
+/// [`assigned_type`] reports it, on a fresh full-stubs backend.
+pub fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
+    assert_assigned_types_on(
+        &create_test_backend_with_full_stubs(),
+        "file:///test.php",
+        content,
+        expected,
+    );
+}
+
+/// [`assert_assigned_types`] against a backend the caller has prepared,
+/// with `content` parsed as `uri`.
+pub fn assert_assigned_types_on(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    expected: &[(&str, &str)],
+) {
+    for (var, want) in expected {
+        assert_eq!(&assigned_type(backend, uri, content, var), want, "{var}");
+    }
+}
+
+/// The type reported for the variable right after a `/*MARKER*/` comment.
+pub fn type_at_marker(backend: &Backend, uri: &str, content: &str, marker: &str) -> String {
+    let needle = format!("/*{marker}*/$");
+    hover_assigned_type(backend, uri, content, position_after(content, &needle))
 }

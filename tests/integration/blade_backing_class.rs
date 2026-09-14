@@ -5,25 +5,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{
+        BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+        blade_undefined_variables, create_psr4_workspace, markup_hover_at, open_blade_template,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-        "App\\": "app/",
-        "Illuminate\\": "stubs/Illuminate/",
-        "Livewire\\": "stubs/Livewire/"
-    }}}"#;
-
-    /// The framework members a component inherits but never exposes.
-    const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-        abstract class Component {\n\
-            public $componentName;\n\
-            public $attributes;\n\
-            public function render() {}\n\
-            public function data() {}\n\
-            public function shouldRender() {}\n\
-        }\n";
 
     const INVOKABLE_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
         class InvokableComponentVariable {\n\
@@ -31,76 +18,24 @@ mod tests {
             public function __toString(): string { return ''; }\n\
         }\n";
 
-    const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
-            public function dispatch(string $event) {}\n\
-        }\n";
-
     const ORDER_CLASS: &str =
         "<?php\nnamespace App\\Models;\nclass Order { public string $reference = ''; }\n";
-
-    async fn open_template(
-        backend: &phpantom_lsp::Backend,
-        root: &std::path::Path,
-        relative: &str,
-    ) -> Url {
-        let uri = Url::from_file_path(root.join(relative)).unwrap();
-        let text = std::fs::read_to_string(root.join(relative)).unwrap();
-        open_document(backend, &uri, "blade", &text).await;
-        uri
-    }
-
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
-        match result {
-            Some(Hover {
-                contents: HoverContents::Markup(m),
-                ..
-            }) => m.value,
-            other => panic!("expected markup hover, got {:?}", other),
-        }
-    }
-
-    fn undefined_variables(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<String> {
-        let virtual_php = backend
-            .blade_virtual_php(uri.as_str())
-            .expect("blade virtual content");
-        let mut diags = Vec::new();
-        backend.collect_undefined_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        diags
-            .into_iter()
-            .filter(|d| d.message.contains("Undefined variable"))
-            .map(|d| d.message)
-            .collect()
-    }
 
     fn component_workspace(
         template: &str,
     ) -> (phpantom_lsp::Backend, tempfile::TempDir, std::path::PathBuf) {
         let (backend, dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
                 (
                     "stubs/Illuminate/View/InvokableComponentVariable.php",
                     INVOKABLE_STUB,
                 ),
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 ("app/Models/Order.php", ORDER_CLASS),
                 (
                     "app/View/Components/OrderCard.php",
@@ -128,22 +63,22 @@ mod tests {
     #[tokio::test]
     async fn a_public_property_types_the_template_variable() {
         let (backend, _dir, root) = component_workspace("<p>{{ $order->reference }}</p>\n");
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/order-card.blade.php",
         )
         .await;
 
-        let hover = hover_text(&backend, &uri, 0, 8).await;
+        let hover = markup_hover_at(&backend, &uri, 0, 8).await;
         assert!(
             hover.contains("App\\Models") && hover.contains("Order"),
             "$order should be typed from the backing class, got: {hover}"
         );
         assert!(
-            undefined_variables(&backend, &uri).is_empty(),
+            blade_undefined_variables(&backend, &uri).is_empty(),
             "no variable of the backing class may be reported undefined: {:?}",
-            undefined_variables(&backend, &uri)
+            blade_undefined_variables(&backend, &uri)
         );
     }
 
@@ -155,20 +90,20 @@ mod tests {
     async fn argument_less_methods_become_variables_and_others_do_not() {
         let (backend, _dir, root) =
             component_workspace("{{ $total }}\n{{ $total() }}\n{{ $formatted }}\n");
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/order-card.blade.php",
         )
         .await;
 
-        let hover = hover_text(&backend, &uri, 0, 7).await;
+        let hover = markup_hover_at(&backend, &uri, 0, 7).await;
         assert!(
             hover.contains("InvokableComponentVariable"),
             "$total should be the wrapper Blade merges in, got: {hover}"
         );
 
-        let undefined = undefined_variables(&backend, &uri);
+        let undefined = blade_undefined_variables(&backend, &uri);
         assert!(
             !undefined.iter().any(|m| m.contains("$total")),
             "$total is view data: {undefined:?}"
@@ -185,14 +120,14 @@ mod tests {
     async fn framework_and_non_public_members_stay_out_of_scope() {
         let (backend, _dir, root) =
             component_workspace("{{ $render }}{{ $data }}{{ $internal }}{{ $make }}\n");
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/order-card.blade.php",
         )
         .await;
 
-        let undefined = undefined_variables(&backend, &uri);
+        let undefined = blade_undefined_variables(&backend, &uri);
         for name in ["$render", "$data", "$internal", "$make"] {
             assert!(
                 undefined.iter().any(|m| m.contains(name)),
@@ -207,20 +142,20 @@ mod tests {
     async fn a_props_entry_wins_over_the_class_member() {
         let (backend, _dir, root) =
             component_workspace("@props(['label' => 0])\n{{ $label }}\n{{ $order }}\n");
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/order-card.blade.php",
         )
         .await;
 
-        let hover = hover_text(&backend, &uri, 1, 7).await;
+        let hover = markup_hover_at(&backend, &uri, 1, 7).await;
         assert!(
             !hover.contains("string"),
             "the @props default should type $label, not the class property: {hover}"
         );
         // The names @props leaves out still come from the class.
-        let order = hover_text(&backend, &uri, 2, 7).await;
+        let order = markup_hover_at(&backend, &uri, 2, 7).await;
         assert!(
             order.contains("App\\Models") && order.contains("Order"),
             "$order should still come from the backing class, got: {order}"
@@ -231,9 +166,12 @@ mod tests {
     #[tokio::test]
     async fn an_anonymous_component_gets_no_class_members() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
                 ("app/Models/Order.php", ORDER_CLASS),
                 (
                     "resources/views/components/plain.blade.php",
@@ -242,7 +180,7 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/plain.blade.php",
@@ -250,7 +188,7 @@ mod tests {
         .await;
 
         assert!(
-            undefined_variables(&backend, &uri)
+            blade_undefined_variables(&backend, &uri)
                 .iter()
                 .any(|m| m.contains("$order")),
             "nothing declares $order in an anonymous component"
@@ -263,9 +201,9 @@ mod tests {
     #[tokio::test]
     async fn a_livewire_view_gets_the_component_scope() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 ("app/Models/Order.php", ORDER_CLASS),
                 (
                     "app/Livewire/OrderList.php",
@@ -286,39 +224,39 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/livewire/order-list.blade.php",
         )
         .await;
 
-        let hover = hover_text(&backend, &uri, 0, 7).await;
+        let hover = markup_hover_at(&backend, &uri, 0, 7).await;
         assert!(
             hover.contains("App\\Models") && hover.contains("Order"),
             "$selected should be typed from the Livewire class, got: {hover}"
         );
-        let instance = hover_text(&backend, &uri, 2, 7).await;
+        let instance = markup_hover_at(&backend, &uri, 2, 7).await;
         assert!(
             instance.contains("App\\Livewire") && instance.contains("OrderList"),
             "$_instance is the component itself, got: {instance}"
         );
-        let this_member = hover_text(&backend, &uri, 3, 11).await;
+        let this_member = markup_hover_at(&backend, &uri, 3, 11).await;
         assert!(
             this_member.contains("int"),
             "$this->page reads the component's own property, got: {this_member}"
         );
         // Livewire binds the instance under both of its own names, not
         // just `$this`.
-        let aliased = hover_text(&backend, &uri, 4, 7).await;
+        let aliased = markup_hover_at(&backend, &uri, 4, 7).await;
         assert!(
             aliased.contains("App\\Livewire") && aliased.contains("OrderList"),
             "$__livewire is the component too, got: {aliased}"
         );
         assert!(
-            undefined_variables(&backend, &uri).is_empty(),
+            blade_undefined_variables(&backend, &uri).is_empty(),
             "the Livewire scope covers every variable used: {:?}",
-            undefined_variables(&backend, &uri)
+            blade_undefined_variables(&backend, &uri)
         );
     }
 
@@ -328,9 +266,9 @@ mod tests {
     #[tokio::test]
     async fn a_livewire_view_resolves_this_to_the_component() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 ("app/Models/Order.php", ORDER_CLASS),
                 (
                     "app/Livewire/OrderList.php",
@@ -354,24 +292,24 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/livewire/order-list.blade.php",
         )
         .await;
 
-        let property = hover_text(&backend, &uri, 1, 12).await;
+        let property = markup_hover_at(&backend, &uri, 1, 12).await;
         assert!(
             property.contains("Order $selected"),
             "$this->selected is the component's own property, got: {property}"
         );
-        let action = hover_text(&backend, &uri, 2, 12).await;
+        let action = markup_hover_at(&backend, &uri, 2, 12).await;
         assert!(
             action.contains("reload") && action.contains("Order"),
             "$this->reload() is a component action, got: {action}"
         );
-        let inherited = hover_text(&backend, &uri, 3, 12).await;
+        let inherited = markup_hover_at(&backend, &uri, 3, 12).await;
         assert!(
             inherited.contains("dispatch"),
             "$this reaches what the component inherits, got: {inherited}"
@@ -395,9 +333,9 @@ mod tests {
     #[tokio::test]
     async fn completion_on_this_offers_the_component_members() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 (
                     "app/Livewire/Counter.php",
                     "<?php\nnamespace App\\Livewire;\n\
@@ -415,7 +353,7 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/livewire/counter.blade.php",
@@ -464,9 +402,9 @@ mod tests {
     #[tokio::test]
     async fn go_to_definition_on_a_this_member_lands_on_the_component() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 (
                     "app/Livewire/Counter.php",
                     "<?php\nnamespace App\\Livewire;\n\
@@ -484,7 +422,7 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/livewire/counter.blade.php",
@@ -523,9 +461,9 @@ mod tests {
     #[tokio::test]
     async fn a_livewire_view_still_hoists_its_own_imports() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 ("app/Models/Order.php", ORDER_CLASS),
                 (
                     "app/Livewire/Counter.php",
@@ -541,7 +479,7 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/livewire/counter.blade.php",
@@ -570,7 +508,7 @@ mod tests {
     #[tokio::test]
     async fn a_blade_component_view_does_not_bind_this() {
         let (backend, _dir, root) = component_workspace("{{ $this->label }}\n");
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/order-card.blade.php",
@@ -591,9 +529,9 @@ mod tests {
     #[tokio::test]
     async fn a_livewire_method_is_not_a_view_variable() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 (
                     "app/Livewire/Counter.php",
                     "<?php\nnamespace App\\Livewire;\n\
@@ -611,14 +549,14 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/livewire/counter.blade.php",
         )
         .await;
 
-        let undefined = undefined_variables(&backend, &uri);
+        let undefined = blade_undefined_variables(&backend, &uri);
         assert!(
             !undefined.iter().any(|m| m.contains("$count")),
             "a public property is view data: {undefined:?}"
@@ -636,9 +574,12 @@ mod tests {
     #[tokio::test]
     async fn an_index_component_backs_its_view() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
                 ("app/Models/Order.php", ORDER_CLASS),
                 (
                     "app/View/Components/Card/Card.php",
@@ -657,17 +598,18 @@ mod tests {
             ],
         );
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(&backend, &root, "resources/views/components/card.blade.php").await;
+        let uri =
+            open_blade_template(&backend, &root, "resources/views/components/card.blade.php").await;
 
-        let hover = hover_text(&backend, &uri, 0, 7).await;
+        let hover = markup_hover_at(&backend, &uri, 0, 7).await;
         assert!(
             hover.contains("App\\Models") && hover.contains("Order"),
             "$order should be typed from the index component class, got: {hover}"
         );
         assert!(
-            undefined_variables(&backend, &uri).is_empty(),
+            blade_undefined_variables(&backend, &uri).is_empty(),
             "the index component declares $order: {:?}",
-            undefined_variables(&backend, &uri)
+            blade_undefined_variables(&backend, &uri)
         );
     }
 
@@ -677,9 +619,12 @@ mod tests {
     #[tokio::test]
     async fn a_guard_inside_an_interpolation_narrows_the_variable_it_proves() {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
                 (
                     "app/helpers.php",
                     "<?php\nfunction shout(string $value): string { return $value; }\n",
@@ -707,7 +652,7 @@ mod tests {
         );
         backend.initialized(InitializedParams {}).await;
         let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_template(
+        let uri = open_blade_template(
             &backend,
             &root,
             "resources/views/components/banner.blade.php",
