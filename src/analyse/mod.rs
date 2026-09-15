@@ -56,7 +56,8 @@ mod run;
 mod stages;
 
 pub(crate) use output::{
-    format_github_message, github_annotation, json_escape, print_success_box, progress_bar,
+    Colour, TableRow, format_github_message, github_annotation, json_escape, print_box,
+    print_success_box, print_table, progress_bar,
 };
 pub(crate) use project::{
     discover_laravel_resources, load_config_or_default, open_headless_project,

@@ -21,9 +21,7 @@ mod tests {
     const ORDER_CLASS: &str =
         "<?php\nnamespace App\\Models;\nclass Order { public string $reference = ''; }\n";
 
-    fn component_workspace(
-        template: &str,
-    ) -> (phpantom_lsp::Backend, tempfile::TempDir, std::path::PathBuf) {
+    fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         let (backend, dir) = create_psr4_workspace(
             BLADE_COMPONENT_COMPOSER,
             &[
@@ -54,21 +52,16 @@ mod tests {
                 ("resources/views/components/order-card.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        (backend, dir, root)
+        (backend, dir)
     }
 
     /// A public property of the backing class types the matching variable
     /// in the component's own template.
     #[tokio::test]
     async fn a_public_property_types_the_template_variable() {
-        let (backend, _dir, root) = component_workspace("<p>{{ $order->reference }}</p>\n");
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/order-card.blade.php",
-        )
-        .await;
+        let (backend, _dir) = component_workspace("<p>{{ $order->reference }}</p>\n");
+        let uri =
+            open_blade_template(&backend, "resources/views/components/order-card.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 0, 8).await;
         assert!(
@@ -88,14 +81,10 @@ mod tests {
     /// variable at all.
     #[tokio::test]
     async fn argument_less_methods_become_variables_and_others_do_not() {
-        let (backend, _dir, root) =
+        let (backend, _dir) =
             component_workspace("{{ $total }}\n{{ $total() }}\n{{ $formatted }}\n");
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/order-card.blade.php",
-        )
-        .await;
+        let uri =
+            open_blade_template(&backend, "resources/views/components/order-card.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 0, 7).await;
         assert!(
@@ -118,14 +107,10 @@ mod tests {
     /// static members are not view data.
     #[tokio::test]
     async fn framework_and_non_public_members_stay_out_of_scope() {
-        let (backend, _dir, root) =
+        let (backend, _dir) =
             component_workspace("{{ $render }}{{ $data }}{{ $internal }}{{ $make }}\n");
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/order-card.blade.php",
-        )
-        .await;
+        let uri =
+            open_blade_template(&backend, "resources/views/components/order-card.blade.php").await;
 
         let undefined = blade_undefined_variables(&backend, &uri);
         for name in ["$render", "$data", "$internal", "$make"] {
@@ -140,14 +125,10 @@ mod tests {
     /// the same name: the template is closer to the body than the class.
     #[tokio::test]
     async fn a_props_entry_wins_over_the_class_member() {
-        let (backend, _dir, root) =
+        let (backend, _dir) =
             component_workspace("@props(['label' => 0])\n{{ $label }}\n{{ $order }}\n");
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/order-card.blade.php",
-        )
-        .await;
+        let uri =
+            open_blade_template(&backend, "resources/views/components/order-card.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 1, 7).await;
         assert!(
@@ -179,13 +160,7 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/plain.blade.php",
-        )
-        .await;
+        let uri = open_blade_template(&backend, "resources/views/components/plain.blade.php").await;
 
         assert!(
             blade_undefined_variables(&backend, &uri)
@@ -223,13 +198,8 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/livewire/order-list.blade.php",
-        )
-        .await;
+        let uri =
+            open_blade_template(&backend, "resources/views/livewire/order-list.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 0, 7).await;
         assert!(
@@ -291,13 +261,8 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/livewire/order-list.blade.php",
-        )
-        .await;
+        let uri =
+            open_blade_template(&backend, "resources/views/livewire/order-list.blade.php").await;
 
         let property = markup_hover_at(&backend, &uri, 1, 12).await;
         assert!(
@@ -352,13 +317,7 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/livewire/counter.blade.php",
-        )
-        .await;
+        let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
         let result = backend
             .completion(CompletionParams {
@@ -421,13 +380,7 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/livewire/counter.blade.php",
-        )
-        .await;
+        let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
         let target = backend
             .goto_definition(GotoDefinitionParams {
@@ -478,13 +431,7 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/livewire/counter.blade.php",
-        )
-        .await;
+        let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -507,13 +454,9 @@ mod tests {
     /// `$this` is *not* the component, so nothing may be invented for it.
     #[tokio::test]
     async fn a_blade_component_view_does_not_bind_this() {
-        let (backend, _dir, root) = component_workspace("{{ $this->label }}\n");
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/order-card.blade.php",
-        )
-        .await;
+        let (backend, _dir) = component_workspace("{{ $this->label }}\n");
+        let uri =
+            open_blade_template(&backend, "resources/views/components/order-card.blade.php").await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -548,13 +491,7 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/livewire/counter.blade.php",
-        )
-        .await;
+        let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
         let undefined = blade_undefined_variables(&backend, &uri);
         assert!(
@@ -597,9 +534,7 @@ mod tests {
                 ),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri =
-            open_blade_template(&backend, &root, "resources/views/components/card.blade.php").await;
+        let uri = open_blade_template(&backend, "resources/views/components/card.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 0, 7).await;
         assert!(
@@ -651,13 +586,8 @@ mod tests {
             ],
         );
         backend.initialized(InitializedParams {}).await;
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = open_blade_template(
-            &backend,
-            &root,
-            "resources/views/components/banner.blade.php",
-        )
-        .await;
+        let uri =
+            open_blade_template(&backend, "resources/views/components/banner.blade.php").await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())

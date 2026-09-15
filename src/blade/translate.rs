@@ -218,18 +218,34 @@ impl Backend {
         uri: &str,
         edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
     ) -> bool {
+        self.retain_translated(uri, edits, |edit| &mut edit.range)
+    }
+
+    /// Translate the range of every edit in `edits` back into `uri`'s own
+    /// coordinates, dropping the ones that land where the template has no
+    /// position, and report whether any edit is left.
+    ///
+    /// `range_of` reaches the range through whichever edit shape the
+    /// caller holds.
+    fn retain_translated<T>(
+        &self,
+        uri: &str,
+        edits: &mut Vec<T>,
+        range_of: impl Fn(&mut T) -> &mut tower_lsp::lsp_types::Range,
+    ) -> bool {
         if !self.is_blade_file(uri) {
             return !edits.is_empty();
         }
-        edits.retain_mut(
-            |edit| match self.try_translate_blade_range(uri, edit.range) {
-                Some(range) => {
-                    edit.range = range;
+        edits.retain_mut(|edit| {
+            let range = range_of(edit);
+            match self.try_translate_blade_range(uri, *range) {
+                Some(translated) => {
+                    *range = translated;
                     true
                 }
                 None => false,
-            },
-        );
+            }
+        });
         !edits.is_empty()
     }
 
@@ -288,23 +304,10 @@ impl Backend {
     ) -> bool {
         use tower_lsp::lsp_types::OneOf;
 
-        let uri = document.text_document.uri.as_str();
-        if !self.is_blade_file(uri) {
-            return !document.edits.is_empty();
-        }
-        document.edits.retain_mut(|edit| {
-            let range = match edit {
-                OneOf::Left(edit) => &mut edit.range,
-                OneOf::Right(edit) => &mut edit.text_edit.range,
-            };
-            match self.try_translate_blade_range(uri, *range) {
-                Some(translated) => {
-                    *range = translated;
-                    true
-                }
-                None => false,
-            }
-        });
-        !document.edits.is_empty()
+        let uri = document.text_document.uri.to_string();
+        self.retain_translated(&uri, &mut document.edits, |edit| match edit {
+            OneOf::Left(edit) => &mut edit.range,
+            OneOf::Right(edit) => &mut edit.text_edit.range,
+        })
     }
 }

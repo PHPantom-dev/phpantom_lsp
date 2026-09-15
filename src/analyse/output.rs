@@ -213,34 +213,47 @@ pub(crate) fn json_escape(s: &str) -> String {
 
 /// Print a file's diagnostics in the PHPStan table format.
 pub(super) fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_colour: bool) {
-    struct Row {
-        line_str: String,
-        lines: Vec<String>,
-    }
-
-    let mut rows: Vec<Row> = Vec::new();
-    for diag in diagnostics {
-        let mut message_lines = vec![diag.message.clone()];
-        if let Some(ref id) = diag.identifier {
-            message_lines.push(format!("\u{1faaa}  {id}"));
-        }
-        rows.push(Row {
-            line_str: diag.line.to_string(),
-            lines: message_lines,
-        });
-    }
-
-    // Column widths.
-    let line_col_w = rows
+    let rows: Vec<TableRow> = diagnostics
         .iter()
-        .map(|r| r.line_str.len())
-        .max()
-        .unwrap_or(0)
-        .max(4); // at least as wide as "Line"
+        .map(|diag| TableRow {
+            line: diag.line.to_string(),
+            message: diag.message.clone(),
+            detail: diag
+                .identifier
+                .as_ref()
+                .map(|id| format!("\u{1faaa}  {id}")),
+        })
+        .collect();
+    print_table(path, &rows, true, use_colour);
+}
+
+/// One row of a findings table: a line number, what was found, and an
+/// optional dimmed second line naming the rule behind it.
+pub(crate) struct TableRow {
+    pub line: String,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+/// Print a PHPStan-style findings table for one file.
+///
+/// `measure_detail` decides whether the dimmed second lines widen the
+/// message column. `analyze` sizes the table to fit them; `fix` sizes it
+/// to the descriptions alone, because its rule names are long and
+/// uniform enough that fitting them would push every table wide.
+pub(crate) fn print_table(path: &str, rows: &[TableRow], measure_detail: bool, use_colour: bool) {
+    let line_col_w = rows.iter().map(|r| r.line.len()).max().unwrap_or(0).max(4); // at least as wide as "Line"
 
     let msg_col_w = rows
         .iter()
-        .flat_map(|r| r.lines.iter().map(|l| l.len()))
+        .flat_map(|r| {
+            std::iter::once(r.message.len()).chain(
+                r.detail
+                    .as_ref()
+                    .filter(|_| measure_detail)
+                    .map(|d| d.len()),
+            )
+        })
         .max()
         .unwrap_or(0)
         .max(path.len());
@@ -264,14 +277,13 @@ pub(super) fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_c
     println!("{sep}");
 
     // Data rows.
-    for row in &rows {
-        for (i, msg_line) in row.lines.iter().enumerate() {
-            if i == 0 {
-                println!("  {:>line_col_w$}   {msg_line}", row.line_str);
-            } else if use_colour {
-                println!("  {:>line_col_w$}   \x1b[2m{msg_line}\x1b[0m", "");
+    for row in rows {
+        println!("  {:>line_col_w$}   {}", row.line, row.message);
+        if let Some(detail) = &row.detail {
+            if use_colour {
+                println!("  {:>line_col_w$}   \x1b[2m{detail}\x1b[0m", "");
             } else {
-                println!("  {:>line_col_w$}   {msg_line}", "");
+                println!("  {:>line_col_w$}   {detail}", "");
             }
         }
     }
@@ -281,34 +293,46 @@ pub(super) fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_c
     println!();
 }
 
+/// The background a summary box is painted in.
+#[derive(Clone, Copy)]
+pub(crate) enum Colour {
+    Green,
+    Yellow,
+    Red,
+}
+
+/// Print `text` in a summary box, the way every CLI subcommand closes.
+///
+/// Without colour the box is just the text, so piped output stays
+/// greppable.
+pub(crate) fn print_box(text: &str, colour: Colour, use_colour: bool) {
+    if !use_colour {
+        println!("{text}");
+        return;
+    }
+    let sgr = match colour {
+        Colour::Green => "30;42",
+        Colour::Yellow => "30;43",
+        Colour::Red => "97;41",
+    };
+    let pad = " ".repeat(text.len());
+    println!();
+    println!(" \x1b[{sgr}m{pad}\x1b[0m");
+    println!(" \x1b[{sgr}m{text}\x1b[0m");
+    println!(" \x1b[{sgr}m{pad}\x1b[0m");
+    println!();
+}
+
 /// Print `text` in the green `[OK]` box a clean run ends with.
 pub(crate) fn print_success_box(text: &str, use_colour: bool) {
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!(" \x1b[30;42m{text}\x1b[0m");
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
+    print_box(text, Colour::Green, use_colour);
 }
 
 /// Print the `[ERROR]` summary box.
 pub(super) fn print_error_box(total_errors: usize, _file_count: usize, use_colour: bool) {
     let label = if total_errors == 1 { "error" } else { "errors" };
     let text = format!(" [ERROR] Found {total_errors} {label} ");
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[97;41m{pad}\x1b[0m");
-        println!(" \x1b[97;41m{text}\x1b[0m");
-        println!(" \x1b[97;41m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
+    print_box(&text, Colour::Red, use_colour);
 }
 
 // ── Progress bar ────────────────────────────────────────────────────────────

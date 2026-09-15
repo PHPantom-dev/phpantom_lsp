@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_test_backend, hover_text_at, open_document, open_php};
+    use crate::common::{
+        create_test_backend, hover_text_at, open_document, open_php, workspace_uri,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -388,8 +390,7 @@ mod tests {
                 (view_path, view_body),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join(view_path)).unwrap();
+        let uri = workspace_uri(&backend, view_path);
         (backend, dir, uri)
     }
 

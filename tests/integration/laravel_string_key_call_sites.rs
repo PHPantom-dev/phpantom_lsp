@@ -7,14 +7,9 @@
 //! `hasForLocale()`, a config key inside `getMany()`, and an environment
 //! variable behind `Env::get()`.
 
-use crate::common::{create_psr4_workspace, markup_hover_at, open_php};
+use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, markup_hover_at, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "app/" } }
-}"#;
 
 /// Every location go-to-definition offers at `line`/`character` of `relative`.
 async fn definitions(
@@ -61,7 +56,7 @@ fn route_workspace(caller: &str) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         Route::get('/orders/{order}', 'show')->name('orders.show');\n\
         Route::get('/admin/users', 'index')->name('admin.users.index');\n";
     create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("routes/web.php", routes), ("app/Demo.php", caller)],
     )
 }
@@ -181,7 +176,7 @@ async fn has_for_locale_reaches_the_translation() {
         \x20   }\n}\n";
     let messages = "<?php\nreturn ['welcome' => 'Welcome'];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("lang/en/messages.php", messages)],
     );
 
@@ -204,7 +199,7 @@ async fn get_many_reaches_each_config_key_it_lists() {
         \x20   }\n}\n";
     let config = "<?php\nreturn ['name' => 'Acme', 'timezone' => 'UTC'];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("config/app.php", config)],
     );
 
@@ -231,7 +226,7 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
         \x20   }\n}\n";
     let config = "<?php\nreturn ['default' => env('MAIL_MAILER', 'smtp')];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             ("config/mail.php", config),
@@ -284,7 +279,7 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
         \x20       env('MAIL_FROM');\n\
         \x20   }\n}\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (
@@ -322,7 +317,7 @@ async fn the_env_helper_completes_the_projects_variables() {
         \x20       env('');\n\
         \x20   }\n}\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (".env", "APP_NAME=Acme\nMAIL_MAILER=log\n"),
@@ -369,7 +364,7 @@ async fn translation_hover_shows_the_translated_line() {
         \x20   'explore' => 'Explore :name',\n\
         \x20   'nested' => ['deep' => 'Deep'],\n];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("lang/en/boards.php", lang)],
     );
     backend.initialized(InitializedParams {}).await;
@@ -399,7 +394,7 @@ async fn the_env_class_reaches_the_same_declaration_as_the_helper() {
         \x20       return \\Illuminate\\Support\\Env::get('MAIL_MAILER');\n\
         \x20   }\n}\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (".env", "APP_NAME=Acme\nMAIL_MAILER=log\n"),

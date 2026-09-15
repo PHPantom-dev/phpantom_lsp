@@ -7,16 +7,11 @@
 //! `enforceMorphMap()` — an unregistered alias is flagged.
 
 use crate::common::{
-    create_psr4_workspace, definition_locations, goto_definition_at, hover_text_at, open_php_str,
-    position_after,
+    LARAVEL_SRC_COMPOSER, create_psr4_workspace, definition_locations, goto_definition_at,
+    hover_text_at, open_php_str, position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const PROVIDERS_PHP: &str = "\
 <?php
@@ -89,7 +84,7 @@ async fn workspace(
 ) -> (phpantom_lsp::Backend, tempfile::TempDir, String) {
     let provider_src = provider(enforce);
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AppServiceProvider.php", &provider_src),
@@ -316,7 +311,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AppServiceProvider.php", LIST_PROVIDER),

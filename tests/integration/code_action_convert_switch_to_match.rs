@@ -1,16 +1,8 @@
 //! Integration tests for the "Convert to match expression" code action.
 
-use crate::common::{create_test_backend, extract_edit_text, get_code_actions_at};
-use tower_lsp::lsp_types::*;
-
-fn find_convert_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title == "Convert to match expression" => {
-            Some(ca)
-        }
-        _ => None,
-    })
-}
+use crate::common::{
+    create_test_backend, extract_edit_text, find_action_titled, get_code_actions_at,
+};
 
 #[test]
 fn offered_on_return_switch() {
@@ -30,7 +22,8 @@ function test($x) {
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 2, 4);
-    let action = find_convert_action(&actions).expect("action should be offered");
+    let action = find_action_titled(&actions, "Convert to match expression")
+        .expect("action should be offered");
     let text = extract_edit_text(action);
     assert!(text.contains("return match ("));
     assert!(text.contains("1 => 'one'"));
@@ -55,7 +48,8 @@ function test($status) {
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 2, 4);
-    let action = find_convert_action(&actions).expect("action should be offered");
+    let action = find_action_titled(&actions, "Convert to match expression")
+        .expect("action should be offered");
     let text = extract_edit_text(action);
     assert!(text.contains("$label = match ("));
     assert!(text.contains("'active' => 'Active'"));
@@ -78,7 +72,7 @@ function test($x) {
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 2, 4);
-    assert!(find_convert_action(&actions).is_none());
+    assert!(find_action_titled(&actions, "Convert to match expression").is_none());
 }
 
 #[test]
@@ -98,5 +92,5 @@ function test($x) {
     let uri = "file:///test.php";
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 2, 4);
-    assert!(find_convert_action(&actions).is_none());
+    assert!(find_action_titled(&actions, "Convert to match expression").is_none());
 }

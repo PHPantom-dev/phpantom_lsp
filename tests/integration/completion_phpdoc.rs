@@ -1,13 +1,5 @@
-use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
+use crate::common::{complete_at, create_psr4_workspace, create_test_backend, filter_texts};
 use tower_lsp::lsp_types::*;
-
-/// Collect the filter_text values from completion items (always the raw tag name).
-fn filter_texts(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter_map(|i| i.filter_text.as_deref())
-        .collect()
-}
 
 // ─── Basic trigger ──────────────────────────────────────────────────────────
 

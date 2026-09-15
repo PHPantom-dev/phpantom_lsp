@@ -8,16 +8,11 @@
 //! check names — is flagged.
 
 use crate::common::{
-    complete_labels_at_opened, create_psr4_workspace, definition_locations, goto_definition_at,
-    hover_text_at, open_php_str, position_after,
+    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_psr4_workspace, definition_locations,
+    goto_definition_at, hover_text_at, open_php_str, position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const PROVIDERS_PHP: &str = "\
 <?php
@@ -90,7 +85,7 @@ class LegacyVideoPolicy
 /// `src/Consumer.php`.
 async fn workspace(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, String) {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -398,7 +393,7 @@ class PostPolicy extends BasePolicy
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -467,7 +462,7 @@ class PostPolicy
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -701,7 +696,7 @@ use Illuminate\\Database\\Eloquent\\Model;
 class Post extends Model {}
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -817,7 +812,8 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &[("src/Consumer.php", consumer)]);
+    let (backend, dir) =
+        create_psr4_workspace(LARAVEL_SRC_COMPOSER, &[("src/Consumer.php", consumer)]);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
@@ -917,7 +913,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", provider),
@@ -986,7 +982,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", providers),
             ("src/Providers/AuthServiceProvider.php", two_in_one_file),
@@ -1028,7 +1024,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -1079,7 +1075,7 @@ class Gate {
 }
 ";
     let (_backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),

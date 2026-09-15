@@ -7,15 +7,11 @@
 //! completion, hover, diagnostics, and go-to-definition.
 
 use crate::common::{
-    create_psr4_workspace, definition_uri, open_php, position_after, response_labels,
+    LARAVEL_SRC_COMPOSER, create_psr4_workspace, definition_uri, open_php, position_after,
+    response_labels,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 /// The framework's own `withRouting(pages: ...)` forwards to
 /// `Folio::route()` internally, which is why this file — not a service
@@ -54,7 +50,7 @@ class Service {
 
 fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
     create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/app.php", BOOTSTRAP_APP_PHP),
             ("resources/views/pages/explore.blade.php", EXPLORE_PAGE),

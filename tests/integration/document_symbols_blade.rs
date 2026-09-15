@@ -5,7 +5,7 @@
 mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        create_psr4_workspace, open_document,
+        create_psr4_workspace, open_blade_template,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -57,10 +57,7 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join(relative)).unwrap();
-        let text = std::fs::read_to_string(root.join(relative)).unwrap();
-        open_document(&backend, &uri, "blade", &text).await;
+        let uri = open_blade_template(&backend, relative).await;
 
         match backend
             .document_symbol(DocumentSymbolParams {

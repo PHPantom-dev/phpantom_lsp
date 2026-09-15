@@ -90,17 +90,24 @@ impl<'a> LineIndex<'a> {
         self.content
     }
 
+    /// Greatest line index whose start is <= `offset`, found by binary
+    /// search over the line table. Unlike [`Self::position`], this does not
+    /// clamp `offset` to the content length or compute a UTF-16 column.
+    pub(crate) fn line_of(&self, offset: usize) -> usize {
+        // `line_starts[0] == 0`, so the `Err(0)` case (offset before the
+        // first line start) cannot happen.
+        match self.line_starts.binary_search(&offset) {
+            Ok(idx) => idx,
+            Err(idx) => idx - 1,
+        }
+    }
+
     /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
     /// column). Offsets past the end of the content clamp to the content
     /// length, matching [`offset_to_position`].
     pub(crate) fn position(&self, offset: usize) -> Position {
         let offset = offset.min(self.content.len());
-        // Greatest line start that is <= offset. `line_starts[0] == 0`, so the
-        // `Err(0)` case (offset before the first line start) cannot happen.
-        let line = match self.line_starts.binary_search(&offset) {
-            Ok(idx) => idx,
-            Err(idx) => idx - 1,
-        };
+        let line = self.line_of(offset);
         let line_start = self.line_starts[line];
         let character = self.content[line_start..offset]
             .chars()

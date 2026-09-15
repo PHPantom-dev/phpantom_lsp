@@ -527,24 +527,13 @@ fn collect_view_files(
     namespace: &str,
     out: &mut HashMap<String, PathBuf>,
 ) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_view_files(base, &path, namespace, out);
-            continue;
-        }
-        let Some(rel) = path.strip_prefix(base).ok().and_then(|rel| rel.to_str()) else {
-            continue;
-        };
+    walk_files(base, dir, &mut |path, rel| {
         let is_blade = rel.ends_with(".blade.php");
         let Some(stem) = rel
             .strip_suffix(".blade.php")
             .or_else(|| rel.strip_suffix(".php"))
         else {
-            continue;
+            return;
         };
         let dotted = stem.replace([std::path::MAIN_SEPARATOR, '/'], ".");
         // An empty namespace means the app's own view roots, where names
@@ -557,40 +546,48 @@ fn collect_view_files(
         };
         match out.entry(name) {
             std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(path);
+                slot.insert(path.to_path_buf());
             }
             std::collections::hash_map::Entry::Occupied(mut slot) => {
                 if is_blade {
-                    slot.insert(path);
+                    slot.insert(path.to_path_buf());
                 }
             }
         }
-    }
+    });
 }
 
 /// Recursively record the FQN of every `.php` file under `dir`, treating
 /// the path below `base` as the namespace tail below `namespace`.
 fn collect_class_files(base: &Path, dir: &Path, namespace: &str, out: &mut Vec<String>) {
+    walk_files(base, dir, &mut |_path, rel| {
+        let Some(stem) = rel.strip_suffix(".php") else {
+            return;
+        };
+        let tail = stem.replace([std::path::MAIN_SEPARATOR, '/'], "\\");
+        if tail.is_empty() {
+            return;
+        }
+        out.push(format!("{namespace}\\{tail}"));
+    });
+}
+
+/// Hand every file under `dir` to `visit`, with its path below `base` as
+/// a relative string. Directories that cannot be read are skipped.
+fn walk_files(base: &Path, dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_class_files(base, &path, namespace, out);
+            walk_files(base, &path, visit);
             continue;
         }
         let Some(rel) = path.strip_prefix(base).ok().and_then(|rel| rel.to_str()) else {
             continue;
         };
-        let Some(stem) = rel.strip_suffix(".php") else {
-            continue;
-        };
-        let tail = stem.replace([std::path::MAIN_SEPARATOR, '/'], "\\");
-        if tail.is_empty() {
-            continue;
-        }
-        out.push(format!("{namespace}\\{tail}"));
+        visit(&path, rel);
     }
 }
 

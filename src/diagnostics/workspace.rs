@@ -1046,17 +1046,8 @@ impl Backend {
         let content = self.get_file_content(uri)?;
         // Blade files are diagnosed on their preprocessed virtual PHP
         // content (produced by `update_ast` during indexing).
-        let blade_content;
-        let effective: &str = if self.is_blade_file(uri) {
-            if let Some(vc) = self.blade_virtual_content.read().get(uri) {
-                blade_content = vc.clone();
-                &blade_content
-            } else {
-                &content
-            }
-        } else {
-            &content
-        };
+        let content_view = self.analysable_content_or(uri, &content);
+        let effective: &str = &content_view;
 
         crate::util::catch_panic_unwind_safe("workspace_diagnostics", uri, None, || {
             let _parse_guard = crate::parser::with_parse_cache(effective);

@@ -38,9 +38,11 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 
-use crate::analyse::{OutputFormat, github_annotation, print_success_box, progress_bar};
+use crate::analyse::{
+    Colour, OutputFormat, github_annotation, note_plain_php_project, print_box, progress_bar,
+};
 use crate::config::FormattingConfig;
 use crate::formatting::blade::{BladeFormatOptions, BladeFormattingStrategy};
 use crate::formatting::{FormattingStrategy, Tool};
@@ -142,12 +144,7 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     // A missing composer.json is not an error: a plain PHP tree formats
     // fine with the built-in formatter.  Note it on stderr so a mistyped
     // --project-root does not silently rewrite the wrong directory.
-    if !root.join("composer.json").is_file() {
-        eprintln!(
-            "Note: no composer.json found in {} - treating it as a plain PHP project.",
-            root.display()
-        );
-    }
+    note_plain_php_project(root, "treating it as a plain PHP project.");
 
     // ── 1. Open the project (config and source layout, no index) ────
     let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
@@ -268,52 +265,23 @@ fn format_files(
     show_progress: bool,
 ) -> (Vec<Reformatted>, Vec<Failure>) {
     let file_count = files.len();
-    // Every worker reserves PARSE_WORKER_STACK_SIZE, so a run over a
-    // handful of files must not spawn one per core.
-    let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(file_count);
-    let next_idx = AtomicUsize::new(0);
-
     if show_progress {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Formatting"));
     }
 
-    let outcomes: Vec<Outcome> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|_| {
-                let next_idx = &next_idx;
-                std::thread::Builder::new()
-                    .name("format-worker".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let mut outcomes: Vec<Outcome> = Vec::new();
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-                            if show_progress && i.is_multiple_of(20) {
-                                eprint!(
-                                    "\r\x1b[2K {}",
-                                    progress_bar(i + 1, file_count, "Formatting")
-                                );
-                            }
-                            outcomes.push(format_one(context, &files[i]));
-                        }
-                        outcomes
-                    })
-                    .expect("failed to spawn format-worker thread")
-            })
-            .collect();
-
-        let mut merged: Vec<Outcome> = Vec::new();
-        for handle in handles {
-            merged.extend(handle.join().unwrap_or_default());
-        }
-        merged
-    });
+    let outcomes: Vec<Outcome> =
+        crate::parallel::map_indexed("format-worker", file_count, |_worker, i| {
+            if show_progress && i.is_multiple_of(20) {
+                eprint!(
+                    "\r\x1b[2K {}",
+                    progress_bar(i + 1, file_count, "Formatting")
+                );
+            }
+            Some(format_one(context, &files[i]))
+        })
+        .into_iter()
+        .map(|(_, outcome)| outcome)
+        .collect();
 
     if show_progress {
         eprint!(
@@ -470,11 +438,12 @@ fn print_table(outcomes: &Outcomes, options: &FormatOptions) {
     }
 
     if reformatted.is_empty() {
-        print_success_box(
+        print_box(
             &format!(
                 " [OK] {file_count} {} already formatted ",
                 plural(*file_count)
             ),
+            Colour::Green,
             options.use_colour,
         );
         return;
@@ -500,32 +469,6 @@ fn print_table(outcomes: &Outcomes, options: &FormatOptions) {
 /// `file` or `files`, for a count the summary reads out.
 fn plural(count: usize) -> &'static str {
     if count == 1 { "file" } else { "files" }
-}
-
-/// The background a summary box is drawn on.
-enum Colour {
-    Green,
-    Yellow,
-    Red,
-}
-
-/// Print a summary box, matching the ones `analyze` and `fix` close with.
-fn print_box(text: &str, colour: Colour, use_colour: bool) {
-    if !use_colour {
-        println!("{text}");
-        return;
-    }
-    let sgr = match colour {
-        Colour::Green => "30;42",
-        Colour::Yellow => "30;43",
-        Colour::Red => "97;41",
-    };
-    let pad = " ".repeat(text.len());
-    println!();
-    println!(" \x1b[{sgr}m{pad}\x1b[0m");
-    println!(" \x1b[{sgr}m{text}\x1b[0m");
-    println!(" \x1b[{sgr}m{pad}\x1b[0m");
-    println!();
 }
 
 // ── GitHub Actions annotations ──────────────────────────────────────────────

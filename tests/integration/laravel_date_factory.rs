@@ -9,14 +9,9 @@
 //! edit to an unrelated file must never override the project's real
 //! configuration.
 
-use crate::common::{create_psr4_workspace, open_php_str};
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php_str};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const PROVIDERS_PHP: &str = "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
 
@@ -54,7 +49,7 @@ fn configured_date_class(backend: &phpantom_lsp::Backend) -> Option<Option<Strin
 #[tokio::test]
 async fn removing_date_use_from_provider_clears_configured_class() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (
@@ -90,7 +85,7 @@ async fn removing_date_use_from_provider_clears_configured_class() {
 #[tokio::test]
 async fn changing_date_use_in_provider_updates_configured_class() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (
@@ -134,7 +129,7 @@ class AppServiceProvider {
 #[tokio::test]
 async fn date_use_in_unrelated_file_does_not_override() {
     let (backend, _dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (

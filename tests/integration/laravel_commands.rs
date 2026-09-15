@@ -7,15 +7,11 @@
 //! command's signature.
 
 use crate::common::{
-    complete_labels_at_opened, create_psr4_workspace, open_php_str, position_after,
+    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_psr4_workspace, open_php_str,
+    position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const SYNC_COMMAND: &str = "\
 <?php
@@ -68,7 +64,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Console/Commands/ReportCommand.php", REPORT_COMMAND),
@@ -107,7 +103,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
@@ -163,7 +159,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
@@ -223,7 +219,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             (
@@ -268,7 +264,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
@@ -305,7 +301,7 @@ class Runner {
 #[tokio::test]
 async fn own_option_completes_against_signature() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[("src/Console/Commands/SyncCommand.php", SYNC_COMMAND)],
     );
     backend.initialized(InitializedParams {}).await;
@@ -354,7 +350,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
@@ -390,7 +386,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
@@ -411,7 +407,7 @@ class Runner {
 #[tokio::test]
 async fn unknown_own_argument_is_flagged() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[("src/Console/Commands/SyncCommand.php", SYNC_COMMAND)],
     );
     backend.initialized(InitializedParams {}).await;
@@ -482,7 +478,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             // A conventionally-named command so the index is non-empty:
             // command diagnostics are skipped wholesale when nothing was
@@ -545,7 +541,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             // A conventionally-named command so the index is non-empty:
             // command diagnostics are skipped wholesale when nothing was
@@ -621,7 +617,7 @@ class Runner {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/Aliased.php", aliased_commands),
             ("src/Runner.php", consumer),
@@ -722,7 +718,7 @@ async fn hover_in_typed_command(
 #[tokio::test]
 async fn signature_types_argument_and_option_accessors() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[("src/Console/Commands/TypedCommand.php", TYPED_COMMAND)],
     );
     backend.initialized(InitializedParams {}).await;
@@ -767,7 +763,7 @@ async fn signature_types_argument_and_option_accessors() {
 #[tokio::test]
 async fn an_attribute_declared_signature_types_the_accessors_too() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[(
             "src/Console/Commands/AttributedCommand.php",
             ATTRIBUTE_TYPED_COMMAND,
@@ -820,7 +816,7 @@ class OverridingCommand extends Command
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[(
             "src/Console/Commands/OverridingCommand.php",
             OVERRIDING_COMMAND,
@@ -882,7 +878,7 @@ class GuardedCommand extends Command
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[("src/Console/Commands/GuardedCommand.php", GUARDED_COMMAND)],
     );
     backend.initialized(InitializedParams {}).await;

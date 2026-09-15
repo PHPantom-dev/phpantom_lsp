@@ -7,8 +7,9 @@
 //! subjects, inline assignments in the condition, and `@phpstan-assert`
 //! on property/array subjects.
 
-use crate::common::{create_test_backend, unknown_member_diagnostics_with_scope_cache};
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    create_test_backend, slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
+};
 
 /// Shared scaffolding: a wide `Expr` interface, a `StringExpr` subtype
 /// with a `value` property, an unrelated subtype, and holders.
@@ -524,17 +525,7 @@ class C {{
 
 /// Run slow diagnostics and keep only argument type mismatches.
 fn type_error_messages(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Vec<String> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(backend, uri, text, "type_mismatch_argument")
 }
 
 /// A `Holder` whose property is a `T|false` union — the shape a `T|false`

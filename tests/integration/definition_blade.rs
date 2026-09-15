@@ -5,7 +5,7 @@
 mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        create_psr4_workspace, open_document, open_php,
+        create_psr4_workspace, open_document, open_php, workspace_uri,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -52,8 +52,7 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         (backend, dir, uri)
     }
 
@@ -197,17 +196,15 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-
         for (rel_path, content) in [
             ("app/echo_helper.php", e_helper),
             ("app/route_helper.php", route_helper),
         ] {
-            let uri = Url::from_file_path(root.join(rel_path)).unwrap();
+            let uri = workspace_uri(&backend, rel_path);
             open_php(&backend, &uri, content).await;
         }
 
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         open_document(&backend, &uri, "blade", template).await;
 
         // On the first `{` of the `{{` opening the echo.
@@ -250,9 +247,8 @@ mod tests {
                     ("resources/views/page.blade.php", template),
                 ],
             );
-            let root = backend.workspace_root().read().clone().unwrap();
-            let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
-            let helper_uri = Url::from_file_path(root.join("app/echo_helper.php")).unwrap();
+            let uri = workspace_uri(&backend, "resources/views/page.blade.php");
+            let helper_uri = workspace_uri(&backend, "app/echo_helper.php");
             open_php(&backend, &helper_uri, e_helper).await;
             open_document(&backend, &uri, "blade", template).await;
 

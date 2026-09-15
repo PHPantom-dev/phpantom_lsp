@@ -3,7 +3,7 @@
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -742,6 +742,18 @@ pub fn create_psr4_workspace_with_stubs(
     (backend, dir)
 }
 
+/// The path of `relative` inside the backend's workspace root, for the
+/// workspaces [`create_psr4_workspace`] and friends lay out on disk.
+pub fn workspace_path(backend: &Backend, relative: &str) -> PathBuf {
+    let root = backend.workspace_root().read().clone().unwrap();
+    root.join(relative)
+}
+
+/// [`workspace_path`] as the URI an editor would open the file under.
+pub fn workspace_uri(backend: &Backend, relative: &str) -> Url {
+    Url::from_file_path(workspace_path(backend, relative)).unwrap()
+}
+
 // ── Shared code-action test helpers ─────────────────────────────────────────
 
 /// Inject a PHPStan diagnostic into the backend's cache and return it.
@@ -752,6 +764,20 @@ pub fn inject_phpstan_diag(
     message: &str,
     identifier: &str,
 ) -> Diagnostic {
+    inject_phpstan_diag_with_data(backend, uri, line, message, identifier, None)
+}
+
+/// [`inject_phpstan_diag`] carrying the `data` payload the real proxy
+/// attaches, e.g. `{"ignorable": false}` for a rule that cannot be
+/// silenced with an ignore comment.
+pub fn inject_phpstan_diag_with_data(
+    backend: &Backend,
+    uri: &str,
+    line: u32,
+    message: &str,
+    identifier: &str,
+    data: Option<serde_json::Value>,
+) -> Diagnostic {
     let diag = Diagnostic {
         range: Range {
             start: Position::new(line, 0),
@@ -761,6 +787,7 @@ pub fn inject_phpstan_diag(
         code: Some(NumberOrString::String(identifier.to_string())),
         source: Some("PHPStan".to_string()),
         message: message.to_string(),
+        data,
         ..Default::default()
     };
     {
@@ -830,6 +857,39 @@ pub fn find_action<'a>(actions: &'a [CodeActionOrCommand], prefix: &str) -> Opti
         CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with(prefix) => Some(ca),
         _ => None,
     })
+}
+
+/// Find a code action by exact title.
+pub fn find_action_titled<'a>(
+    actions: &'a [CodeActionOrCommand],
+    title: &str,
+) -> Option<&'a CodeAction> {
+    actions.iter().find_map(|a| match a {
+        CodeActionOrCommand::CodeAction(ca) if ca.title == title => Some(ca),
+        _ => None,
+    })
+}
+
+/// Find a code action whose title contains `needle`.
+pub fn find_action_containing<'a>(
+    actions: &'a [CodeActionOrCommand],
+    needle: &str,
+) -> Option<&'a CodeAction> {
+    actions.iter().find_map(|a| match a {
+        CodeActionOrCommand::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
+        _ => None,
+    })
+}
+
+/// Find all code actions whose title starts with `prefix`.
+pub fn find_actions<'a>(actions: &'a [CodeActionOrCommand], prefix: &str) -> Vec<&'a CodeAction> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with(prefix) => Some(ca),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Resolve a deferred code action by storing file content in open_files
@@ -1187,11 +1247,21 @@ pub async fn markup_hover_at(backend: &Backend, uri: &Url, line: u32, character:
         .unwrap_or_else(|| panic!("expected a hover at {line}:{character}"))
 }
 
+/// The items among `items` whose kind is `kind`.
+pub fn items_of_kind(items: &[CompletionItem], kind: CompletionItemKind) -> Vec<&CompletionItem> {
+    items.iter().filter(|i| i.kind == Some(kind)).collect()
+}
+
 /// The class items among `items`.
 pub fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
+    items_of_kind(items, CompletionItemKind::CLASS)
+}
+
+/// The `filter_text` of every item that carries one.
+pub fn filter_texts(items: &[CompletionItem]) -> Vec<&str> {
     items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter_map(|i| i.filter_text.as_deref())
         .collect()
 }
 
@@ -1303,6 +1373,70 @@ pub const ILLUMINATE_COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\
         public function shouldRender() {}\n\
     }\n";
 
+/// Strip the `§` cursor marker from `content`, returning the text an
+/// editor would hold and the position the marker stood at.
+pub fn split_cursor(content: &str) -> (String, Position) {
+    let offset = content.find('§').expect("test source needs a § cursor");
+    let before = &content[..offset];
+    let line = before.matches('\n').count() as u32;
+    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
+    (content.replace('§', ""), Position { line, character })
+}
+
+// ── Shared Laravel fixtures ─────────────────────────────────────────────────
+
+/// A Laravel `composer.json` whose `App\` namespace maps to `src/`.
+pub const LARAVEL_SRC_COMPOSER: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": { "psr-4": { "App\\": "src/" } }
+}"#;
+
+/// A Laravel `composer.json` whose `App\` namespace maps to `app/`, the
+/// layout a real Laravel application uses.
+pub const LARAVEL_APP_COMPOSER: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": { "psr-4": { "App\\": "app/" } }
+}"#;
+
+/// The `App\` to `app/` mapping alone, for a project that needs the
+/// autoload layout but not the framework dependency.
+pub const APP_PSR4_COMPOSER: &str = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
+
+/// A minimal Eloquent-shaped model for templates to render.
+pub const USER_MODEL_STUB: &str =
+    "<?php\nnamespace App\\Models;\nclass User { public string $email = ''; }\n";
+
+/// Laravel's `app()` helper, with the conditional return type that makes
+/// `app(Foo::class)` resolve to `Foo`.
+pub const APP_HELPERS_PHP: &str = r#"<?php
+/**
+ * @template TClass
+ * @param string|class-string<TClass> $abstract
+ * @return ($abstract is class-string<TClass> ? TClass : \Illuminate\Foundation\Application)
+ */
+function app($abstract = null, array $parameters = [])
+{
+}
+"#;
+
+/// A stand-in for `Illuminate\Foundation\Http\FormRequest`.
+pub const FORM_REQUEST_STUB: &str = "\
+<?php
+namespace Illuminate\\Foundation\\Http;
+use Illuminate\\Http\\Request;
+class FormRequest extends Request {
+    public function rules(): array { return []; }
+}
+";
+
+/// A consumer class whose one method runs `body` and then reads the
+/// variable it bound, the shape container-resolution tests assert on.
+pub fn consumer_class(body: &str) -> String {
+    format!(
+        "<?php\nnamespace App;\nclass Consumer {{\n    public function go(): void {{\n        $x = {body};\n        $x;\n    }}\n}}\n"
+    )
+}
+
 /// A stand-in for `Livewire\Component`, the base class of a Livewire
 /// component.
 pub const LIVEWIRE_COMPONENT_STUB: &str = "<?php\nnamespace Livewire;\n\
@@ -1311,17 +1445,65 @@ pub const LIVEWIRE_COMPONENT_STUB: &str = "<?php\nnamespace Livewire;\n\
         public function dispatch(string $event) {}\n\
     }\n";
 
-/// Open the Blade template at `root/relative` from disk, the way an editor
-/// opening it with language id `blade` would, and hand back its URI.
-pub async fn open_blade_template(backend: &Backend, root: &Path, relative: &str) -> Url {
-    let path = root.join(relative);
+/// Open the Blade template at `relative` in the backend's workspace from
+/// disk, the way an editor opening it with language id `blade` would, and
+/// hand back its URI.
+pub async fn open_blade_template(backend: &Backend, relative: &str) -> Url {
+    let path = workspace_path(backend, relative);
     let text = fs::read_to_string(&path).unwrap();
     let uri = Url::from_file_path(&path).unwrap();
     open_document(backend, &uri, "blade", &text).await;
     uri
 }
 
+/// [`open_blade_template`] with the workspace scan already run, so provider
+/// registrations and view discovery are in place before the template opens.
+pub async fn open_initialized_blade_template(backend: &Backend, relative: &str) -> Url {
+    backend.initialized(InitializedParams {}).await;
+    open_blade_template(backend, relative).await
+}
+
 // ─── Diagnostics ────────────────────────────────────────────────────────────
+
+/// The diagnostics among `diags` whose `code` is the string `code`.
+pub fn with_code(diags: Vec<Diagnostic>, code: &str) -> Vec<Diagnostic> {
+    diags
+        .into_iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == code))
+        })
+        .collect()
+}
+
+/// The messages of the diagnostics among `diags` whose `code` is the
+/// string `code`.
+pub fn messages_with_code(diags: &[Diagnostic], code: &str) -> Vec<String> {
+    diags
+        .iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == code))
+        })
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+/// Parse `php` as `uri` and return the messages of the slow-pass
+/// diagnostics whose `code` is the string `code`.
+pub fn slow_diagnostic_messages(
+    backend: &Backend,
+    uri: &str,
+    php: &str,
+    code: &str,
+) -> Vec<String> {
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+    messages_with_code(&out, code)
+}
 
 /// Parse `php` as `file:///test.php` on `backend` and run one diagnostic
 /// collector over it, e.g. `Backend::collect_unused_variable_diagnostics`.

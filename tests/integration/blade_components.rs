@@ -6,7 +6,7 @@ mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
         complete_labels_at_opened_with_trigger, create_psr4_workspace, markup_hover_at,
-        open_document,
+        open_document, workspace_path, workspace_uri,
     };
     use tower_lsp::lsp_types::*;
 
@@ -99,28 +99,23 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
         // Parse the helper up front: a function is only findable once the
         // file declaring it has been indexed, and these workspaces are not
         // walked.
-        let helpers = Url::from_file_path(root.join("stubs/helpers.php")).unwrap();
+        let helpers = workspace_uri(&backend, "stubs/helpers.php");
         backend.update_ast(
             helpers.as_str(),
-            &std::fs::read_to_string(root.join("stubs/helpers.php")).unwrap(),
+            &std::fs::read_to_string(workspace_path(&backend, "stubs/helpers.php")).unwrap(),
         );
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         (backend, dir, uri)
     }
 
     /// Open a second template from the same workspace, for the cases that
     /// need a caller and a callee.
-    async fn open_view(
-        backend: &phpantom_lsp::Backend,
-        root: &std::path::Path,
-        relative: &str,
-    ) -> Url {
-        let uri = Url::from_file_path(root.join(relative)).unwrap();
-        let text = std::fs::read_to_string(root.join(relative)).unwrap();
+    async fn open_view(backend: &phpantom_lsp::Backend, relative: &str) -> Url {
+        let uri = workspace_uri(backend, relative);
+        let text = std::fs::read_to_string(workspace_path(backend, relative)).unwrap();
         open_document(backend, &uri, "blade", &text).await;
         uri
     }
@@ -381,13 +376,7 @@ mod tests {
         let (backend, _dir, uri) = workspace(template);
         open_document(&backend, &uri, "blade", template).await;
 
-        let root = backend.workspace_root().read().clone().unwrap();
-        let banner = open_view(
-            &backend,
-            &root,
-            "resources/views/components/banner.blade.php",
-        )
-        .await;
+        let banner = open_view(&backend, "resources/views/components/banner.blade.php").await;
 
         let hover = markup_hover_at(&backend, &banner, 0, 10).await;
         assert!(

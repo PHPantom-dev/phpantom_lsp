@@ -5,20 +5,15 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{
-        "require": { "laravel/framework": "^11.0" },
-        "autoload": { "psr-4": { "App\\": "app/" } }
-    }"#;
 
     /// The directive-balance diagnostics for one template, as
     /// `(code, message, line)` in report order.
     async fn balance_diagnostics(template: &str) -> Vec<(String, String, u32)> {
         let relative = "resources/views/page.blade.php";
-        let (backend, dir) = create_psr4_workspace(COMPOSER, &[(relative, template)]);
+        let (backend, dir) = create_psr4_workspace(LARAVEL_APP_COMPOSER, &[(relative, template)]);
         backend.initialized(InitializedParams {}).await;
 
         let path = dir.path().join(relative);
@@ -132,7 +127,7 @@ mod tests {
     /// `(code, message, line)` in report order.
     async fn tag_balance_diagnostics(template: &str) -> Vec<(String, String, u32)> {
         let relative = "resources/views/page.blade.php";
-        let (backend, dir) = create_psr4_workspace(COMPOSER, &[(relative, template)]);
+        let (backend, dir) = create_psr4_workspace(LARAVEL_APP_COMPOSER, &[(relative, template)]);
         backend.initialized(InitializedParams {}).await;
 
         let path = dir.path().join(relative);

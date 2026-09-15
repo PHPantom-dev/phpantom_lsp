@@ -48,6 +48,7 @@ use std::ops::Range;
 use crate::blade::balance::{BLOCKS, opens_block};
 use crate::blade::component_tags::{is_attr_name_char, is_tag_name_char};
 use crate::blade::signature::{matching_paren, skip_php_comment};
+use crate::text_position::LineIndex;
 
 /// How the formatter lays a template out, from the editor's formatting
 /// options.
@@ -207,7 +208,7 @@ struct OpenBracket {
 struct Scanner<'a> {
     src: &'a str,
     bytes: &'a [u8],
-    line_starts: Vec<usize>,
+    lines: LineIndex<'a>,
     events: Vec<Event>,
     brackets: Vec<OpenBracket>,
     /// The names every `@end…` in the template closes, so a block the
@@ -218,17 +219,10 @@ struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     fn new(src: &'a str) -> Self {
-        let mut line_starts = vec![0];
-        line_starts.extend(
-            src.bytes()
-                .enumerate()
-                .filter(|(_, b)| *b == b'\n')
-                .map(|(i, _)| i + 1),
-        );
         let mut scanner = Self {
             src,
             bytes: src.as_bytes(),
-            line_starts,
+            lines: LineIndex::new(src),
             events: Vec::new(),
             brackets: Vec::new(),
             end_names: HashSet::new(),
@@ -238,10 +232,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn line_of(&self, offset: usize) -> usize {
-        match self.line_starts.binary_search(&offset) {
-            Ok(line) => line,
-            Err(line) => line - 1,
-        }
+        self.lines.line_of(offset)
     }
 
     /// Whether only spaces, tabs, and a carriage return follow `from` on
@@ -390,18 +381,6 @@ impl<'a> Scanner<'a> {
         end + close.len()
     }
 
-    /// The extent of the echo at `at`, without scanning it.
-    fn skip_echo(&self, at: usize) -> usize {
-        let (open, close) = echo_delimiters(self.bytes, at);
-        find(
-            self.bytes,
-            at + open.len(),
-            self.bytes.len(),
-            close.as_bytes(),
-        )
-        .map_or(at + open.len(), |end| end + close.len())
-    }
-
     fn scan_comment(&mut self, at: usize) -> usize {
         let Some(close) = find(self.bytes, at + 4, self.bytes.len(), b"--}}") else {
             self.region(at, RegionKind::IndentPreserve, at + 4, None);
@@ -421,15 +400,7 @@ impl<'a> Scanner<'a> {
 
     /// The next `{{-- marker --}}` comment at or after `from`.
     fn find_marker_comment(&self, from: usize, marker: &str) -> Option<Range<usize>> {
-        let mut i = from;
-        while let Some(start) = find(self.bytes, i, self.bytes.len(), b"{{--") {
-            let close = find(self.bytes, start + 4, self.bytes.len(), b"--}}")?;
-            if self.src[start + 4..close].trim() == marker {
-                return Some(start..close + 4);
-            }
-            i = close + 4;
-        }
-        None
+        find_marker_comment(self.src, self.bytes, from, self.bytes.len(), marker)
     }
 
     /// Record a region, unless it opens and closes on one line, in which
@@ -461,51 +432,24 @@ impl<'a> Scanner<'a> {
     /// The next `@name` directive at or after `from`, honouring Blade's
     /// word-boundary rule.
     fn find_directive(&self, from: usize, name: &str) -> Option<Range<usize>> {
-        let mut i = from;
-        while let Some(at) = self.bytes[i..].iter().position(|b| *b == b'@') {
-            let at = i + at;
-            i = at + 1;
-            if boundary_before(self.bytes, at)
-                && self.src[at + 1..].starts_with(name)
-                && word_end(self.bytes, at + 1) == at + 1 + name.len()
-            {
-                return Some(at..at + 1 + name.len());
-            }
-        }
-        None
+        find_directive(self.src, self.bytes, from, self.bytes.len(), name)
     }
 
     fn scan_directive(&mut self, at: usize) -> usize {
-        if !boundary_before(self.bytes, at) {
-            return at + 1;
-        }
-        match self.bytes.get(at + 1) {
-            // `@@if` is the escape for a literal `@if`.
-            Some(b'@') => return at + 2,
-            // `@{{ … }}` is a literal echo, whose braces are text.
-            Some(b'{') if is_echo_start(self.bytes, at + 1) => return self.skip_echo(at + 1),
-            _ => {}
-        }
-        let name_end = word_end(self.bytes, at + 1);
-        if name_end == at + 1 {
-            return at + 1;
-        }
-        let name = &self.src[at + 1..name_end];
-        // `@click="…"` is a JavaScript framework's binding; the caller
-        // reads it as an attribute.
-        if self.bytes.get(name_end) == Some(&b'=') {
-            return name_end;
-        }
-
-        // Blade allows spaces and tabs, but no newline, between a
-        // directive's name and its argument list.
-        let mut open = name_end;
-        while matches!(self.bytes.get(open), Some(b' ' | b'\t')) {
-            open += 1;
-        }
-        let args = (self.bytes.get(open) == Some(&b'('))
-            .then(|| matching_paren(self.bytes, open).map(|close| open..close + 1))
-            .flatten();
+        let (name, name_end, args) =
+            match directive_head(self.src, self.bytes, at, self.bytes.len()) {
+                DirectiveHead::None(end)
+                | DirectiveHead::Escaped(end)
+                | DirectiveHead::LiteralEcho(end) => {
+                    return end;
+                }
+                DirectiveHead::Named {
+                    name,
+                    name_end,
+                    args,
+                    ..
+                } => (name, name_end, args),
+            };
         let end = args.as_ref().map_or(name_end, |args| args.end);
 
         match name {
@@ -757,36 +701,9 @@ impl<'a> Scanner<'a> {
 
     /// An attribute, with its value when it has one.
     fn scan_attribute(&mut self, at: usize) -> usize {
-        let mut i = at;
-        while i < self.bytes.len()
-            && (is_attr_name_char(self.bytes[i] as char) || self.bytes[i] == b'$')
-        {
-            i += 1;
-        }
-        let mut j = i;
-        while j < self.bytes.len() && self.bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        if self.bytes.get(j) != Some(&b'=') {
-            return i;
-        }
-        j += 1;
-        while j < self.bytes.len() && self.bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        match self.bytes.get(j) {
-            Some(b'\'' | b'"') => self.scan_attribute_value(j),
-            Some(_) => {
-                // An unquoted value runs to whitespace or the tag's end.
-                while j < self.bytes.len()
-                    && !self.bytes[j].is_ascii_whitespace()
-                    && self.bytes[j] != b'>'
-                {
-                    j += 1;
-                }
-                j
-            }
-            None => j,
+        match attribute_head(self.bytes, at, self.bytes.len()).1 {
+            AttributeValue::None(end) | AttributeValue::Unquoted(end) => end,
+            AttributeValue::Quoted(quote_at) => self.scan_attribute_value(quote_at),
         }
     }
 
@@ -923,6 +840,180 @@ pub(super) fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> 
         .iter()
         .position(|b| *b == needle)
         .map(|at| from + at)
+}
+
+/// The next `@name` directive at or after `from`, honouring Blade's
+/// word-boundary rule. A delimiter written inside a string literal counts,
+/// because Blade's own scan for one is a non-greedy regex that knows
+/// nothing about PHP: this has to agree with the reindenter and with the
+/// compiler about where a block ends.
+pub(super) fn find_directive(
+    src: &str,
+    bytes: &[u8],
+    from: usize,
+    limit: usize,
+    name: &str,
+) -> Option<Range<usize>> {
+    let mut i = from;
+    while let Some(at) = find(bytes, i, limit, b"@") {
+        i = at + 1;
+        if boundary_before(bytes, at)
+            && src[at + 1..].starts_with(name)
+            && word_end(bytes, at + 1) == at + 1 + name.len()
+        {
+            return Some(at..at + 1 + name.len());
+        }
+    }
+    None
+}
+
+/// The next `{{-- marker --}}` comment at or after `from`, bounded by
+/// `limit`.
+pub(super) fn find_marker_comment(
+    src: &str,
+    bytes: &[u8],
+    from: usize,
+    limit: usize,
+    marker: &str,
+) -> Option<Range<usize>> {
+    let mut i = from;
+    while let Some(start) = find(bytes, i, limit, b"{{--") {
+        let close = find(bytes, start + 4, limit, b"--}}")?;
+        if src[start + 4..close].trim() == marker {
+            return Some(start..close + 4);
+        }
+        i = close + 4;
+    }
+    None
+}
+
+/// What parsing the `@` at a candidate directive position found.
+pub(super) enum DirectiveHead<'a> {
+    /// Not a directive: the word-boundary rule failed, the name was
+    /// empty, or this is a `@click="…"`-style JavaScript framework
+    /// binding that the caller reads as an attribute instead. The
+    /// offset is where the caller should resume scanning.
+    None(usize),
+    /// `@@name` is the escape for a literal `@name`.
+    Escaped(usize),
+    /// `@{{ … }}` is a literal echo, whose braces are text rather than a
+    /// directive.
+    LiteralEcho(usize),
+    /// A directive name, and where its argument list opens and (if it
+    /// closes within `limit`) the argument list's full range.
+    Named {
+        name: &'a str,
+        name_end: usize,
+        open: usize,
+        args: Option<Range<usize>>,
+    },
+}
+
+/// Parse the directive head at the `@` at `at`: its name and, when
+/// present, its argument list. `limit` bounds the search for the
+/// argument list's closing paren and the literal echo's closing
+/// delimiter, so a caller working on a fragment does not read past it.
+pub(super) fn directive_head<'a>(
+    src: &'a str,
+    bytes: &[u8],
+    at: usize,
+    limit: usize,
+) -> DirectiveHead<'a> {
+    if !boundary_before(bytes, at) {
+        return DirectiveHead::None(at + 1);
+    }
+    match bytes.get(at + 1) {
+        // `@@if` is the escape for a literal `@if`.
+        Some(b'@') => return DirectiveHead::Escaped(at + 2),
+        // `@{{ … }}` is a literal echo, whose braces are text.
+        Some(b'{') if is_echo_start(bytes, at + 1) => {
+            let (open, close) = echo_delimiters(bytes, at + 1);
+            let body_start = at + 1 + open.len();
+            let end = find(bytes, body_start, limit, close.as_bytes())
+                .map_or(body_start, |end| end + close.len());
+            return DirectiveHead::LiteralEcho(end);
+        }
+        _ => {}
+    }
+    let name_end = word_end(bytes, at + 1);
+    if name_end == at + 1 {
+        return DirectiveHead::None(at + 1);
+    }
+    let name = &src[at + 1..name_end];
+    // `@click="…"` is a JavaScript framework's binding; the caller reads
+    // it as an attribute.
+    if bytes.get(name_end) == Some(&b'=') {
+        return DirectiveHead::None(name_end);
+    }
+
+    // Blade allows spaces and tabs, but no newline, between a directive's
+    // name and its argument list.
+    let mut open = name_end;
+    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
+        open += 1;
+    }
+    let args = (bytes.get(open) == Some(&b'('))
+        .then(|| {
+            matching_paren(bytes, open)
+                .filter(|close| *close < limit)
+                .map(|close| open..close + 1)
+        })
+        .flatten();
+    DirectiveHead::Named {
+        name,
+        name_end,
+        open,
+        args,
+    }
+}
+
+/// Where an attribute's value starts, once its name and any `=` have
+/// been lexed.
+pub(super) enum AttributeValue {
+    /// A boolean attribute, or one whose `=` is not followed by a value:
+    /// the attribute ends at this offset.
+    None(usize),
+    /// A quoted value opens at this offset (the quote byte itself).
+    Quoted(usize),
+    /// An unquoted value, ending at this offset.
+    Unquoted(usize),
+}
+
+/// Lex one attribute's name and, when present, where its value begins.
+/// `limit` bounds the scan.
+pub(super) fn attribute_head(
+    bytes: &[u8],
+    at: usize,
+    limit: usize,
+) -> (Range<usize>, AttributeValue) {
+    let mut i = at;
+    while i < limit && (is_attr_name_char(bytes[i] as char) || bytes[i] == b'$') {
+        i += 1;
+    }
+    let name = at..i;
+    let mut j = i;
+    while j < limit && bytes[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    if bytes.get(j) != Some(&b'=') {
+        return (name, AttributeValue::None(i));
+    }
+    j += 1;
+    while j < limit && bytes[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    match bytes.get(j) {
+        Some(b'\'' | b'"') => (name, AttributeValue::Quoted(j)),
+        Some(_) => {
+            // An unquoted value runs to whitespace or the tag's end.
+            let mut k = j;
+            while k < limit && !bytes[k].is_ascii_whitespace() && bytes[k] != b'>' {
+                k += 1;
+            }
+            (name, AttributeValue::Unquoted(k))
+        }
+        None => (name, AttributeValue::None(j)),
+    }
 }
 
 // ── Walker ──────────────────────────────────────────────────────────

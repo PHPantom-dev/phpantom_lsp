@@ -6,14 +6,9 @@
 //! to open a folder as a document reports an error — but they do complete, so
 //! the next segment of the path can be typed against a real listing.
 
-use crate::common::{create_psr4_workspace, goto_definition_at, position_of};
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, goto_definition_at, position_of};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 /// A composer file with no Laravel dependency, so the helper names mean
 /// whatever the project made them mean.
@@ -94,7 +89,7 @@ class Paths {
     }
 }
 ";
-    let (backend, dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     for (marker, expected) in [
         ("routes/web.php", "routes/web.php"),
@@ -125,7 +120,7 @@ class Paths {
     }
 }
 ";
-    let (backend, _dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, _dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     let response = definition_at(&backend, &uri, CONSUMER, "routes/console.php").await;
     assert!(
@@ -146,7 +141,7 @@ class Paths {
     }
 }
 ";
-    let (backend, _dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, _dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     let response = definition_at(&backend, &uri, CONSUMER, "'routes'").await;
     assert!(
@@ -192,7 +187,7 @@ class Paths {
     }
 }
 ";
-    let (backend, dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     let links = backend
         .handle_document_link(uri.as_str(), CONSUMER)
@@ -273,7 +268,7 @@ class Paths {
     }
 }
 ";
-    let (backend, _dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, _dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     let items = completion_at(&backend, &uri, CONSUMER, "resource_path('").await;
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
@@ -301,7 +296,7 @@ class Paths {
     }
 }
 ";
-    let (backend, _dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, _dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     let items = completion_at(&backend, &uri, CONSUMER, "views/wel").await;
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
@@ -329,7 +324,7 @@ class Paths {
     }
 }
 ";
-    let (backend, _dir, uri) = workspace(COMPOSER_JSON, CONSUMER).await;
+    let (backend, _dir, uri) = workspace(LARAVEL_SRC_COMPOSER, CONSUMER).await;
 
     let items = completion_at(&backend, &uri, CONSUMER, "config_path('zz").await;
     assert!(

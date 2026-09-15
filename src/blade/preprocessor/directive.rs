@@ -1,4 +1,4 @@
-use super::shared::{LineOut, Lowering, flush_buffer, utf16_count};
+use super::shared::{LineOut, Lowering, closes_args, flush_buffer};
 use super::{CapturedDirective, Mode};
 use crate::blade::directives::{
     CUSTOM_MARKER, CustomDirectives, CustomForm, match_directive, translate_directive,
@@ -328,34 +328,24 @@ pub(super) fn consume_args(
     ch: char,
     mode: Mode,
     paren_depth: &mut i32,
-    out: LineOut<'_>,
+    mut out: LineOut<'_>,
 ) -> bool {
     // In Directive Args, we wait for balanced parentheses
-    if ch == '(' {
-        *paren_depth += 1;
-    } else if ch == ')' {
-        *paren_depth -= 1;
-        if *paren_depth <= 0 {
-            out.buffer.push(')');
-            *out.char_idx += 1;
-            *out.current_utf16_col += 1;
-            flush_buffer(
-                out.processed,
-                out.buffer,
-                mode,
-                *out.current_utf16_col,
-                out.adjustments,
-            );
+    if closes_args(ch, paren_depth) {
+        out.buffer.push(')');
+        *out.char_idx += 1;
+        *out.current_utf16_col += 1;
+        flush_buffer(
+            out.processed,
+            out.buffer,
+            mode,
+            *out.current_utf16_col,
+            out.adjustments,
+        );
 
-            let start_suffix = utf16_count(out.processed) as u32;
-            out.processed.push_str(suffix);
-            let end_suffix = utf16_count(out.processed) as u32;
+        out.emit_suffix(suffix);
 
-            out.adjustments.push((*out.current_utf16_col, start_suffix));
-            out.adjustments.push((*out.current_utf16_col, end_suffix));
-
-            return true;
-        }
+        return true;
     }
     false
 }
@@ -367,27 +357,17 @@ pub(super) fn skip_args(
     suffix: &'static str,
     ch: char,
     paren_depth: &mut i32,
-    out: LineOut<'_>,
+    mut out: LineOut<'_>,
 ) -> bool {
     // Consume balanced parens without outputting them
-    if ch == '(' {
-        *paren_depth += 1;
-    } else if ch == ')' {
-        *paren_depth -= 1;
-        if *paren_depth <= 0 {
-            *out.char_idx += 1;
-            *out.current_utf16_col += 1;
-            out.buffer.clear();
+    if closes_args(ch, paren_depth) {
+        *out.char_idx += 1;
+        *out.current_utf16_col += 1;
+        out.buffer.clear();
 
-            let start_suffix = utf16_count(out.processed) as u32;
-            out.processed.push_str(suffix);
-            let end_suffix = utf16_count(out.processed) as u32;
+        out.emit_suffix(suffix);
 
-            out.adjustments.push((*out.current_utf16_col, start_suffix));
-            out.adjustments.push((*out.current_utf16_col, end_suffix));
-
-            return true;
-        }
+        return true;
     }
     *out.char_idx += 1;
     *out.current_utf16_col += ch.len_utf16() as u32;

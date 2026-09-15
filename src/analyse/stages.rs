@@ -32,7 +32,7 @@ use super::{FileDiagnostic, OutputFormat};
 pub(crate) fn note_plain_php_project(root: &Path, consequence: &str) {
     if !root.join("composer.json").is_file() {
         eprintln!(
-            "Note: no composer.json found in {} — {consequence}",
+            "Note: no composer.json found in {} - {consequence}",
             root.display()
         );
     }

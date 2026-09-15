@@ -1,4 +1,4 @@
-use crate::common::{collect_diagnostics_with, create_test_backend};
+use crate::common::{collect_diagnostics_with, create_test_backend, messages_with_code};
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
@@ -13,23 +13,11 @@ fn collect(php: &str) -> Vec<Diagnostic> {
 }
 
 fn has_property_error(diags: &[Diagnostic]) -> bool {
-    diags.iter().any(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_property"),
-        )
-    })
+    !messages_with_code(diags, "type_mismatch_property").is_empty()
 }
 
 fn property_error_messages(diags: &[Diagnostic]) -> Vec<String> {
-    diags
-        .iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_property"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    messages_with_code(diags, "type_mismatch_property")
 }
 
 // ─── Basic: assign wrong type to property ───────────────────────────────────

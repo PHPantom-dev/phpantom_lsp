@@ -8,24 +8,19 @@
 //! argument, an array element, a ternary condition, a nested operand)
 //! reading the un-narrowed type.
 
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    create_test_backend, create_test_backend_with_function_stubs, slow_diagnostic_messages,
+};
 
 /// Collect argument-type diagnostics through the slow pipeline, which is
 /// what activates the forward walker's scope-snapshot cache.
 fn type_errors_with(backend: phpantom_lsp::Backend, php: &str) -> Vec<String> {
-    let uri = "file:///nested_short_circuit.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(
+        &backend,
+        "file:///nested_short_circuit.php",
+        php,
+        "type_mismatch_argument",
+    )
 }
 
 /// The positions matrix only needs user-declared functions, so it runs

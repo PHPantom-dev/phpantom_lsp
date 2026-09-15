@@ -1,7 +1,7 @@
 use super::component_call::{
     OpenComponentCall, bound_attr_open_len, bound_attr_spans_lines, component_tag_at,
 };
-use super::shared::{LineOut, Lowering, flush_buffer, utf16_count};
+use super::shared::{LineOut, Lowering, flush_buffer};
 use super::{ComponentResolver, Mode};
 use crate::blade::component_tags::camel_case_attr_name;
 
@@ -203,7 +203,7 @@ pub(super) fn close_bound_attr(
     ch: char,
     in_string: Option<char>,
     bound_attr: &BoundAttr,
-    out: LineOut<'_>,
+    mut out: LineOut<'_>,
 ) -> bool {
     let at_end = match term {
         Some(delim) => in_string.is_none() && ch == delim,
@@ -219,11 +219,7 @@ pub(super) fn close_bound_attr(
         *out.current_utf16_col,
         out.adjustments,
     );
-    let start_suffix = utf16_count(out.processed) as u32;
-    out.processed.push_str(bound_attr.suffix);
-    let end_suffix = utf16_count(out.processed) as u32;
-    out.adjustments.push((*out.current_utf16_col, start_suffix));
-    out.adjustments.push((*out.current_utf16_col, end_suffix));
+    let end_suffix = out.emit_suffix(bound_attr.suffix);
     if term.is_some() {
         // Consume the closing quote (masked tag markup).
         *out.char_idx += 1;

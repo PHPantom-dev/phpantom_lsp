@@ -5,14 +5,11 @@
 //! the name was declared on.  The same applies to `to_route()`,
 //! `signedRoute()`, and `temporarySignedRoute()`.
 
-use crate::common::{create_psr4_workspace, open_php, position_after, response_labels};
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php, position_after, response_labels,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const ROUTES: &str = "\
 <?php
@@ -35,7 +32,7 @@ Route::apiResource('categories', CategoryController::class)
 /// first position after `needle` in the consumer.
 async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[("routes/web.php", ROUTES), ("src/Runner.php", consumer)],
     );
     backend.initialized(InitializedParams {}).await;

@@ -32,6 +32,37 @@ pub(super) struct LineOut<'a> {
     pub(super) current_utf16_col: &'a mut u32,
 }
 
+impl LineOut<'_> {
+    /// Append PHP that has no Blade source of its own (a statement
+    /// terminator, a synthesized call) and anchor both its ends to the
+    /// current Blade column, so the map keeps the text around it aligned.
+    /// Returns the emitted end offset, for callers that need to anchor
+    /// further masked source to it.
+    pub(super) fn emit_suffix(&mut self, text: &str) -> u32 {
+        let start_suffix = utf16_count(self.processed) as u32;
+        self.processed.push_str(text);
+        let end_suffix = utf16_count(self.processed) as u32;
+
+        self.adjustments
+            .push((*self.current_utf16_col, start_suffix));
+        self.adjustments.push((*self.current_utf16_col, end_suffix));
+
+        end_suffix
+    }
+}
+
+/// Track a directive argument list's paren nesting, reporting whether `ch`
+/// is the `)` that balances it.
+pub(super) fn closes_args(ch: char, paren_depth: &mut i32) -> bool {
+    if ch == '(' {
+        *paren_depth += 1;
+    } else if ch == ')' {
+        *paren_depth -= 1;
+        return *paren_depth <= 0;
+    }
+    false
+}
+
 pub(super) fn flush_buffer(
     processed: &mut String,
     buffer: &mut String,

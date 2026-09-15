@@ -34,14 +34,13 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::analyse::{
-    OpenedProject, OutputFormat, note_plain_php_project, open_project, print_success_box,
-    progress_bar,
+    Colour, OpenedProject, OutputFormat, TableRow, github_annotation, note_plain_php_project,
+    open_project, print_box, print_success_box, print_table, progress_bar,
 };
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
@@ -251,10 +250,6 @@ pub async fn run(options: FixOptions) -> i32 {
     let file_count = files.len();
     let use_colour = options.use_colour;
     let output_format = options.output_format;
-    let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-
     // ── 2. Parse all files (parallel) ───────────────────────────────
     if use_colour && output_format == OutputFormat::Table {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Parsing"));
@@ -275,89 +270,56 @@ pub async fn run(options: FixOptions) -> i32 {
     if use_colour && output_format == OutputFormat::Table {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Fixing"));
     }
-    let next_idx = AtomicUsize::new(0);
     let dry_run = options.dry_run;
 
-    let results: Vec<FileFixResult> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|_| {
-                let backend = &backend;
-                let next_idx = &next_idx;
-                let file_data = &file_data;
-                let files = &files;
-                let native_rules = &native_rules;
-                // The collectors walk types, which nests deeply enough to
-                // overflow a spawned thread's default stack.
-                std::thread::Builder::new()
-                    .name("fix-worker".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let mut results: Vec<FileFixResult> = Vec::new();
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-                            if use_colour
-                                && output_format == OutputFormat::Table
-                                && i.is_multiple_of(20)
-                            {
-                                eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count, "Fixing"));
-                            }
+    let results: Vec<FileFixResult> =
+        crate::parallel::map_indexed("fix-worker", file_count, |_worker, i| {
+            if use_colour && output_format == OutputFormat::Table && i.is_multiple_of(20) {
+                eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count, "Fixing"));
+            }
 
-                            let Some((uri, content)) = &file_data[i] else {
-                                continue;
-                            };
+            let (uri, content) = file_data[i].as_ref()?;
 
-                            let _parse_guard = with_parse_cache(content);
-                            let _cache_guard =
-                                with_active_resolved_class_cache(&backend.resolved_class_cache);
+            let _parse_guard = with_parse_cache(content);
+            let _cache_guard = with_active_resolved_class_cache(&backend.resolved_class_cache);
 
-                            let mut current_content = content.clone();
-                            let mut all_fixes: Vec<AppliedFix> = Vec::new();
+            let mut current_content = content.clone();
+            let mut all_fixes: Vec<AppliedFix> = Vec::new();
 
-                            for rule in native_rules.iter() {
-                                match *rule {
-                                    "unused_import" => {
-                                        let (new_content, fixes) =
-                                            fix_unused_imports(backend, uri, &current_content);
-                                        current_content = new_content;
-                                        all_fixes.extend(fixes);
-                                    }
-                                    _ => {
-                                        // Future rules go here.
-                                    }
-                                }
-                            }
+            for rule in native_rules.iter() {
+                match *rule {
+                    "unused_import" => {
+                        let (new_content, fixes) =
+                            fix_unused_imports(&backend, uri, &current_content);
+                        current_content = new_content;
+                        all_fixes.extend(fixes);
+                    }
+                    _ => {
+                        // Future rules go here.
+                    }
+                }
+            }
 
-                            let changed = current_content != *content;
-                            if changed {
-                                let display_path = files[i]
-                                    .strip_prefix(root)
-                                    .unwrap_or(&files[i])
-                                    .to_string_lossy()
-                                    .to_string();
-                                results.push(FileFixResult {
-                                    display_path,
-                                    abs_path: files[i].clone(),
-                                    new_content: current_content,
-                                    changed,
-                                    fixes: all_fixes,
-                                });
-                            }
-                        }
-                        results
-                    })
-                    .expect("failed to spawn fix-worker thread")
+            let changed = current_content != *content;
+            if !changed {
+                return None;
+            }
+            let display_path = files[i]
+                .strip_prefix(root)
+                .unwrap_or(&files[i])
+                .to_string_lossy()
+                .to_string();
+            Some(FileFixResult {
+                display_path,
+                abs_path: files[i].clone(),
+                new_content: current_content,
+                changed,
+                fixes: all_fixes,
             })
-            .collect();
-
-        let mut merged: Vec<FileFixResult> = Vec::new();
-        for handle in handles {
-            merged.extend(handle.join().unwrap_or_default());
-        }
-        merged
-    });
+        })
+        .into_iter()
+        .map(|(_, result)| result)
+        .collect();
 
     if use_colour && output_format == OutputFormat::Table {
         eprint!(
@@ -433,52 +395,15 @@ pub async fn run(options: FixOptions) -> i32 {
 
 /// Print a file's fixes in a table format.
 fn print_fix_table(path: &str, fixes: &[AppliedFix], use_colour: bool) {
-    let line_col_w = fixes
+    let rows: Vec<TableRow> = fixes
         .iter()
-        .map(|f| f.line.to_string().len())
-        .max()
-        .unwrap_or(0)
-        .max(4);
-
-    let msg_col_w = fixes
-        .iter()
-        .map(|f| f.description.len())
-        .max()
-        .unwrap_or(0)
-        .max(path.len());
-
-    let sep = format!(
-        " {} {}",
-        "-".repeat(line_col_w + 2),
-        "-".repeat(msg_col_w + 2),
-    );
-
-    println!("{sep}");
-    if use_colour {
-        println!(
-            "  \x1b[32m{:>line_col_w$}\x1b[0m   \x1b[32m{path}\x1b[0m",
-            "Line"
-        );
-    } else {
-        println!("  {:>line_col_w$}   {path}", "Line");
-    }
-    println!("{sep}");
-
-    for fix in fixes {
-        let line_str = fix.line.to_string();
-        println!("  {:>line_col_w$}   {}", line_str, fix.description);
-        if use_colour {
-            println!(
-                "  {:>line_col_w$}   \x1b[2m\u{1f527}  {}\x1b[0m",
-                "", fix.rule
-            );
-        } else {
-            println!("  {:>line_col_w$}   \u{1f527}  {}", "", fix.rule);
-        }
-    }
-
-    println!("{sep}");
-    println!();
+        .map(|fix| TableRow {
+            line: fix.line.to_string(),
+            message: fix.description.clone(),
+            detail: Some(format!("\u{1f527}  {}", fix.rule)),
+        })
+        .collect();
+    print_table(path, &rows, false, use_colour);
 }
 
 /// Print the dry-run summary box.
@@ -488,16 +413,7 @@ fn print_dry_run_box(total_fixes: usize, files_changed: usize, use_colour: bool)
     let text = format!(
         " [DRY RUN] {total_fixes} {fix_label} in {files_changed} {file_label} (not applied) "
     );
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[30;43m{pad}\x1b[0m");
-        println!(" \x1b[30;43m{text}\x1b[0m");
-        println!(" \x1b[30;43m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
+    print_box(&text, Colour::Yellow, use_colour);
 }
 
 /// Print the fixed summary box.
@@ -506,16 +422,7 @@ fn print_fixed_box(total_fixes: usize, files_changed: usize, use_colour: bool) {
     let file_label = if files_changed == 1 { "file" } else { "files" };
     let text =
         format!(" [FIXED] Applied {total_fixes} {fix_label} across {files_changed} {file_label} ");
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!(" \x1b[30;42m{text}\x1b[0m");
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
+    print_box(&text, Colour::Green, use_colour);
 }
 
 // ── GitHub Actions annotations ──────────────────────────────────────────────
@@ -527,12 +434,15 @@ fn print_fixed_box(total_fixes: usize, files_changed: usize, use_colour: bool) {
 fn print_fix_github_annotations(results: &[FileFixResult]) {
     for result in results {
         for fix in &result.fixes {
-            let message = crate::analyse::format_github_message(&fix.description);
             println!(
-                "::notice file={path},line={line},col=0,title={rule}::{message}",
-                path = result.display_path,
-                line = fix.line,
-                rule = fix.rule,
+                "{}",
+                github_annotation(
+                    "notice",
+                    &result.display_path,
+                    fix.line,
+                    &fix.rule,
+                    &fix.description,
+                )
             );
         }
     }

@@ -24,23 +24,6 @@ use mago_syntax::walker::Walker;
 
 use crate::scope_collector::ScopeBody;
 
-/// Emit [`Walker`] overrides that stop traversal at nested variable
-/// scopes (closures, arrow functions, named function declarations) while
-/// still walking an anonymous class's constructor arguments, which belong
-/// to the enclosing scope.
-macro_rules! stop_at_inner_scopes {
-    ($ctx:ty) => {
-        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
-        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
-        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
-        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
-            if let Some(argument_list) = &node.argument_list {
-                self.walk_partial_argument_list(argument_list, context);
-            }
-        }
-    };
-}
-
 // ─── Dynamic variable / extract detection ───────────────────────────────────
 
 /// Returns `true` if the body contains variable variables (`$$x` or

@@ -188,10 +188,7 @@ pub(crate) fn referenced_tags(content: &str) -> Vec<String> {
             continue;
         };
         let name_start = i + prefix.len();
-        let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-            j += 1;
-        }
+        let j = tag_name_end(bytes, name_start);
         if j > name_start {
             let tag = format!("{}{}", &prefix[1..], &masked[name_start..j]);
             if !tags.contains(&tag) {
@@ -285,10 +282,7 @@ pub(crate) fn scan_component_tag_calls(
             }
         }
         let name_start = i + 1;
-        let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-            j += 1;
-        }
+        let j = tag_name_end(bytes, name_start);
         let tag_name = &masked[name_start..j];
         let is_match = tag_name
             .strip_prefix("x-")
@@ -383,10 +377,7 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
                 continue;
             };
             let name_start = i + 2 + (prefix.len() - 1);
-            let mut j = name_start;
-            while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-                j += 1;
-            }
+            let j = tag_name_end(bytes, name_start);
             let Some(close) = find_byte(&masked, j, b'>') else {
                 break;
             };
@@ -408,10 +399,7 @@ fn pair_tags(content: &str) -> Option<PairedTags<'_>> {
             continue;
         };
         let name_start = i + prefix.len();
-        let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-            j += 1;
-        }
+        let j = tag_name_end(bytes, name_start);
         if j == name_start {
             i += 1;
             continue;
@@ -609,6 +597,15 @@ fn find_byte(content: &str, from: usize, needle: u8) -> Option<usize> {
 /// (`pkg::calendar`), and `<x-slot:title>` names a slot the same way.
 pub(crate) fn is_tag_name_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.' | ':' | '_')
+}
+
+/// The end of the tag-name run starting at `from`.
+pub(crate) fn tag_name_end(bytes: &[u8], from: usize) -> usize {
+    let mut j = from;
+    while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
+        j += 1;
+    }
+    j
 }
 
 /// The characters an HTML attribute name is spelled with, which is a
@@ -898,10 +895,7 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
                 continue;
             }
             let name_start = i + 2 + "x-".len();
-            let mut j = name_start;
-            while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-                j += 1;
-            }
+            let j = tag_name_end(bytes, name_start);
             let Some(close) = find_byte(&masked, j, b'>') else {
                 break;
             };
@@ -923,10 +917,7 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
             continue;
         }
         let name_start = i + 1 + "x-".len();
-        let mut j = name_start;
-        while j < bytes.len() && is_tag_name_char(bytes[j] as char) {
-            j += 1;
-        }
+        let j = tag_name_end(bytes, name_start);
         let tag_name = &masked[name_start..j];
         let lexed = lex_tag_attributes(&masked, j);
         if is_slot_tag_name(tag_name) {

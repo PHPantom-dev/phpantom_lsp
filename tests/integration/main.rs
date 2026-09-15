@@ -34,6 +34,7 @@ mod code_action_promote_constructor_param;
 mod code_action_remove_unreachable;
 mod code_action_remove_unused_import;
 mod code_action_remove_unused_return_type;
+mod code_action_replace_fqcn;
 mod code_action_simplify_null;
 mod code_action_sort_use_statements;
 mod code_action_update_docblock;

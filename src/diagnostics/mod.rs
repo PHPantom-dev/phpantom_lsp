@@ -220,6 +220,7 @@ mod argument_count;
 mod blade_call_site;
 mod blade_component_tags;
 mod blade_directives;
+mod blade_imbalance;
 mod blade_sections;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;

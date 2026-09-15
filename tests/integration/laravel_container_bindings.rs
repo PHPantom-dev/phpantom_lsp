@@ -7,7 +7,7 @@
 //! `app('sentry')` helper form and the container's own
 //! `app()->make('sentry')` resolve to the bound class.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, position_of};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -139,24 +139,13 @@ class Application
 }
 "#;
 
-const HELPERS_PHP: &str = r#"<?php
-/**
- * @template TClass
- * @param string|class-string<TClass> $abstract
- * @return ($abstract is class-string<TClass> ? TClass : \Illuminate\Foundation\Application)
- */
-function app($abstract = null, array $parameters = [])
-{
-}
-"#;
-
 fn base_files() -> Vec<(&'static str, &'static str)> {
     vec![
         ("bootstrap/providers.php", PROVIDERS_PHP),
         ("src/AppServiceProvider.php", APP_SERVICE_PROVIDER),
         ("src/Support/Clock.php", CLOCK_PHP),
         ("src/Support/FeatureFlags.php", FEATURE_FLAGS_PHP),
-        ("src/helpers.php", HELPERS_PHP),
+        ("src/helpers.php", APP_HELPERS_PHP),
         ("vendor/sentry/HubAdapter.php", HUB_ADAPTER_PHP),
         ("vendor/sentry/Client.php", SENTRY_CLIENT_PHP),
         ("vendor/sentry/State/HubInterface.php", HUB_INTERFACE_PHP),
@@ -247,25 +236,9 @@ async fn hover_over_key(extra: &[(&str, &str)], consumer: &str, key: &str) -> St
     }
 }
 
-/// The position of the first character of `needle` in `content`.
-fn position_of(content: &str, needle: &str) -> Position {
-    let idx = content.find(needle).expect("needle should be present");
-    let prefix = &content[..idx];
-    Position {
-        line: prefix.bytes().filter(|b| *b == b'\n').count() as u32,
-        character: prefix.rsplit('\n').next().unwrap().len() as u32,
-    }
-}
-
-fn consumer(body: &str) -> String {
-    format!(
-        "<?php\nnamespace App;\nclass Consumer {{\n    public function go(): void {{\n        $x = {body};\n        $x;\n    }}\n}}\n"
-    )
-}
-
 #[tokio::test]
 async fn make_resolves_a_closure_bound_string_key() {
-    let text = hover_over_x(&consumer("app()->make('sentry')")).await;
+    let text = hover_over_x(&consumer_class("app()->make('sentry')")).await;
     assert!(
         text.contains("HubAdapter"),
         "expected the 'sentry' binding to resolve to HubAdapter, got: {text}"
@@ -274,7 +247,7 @@ async fn make_resolves_a_closure_bound_string_key() {
 
 #[tokio::test]
 async fn make_resolves_a_class_string_bound_key() {
-    let text = hover_over_x(&consumer("app()->make('clock')")).await;
+    let text = hover_over_x(&consumer_class("app()->make('clock')")).await;
     assert!(
         text.contains("Clock"),
         "expected the 'clock' binding to resolve to Clock, got: {text}"
@@ -283,7 +256,7 @@ async fn make_resolves_a_class_string_bound_key() {
 
 #[tokio::test]
 async fn make_resolves_an_instance_bound_key() {
-    let text = hover_over_x(&consumer("app()->make('flags')")).await;
+    let text = hover_over_x(&consumer_class("app()->make('flags')")).await;
     assert!(
         text.contains("FeatureFlags"),
         "expected the 'flags' binding to resolve to FeatureFlags, got: {text}"
@@ -293,7 +266,7 @@ async fn make_resolves_an_instance_bound_key() {
 /// The `app('sentry')` helper form reaches the same table.
 #[tokio::test]
 async fn app_helper_resolves_a_provider_bound_string_key() {
-    let text = hover_over_x(&consumer("app('sentry')")).await;
+    let text = hover_over_x(&consumer_class("app('sentry')")).await;
     assert!(
         text.contains("HubAdapter"),
         "expected app('sentry') to resolve to HubAdapter, got: {text}"
@@ -305,7 +278,7 @@ async fn app_helper_resolves_a_provider_bound_string_key() {
 /// a static property on the base provider its subclass extends.
 #[tokio::test]
 async fn alias_resolves_a_key_named_by_an_inherited_static_property() {
-    let text = hover_over_x(&consumer("app('sentry.hub')")).await;
+    let text = hover_over_x(&consumer_class("app('sentry.hub')")).await;
     assert!(
         text.contains("HubInterface"),
         "expected the aliased 'sentry.hub' key to resolve to HubInterface, got: {text}"
@@ -315,7 +288,7 @@ async fn alias_resolves_a_key_named_by_an_inherited_static_property() {
 /// The same folded key, this time built into a longer one by concatenation.
 #[tokio::test]
 async fn make_resolves_a_key_built_from_an_inherited_static_property() {
-    let text = hover_over_x(&consumer("app()->make('sentry.hub.client')")).await;
+    let text = hover_over_x(&consumer_class("app()->make('sentry.hub.client')")).await;
     assert!(
         text.contains("Client"),
         "expected the 'sentry.hub.client' binding to resolve to Client, got: {text}"
@@ -326,7 +299,7 @@ async fn make_resolves_a_key_built_from_an_inherited_static_property() {
 /// a class that does not exist.
 #[tokio::test]
 async fn an_unbound_string_key_stays_unresolved() {
-    let text = hover_over_x(&consumer("app()->make('nothing.binds.this')")).await;
+    let text = hover_over_x(&consumer_class("app()->make('nothing.binds.this')")).await;
     assert!(
         !text.contains("nothing.binds.this"),
         "an unbound key must not be reported as a class, got: {text}"
@@ -369,9 +342,11 @@ fn array_binding_files() -> [(&'static str, &'static str); 2] {
 /// bind exactly as a `bind()` call in `register()` would.
 #[tokio::test]
 async fn a_bindings_array_entry_resolves_to_its_class() {
-    let text =
-        hover_over_x_with_extra_files(&array_binding_files(), &consumer("app('array.clock')"))
-            .await;
+    let text = hover_over_x_with_extra_files(
+        &array_binding_files(),
+        &consumer_class("app('array.clock')"),
+    )
+    .await;
     assert!(
         text.contains("Clock"),
         "expected the $bindings entry 'array.clock' to resolve to Clock, got: {text}"
@@ -381,9 +356,11 @@ async fn a_bindings_array_entry_resolves_to_its_class() {
 /// `$singletons` is read the same way.
 #[tokio::test]
 async fn a_singletons_array_entry_resolves_to_its_class() {
-    let text =
-        hover_over_x_with_extra_files(&array_binding_files(), &consumer("app('array.flags')"))
-            .await;
+    let text = hover_over_x_with_extra_files(
+        &array_binding_files(),
+        &consumer_class("app('array.flags')"),
+    )
+    .await;
     assert!(
         text.contains("FeatureFlags"),
         "expected the $singletons entry 'array.flags' to resolve to FeatureFlags, got: {text}"
@@ -397,7 +374,7 @@ async fn a_singletons_array_entry_resolves_to_its_class() {
 async fn a_bindings_array_entry_keyed_by_a_contract_keeps_the_contract() {
     let text = hover_over_x_with_extra_files(
         &array_binding_files(),
-        &consumer("app(\\Sentry\\State\\HubInterface::class)"),
+        &consumer_class("app(\\Sentry\\State\\HubInterface::class)"),
     )
     .await;
     assert!(
@@ -435,7 +412,7 @@ class TypedFactoryProvider
         ("src/TypedFactoryProvider.php", TYPED_FACTORY_PROVIDER_PHP),
         ("bootstrap/providers.php", PROVIDERS_WITH_TYPED_PHP),
     ];
-    let text = hover_over_x_with_extra_files(&extra, &consumer("app('typed.clock')")).await;
+    let text = hover_over_x_with_extra_files(&extra, &consumer_class("app('typed.clock')")).await;
     assert!(
         text.contains("Clock"),
         "expected the declared return type to settle the binding, got: {text}"
@@ -446,7 +423,7 @@ class TypedFactoryProvider
 /// registered it, rather than describing the value the call produces.
 #[tokio::test]
 async fn hovering_a_container_key_reports_its_binding() {
-    let source = consumer("app('sentry')");
+    let source = consumer_class("app('sentry')");
     let text = hover_over_key(&[], &source, "sentry');").await;
     assert!(
         text.contains("Resolves to `Sentry\\HubAdapter`"),
@@ -462,7 +439,7 @@ async fn hovering_a_container_key_reports_its_binding() {
 /// registration of its own, so its class is all it has to show.
 #[tokio::test]
 async fn hovering_a_core_alias_reports_only_its_class() {
-    let source = consumer("app('app')");
+    let source = consumer_class("app('app')");
     let text = hover_over_key(&[], &source, "app');").await;
     assert!(
         text.contains("Illuminate\\Foundation\\Application"),
@@ -478,7 +455,7 @@ async fn hovering_a_core_alias_reports_only_its_class() {
 /// claiming a class it does not resolve to.
 #[tokio::test]
 async fn hovering_an_unbound_container_key_claims_nothing() {
-    let source = consumer("app('nothing.binds.this')");
+    let source = consumer_class("app('nothing.binds.this')");
     let text = hover_over_key(&[], &source, "nothing.binds.this');").await;
     assert!(
         text.contains("**Container** `nothing.binds.this`"),
@@ -498,7 +475,7 @@ async fn hovering_an_unbound_container_key_claims_nothing() {
 /// guessing at a registration.
 #[tokio::test]
 async fn goto_definition_on_an_unbound_container_key_offers_nothing() {
-    let source = consumer("app('nothing.binds.this')");
+    let source = consumer_class("app('nothing.binds.this')");
     let response = goto_definition_on_key(&source, "nothing.binds.this');").await;
     assert!(
         response.is_none(),
@@ -542,7 +519,7 @@ async fn goto_definition_on_key(consumer: &str, needle: &str) -> Option<GotoDefi
 /// Go-to-definition on the key lands on the registration that bound it.
 #[tokio::test]
 async fn goto_definition_on_a_container_key_lands_on_its_registration() {
-    let source = consumer("app('sentry')");
+    let source = consumer_class("app('sentry')");
     let response = goto_definition_on_key(&source, "sentry');")
         .await
         .expect("the key should navigate");
@@ -580,7 +557,7 @@ async fn goto_definition_on_a_container_key_lands_on_its_registration() {
 /// the class alone rather than nothing.
 #[tokio::test]
 async fn goto_definition_on_a_core_alias_offers_the_class_alone() {
-    let source = consumer("app('app')");
+    let source = consumer_class("app('app')");
     let response = goto_definition_on_key(&source, "app');")
         .await
         .expect("the core alias should navigate");
@@ -613,7 +590,7 @@ class GhostServiceProvider
 "#;
     const PROVIDERS_WITH_GHOST_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n    Sentry\\Laravel\\ServiceProvider::class,\n    App\\GhostServiceProvider::class,\n];\n";
 
-    let source = consumer("app('ghost')");
+    let source = consumer_class("app('ghost')");
     let mut files = base_files();
     files.push(("src/GhostServiceProvider.php", GHOST_PROVIDER_PHP));
     files.push(("bootstrap/providers.php", PROVIDERS_WITH_GHOST_PHP));
@@ -756,7 +733,8 @@ class BakeryServiceProvider
         ("src/BakeryServiceProvider.php", BAKERY_SERVICE_PROVIDER_PHP),
         ("bootstrap/providers.php", PROVIDERS_WITH_BAKERY_PHP),
     ];
-    let text = hover_over_x_with_extra_files(&extra_files, &consumer("app('demo.bakery')")).await;
+    let text =
+        hover_over_x_with_extra_files(&extra_files, &consumer_class("app('demo.bakery')")).await;
 
     assert!(
         text.contains("BakeryService"),

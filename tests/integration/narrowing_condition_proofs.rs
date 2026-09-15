@@ -9,9 +9,8 @@
 //! an array element records the element that was checked, not the whole
 //! array's value type.
 
-use crate::common::{create_test_backend, hover_at, hover_text};
+use crate::common::{create_test_backend, hover_at, hover_text, slow_diagnostic_messages};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -901,17 +900,7 @@ function accept(Agreement $agreement): void {}
 /// Run the slow diagnostic pipeline and keep the argument-type errors a
 /// lost narrowing produces.
 fn argument_type_errors(backend: &Backend, uri: &str, php: &str) -> Vec<String> {
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(backend, uri, php, "type_mismatch_argument")
 }
 
 /// The guard names only the chain's *result*, but a null `$agreement`

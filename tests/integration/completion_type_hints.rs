@@ -1,14 +1,11 @@
-use crate::common::{class_items, complete_at, create_test_backend, labels};
+use crate::common::{class_items, complete_at, create_test_backend, items_of_kind, labels};
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
 /// Filter to only KEYWORD-kind items (native types).
 fn keyword_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
-        .collect()
+    items_of_kind(items, CompletionItemKind::KEYWORD)
 }
 
 // ─── Function parameter type hints ──────────────────────────────────────────

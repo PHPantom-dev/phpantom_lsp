@@ -9,11 +9,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        blade_undefined_variables, create_psr4_workspace, markup_hover_at, open_blade_template,
-        open_document,
+        USER_MODEL_STUB, blade_undefined_variables, create_psr4_workspace, markup_hover_at,
+        open_blade_template, open_initialized_blade_template,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
 
     const COMPOSER_JSON: &str = r#"{
         "require": { "laravel/framework": "^11.0" },
@@ -69,8 +67,6 @@ class ProfileComposer
 }
 "#;
 
-    const USER_CLASS: &str =
-        "<?php\nnamespace App\\Models;\nclass User { public string $email = ''; }\n";
     const MENU_CLASS: &str = "<?php\nnamespace App\\Support;\nclass Menu { public function items(): array { return []; } }\n";
     const APPLICATION_CLASS: &str =
         "<?php\nnamespace Illuminate\\Foundation;\nclass Application {}\n";
@@ -83,7 +79,7 @@ class ProfileComposer
                 VIEW_SERVICE_PROVIDER,
             ),
             ("app/View/Composers/ProfileComposer.php", PROFILE_COMPOSER),
-            ("app/Models/User.php", USER_CLASS),
+            ("app/Models/User.php", USER_MODEL_STUB),
             ("app/Support/Menu.php", MENU_CLASS),
             (
                 "vendor/illuminate/Foundation/Application.php",
@@ -94,23 +90,14 @@ class ProfileComposer
         create_psr4_workspace(COMPOSER_JSON, &files)
     }
 
-    /// Open a template and hand back its URI, with the provider scan already
-    /// run so the registrations are known.
-    async fn open_template(
-        backend: &phpantom_lsp::Backend,
-        dir: &tempfile::TempDir,
-        relative: &str,
-    ) -> Url {
-        backend.initialized(InitializedParams {}).await;
-        open_blade_template(backend, dir.path(), relative).await
-    }
-
     /// A shared variable reaches a template no caller and no composer
     /// mentions, typed from the expression the provider shares.
     #[tokio::test]
     async fn a_shared_variable_reaches_every_template() {
-        let (backend, dir) = workspace(&[("resources/views/about.blade.php", "{{ $siteName }}\n")]);
-        let uri = open_template(&backend, &dir, "resources/views/about.blade.php").await;
+        let (backend, _dir) =
+            workspace(&[("resources/views/about.blade.php", "{{ $siteName }}\n")]);
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/about.blade.php").await;
 
         assert!(
             markup_hover_at(&backend, &uri, 0, 7)
@@ -129,9 +116,10 @@ class ProfileComposer
     /// template.
     #[tokio::test]
     async fn a_shared_object_keeps_its_class() {
-        let (backend, dir) =
+        let (backend, _dir) =
             workspace(&[("resources/views/about.blade.php", "{{ $menu->items() }}\n")]);
-        let uri = open_template(&backend, &dir, "resources/views/about.blade.php").await;
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/about.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 0, 5).await;
         assert!(
@@ -144,11 +132,12 @@ class ProfileComposer
     /// registration targets.
     #[tokio::test]
     async fn a_composer_reaches_only_the_views_it_targets() {
-        let (backend, dir) = workspace(&[
+        let (backend, _dir) = workspace(&[
             ("resources/views/profile.blade.php", "{{ $user->email }}\n"),
             ("resources/views/about.blade.php", "{{ $user->email }}\n"),
         ]);
-        let profile = open_template(&backend, &dir, "resources/views/profile.blade.php").await;
+        let profile =
+            open_initialized_blade_template(&backend, "resources/views/profile.blade.php").await;
 
         let hover = markup_hover_at(&backend, &profile, 0, 5).await;
         assert!(
@@ -161,11 +150,7 @@ class ProfileComposer
             blade_undefined_variables(&backend, &profile)
         );
 
-        let about =
-            Url::from_file_path(dir.path().join("resources/views/about.blade.php")).unwrap();
-        let text =
-            std::fs::read_to_string(dir.path().join("resources/views/about.blade.php")).unwrap();
-        open_document(&backend, &about, "blade", &text).await;
+        let about = open_blade_template(&backend, "resources/views/about.blade.php").await;
         assert!(
             blade_undefined_variables(&backend, &about)
                 .iter()
@@ -177,11 +162,13 @@ class ProfileComposer
     /// A wildcard registration covers every view below its prefix.
     #[tokio::test]
     async fn a_wildcard_composer_covers_the_views_below_it() {
-        let (backend, dir) = workspace(&[(
+        let (backend, _dir) = workspace(&[(
             "resources/views/partials/header.blade.php",
             "{{ $breadcrumbs->items() }}\n",
         )]);
-        let uri = open_template(&backend, &dir, "resources/views/partials/header.blade.php").await;
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/partials/header.blade.php")
+                .await;
 
         let hover = markup_hover_at(&backend, &uri, 0, 5).await;
         assert!(
@@ -194,11 +181,12 @@ class ProfileComposer
     /// injected one, so the author still decides the type.
     #[tokio::test]
     async fn a_template_declaration_wins_over_a_shared_variable() {
-        let (backend, dir) = workspace(&[(
+        let (backend, _dir) = workspace(&[(
             "resources/views/about.blade.php",
             "@php\n/** @var \\App\\Models\\User $siteName */\n@endphp\n{{ $siteName->email }}\n",
         )]);
-        let uri = open_template(&backend, &dir, "resources/views/about.blade.php").await;
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/about.blade.php").await;
 
         let hover = markup_hover_at(&backend, &uri, 3, 5).await;
         assert!(

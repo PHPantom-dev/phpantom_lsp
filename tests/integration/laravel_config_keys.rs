@@ -7,14 +7,9 @@
 //! names, so a later read of that key is as valid as a read of one declared
 //! on disk.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 /// A package: the framework is a dev dependency of its test suite, and the
 /// configuration it reads belongs to whatever application installs it.
@@ -124,7 +119,7 @@ async fn config_diagnostics_for(
 
 #[tokio::test]
 async fn only_a_typo_in_a_config_file_we_read_is_reported() {
-    let messages = config_diagnostics_for(COMPOSER_JSON, "src/Settings.php", CONSUMER).await;
+    let messages = config_diagnostics_for(LARAVEL_SRC_COMPOSER, "src/Settings.php", CONSUMER).await;
 
     assert_eq!(
         messages.len(),
@@ -140,7 +135,8 @@ async fn only_a_typo_in_a_config_file_we_read_is_reported() {
 
 #[tokio::test]
 async fn a_key_written_at_runtime_is_a_declaration() {
-    let messages = config_diagnostics_for(COMPOSER_JSON, "src/Fixtures.php", RUNTIME_WRITER).await;
+    let messages =
+        config_diagnostics_for(LARAVEL_SRC_COMPOSER, "src/Fixtures.php", RUNTIME_WRITER).await;
 
     assert_eq!(
         messages.len(),

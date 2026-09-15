@@ -1,13 +1,5 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{complete_at, create_test_backend, filter_texts};
 use tower_lsp::lsp_types::*;
-
-/// Collect the filter_text values from completion items.
-fn filter_texts(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter_map(|i| i.filter_text.as_deref())
-        .collect()
-}
 
 // ─── Basic: method on same-file class ───────────────────────────────────────
 

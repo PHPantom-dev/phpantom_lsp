@@ -256,9 +256,6 @@ pub(crate) fn run_phpstan(
 
 /// Project-wide runs multiply the per-file timeout by this factor:
 /// analysing a whole codebase legitimately takes far longer than the
-/// single-file editor-mode run the base timeout is calibrated for.
-const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
-
 /// Whether the project has its own PHPStan configuration file.
 ///
 /// A project-wide run is only attempted when one exists: without it,
@@ -279,7 +276,7 @@ pub(crate) fn has_project_config(workspace_root: &Path) -> bool {
 /// No path argument is passed, so PHPStan analyses the `paths`
 /// configured in its own configuration file (the caller checks
 /// [`has_project_config`] first).  Runs with an extended timeout
-/// ([`WORKSPACE_TIMEOUT_FACTOR`] × the per-file timeout).
+/// ([`crate::process::WORKSPACE_TIMEOUT_FACTOR`] × the per-file timeout).
 pub(crate) fn run_phpstan_workspace(
     resolved: &ResolvedPhpStan,
     workspace_root: &Path,
@@ -289,7 +286,7 @@ pub(crate) fn run_phpstan_workspace(
     let timeout_ms = config
         .timeout
         .unwrap_or(DEFAULT_TIMEOUT_MS)
-        .saturating_mul(WORKSPACE_TIMEOUT_FACTOR);
+        .saturating_mul(crate::process::WORKSPACE_TIMEOUT_FACTOR);
     let timeout = Duration::from_millis(timeout_ms);
     let memory_limit = config.memory_limit.as_deref().unwrap_or("1G");
 
@@ -309,18 +306,9 @@ pub(crate) fn run_phpstan_workspace(
         None,
     )?;
 
-    match output.code {
-        0 => Ok(std::collections::HashMap::new()),
-        1 => parse_phpstan_json_workspace(&output.stdout, workspace_root),
-        _ => match parse_phpstan_json_workspace(&output.stdout, workspace_root) {
-            Ok(map) if !map.is_empty() => Ok(map),
-            _ => Err(format!(
-                "PHPStan exited with code {} (stderr: {})",
-                output.code,
-                output.stderr.trim()
-            )),
-        },
-    }
+    crate::process::workspace_run_result(&output, "PHPStan", &[1], false, |stdout| {
+        parse_phpstan_json_workspace(stdout, workspace_root)
+    })
 }
 
 /// Parse PHPStan's JSON output into diagnostics grouped by file path.
@@ -492,16 +480,7 @@ fn parse_phpstan_message(msg: &serde_json::Value) -> Option<Diagnostic> {
     let data = Some(serde_json::json!({ "ignorable": ignorable }));
 
     Some(Diagnostic {
-        range: Range {
-            start: Position {
-                line: lsp_line,
-                character: 0,
-            },
-            end: Position {
-                line: lsp_line,
-                character: u32::MAX,
-            },
-        },
+        range: crate::process::full_line_range(lsp_line),
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(identifier.to_string())),
         code_description: None,

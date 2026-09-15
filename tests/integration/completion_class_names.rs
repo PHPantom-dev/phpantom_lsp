@@ -1,6 +1,6 @@
 use crate::common::{
     class_items, complete_at, create_psr4_workspace, create_test_backend_with_full_stubs,
-    create_test_backend_with_function_stubs, create_test_backend_with_stubs, labels,
+    create_test_backend_with_function_stubs, create_test_backend_with_stubs, items_of_kind, labels,
 };
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
@@ -26,17 +26,11 @@ fn fqns<'a>(items: &'a [&'a CompletionItem]) -> Vec<&'a str> {
 }
 
 fn function_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
-        .collect()
+    items_of_kind(items, CompletionItemKind::FUNCTION)
 }
 
 fn constant_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
-        .collect()
+    items_of_kind(items, CompletionItemKind::CONSTANT)
 }
 
 #[tokio::test]
@@ -4017,10 +4011,7 @@ async fn test_fqn_mode_user_typed_leading_backslash_unaffected() {
 
 /// Helper: extract MODULE-kind items from a completion list.
 fn module_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::MODULE))
-        .collect()
+    items_of_kind(items, CompletionItemKind::MODULE)
 }
 
 #[tokio::test]

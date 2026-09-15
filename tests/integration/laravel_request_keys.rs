@@ -2,7 +2,10 @@
 //! validation rules — completion inside `$request->input('…')` and friends,
 //! plus go-to-definition from a key to the rule that declares it.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{
+    FORM_REQUEST_STUB, create_psr4_workspace, definition_locations, goto_definition_at,
+    split_cursor,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -42,15 +45,6 @@ class Request {
     public function validate(array $rules): array { return []; }
     public function validated($key = null, $default = null) { return []; }
     public function safe(): ValidatedInput { return new ValidatedInput(); }
-}
-";
-
-const FORM_REQUEST_PHP: &str = "\
-<?php
-namespace Illuminate\\Foundation\\Http;
-use Illuminate\\Http\\Request;
-class FormRequest extends Request {
-    public function rules(): array { return []; }
 }
 ";
 
@@ -132,7 +126,7 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         ("vendor/illuminate/Http/Request.php", REQUEST_PHP),
         (
             "vendor/illuminate/Foundation/Http/FormRequest.php",
-            FORM_REQUEST_PHP,
+            FORM_REQUEST_STUB,
         ),
         (
             "vendor/illuminate/Support/ValidatedInput.php",
@@ -201,29 +195,8 @@ async fn complete_items(open_path: &str, content: &str) -> Vec<CompletionItem> {
 async fn definition_line(open_path: &str, content: &str) -> Option<(String, String)> {
     let (backend, _dir, uri, position) = open_at_cursor(open_path, content).await;
 
-    let response = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap()?;
-
-    let location = match response {
-        GotoDefinitionResponse::Scalar(loc) => loc,
-        GotoDefinitionResponse::Array(mut locs) => locs.drain(..).next()?,
-        GotoDefinitionResponse::Link(mut links) => {
-            let link = links.drain(..).next()?;
-            Location {
-                uri: link.target_uri,
-                range: link.target_range,
-            }
-        }
-    };
+    let response = goto_definition_at(&backend, &uri, position.line, position.character).await;
+    let location = definition_locations(response).into_iter().next()?;
 
     let path = location.uri.to_file_path().ok()?;
     let text = std::fs::read_to_string(&path).ok()?;
@@ -241,11 +214,7 @@ async fn open_at_cursor(
     open_path: &str,
     content: &str,
 ) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Position) {
-    let offset = content.find('§').expect("test source needs a § cursor");
-    let stripped = content.replace('§', "");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
+    let (stripped, position) = split_cursor(content);
 
     // The opened file is also written to disk so that go-to-definition can
     // read back the line it resolves to.
@@ -265,7 +234,7 @@ async fn open_at_cursor(
         })
         .await;
 
-    (backend, dir, uri, Position { line, character })
+    (backend, dir, uri, position)
 }
 
 // ─── FormRequest-driven completion ──────────────────────────────────────────

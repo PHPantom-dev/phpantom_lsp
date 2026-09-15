@@ -1,5 +1,6 @@
 use crate::common::{
     class_items, complete_at, create_test_backend, create_test_backend_with_stubs, labels,
+    open_php_str,
 };
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
@@ -27,29 +28,23 @@ fn fqn_labels<'a>(items: &'a [&'a CompletionItem]) -> Vec<&'a str> {
 /// Load scaffolding classes into the backend's ast_map so the context
 /// filter can inspect their `ClassLikeKind` / `is_final` / `is_abstract`.
 async fn load_scaffolding(backend: &Backend) {
-    let scaffolding_uri = Url::parse("file:///scaffolding.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace Scaffold;\n",
-                    "class ConcreteClass {}\n",
-                    "final class FinalClass {}\n",
-                    "abstract class AbstractClass {}\n",
-                    "interface SomeInterface {}\n",
-                    "interface AnotherInterface {}\n",
-                    "trait SomeTrait {}\n",
-                    "trait AnotherTrait {}\n",
-                    "enum SomeEnum {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php_str(
+        backend,
+        "file:///scaffolding.php",
+        concat!(
+            "<?php\n",
+            "namespace Scaffold;\n",
+            "class ConcreteClass {}\n",
+            "final class FinalClass {}\n",
+            "abstract class AbstractClass {}\n",
+            "interface SomeInterface {}\n",
+            "interface AnotherInterface {}\n",
+            "trait SomeTrait {}\n",
+            "trait AnotherTrait {}\n",
+            "enum SomeEnum {}\n",
+        ),
+    )
+    .await;
 }
 
 // ─── extends (class) ────────────────────────────────────────────────────────

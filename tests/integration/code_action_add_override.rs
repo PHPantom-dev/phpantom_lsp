@@ -6,18 +6,10 @@
 //! `use Override;` import when the file declares a namespace.
 
 use crate::common::{
-    apply_edits, create_test_backend, extract_edits, get_code_actions_at, inject_phpstan_diag,
-    resolve_action,
+    apply_edits, create_test_backend, extract_edits, find_action_containing, get_code_actions_at,
+    inject_phpstan_diag, resolve_action,
 };
 use tower_lsp::lsp_types::*;
-
-/// Find the "Add #[Override]" code action.
-fn find_add_override_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.contains("#[Override]") => Some(ca),
-        _ => None,
-    })
-}
 
 // ── Basic: adds #[Override] to a simple method (no namespace) ───────────────
 
@@ -41,7 +33,8 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer Add #[Override] action");
+    let action = find_action_containing(&actions, "#[Override]")
+        .expect("should offer Add #[Override] action");
 
     assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
     assert_eq!(action.is_preferred, Some(true));
@@ -106,7 +99,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 5, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -143,7 +136,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -181,7 +174,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 4, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -220,7 +213,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 10);
-    let action = find_add_override_action(&actions);
+    let action = find_action_containing(&actions, "#[Override]");
     assert!(
         action.is_none(),
         "should NOT offer action when #[\\Override] already present"
@@ -250,7 +243,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 10);
-    let action = find_add_override_action(&actions);
+    let action = find_action_containing(&actions, "#[Override]");
     assert!(
         action.is_none(),
         "should NOT offer action when #[Override] (without backslash) already present"
@@ -279,7 +272,7 @@ class Foo {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions);
+    let action = find_action_containing(&actions, "#[Override]");
     assert!(
         action.is_none(),
         "should NOT offer action for non-missingOverride identifiers"
@@ -308,7 +301,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -343,7 +336,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -378,7 +371,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     assert!(
         action.title.contains("__construct"),
@@ -421,7 +414,7 @@ class UserController extends Controller {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 4, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -475,7 +468,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 6, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -522,7 +515,7 @@ class UserController extends Controller {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 7, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -562,7 +555,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -609,7 +602,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 6, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -649,7 +642,7 @@ class Outer {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 12);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -684,7 +677,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let attached_diags = action
         .diagnostics
@@ -717,7 +710,7 @@ class Child extends Base {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 10);
-    let action = find_add_override_action(&actions);
+    let action = find_action_containing(&actions, "#[Override]");
     assert!(
         action.is_none(),
         "should NOT offer action when Override already in combined attribute list"
@@ -749,7 +742,7 @@ class Child extends Base {
 
     // Request code actions on `bar` (line 3).
     let actions = get_code_actions_at(&backend, uri, content, 3, 10);
-    let action = find_add_override_action(&actions);
+    let action = find_action_containing(&actions, "#[Override]");
     assert!(
         action.is_none(),
         "should NOT offer action on a different method"
@@ -757,7 +750,7 @@ class Child extends Base {
 
     // Request code actions on `foo` (line 2).
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions);
+    let action = find_action_containing(&actions, "#[Override]");
     assert!(
         action.is_some(),
         "should offer action on the diagnosed method"
@@ -786,7 +779,7 @@ class Foo implements BarInterface {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -823,7 +816,7 @@ class Handler implements HandlerInterface {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 4, 10);
-    let action = find_add_override_action(&actions).expect("should offer action");
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);

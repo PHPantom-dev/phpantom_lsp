@@ -5,7 +5,7 @@
 use crate::common::{
     BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
     complete_at_opened_with_trigger, create_psr4_workspace, create_test_backend, labels,
-    open_document,
+    open_document, workspace_uri,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -195,8 +195,7 @@ fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::Temp
             ("resources/views/page.blade.php", template),
         ],
     );
-    let root = backend.workspace_root().read().clone().unwrap();
-    let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+    let uri = workspace_uri(&backend, "resources/views/page.blade.php");
     (backend, dir, uri)
 }
 
@@ -515,8 +514,7 @@ async fn an_include_view_name_edit_lands_on_the_directive_not_the_prologue() {
             ("resources/views/page.blade.php", "@include('"),
         ],
     );
-    let root = backend.workspace_root().read().clone().unwrap();
-    let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+    let uri = workspace_uri(&backend, "resources/views/page.blade.php");
     let template = "@include('";
     open_document(&backend, &uri, "blade", template).await;
 

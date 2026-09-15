@@ -148,15 +148,7 @@ fn extends_first_candidates(masked: &str, content: &str) -> Option<Vec<String>> 
 
 /// The contents of the plain string literal an argument list starts with.
 pub(crate) fn leading_string_literal(args: &str) -> Option<String> {
-    let args = args.trim_start();
-    let quote = args.chars().next().filter(|ch| *ch == '\'' || *ch == '"')?;
-    let rest = &args[quote.len_utf8()..];
-    let value = &rest[..rest.find(quote)?];
-    // A double-quoted argument that interpolates is a dynamic name.
-    if quote == '"' && value.contains(['$', '{']) {
-        return None;
-    }
-    Some(value.to_string())
+    crate::blade::plain_string_literal(args.trim_start()).map(str::to_string)
 }
 
 /// Whether the template declares its own contract, and so manages its own

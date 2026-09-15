@@ -264,6 +264,7 @@ mod mago;
 mod mem_audit;
 pub mod move_cli;
 pub(crate) mod names;
+mod parallel;
 mod parser;
 pub(crate) mod phar;
 pub mod php_type;

@@ -1,5 +1,5 @@
 use super::CapturedDirective;
-use super::shared::{LineOut, utf16_count};
+use super::shared::{LineOut, closes_args};
 
 /// Capture an `@use(...)` / `@inject(...)` argument list until its parens
 /// balance and emit the real PHP construct it becomes, reporting whether
@@ -10,46 +10,36 @@ pub(super) fn consume(
     paren_depth: &mut i32,
     capture_buffer: &mut String,
     hoisted_uses: &mut Vec<String>,
-    out: LineOut<'_>,
+    mut out: LineOut<'_>,
 ) -> bool {
     // Capture the argument text (in `buffer`, via the fall-through
     // push the caller does) until the parens balance, then transform it.
-    if ch == '(' {
-        *paren_depth += 1;
-    } else if ch == ')' {
-        *paren_depth -= 1;
-        if *paren_depth <= 0 {
-            *out.char_idx += 1;
-            *out.current_utf16_col += 1;
-            // `capture_buffer` holds any prior lines of this
-            // argument list; `buffer` holds the current line's
-            // text from the opening `(` (or line start) up to
-            // (but not including) this closing `)`. Together
-            // they are the argument text from the opening `(`
-            // to the closing `)`.
-            let mut raw = std::mem::take(capture_buffer);
-            raw.push_str(out.buffer);
-            out.buffer.clear();
-            let emitted = match kind {
-                CapturedDirective::Use => {
-                    if let Some(stmt) = build_use_statement(&raw) {
-                        hoisted_uses.push(stmt);
-                    }
-                    // The import is hoisted; nothing inline.
-                    String::new()
+    if closes_args(ch, paren_depth) {
+        *out.char_idx += 1;
+        *out.current_utf16_col += 1;
+        // `capture_buffer` holds any prior lines of this
+        // argument list; `buffer` holds the current line's
+        // text from the opening `(` (or line start) up to
+        // (but not including) this closing `)`. Together
+        // they are the argument text from the opening `(`
+        // to the closing `)`.
+        let mut raw = std::mem::take(capture_buffer);
+        raw.push_str(out.buffer);
+        out.buffer.clear();
+        let emitted = match kind {
+            CapturedDirective::Use => {
+                if let Some(stmt) = build_use_statement(&raw) {
+                    hoisted_uses.push(stmt);
                 }
-                CapturedDirective::Inject => build_inject_statement(&raw),
-            };
+                // The import is hoisted; nothing inline.
+                String::new()
+            }
+            CapturedDirective::Inject => build_inject_statement(&raw),
+        };
 
-            let start_suffix = utf16_count(out.processed) as u32;
-            out.processed.push_str(&emitted);
-            let end_suffix = utf16_count(out.processed) as u32;
+        out.emit_suffix(&emitted);
 
-            out.adjustments.push((*out.current_utf16_col, start_suffix));
-            out.adjustments.push((*out.current_utf16_col, end_suffix));
-
-            return true;
-        }
+        return true;
     }
     false
 }
