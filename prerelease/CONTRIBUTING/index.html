@@ -1496,11 +1496,13 @@
 </ul>
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Integration tests go in <code>tests/completion_*.rs</code> or <code>tests/definition_*.rs</code>, one file per feature area</li>
-<li>Use <code>create_test_backend()</code> from <code>tests/common/mod.rs</code> for same-file tests</li>
+<li>Integration tests go in <code>tests/integration/</code>, one file per feature area (<code>completion_*.rs</code>, <code>definition_*.rs</code>, <code>code_action_*.rs</code>, ...)</li>
+<li>Use <code>create_test_backend()</code> from <code>tests/integration/common/mod.rs</code> for same-file tests</li>
 <li>Use <code>create_psr4_workspace()</code> for cross-file / PSR-4 tests</li>
+<li>A helper (a request wrapper, a label extractor, a position finder) that three or more test files would define belongs in <code>tests/integration/common/mod.rs</code>, not copied into each file; check there before writing one</li>
+<li>Inline <code>#[cfg(test)]</code> modules in <code>src/</code> are for unit tests of private helpers; a test that drives a <code>Backend</code> through a public handler goes in <code>tests/integration/</code></li>
 <li>Test the happy path, edge cases, and interactions with existing features</li>
-<li>When adding a feature, update <code>examples/php/demo.php</code> with working examples (and verify with <code>php -l examples/php/demo.php</code>). For Laravel-specific features, also update <code>examples/laravel/app/Demo.php</code> (and verify with <code>php -l examples/laravel/app/Demo.php</code>).</li>
+<li>When adding a feature, update the matching demo file under <code>examples/php/</code> with working examples (and verify with <code>find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l</code>). For Laravel-specific features, also update <code>examples/laravel/app/Demo.php</code> (and verify with <code>php -l examples/laravel/app/Demo.php</code>).</li>
 </ul>
 <p>See <a href="../BUILDING/">BUILDING.md</a> for more on running tests and manual LSP testing.</p>
 <h2 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h2>
