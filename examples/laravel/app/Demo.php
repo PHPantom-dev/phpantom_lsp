@@ -16,9 +16,11 @@ use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Baker;
 use App\Models\Bakery;
+use App\Models\BakeryOrder;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Customer;
+use App\Models\Delivery;
 use App\Models\Loaf;
 use App\Models\PostCollection;
 use App\Models\Review;
@@ -54,6 +56,16 @@ use Illuminate\View\Factory as ViewFactory;
 
 class Demo
 {
+    // Try: hover or complete the primary keys. HasUuids and HasUlids
+    // make them strings without a $keyType override or @property tag.
+    public function uniqueIdentifiers(BakeryOrder $order, Delivery $delivery): string
+    {
+        $orderId = $order->id;                // HasUuids → string
+        $trackingId = $delivery->tracking_id; // HasUlids, custom primary key → string
+
+        return $orderId . ':' . $trackingId;
+    }
+
     // ── Eloquent Virtual Properties ─────────────────────────────────────────
     // Alphabetical — every property a through w should appear in order.
     // Trigger completion on `$bakery->` and scan the list.
