@@ -43,49 +43,6 @@ proxies:
 
 ---
 
-## D6. Unreachable code diagnostic
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Dim code that appears after unconditional control flow exits:
-`return`, `throw`, `exit`, `die`, `continue`, `break`. This is a
-Phase 1 (fast) diagnostic since it requires only AST structure, not
-type resolution.
-
-### Behaviour
-
-| Scenario                                           | Rendering                           |
-| -------------------------------------------------- | ----------------------------------- |
-| Code after `return $x;` in same block              | Dimmed (DiagnosticTag::UNNECESSARY) |
-| Code after `throw new \Exception()`                | Dimmed                              |
-| Code after `exit(1)` or `die()`                    | Dimmed                              |
-| Code after `continue` or `break` in a loop         | Dimmed                              |
-| Code after `if (...) { return; } else { return; }` | Dimmed (both branches exit)         |
-
-Severity: **Hint** with `DiagnosticTag::UNNECESSARY` so editors dim
-the text rather than underlining it. This matches how unused imports
-are rendered.
-
-### Implementation
-
-Walk the AST statement list. After encountering a statement that
-unconditionally exits the current scope (return, throw, expression
-statement containing `exit`/`die`), mark all subsequent statements in
-the same block as unreachable. The span covers from the start of the
-first unreachable statement to the end of the last statement in the
-block.
-
-Phase 1 only handles the simple single-block case. Whole-branch
-analysis (both if/else branches exit) is a future refinement.
-
-### Debugging value
-
-When our type engine silently resolves a method to a `never` return
-type (e.g. an incorrectly resolved overload), unreachable code after
-the call becomes visible, signalling the bug.
-
----
-
 ## D10. PHPMD diagnostic proxy
 
 **Impact: Low · Complexity: Medium**
@@ -400,3 +357,61 @@ member is out of reach.
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.
+## D24. "Remove unreachable code" is wired to PHPStan only
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The action reads `phpstan_tool.last_diags` and nothing else
+(`code_actions/phpstan/remove_unreachable.rs`), so the native
+`unreachable_code` diagnostic never offers it. Adding the code to the
+trigger is not enough on its own: the resolve step deletes from the
+diagnostic's line to the next closing brace rather than using the
+diagnostic's own range, which
+
+- has nothing to delete for a dead run at the top level of a file, where
+  no closing brace follows;
+- ignores the reported span, so it would remove more than was dimmed;
+- can swallow a hoisted declaration or a `goto` label sitting inside the
+  run, both of which the diagnostic deliberately leaves reachable.
+
+**Fix:** Take the range from the diagnostic and carry it through to the
+resolve payload, and let the action accept a native diagnostic rather
+than only a proxied one. Moving the file out of `phpstan/` is the
+smallest part of it.
+
+---
+
+## D25. `namespace` and `declare` bodies break the reachability flow
+
+**Impact: Low · Complexity: Low-Medium**
+
+`unreachable_code` treats a braced `namespace` and a `declare` body as
+fresh statement lists rather than as the transparent wrappers they are,
+so reachability neither flows into them nor out of them:
+
+```php
+<?php
+namespace First {
+    return;          // ends the whole file
+}
+
+namespace Second {
+    echo 'never';    // not reported
+}
+```
+
+and, inside a function:
+
+```php
+return;
+
+declare(ticks=1) {
+    echo 'never';    // not reported
+}
+```
+
+Neither wrapper is itself a runtime statement, so neither should be
+dimmed — but the state on either side of it has to carry through.
+
+**Fix:** Thread the reachable/unreachable state through both wrappers
+instead of restarting the scan inside them.
