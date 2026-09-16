@@ -35,6 +35,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
+use super::helpers::string_literal_at;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MethodInfo};
@@ -200,7 +201,7 @@ fn collect_gate_call(
     };
 
     if method.eq_ignore_ascii_case("define") {
-        if let Some((name, offset)) = string_literal_content(first.value(), content) {
+        if let Some((name, offset)) = string_literal_at(first.value(), content) {
             scan.definitions.push(GateDefinition {
                 name: name.to_string(),
                 offset,
@@ -232,7 +233,7 @@ fn collect_gate_call(
     // per CRUD verb, named `<resource>.<verb>`.  A third argument replaces
     // the default verb list with an explicit `ability => method` map.
     if method.eq_ignore_ascii_case("resource")
-        && let Some((prefix, offset)) = string_literal_content(first.value(), content)
+        && let Some((prefix, offset)) = string_literal_at(first.value(), content)
     {
         let explicit: Vec<String> = args
             .next()
@@ -290,8 +291,8 @@ fn array_keys_or_values(expr: &Expression<'_>, content: &str) -> Vec<String> {
     elements
         .iter()
         .filter_map(|element| match element {
-            ArrayElement::KeyValue(kv) => string_literal_content(kv.key, content),
-            ArrayElement::Value(value) => string_literal_content(value.value, content),
+            ArrayElement::KeyValue(kv) => string_literal_at(kv.key, content),
+            ArrayElement::Value(value) => string_literal_at(value.value, content),
             _ => None,
         })
         .map(|(text, _)| text.to_string())
@@ -368,21 +369,6 @@ fn class_constant_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> O
         }
         _ => None,
     }
-}
-
-/// The content of a non-interpolated string literal plus the byte offset of
-/// that content (just inside the opening quote).
-fn string_literal_content<'c>(expr: &Expression<'_>, content: &'c str) -> Option<(&'c str, u32)> {
-    let Expression::Literal(Literal::String(s)) = expr else {
-        return None;
-    };
-    let start = s.span.start.offset + 1;
-    let end = s.span.end.offset - 1;
-    if start >= end || end as usize > content.len() {
-        return None;
-    }
-    let text = &content[start as usize..end as usize];
-    (!text.is_empty()).then_some((text, start))
 }
 
 // ─── Index ───────────────────────────────────────────────────────────────────

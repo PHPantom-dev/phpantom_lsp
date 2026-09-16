@@ -1332,4 +1332,38 @@ class Consumer
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// The guard's reach is found by scanning for the `}` that closes the
+    /// enclosing scope. A `}` written inside a comment is not that brace,
+    /// so the guard has to keep reaching past it.
+    #[test]
+    fn a_brace_in_a_comment_does_not_cut_a_guard_short() {
+        let backend = Backend::new_test();
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Consumer
+{
+    public function run(): void
+    {
+        if (!\class_exists('Vendor\\Optional\\GeneratedConfig')) {
+            return;
+        }
+
+        // A closing brace } in a line comment.
+        /* and one } in a block comment. */
+        echo \Vendor\Optional\GeneratedConfig::$configDir;
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "the guarded use must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }

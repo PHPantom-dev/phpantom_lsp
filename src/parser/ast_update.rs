@@ -559,22 +559,7 @@ impl Backend {
                                 Statement::Use(use_stmt) => {
                                     Self::extract_use_items(&use_stmt.items, &mut use_map);
                                 }
-                                Statement::Class(_)
-                                | Statement::Interface(_)
-                                | Statement::Trait(_)
-                                | Statement::Enum(_)
-                                // Class-likes declared inside conditional /
-                                // control-flow blocks (e.g. Doctrine's
-                                // `ServiceEntityRepository` version guard) —
-                                // the extractor descends into the bodies.
-                                | Statement::If(_)
-                                | Statement::Block(_)
-                                | Statement::Try(_)
-                                | Statement::Switch(_)
-                                | Statement::While(_)
-                                | Statement::DoWhile(_)
-                                | Statement::For(_)
-                                | Statement::Foreach(_) => {
+                                inner if Self::is_classlike_extraction_candidate(inner) => {
                                     Self::extract_classes_from_statements(
                                         std::iter::once(inner),
                                         &mut block_classes,
@@ -609,21 +594,7 @@ impl Backend {
                             classes_with_ns.push((cls, block_ns.clone()));
                         }
                     }
-                    Statement::Class(_)
-                    | Statement::Interface(_)
-                    | Statement::Trait(_)
-                    | Statement::Enum(_)
-                    // Class-likes declared inside top-level conditional /
-                    // control-flow blocks — the extractor descends into the
-                    // bodies (and still collects anonymous classes within).
-                    | Statement::If(_)
-                    | Statement::Block(_)
-                    | Statement::Try(_)
-                    | Statement::Switch(_)
-                    | Statement::While(_)
-                    | Statement::DoWhile(_)
-                    | Statement::For(_)
-                    | Statement::Foreach(_) => {
+                    statement if Self::is_classlike_extraction_candidate(statement) => {
                         // A template whose `$this` is bound wraps its body
                         // in a method rather than a function, which buries
                         // the template's own imports just the same (see the

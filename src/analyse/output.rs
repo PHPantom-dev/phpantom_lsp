@@ -5,9 +5,12 @@
 //! annotations, and JSON. Also owns the progress bar drawn during the
 //! diagnostic pass.
 
+use std::collections::BTreeMap;
+
+use serde::Serialize;
 use tower_lsp::lsp_types::*;
 
-use super::FileDiagnostic;
+use super::{FileDiagnostic, OutputFormat};
 
 // ── GitHub Actions annotations ──────────────────────────────────────────────
 
@@ -20,8 +23,9 @@ pub(super) fn print_github_annotations(file_diagnostics: &[(String, Vec<FileDiag
     for (path, diagnostics) in file_diagnostics {
         for diag in diagnostics {
             let level = match diag.severity {
-                DiagnosticSeverity::ERROR => "error",
-                DiagnosticSeverity::WARNING => "warning",
+                DiagnosticSeverity::ERROR | DiagnosticSeverity::WARNING => {
+                    severity_name(diag.severity)
+                }
                 _ => "notice",
             };
             let title = diag.identifier.as_deref().unwrap_or("");
@@ -96,7 +100,93 @@ pub(crate) fn format_github_message(message: &str) -> String {
     result
 }
 
+// ── Report dispatch ─────────────────────────────────────────────────────────
+
+/// Whether the run is inside a GitHub Actions job.
+///
+/// Every subcommand's table output emits workflow annotations alongside
+/// the table there, so a CI run annotates the diff without giving up the
+/// readable summary (the behaviour PHPStan has).
+pub(crate) fn in_github_actions() -> bool {
+    std::env::var_os("GITHUB_ACTIONS").is_some()
+}
+
+/// Render a report in `format` by calling the writer that belongs to it.
+///
+/// Only one of the three runs, except under [`OutputFormat::Table`]
+/// inside GitHub Actions, where `github` runs first; see
+/// [`in_github_actions`].
+pub(crate) fn dispatch_report(
+    format: OutputFormat,
+    table: impl FnOnce(),
+    github: impl FnOnce(),
+    json: impl FnOnce(),
+) {
+    match format {
+        OutputFormat::Table => {
+            if in_github_actions() {
+                github();
+            }
+            table();
+        }
+        OutputFormat::Github => github(),
+        OutputFormat::Json => json(),
+    }
+}
+
 // ── JSON output ─────────────────────────────────────────────────────────────
+
+/// One entry of a report's `"files"` object: what was found in one file,
+/// and how many findings that is.
+///
+/// `analyze` and `move` both report through this shape so a consumer can
+/// read either with the same code.
+#[derive(Serialize)]
+pub(crate) struct JsonFileEntry<'a> {
+    pub errors: usize,
+    pub messages: Vec<JsonMessage<'a>>,
+}
+
+/// One finding inside a [`JsonFileEntry`].
+#[derive(Serialize)]
+pub(crate) struct JsonMessage<'a> {
+    pub message: &'a str,
+    pub line: u64,
+    pub severity: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<&'a str>,
+}
+
+/// The `"totals"` object `analyze` and `move` share: findings that name
+/// no file, and findings that do.
+#[derive(Serialize)]
+pub(crate) struct JsonTotals {
+    pub errors: usize,
+    pub file_errors: usize,
+}
+
+/// The whole `analyze` report.
+///
+/// `errors` is the top-level array for findings that name no file, which
+/// `analyze` never produces; it is written as `[]` so the document keeps
+/// the same shape `move` emits.
+#[derive(Serialize)]
+struct AnalyseReport<'a> {
+    totals: JsonTotals,
+    files: BTreeMap<&'a str, JsonFileEntry<'a>>,
+    errors: [&'a str; 0],
+}
+
+/// Name a severity the way the JSON and GitHub formats spell it.
+fn severity_name(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::ERROR => "error",
+        DiagnosticSeverity::WARNING => "warning",
+        DiagnosticSeverity::INFORMATION => "info",
+        DiagnosticSeverity::HINT => "hint",
+        _ => "unknown",
+    }
+}
 
 /// Print all diagnostics as a single JSON object.
 ///
@@ -119,82 +209,42 @@ pub(super) fn print_json_output(
     file_diagnostics: &[(String, Vec<FileDiagnostic>)],
     total_errors: usize,
 ) {
-    use std::fmt::Write;
-
-    let mut out = String::from("{\n");
-    let _ = writeln!(
-        out,
-        "  \"totals\": {{ \"errors\": 0, \"file_errors\": {} }},",
-        total_errors
-    );
-
-    if file_diagnostics.is_empty() {
-        out.push_str("  \"files\": {},\n");
-    } else {
-        out.push_str("  \"files\": {\n");
-        for (i, (path, diagnostics)) in file_diagnostics.iter().enumerate() {
-            let _ = write!(
-                out,
-                "    {}: {{\n      \"errors\": {},\n      \"messages\": [\n",
-                json_escape(path),
-                diagnostics.len()
-            );
-            for (j, diag) in diagnostics.iter().enumerate() {
-                let severity_str = match diag.severity {
-                    DiagnosticSeverity::ERROR => "error",
-                    DiagnosticSeverity::WARNING => "warning",
-                    DiagnosticSeverity::INFORMATION => "info",
-                    DiagnosticSeverity::HINT => "hint",
-                    _ => "unknown",
-                };
-                let _ = write!(
-                    out,
-                    "        {{ \"message\": {}, \"line\": {}, \"severity\": \"{}\"",
-                    json_escape(&diag.message),
-                    diag.line,
-                    severity_str,
-                );
-                if let Some(ref id) = diag.identifier {
-                    let _ = write!(out, ", \"identifier\": {}", json_escape(id));
-                }
-                out.push_str(" }");
-                if j + 1 < diagnostics.len() {
-                    out.push(',');
-                }
-                out.push('\n');
-            }
-            out.push_str("      ]\n    }");
-            if i + 1 < file_diagnostics.len() {
-                out.push(',');
-            }
-            out.push('\n');
-        }
-        out.push_str("  },\n");
-    }
-
-    out.push_str("  \"errors\": []\n}");
-    println!("{out}");
+    println!("{}", analyse_json_body(file_diagnostics, total_errors));
 }
 
-/// Escape a string for JSON output.
-pub(crate) fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c < '\x20' => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+/// Build the `analyze` JSON document; see [`print_json_output`].
+fn analyse_json_body(
+    file_diagnostics: &[(String, Vec<FileDiagnostic>)],
+    total_errors: usize,
+) -> String {
+    let report = AnalyseReport {
+        totals: JsonTotals {
+            errors: 0,
+            file_errors: total_errors,
+        },
+        files: file_diagnostics
+            .iter()
+            .map(|(path, diagnostics)| {
+                (
+                    path.as_str(),
+                    JsonFileEntry {
+                        errors: diagnostics.len(),
+                        messages: diagnostics
+                            .iter()
+                            .map(|diag| JsonMessage {
+                                message: &diag.message,
+                                line: u64::from(diag.line),
+                                severity: severity_name(diag.severity),
+                                identifier: diag.identifier.as_deref(),
+                            })
+                            .collect(),
+                    },
+                )
+            })
+            .collect(),
+        errors: [],
+    };
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ── PHPStan-style table output ──────────────────────────────────────────────
@@ -360,46 +410,67 @@ pub(crate) fn progress_bar(done: usize, total: usize, label: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn json_escape_basic() {
-        assert_eq!(json_escape("hello"), "\"hello\"");
-    }
-
-    #[test]
-    fn json_escape_special_chars() {
-        assert_eq!(json_escape("a\"b\\c\nd"), "\"a\\\"b\\\\c\\nd\"");
-    }
-
-    #[test]
-    fn json_escape_control_chars() {
-        assert_eq!(json_escape("\x00\x1f"), "\"\\u0000\\u001f\"");
-    }
-
-    #[test]
-    fn github_annotation_format() {
-        let diag = FileDiagnostic {
-            line: 15,
+    fn diagnostic(line: u32, message: &str, identifier: Option<&str>) -> FileDiagnostic {
+        FileDiagnostic {
+            line,
             column: 0,
-            message: "Call to undefined method Bar::baz().".to_string(),
-            identifier: Some("unknown_member".to_string()),
+            message: message.to_string(),
+            identifier: identifier.map(str::to_string),
             severity: DiagnosticSeverity::ERROR,
-        };
-        assert_eq!(diag.line, 15);
-        assert_eq!(diag.severity, DiagnosticSeverity::ERROR);
-        assert_eq!(diag.identifier.as_deref(), Some("unknown_member"));
+        }
     }
 
     #[test]
-    fn json_output_empty() {
-        // Verify print_json_output doesn't panic with empty input.
-        // We can't easily capture stdout in unit tests, so just verify
-        // the helper works.
-        let out = {
-            let mut s = String::new();
-            use std::fmt::Write;
-            let _ = write!(s, "{{}}");
-            s
-        };
-        assert_eq!(out, "{}");
+    fn json_is_valid_without_diagnostics() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(&analyse_json_body(&[], 0)).expect("valid json");
+        assert_eq!(parsed["totals"]["errors"], 0);
+        assert_eq!(parsed["totals"]["file_errors"], 0);
+        assert_eq!(parsed["files"], serde_json::json!({}));
+        assert_eq!(parsed["errors"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn json_groups_diagnostics_by_file() {
+        let files = vec![(
+            "src/Foo.php".to_string(),
+            vec![
+                diagnostic(15, "a\"quoted\" \\ message\n", Some("unknown_member")),
+                diagnostic(42, "plain", None),
+            ],
+        )];
+        let parsed: serde_json::Value =
+            serde_json::from_str(&analyse_json_body(&files, 2)).expect("valid json");
+        assert_eq!(parsed["totals"]["file_errors"], 2);
+        assert_eq!(parsed["files"]["src/Foo.php"]["errors"], 2);
+        let messages = &parsed["files"]["src/Foo.php"]["messages"];
+        assert_eq!(messages[0]["message"], "a\"quoted\" \\ message\n");
+        assert_eq!(messages[0]["identifier"], "unknown_member");
+        assert_eq!(messages[0]["severity"], "error");
+        assert_eq!(messages[1]["line"], 42);
+        // A diagnostic with no rule name leaves the key out entirely.
+        assert!(messages[1].get("identifier").is_none());
+    }
+
+    #[test]
+    fn json_escapes_control_characters() {
+        let files = vec![(
+            "a.php".to_string(),
+            vec![diagnostic(1, "\u{0}\u{1f}", None)],
+        )];
+        let body = analyse_json_body(&files, 1);
+        assert!(body.contains("\\u0000\\u001f"), "{body}");
+    }
+
+    #[test]
+    fn github_annotation_leaves_out_an_empty_title() {
+        assert_eq!(
+            github_annotation("error", "src/Foo.php", 15, "", "boom"),
+            "::error file=src/Foo.php,line=15,col=0::boom"
+        );
+        assert_eq!(
+            github_annotation("warning", "src/Foo.php", 15, "rule", "boom"),
+            "::warning file=src/Foo.php,line=15,col=0,title=rule::boom"
+        );
     }
 }

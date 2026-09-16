@@ -95,30 +95,8 @@ fn find_namespace_keyword_line(content: &str) -> Option<u32> {
 }
 
 fn find_namespace_insert_position(content: &str) -> Position {
-    let mut insert_line = 0u32;
-
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-
-        if trimmed.starts_with("<?php") {
-            insert_line = (i + 1) as u32;
-            continue;
-        }
-
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if trimmed.starts_with("declare(") || trimmed.starts_with("declare (") {
-            insert_line = (i + 1) as u32;
-            continue;
-        }
-
-        break;
-    }
-
     Position {
-        line: insert_line,
+        line: crate::text_scan::header_insert_line(content),
         character: 0,
     }
 }

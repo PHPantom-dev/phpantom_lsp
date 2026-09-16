@@ -20,6 +20,71 @@ use super::target_cache::CALLABLE_TARGET_CACHE;
 use super::template_subs::evaluate_constant_operands;
 
 impl Backend {
+    /// Bind a method's declaration to one call site: substitute the
+    /// method-level `@template` params the arguments decide, then collapse
+    /// any conditional left inside the return type against those same
+    /// arguments, so signature help and every downstream consumer see a
+    /// settled type rather than a raw conditional.
+    ///
+    /// Returns the bound method together with the template params that
+    /// bound to the receiver itself, which the caller records so a later
+    /// hop knows they are already spoken for.
+    fn bind_method_to_call_site(
+        declared: &MethodInfo,
+        owner: &ClassInfo,
+        method_name: &str,
+        args_text: Option<&str>,
+        rctx: &ResolutionCtx<'_>,
+    ) -> (MethodInfo, crate::atom::AtomSet) {
+        let mut bound = declared.clone();
+        let mut self_bound_params = crate::atom::AtomSet::default();
+
+        let Some(at) = args_text else {
+            return (bound, self_bound_params);
+        };
+
+        let split_args = crate::type_engine::types::conditional::split_text_args(at);
+        let method_subs = Self::build_method_template_subs(owner, method_name, &split_args, rctx);
+        if !method_subs.is_empty() {
+            crate::inheritance::apply_substitution_to_method(&mut bound, &method_subs);
+            self_bound_params = super::template_subs::self_bound_template_params(
+                &declared.template_bindings,
+                &declared.parameters,
+                &split_args,
+            );
+        }
+
+        if let Some(ret) = bound
+            .return_type
+            .as_ref()
+            .filter(|r| r.contains_conditional())
+        {
+            let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
+            let tpl = TemplateContext {
+                defaults: Some(&method_subs),
+                params: &bound.template_params,
+                bindings: &bound.template_bindings,
+                arg_type_resolver: Some(&arg_ty_resolver),
+            };
+            let evaluated =
+                crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
+                    ret,
+                    &bound.parameters,
+                    at,
+                    None,
+                    crate::type_engine::types::conditional::ConditionalClassContext {
+                        calling: rctx.current_class.map(|c| c.name.as_str()),
+                        declaring: Some(owner.fqn().as_str()),
+                    },
+                    rctx.class_loader,
+                    &tpl,
+                );
+            bound.return_type = Some(evaluated);
+        }
+
+        (bound, self_bound_params)
+    }
+
     /// Resolve an instance method base expression + method name to a
     /// [`ResolvedCallableTarget`].
     ///
@@ -139,63 +204,8 @@ impl Backend {
             );
 
             if let Some(m) = effective.get_method_ci(&method_lower) {
-                let mut result_method = m.clone();
-                let mut self_bound_params = crate::atom::AtomSet::default();
-
-                // Apply method-level template substitutions when
-                // call-site argument text is available.
-                if let Some(at) = args_text {
-                    let split_args = crate::type_engine::types::conditional::split_text_args(at);
-                    let method_subs = Self::build_method_template_subs(
-                        &effective,
-                        method_name,
-                        &split_args,
-                        rctx,
-                    );
-                    if !method_subs.is_empty() {
-                        crate::inheritance::apply_substitution_to_method(
-                            &mut result_method,
-                            &method_subs,
-                        );
-                        self_bound_params = super::template_subs::self_bound_template_params(
-                            &m.template_bindings,
-                            &m.parameters,
-                            &split_args,
-                        );
-                    }
-                    // Collapse any conditionals nested inside the return type
-                    // (e.g. `Collection<($k is array|string ? array-key :
-                    // …), …>`) against the call arguments so signature help
-                    // and downstream consumers never see a raw conditional.
-                    if result_method
-                        .return_type
-                        .as_ref()
-                        .is_some_and(|r| r.contains_conditional())
-                    {
-                        let ret = result_method.return_type.as_ref().unwrap();
-                        let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
-                        let tpl = TemplateContext {
-                            defaults: Some(&method_subs),
-                            params: &result_method.template_params,
-                            bindings: &result_method.template_bindings,
-                            arg_type_resolver: Some(&arg_ty_resolver),
-                        };
-                        let evaluated =
-                            crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
-                                ret,
-                                &result_method.parameters,
-                                at,
-                                None,
-                                crate::type_engine::types::conditional::ConditionalClassContext {
-                                    calling: rctx.current_class.map(|c| c.name.as_str()),
-                                    declaring: Some(effective.fqn().as_str()),
-                                },
-                                rctx.class_loader,
-                                &tpl,
-                            );
-                        result_method.return_type = Some(evaluated);
-                    }
-                }
+                let (result_method, self_bound_params) =
+                    Self::bind_method_to_call_site(m, &effective, method_name, args_text, rctx);
 
                 let target = ResolvedCallableTarget {
                     parameters: result_method.parameters.clone(),
@@ -304,55 +314,8 @@ impl Backend {
 
         let m = merged.get_method_ci(method_name)?;
 
-        let mut result_method = m.clone();
-        let mut self_bound_params = crate::atom::AtomSet::default();
-
-        // Apply method-level template substitutions when call-site
-        // argument text is available.
-        if let Some(at) = args_text {
-            let split_args = crate::type_engine::types::conditional::split_text_args(at);
-            let method_subs =
-                Self::build_method_template_subs(&merged, method_name, &split_args, rctx);
-            if !method_subs.is_empty() {
-                crate::inheritance::apply_substitution_to_method(&mut result_method, &method_subs);
-                self_bound_params = super::template_subs::self_bound_template_params(
-                    &m.template_bindings,
-                    &m.parameters,
-                    &split_args,
-                );
-            }
-            // Collapse conditionals nested inside the return type (e.g.
-            // `Str::replace`'s `($subject is string ? string : string[])`
-            // wrapped in a generic factory) against the call arguments.
-            if result_method
-                .return_type
-                .as_ref()
-                .is_some_and(|r| r.contains_conditional())
-            {
-                let ret = result_method.return_type.as_ref().unwrap();
-                let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
-                let tpl = TemplateContext {
-                    defaults: Some(&method_subs),
-                    params: &result_method.template_params,
-                    bindings: &result_method.template_bindings,
-                    arg_type_resolver: Some(&arg_ty_resolver),
-                };
-                let evaluated =
-                    crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
-                        ret,
-                        &result_method.parameters,
-                        at,
-                        None,
-                        crate::type_engine::types::conditional::ConditionalClassContext {
-                            calling: rctx.current_class.map(|c| c.name.as_str()),
-                            declaring: Some(merged.fqn().as_str()),
-                        },
-                        rctx.class_loader,
-                        &tpl,
-                    );
-                result_method.return_type = Some(evaluated);
-            }
-        }
+        let (result_method, self_bound_params) =
+            Self::bind_method_to_call_site(m, &merged, method_name, args_text, rctx);
 
         Some(ResolvedCallableTarget {
             parameters: result_method.parameters.clone(),

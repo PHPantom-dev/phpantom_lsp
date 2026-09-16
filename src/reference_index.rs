@@ -419,11 +419,7 @@ impl Backend {
                 keep[idx] = false;
             }
         }
-        rebuilt = rebuilt
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, item)| keep[idx].then_some(item))
-            .collect();
+        crate::util::retain_by_mask(&mut rebuilt, &keep);
 
         if track_members && !rebuilt.is_empty() {
             self.member_ref_counts.invalidate_locations_all();

@@ -263,6 +263,17 @@ pub(crate) struct ScopeState {
 }
 
 impl ScopeState {
+    /// A variable resolver that answers from a snapshot of this scope.
+    ///
+    /// Taking a copy is what lets the resolver be handed to the RHS
+    /// pipeline while the walker still holds the scope mutably:
+    /// resolution cannot see, or be disturbed by, writes made after the
+    /// snapshot was taken.
+    pub(crate) fn snapshot_resolver(&self) -> impl Fn(&str) -> Vec<ResolvedType> + use<> {
+        let locals = self.locals.clone();
+        move |var_name: &str| locals.get(&atom(var_name)).cloned().unwrap_or_default()
+    }
+
     pub fn new() -> Self {
         Self {
             locals: AtomMap::default(),
@@ -1415,6 +1426,19 @@ pub(crate) struct ForwardWalkCtx<'a> {
 }
 
 impl<'a> ForwardWalkCtx<'a> {
+    /// Type `hint` against this walk's classes: the classes it names, or
+    /// the bare type string when it names none.
+    ///
+    /// See [`crate::type_engine::type_resolution::resolved_types_for_hint`].
+    pub(crate) fn resolved_types_for(&self, hint: PhpType) -> Vec<ResolvedType> {
+        crate::type_engine::type_resolution::resolved_types_for_hint(
+            hint,
+            &self.current_class.name,
+            self.all_classes,
+            self.class_loader,
+        )
+    }
+
     /// Build a walk context from a variable-resolution context.
     ///
     /// Lets the expression resolvers reach the narrowing pipeline that lives
@@ -1569,18 +1593,7 @@ pub(crate) fn seed_params<'b>(
                 )
                 .unwrap_or(var_type);
 
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    &effective,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-
-                let results = if !resolved.is_empty() {
-                    ResolvedType::from_classes_with_hint(resolved, effective)
-                } else {
-                    vec![ResolvedType::from_type_string(effective)]
-                };
+                let results = ctx.resolved_types_for(effective);
 
                 scope.seed(&pname, results);
                 continue;
@@ -1706,21 +1719,8 @@ fn seed_implicit_set_value(
     };
 
     let hint_type = extract_hint_type(hint);
-    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        &hint_type,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    );
 
-    if resolved.is_empty() {
-        scope.seed("$value", vec![ResolvedType::from_type_string(hint_type)]);
-    } else {
-        scope.seed(
-            "$value",
-            ResolvedType::from_classes_with_hint(resolved, hint_type),
-        );
-    }
+    scope.seed("$value", ctx.resolved_types_for(hint_type));
 }
 
 /// Finish the type operators a declared type reads through a constant, or

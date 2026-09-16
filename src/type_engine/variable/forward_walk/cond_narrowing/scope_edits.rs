@@ -1,5 +1,58 @@
 use super::*;
 
+/// Rewrite every type a variable could hold with `refine`, dropping the
+/// members it rules out, and write the result back.
+///
+/// Returns whether anything survived. A variable with no recorded type is
+/// left alone and reports `true`: nothing was ruled out, there was just
+/// nothing to rule out. A variable `refine` emptied keeps what it had,
+/// because the branch that asked is dead and saying so is the
+/// reachability question rather than this one; a caller that wants to
+/// answer it reads the return value.
+fn refine_in_scope(
+    var_name: &str,
+    scope: &mut ScopeState,
+    refine: impl FnMut(ResolvedType) -> Option<ResolvedType>,
+) -> bool {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return true;
+    }
+
+    let refined: Vec<ResolvedType> = types.into_iter().filter_map(refine).collect();
+    if refined.is_empty() {
+        return false;
+    }
+    scope.set(var_name, refined);
+    true
+}
+
+/// Replace everything a variable could hold with `value`, provided one of
+/// the types it holds could have been that value.
+///
+/// A union with nothing `admits` matches says the opposite of what the
+/// condition proved, so it is left as it was.
+fn narrow_to_in_scope(
+    var_name: &str,
+    scope: &mut ScopeState,
+    value: PhpType,
+    admits: impl Fn(&PhpType) -> bool,
+) {
+    let types = scope.get(var_name).to_vec();
+    if types.iter().any(|rt| admits(&rt.type_string)) {
+        scope.set(var_name, vec![ResolvedType::from_type_string(value)]);
+    }
+}
+
+/// Whether a type has `false` among the values it could hold.
+fn holds_false(ty: &PhpType) -> bool {
+    let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
+    match ty.kind() {
+        TypeKind::Union(members) => members.iter().any(is_false),
+        _ => is_false(ty),
+    }
+}
+
 /// Refine a variable's type to its non-empty counterpart.
 ///
 /// `string` becomes `non-empty-string`, `array<K, V>` becomes
@@ -8,22 +61,10 @@ use super::*;
 /// outside the compared domain are left alone: `$x !== ''` on a
 /// `string|array` says nothing about the array half.
 pub(crate) fn refine_non_empty_in_scope(var_name: &str, empty: EmptyValue, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-
-    let refined: Vec<ResolvedType> = types
-        .into_iter()
-        .filter_map(|mut rt| {
-            rt.type_string = refine_non_empty_type(&rt.type_string, empty)?;
-            Some(rt)
-        })
-        .collect();
-
-    if !refined.is_empty() {
-        scope.set(var_name, refined);
-    }
+    refine_in_scope(var_name, scope, |mut rt| {
+        rt.type_string = refine_non_empty_type(&rt.type_string, empty)?;
+        Some(rt)
+    });
 }
 
 /// Refine a variable's type to its empty counterpart.
@@ -36,25 +77,12 @@ pub(crate) fn refine_non_empty_in_scope(var_name: &str, empty: EmptyValue, scope
 /// side leaves them: `count($x) === 0` on a `Countable|array` says nothing
 /// about the object half.
 pub(crate) fn refine_empty_in_scope(var_name: &str, empty: EmptyValue, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-
-    let refined: Vec<ResolvedType> = types
-        .into_iter()
-        .filter_map(|mut rt| {
-            rt.type_string = refine_empty_type(&rt.type_string, empty)?;
-            Some(rt)
-        })
-        .collect();
-
-    if !refined.is_empty() {
-        scope.set(var_name, refined);
-    }
+    refine_in_scope(var_name, scope, |mut rt| {
+        rt.type_string = refine_empty_type(&rt.type_string, empty)?;
+        Some(rt)
+    });
 }
 
-/// Strip `null` from a variable's type in the scope.
 /// Narrow a variable in scope to `null` only.
 ///
 /// Used when a condition like `$x === null` is true: the variable must
@@ -62,28 +90,17 @@ pub(crate) fn refine_empty_in_scope(var_name: &str, empty: EmptyValue, scope: &m
 /// contains a nullable type, or sets it to `null` if the variable has
 /// any type at all.
 pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
     // A `null` among the values the variable could hold is what makes
     // replacing them all with `null` sound.  A union that has none says
     // the opposite — `bool|string` came out of a falsy branch as `null`
     // while `non_null_type()` stood in for this check, because a union
     // with nothing to strip still has a non-null part.
-    fn holds_null(ty: &PhpType) -> bool {
-        match ty.kind() {
-            TypeKind::Nullable(_) => true,
-            TypeKind::Union(members) => members.iter().any(holds_null),
-            _ => ty.is_null(),
-        }
-    }
-    if types.iter().any(|rt| holds_null(&rt.type_string)) {
-        scope.set(
-            var_name,
-            vec![ResolvedType::from_type_string(PhpType::null())],
-        );
-    }
+    narrow_to_in_scope(
+        var_name,
+        scope,
+        PhpType::null(),
+        scope_state::type_admits_null,
+    );
 }
 
 /// Narrow a variable in scope to `false` only.
@@ -92,21 +109,7 @@ pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
 /// condition like `$x !== false` is known to be false, so the variable
 /// must be `false`.
 pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-    let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
-    let has_false = types.iter().any(|rt| match rt.type_string.kind() {
-        TypeKind::Union(members) => members.iter().any(is_false),
-        _ => is_false(&rt.type_string),
-    });
-    if has_false {
-        scope.set(
-            var_name,
-            vec![ResolvedType::from_type_string(PhpType::false_())],
-        );
-    }
+    narrow_to_in_scope(var_name, scope, PhpType::false_(), holds_false);
 }
 
 /// Keep only what a variable could hold and still be falsy.
@@ -131,57 +134,36 @@ pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
 /// emptied: the branch is dead, and saying so is the reachability
 /// question rather than this one.
 pub(crate) fn narrow_to_falsy_in_scope(var_name: &str, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-
-    let falsy: Vec<ResolvedType> = types
-        .into_iter()
-        .filter_map(|mut rt| {
-            let falsy = rt.type_string.falsy_type()?;
-            // An object is truthy, so a falsy `?Customer` is a `null` that
-            // no longer names a class.  Leaving the resolved class beside
-            // it makes the entry read as a `Customer` to everything that
-            // consults the class rather than the type, and a join with the
-            // branch's own `Customer` then collapses the pair to whichever
-            // type string came last.
-            let dropped_class = falsy.unwrap_nullable().class_name()
-                != rt.type_string.unwrap_nullable().class_name();
-            if dropped_class {
-                rt.class_info = None;
-            }
-            rt.type_string = falsy;
-            Some(rt)
-        })
-        .collect();
-
-    if !falsy.is_empty() {
-        scope.set(var_name, falsy);
-    }
+    refine_in_scope(var_name, scope, |mut rt| {
+        let falsy = rt.type_string.falsy_type()?;
+        // An object is truthy, so a falsy `?Customer` is a `null` that
+        // no longer names a class.  Leaving the resolved class beside
+        // it makes the entry read as a `Customer` to everything that
+        // consults the class rather than the type, and a join with the
+        // branch's own `Customer` then collapses the pair to whichever
+        // type string came last.
+        let dropped_class =
+            falsy.unwrap_nullable().class_name() != rt.type_string.unwrap_nullable().class_name();
+        if dropped_class {
+            rt.class_info = None;
+        }
+        rt.type_string = falsy;
+        Some(rt)
+    });
 }
 
 pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-
-    let stripped: Vec<ResolvedType> = types
-        .into_iter()
-        .filter_map(|mut rt| match rt.type_string.non_null_type() {
+    let survived = refine_in_scope(var_name, scope, |mut rt| {
+        match rt.type_string.non_null_type() {
             Some(non_null) => {
                 rt.type_string = non_null;
                 Some(rt)
             }
             None if rt.type_string == PhpType::null() => None,
             None => Some(rt),
-        })
-        .collect();
-
-    if !stripped.is_empty() {
-        scope.set(var_name, stripped);
-    } else {
+        }
+    });
+    if !survived {
         // Everything the variable could hold was `null`, so a path that
         // proves it is not null cannot run.  Saying so keeps the dead
         // path's end state out of the join instead of letting the
@@ -197,22 +179,10 @@ pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
 /// Used after falsy guard clauses (`if (!$var) { throw; }`) where the
 /// variable is known to be truthy (non-null and non-false) after the guard.
 pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-
-    let stripped: Vec<ResolvedType> = types
-        .into_iter()
-        .filter_map(|mut rt| {
-            rt.type_string = rt.type_string.truthy_type()?;
-            Some(rt)
-        })
-        .collect();
-
-    if !stripped.is_empty() {
-        scope.set(var_name, stripped);
-    }
+    refine_in_scope(var_name, scope, |mut rt| {
+        rt.type_string = rt.type_string.truthy_type()?;
+        Some(rt)
+    });
 }
 
 /// Strip `false` (but not `null`) from a variable's type in the scope.
@@ -222,36 +192,23 @@ pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
 /// [`strip_falsy_from_scope`], which also strips `null` for the broader
 /// `!$var`/`empty($var)` idiom that guards against both.
 pub(crate) fn strip_false_from_scope(var_name: &str, scope: &mut ScopeState) {
-    let types = scope.get(var_name).to_vec();
-    if types.is_empty() {
-        return;
-    }
-
     let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
-
-    let stripped: Vec<ResolvedType> = types
-        .into_iter()
-        .filter_map(|mut rt| {
-            let ty = &rt.type_string;
-            if is_false(ty) {
-                return None;
-            }
-            if let TypeKind::Union(members) = ty.kind() {
-                let non_false: Vec<PhpType> =
-                    members.iter().filter(|m| !is_false(m)).cloned().collect();
-                rt.type_string = match non_false.len() {
-                    0 => return None,
-                    1 => non_false.into_iter().next().unwrap(),
-                    _ => PhpType::union(non_false),
-                };
-            }
-            Some(rt)
-        })
-        .collect();
-
-    if !stripped.is_empty() {
-        scope.set(var_name, stripped);
-    }
+    refine_in_scope(var_name, scope, |mut rt| {
+        let ty = &rt.type_string;
+        if is_false(ty) {
+            return None;
+        }
+        if let TypeKind::Union(members) = ty.kind() {
+            let non_false: Vec<PhpType> =
+                members.iter().filter(|m| !is_false(m)).cloned().collect();
+            rt.type_string = match non_false.len() {
+                0 => return None,
+                1 => non_false.into_iter().next().unwrap(),
+                _ => PhpType::union(non_false),
+            };
+        }
+        Some(rt)
+    });
 }
 
 /// Split a single-level array access key like `$a["test"]` into base

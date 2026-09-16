@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, MAX_TRAIT_DEPTH, Visibility};
+use crate::types::{ClassInfo, MAX_TRAIT_DEPTH};
 use crate::util::short_name;
 use crate::virtual_members::laravel::{
     extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
@@ -19,9 +19,9 @@ use crate::virtual_members::{
 };
 
 use super::generics::{
-    apply_substitution_to_method, apply_substitution_to_property, method_has_bare_self,
-    method_references_params, property_references_params, replace_bare_self_in_method,
-    right_align_offset,
+    apply_substitution_to_method, apply_substitution_to_property, fill_template_bounds,
+    method_has_bare_self, method_references_params, property_references_params,
+    replace_bare_self_in_method, right_align_offset,
 };
 use super::{MergeDedup, TraitContext};
 
@@ -89,18 +89,7 @@ pub(crate) fn merge_traits_into(
         // and no convention-based provider filled the map, fall back
         // to the template parameter bounds (e.g. `@template T of object`
         // → `object`) so inherited methods don't leak raw template names.
-        if !trait_info.template_params.is_empty() {
-            for param_name in &trait_info.template_params {
-                if !trait_subs.contains_key(param_name.to_string().as_str()) {
-                    let bound = trait_info
-                        .template_param_bounds
-                        .get(param_name)
-                        .cloned()
-                        .unwrap_or_else(PhpType::mixed);
-                    trait_subs.insert(param_name.to_string(), bound);
-                }
-            }
-        }
+        fill_template_bounds(&trait_info, &mut trait_subs);
 
         // Recursively merge traits used by this trait (trait composition).
         // The sub-trait's own `@use` generics (from the trait's docblock)
@@ -158,38 +147,7 @@ pub(crate) fn merge_traits_into(
                 );
             }
 
-            for method in &parent.methods {
-                if method.visibility == Visibility::Private {
-                    continue;
-                }
-                if !dedup
-                    .methods
-                    .insert(crate::atom::ascii_lowercase_atom(&method.name))
-                {
-                    continue;
-                }
-                merged.methods.push(Arc::clone(method));
-            }
-
-            for property in &parent.properties {
-                if property.visibility == Visibility::Private {
-                    continue;
-                }
-                if !dedup.properties.insert(property.name) {
-                    continue;
-                }
-                merged.properties.push(Arc::clone(property));
-            }
-
-            for constant in &parent.constants {
-                if constant.visibility == Visibility::Private {
-                    continue;
-                }
-                if !dedup.constants.insert(constant.name) {
-                    continue;
-                }
-                merged.constants.push(Arc::clone(constant));
-            }
+            dedup.merge_visible_members(&parent, merged);
 
             current = parent;
         }

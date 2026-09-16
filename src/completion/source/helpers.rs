@@ -169,6 +169,17 @@ pub(crate) fn is_closure_like_text(text: &str) -> bool {
     closure_literal_parts(text).is_some()
 }
 
+/// The offsets of a parameter list's opening `(` and its matching `)`.
+///
+/// The first `(` of `text` opens the list; the scan then pairs brackets
+/// so a default value written as a call (`fn ($x = f(1))`) does not close
+/// it early. `None` when there is no `(` or it is never closed.
+fn parameter_list_parens(text: &str) -> Option<(usize, usize)> {
+    let open = text.find('(')?;
+    let close = crate::text_scan::find_matching_forward(text, open, b'(', b')')?;
+    Some((open, close))
+}
+
 /// Extract the return type annotation from a closure or arrow-function
 /// literal, given its own source text (e.g. the closure's span text, or
 /// the text between a call's parentheses for one argument).
@@ -183,48 +194,15 @@ pub(crate) fn is_closure_like_text(text: &str) -> bool {
 pub(crate) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
     let (_, trimmed) = closure_literal_parts(text)?;
 
-    // Find the opening `(` of the parameter list.
-    let paren_open = trimmed.find('(')?;
-    // Find the matching `)` by tracking depth.
-    let mut depth = 0i32;
-    let mut paren_close = None;
-    for (i, c) in trimmed[paren_open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    paren_close = Some(paren_open + i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let paren_close = paren_close?;
+    let (_, paren_close) = parameter_list_parens(trimmed)?;
 
     // After `)`, look for `: ReturnType`.
     let after_paren = trimmed.get(paren_close + 1..)?.trim_start();
 
     // For closures there may be a `use (…)` clause before the return type.
     let after_use = if after_paren.starts_with("use") {
-        let use_paren = after_paren.find('(')?;
-        let mut udepth = 0i32;
-        let mut use_close = None;
-        for (i, c) in after_paren[use_paren..].char_indices() {
-            match c {
-                '(' => udepth += 1,
-                ')' => {
-                    udepth -= 1;
-                    if udepth == 0 {
-                        use_close = Some(use_paren + i);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        after_paren.get(use_close? + 1..)?.trim_start()
+        let (_, use_close) = parameter_list_parens(after_paren)?;
+        after_paren.get(use_close + 1..)?.trim_start()
     } else {
         after_paren
     };
@@ -432,24 +410,7 @@ pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<Php
 pub(crate) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
     let (is_arrow, trimmed) = closure_literal_parts(text)?;
 
-    // Find the parameter list's closing `)` by matching depth.
-    let paren_open = trimmed.find('(')?;
-    let mut depth = 0i32;
-    let mut paren_close = None;
-    for (i, c) in trimmed[paren_open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    paren_close = Some(paren_open + i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let paren_close = paren_close?;
+    let (_, paren_close) = parameter_list_parens(trimmed)?;
 
     if is_arrow {
         // The body is the single expression after the `=>` arrow.  The
@@ -652,25 +613,7 @@ pub(crate) fn extract_closure_params_from_text(
 ) -> Option<Vec<(String, Option<PhpType>)>> {
     let (_, trimmed) = closure_literal_parts(text)?;
 
-    // Find the opening `(` of the parameter list.
-    let paren_open = trimmed.find('(')?;
-    // Find the matching `)` by tracking depth.
-    let mut depth = 0i32;
-    let mut paren_close = None;
-    for (i, c) in trimmed[paren_open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    paren_close = Some(paren_open + i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let paren_close = paren_close?;
+    let (paren_open, paren_close) = parameter_list_parens(trimmed)?;
 
     // Extract the parameter list text between the parens.
     let params_text = trimmed.get(paren_open + 1..paren_close)?.trim();

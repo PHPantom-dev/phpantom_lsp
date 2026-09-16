@@ -93,16 +93,7 @@ fn static_property_hint_of(
     else {
         return Vec::new();
     };
-    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        &hint,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-    match resolved.is_empty() {
-        true => vec![ResolvedType::from_type_string(hint)],
-        false => ResolvedType::from_classes_with_hint(resolved, hint),
-    }
+    ctx.resolved_types_for(hint)
 }
 
 /// Resolve the element type an array-access key promises (`$a["k"]`,
@@ -166,23 +157,7 @@ fn resolve_array_key_type(
         let Some(element_type) = element_type else {
             continue;
         };
-        let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            &element_type,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
-        if resolved_classes.is_empty() {
-            ResolvedType::extend_unique(
-                &mut key_results,
-                vec![ResolvedType::from_type_string(element_type)],
-            );
-        } else {
-            ResolvedType::extend_unique(
-                &mut key_results,
-                ResolvedType::from_classes_with_hint(resolved_classes, element_type),
-            );
-        }
+        ResolvedType::extend_unique(&mut key_results, ctx.resolved_types_for(element_type));
     }
     key_results
 }

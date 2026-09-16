@@ -293,13 +293,9 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 /// trait body.
 pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
     let mut namespace_line: Option<u32> = None;
-    let mut php_open_line: Option<u32> = None;
 
     for (i, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with("<?php") && php_open_line.is_none() {
-            php_open_line = Some(i as u32);
-        }
         // Match `namespace Foo\Bar;` or `namespace Foo\Bar {`
         // but not `namespace\something` (which is a different construct).
         if trimmed.starts_with("namespace ") || trimmed.starts_with("namespace\t") {
@@ -317,8 +313,13 @@ pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
         })
         .collect();
 
-    // Fallback: insert after `namespace`, or after `<?php`.
-    let fallback_line = namespace_line.or(php_open_line).map(|l| l + 1).unwrap_or(0);
+    // Fallback: insert after `namespace`, or, with no namespace, on the
+    // first line the file's header leaves free — which is past any
+    // `declare(strict_types=1)`, since PHP requires that to come first.
+    let fallback_line = match namespace_line {
+        Some(line) => line + 1,
+        None => crate::text_scan::header_insert_line(content),
+    };
     let has_namespace = namespace_line.is_some();
 
     UseBlockInfo {

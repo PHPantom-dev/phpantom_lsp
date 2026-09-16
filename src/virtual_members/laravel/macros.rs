@@ -761,9 +761,6 @@ fn collect_instance_macro_registrations(
     php_version: Option<PhpVersion>,
     out: &mut Vec<MacroRegistration>,
 ) {
-    use mago_syntax::cst::class_like::member::ClassLikeMember;
-    use mago_syntax::cst::class_like::method::MethodBody;
-
     match node {
         Node::Program(program) => {
             for statement in program.statements.iter() {
@@ -795,53 +792,19 @@ fn collect_instance_macro_registrations(
             php_version,
             out,
         ),
-        Node::Class(class) => {
-            for member in class.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_instance_macros_in_body(
-                        Node::Block(body),
-                        &typed_parameter_targets(&method.parameter_list, resolved),
-                        resolved,
-                        content,
-                        php_version,
-                        out,
-                    );
-                }
-            }
-        }
-        Node::Trait(trait_) => {
-            for member in trait_.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_instance_macros_in_body(
-                        Node::Block(body),
-                        &typed_parameter_targets(&method.parameter_list, resolved),
-                        resolved,
-                        content,
-                        php_version,
-                        out,
-                    );
-                }
-            }
-        }
-        Node::Enum(enum_) => {
-            for member in enum_.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_instance_macros_in_body(
-                        Node::Block(body),
-                        &typed_parameter_targets(&method.parameter_list, resolved),
-                        resolved,
-                        content,
-                        php_version,
-                        out,
-                    );
-                }
-            }
+        // Each method of a class-like opens a variable scope of its own.
+        Node::Class(_) | Node::Trait(_) | Node::Enum(_) => {
+            let members = crate::parser::class_like_members(node).unwrap_or_default();
+            crate::parser::for_each_concrete_method(members, |method, body| {
+                collect_instance_macros_in_body(
+                    Node::Block(body),
+                    &typed_parameter_targets(&method.parameter_list, resolved),
+                    resolved,
+                    content,
+                    php_version,
+                    out,
+                );
+            });
         }
         // A closure or arrow function in top-level code opens a variable
         // scope of its own; the body walker computes it from the empty
@@ -868,9 +831,6 @@ fn collect_instance_macros_in_body(
     php_version: Option<PhpVersion>,
     out: &mut Vec<MacroRegistration>,
 ) {
-    use mago_syntax::cst::class_like::member::ClassLikeMember;
-    use mago_syntax::cst::class_like::method::MethodBody;
-
     match node {
         // A closure sees only its `use (...)` captures plus its own
         // parameters; a typed parameter overrides everything else.
@@ -925,20 +885,16 @@ fn collect_instance_macros_in_body(
         ),
         // So does each method of an anonymous class.
         Node::AnonymousClass(class) => {
-            for member in class.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_instance_macros_in_body(
-                        Node::Block(body),
-                        &typed_parameter_targets(&method.parameter_list, resolved),
-                        resolved,
-                        content,
-                        php_version,
-                        out,
-                    );
-                }
-            }
+            crate::parser::for_each_concrete_method(class.members.as_slice(), |method, body| {
+                collect_instance_macros_in_body(
+                    Node::Block(body),
+                    &typed_parameter_targets(&method.parameter_list, resolved),
+                    resolved,
+                    content,
+                    php_version,
+                    out,
+                );
+            });
         }
         _ => {
             if let Node::MethodCall(call) = node
@@ -1245,45 +1201,12 @@ fn collect_provider_method_refs(
     seen: &mut HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    use mago_syntax::cst::class_like::member::ClassLikeMember;
-    use mago_syntax::cst::class_like::method::MethodBody;
-
     match node {
-        Node::Class(class) => {
-            for member in class.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_class_refs(Node::Block(body), resolved, seen, out);
-                }
-            }
-        }
-        Node::AnonymousClass(class) => {
-            for member in class.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_class_refs(Node::Block(body), resolved, seen, out);
-                }
-            }
-        }
-        Node::Trait(trait_) => {
-            for member in trait_.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_class_refs(Node::Block(body), resolved, seen, out);
-                }
-            }
-        }
-        Node::Enum(enum_) => {
-            for member in enum_.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(body) = &method.body
-                {
-                    collect_class_refs(Node::Block(body), resolved, seen, out);
-                }
-            }
+        Node::Class(_) | Node::AnonymousClass(_) | Node::Trait(_) | Node::Enum(_) => {
+            let members = crate::parser::class_like_members(node).unwrap_or_default();
+            crate::parser::for_each_concrete_method(members, |_, body| {
+                collect_class_refs(Node::Block(body), resolved, seen, out);
+            });
         }
         Node::Interface(_) => {}
         _ => node.visit_children(|child| collect_provider_method_refs(child, resolved, seen, out)),

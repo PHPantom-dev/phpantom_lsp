@@ -23,7 +23,7 @@ use crate::code_actions::implement_methods::{
 };
 use crate::php_type::PhpType;
 use crate::text_position::{offset_to_position, position_to_offset};
-use crate::text_scan::{skip_block_comment, skip_line_comment};
+use crate::text_scan::{is_ident_byte, scan_ident_backward, skip_block_comment, skip_line_comment};
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, PhpVersion, PropertyInfo, PropertySource,
     Visibility,
@@ -206,6 +206,27 @@ pub(crate) struct OverrideCompletionOpts<'a> {
     pub include_declaration: bool,
 }
 
+/// The `#[\Override]` insertion edit an override completion adds above
+/// its declaration, once the target PHP version supports the attribute
+/// for the member kind being overridden — `None` below that version.
+///
+/// Shared by the method, property, and constant builders, which only
+/// differ in which version threshold they gate on.
+fn override_attribute_edit(
+    php_version: PhpVersion,
+    min_version: PhpVersion,
+    line_start: Position,
+    indent: &str,
+) -> Option<TextEdit> {
+    (php_version >= min_version).then(|| TextEdit {
+        range: Range {
+            start: line_start,
+            end: line_start,
+        },
+        new_text: format!("{indent}#[\\Override]\n"),
+    })
+}
+
 fn visibility_keyword(visibility: Visibility) -> &'static str {
     match visibility {
         Visibility::Public => "public",
@@ -224,17 +245,12 @@ pub(crate) fn build_override_completions(
     methods: &[(MethodInfo, String, bool)],
     opts: &OverrideCompletionOpts<'_>,
 ) -> Vec<CompletionItem> {
-    let override_edit = if opts.php_version >= METHOD_OVERRIDE_ATTR_MIN {
-        Some(TextEdit {
-            range: Range {
-                start: opts.line_start,
-                end: opts.line_start,
-            },
-            new_text: format!("{}#[\\Override]\n", opts.indent),
-        })
-    } else {
-        None
-    };
+    let override_edit = override_attribute_edit(
+        opts.php_version,
+        METHOD_OVERRIDE_ATTR_MIN,
+        opts.line_start,
+        opts.indent,
+    );
 
     let mut items = Vec::new();
     for (method, declaring, skip_override_attr) in methods {
@@ -640,17 +656,12 @@ pub(crate) fn build_property_override_completions(
     props: &[(PropertyInfo, String, bool)],
     opts: &NameOverrideCompletionOpts<'_>,
 ) -> Vec<CompletionItem> {
-    let override_edit = if opts.php_version >= PROPERTY_OVERRIDE_ATTR_MIN {
-        Some(TextEdit {
-            range: Range {
-                start: opts.line_start,
-                end: opts.line_start,
-            },
-            new_text: format!("{}#[\\Override]\n", opts.indent),
-        })
-    } else {
-        None
-    };
+    let override_edit = override_attribute_edit(
+        opts.php_version,
+        PROPERTY_OVERRIDE_ATTR_MIN,
+        opts.line_start,
+        opts.indent,
+    );
     let mut items = Vec::new();
     for (prop, declaring, skip_override_attr) in props {
         let type_str = prop
@@ -747,17 +758,12 @@ pub(crate) fn build_constant_override_completions(
     constants: &[(ConstantInfo, String)],
     opts: &NameOverrideCompletionOpts<'_>,
 ) -> Vec<CompletionItem> {
-    let override_edit = if opts.php_version >= CONSTANT_OVERRIDE_ATTR_MIN {
-        Some(TextEdit {
-            range: Range {
-                start: opts.line_start,
-                end: opts.line_start,
-            },
-            new_text: format!("{}#[\\Override]\n", opts.indent),
-        })
-    } else {
-        None
-    };
+    let override_edit = override_attribute_edit(
+        opts.php_version,
+        CONSTANT_OVERRIDE_ATTR_MIN,
+        opts.line_start,
+        opts.indent,
+    );
     let mut items = Vec::new();
     for (c, declaring) in constants {
         let type_str = c
@@ -870,10 +876,7 @@ pub(crate) fn is_after_function_keyword(content: &str, position: Position) -> bo
 pub(crate) fn is_after_const_keyword(content: &str, position: Position) -> bool {
     let bytes = content.as_bytes();
     let cursor = (position_to_offset(content, position) as usize).min(bytes.len());
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let mut i = scan_ident_backward(bytes, cursor);
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
@@ -886,18 +889,11 @@ pub(crate) fn is_after_const_keyword(content: &str, position: Position) -> bool 
 fn after_keyword(content: &str, position: Position, keyword: &str) -> bool {
     let bytes = content.as_bytes();
     let cursor = (position_to_offset(content, position) as usize).min(bytes.len());
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let mut i = scan_ident_backward(bytes, cursor);
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
     check_keyword_ending_at_bytes(bytes, i, keyword.as_bytes())
-}
-
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 fn check_keyword_ending_at_bytes(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
@@ -1033,7 +1029,7 @@ pub(crate) fn is_class_body_member_start(content: &str, body_start: usize, curso
                 continue;
             }
             b'\'' | b'"' => {
-                let end = skip_quoted(bytes, i);
+                let end = crate::text_scan::skip_string_forward(bytes, i);
                 if end > cursor {
                     return false;
                 }
@@ -1094,10 +1090,7 @@ pub(crate) fn is_class_body_member_start(content: &str, body_start: usize, curso
 pub(crate) fn class_body_partial_starts_with_dollar(content: &str, cursor: usize) -> bool {
     let bytes = content.as_bytes();
     let cursor = cursor.min(bytes.len());
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let i = scan_ident_backward(bytes, cursor);
     i > 0 && bytes[i - 1] == b'$'
 }
 
@@ -1109,7 +1102,7 @@ fn skip_attribute(bytes: &[u8], i: usize) -> usize {
     while k < bytes.len() {
         match bytes[k] {
             b'\'' | b'"' => {
-                k = skip_quoted(bytes, k);
+                k = crate::text_scan::skip_string_forward(bytes, k);
                 continue;
             }
             b'[' => brackets += 1,
@@ -1119,21 +1112,6 @@ fn skip_attribute(bytes: &[u8], i: usize) -> usize {
                     return k + 1;
                 }
             }
-            _ => {}
-        }
-        k += 1;
-    }
-    bytes.len()
-}
-
-/// Offset just past the closing quote of the string literal at `i`.
-fn skip_quoted(bytes: &[u8], i: usize) -> usize {
-    let quote = bytes[i];
-    let mut k = i + 1;
-    while k < bytes.len() {
-        match bytes[k] {
-            b'\\' => k += 1,
-            b if b == quote => return k + 1,
             _ => {}
         }
         k += 1;
@@ -1197,10 +1175,7 @@ pub(crate) fn is_member_declaration_name_position_at_offset(content: &str, curso
 }
 
 fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let mut i = scan_ident_backward(bytes, cursor);
 
     let after_ident = i;
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
@@ -1266,10 +1241,7 @@ fn brace_opens_enum(bytes: &[u8], brace_pos: usize) -> bool {
 
 fn is_property_declaration_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {
     // Skip partial name.
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let i = scan_ident_backward(bytes, cursor);
     // Must be immediately after `$`.
     if i == 0 || bytes[i - 1] != b'$' {
         return false;

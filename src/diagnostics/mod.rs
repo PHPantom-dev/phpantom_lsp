@@ -263,6 +263,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::type_engine::resolver::LendsLoaders;
 
 /// Callback invoked after each Phase 2 collector in
 /// [`Backend::collect_slow_diagnostics_observed`]: receives the
@@ -446,22 +447,13 @@ impl Backend {
 
         if let Some(ctx) = &file_ctx {
             let class_loader = self.class_loader(&ctx.file);
-            let function_loader_cl = self.function_loader(&ctx.file);
-            let constant_loader_cl = self.constant_loader(&ctx.file);
-            let config_resolver = |key: &str| self.resolve_config_type(key);
-            let trans_resolver = |key: &str| self.resolve_trans_type(key);
-            let loaders = crate::type_engine::resolver::Loaders {
-                function_loader: Some(&function_loader_cl),
-                constant_loader: Some(&constant_loader_cl),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
+            let owned_loaders = self.diagnostic_loaders(&ctx.file);
             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,
                 &ctx.file.classes,
                 &class_loader,
                 Some(self),
-                loaders,
+                owned_loaders.loaders(),
                 Some(&self.resolved_class_cache),
             );
         }

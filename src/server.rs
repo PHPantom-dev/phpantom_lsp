@@ -98,6 +98,35 @@ where
     });
 }
 
+impl Backend {
+    /// Run a position-based request handler on the blocking pool.
+    ///
+    /// Wires up the `Backend` clone, URI clone, and cancel-safe dispatch
+    /// shared by every handler that resolves a
+    /// `TextDocumentPositionParams`-shaped request and has no extra
+    /// progress-token wrapping. `body` receives the cloned backend, the
+    /// URI, and the position, and is responsible for calling
+    /// [`Backend::handle_with_position`] itself (some handlers run
+    /// Blade-specific checks first).
+    async fn run_position_request<T, F>(
+        &self,
+        name: &'static str,
+        uri: String,
+        position: Position,
+        body: F,
+    ) -> Result<Option<T>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Backend, &str, Position) -> Result<Option<T>> + Send + 'static,
+    {
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        run_blocking_cancel_safe(name, move || body(&backend, &uri_clone, position))
+            .await
+            .unwrap_or(Ok(None))
+    }
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -1090,69 +1119,71 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let backend = self.clone_for_blocking();
-        let uri_clone = uri.clone();
-        run_blocking_cancel_safe("goto_definition", move || {
-            // YAML and XML may name PHP classes under any schema. Resolve
-            // fully-qualified class and Class::member tokens before entering
-            // the PHP-only symbol-map path below.
-            if crate::resource_navigation::is_resource_document(&uri_clone) {
-                let location = backend.get_file_content(&uri_clone).and_then(|content| {
-                    crate::util::catch_panic_unwind_safe(
+        self.run_position_request(
+            "goto_definition",
+            uri,
+            position,
+            |backend, uri, position| {
+                // YAML and XML may name PHP classes under any schema. Resolve
+                // fully-qualified class and Class::member tokens before entering
+                // the PHP-only symbol-map path below.
+                if crate::resource_navigation::is_resource_document(uri) {
+                    let location = backend.get_file_content(uri).and_then(|content| {
+                        crate::util::catch_panic_unwind_safe(
+                            "goto_definition",
+                            uri,
+                            Some(position),
+                            || backend.resolve_resource_definition(&content, position),
+                        )
+                        .flatten()
+                    });
+                    return Ok(location.map(GotoDefinitionResponse::Scalar));
+                }
+
+                // A component tag is HTML, so it has no position in the virtual
+                // PHP `handle_with_position` would swap in below; it is resolved
+                // from the template's own source instead.
+                if backend.is_blade_file(uri)
+                    && let Some(location) = crate::util::catch_panic_unwind_safe(
                         "goto_definition",
-                        &uri_clone,
+                        uri,
                         Some(position),
-                        || backend.resolve_resource_definition(&content, position),
+                        || backend.blade_component_tag_definition(uri, position),
                     )
                     .flatten()
-                });
-                return Ok(location.map(GotoDefinitionResponse::Scalar));
-            }
-
-            // A component tag is HTML, so it has no position in the virtual
-            // PHP `handle_with_position` would swap in below; it is resolved
-            // from the template's own source instead.
-            if backend.is_blade_file(&uri_clone)
-                && let Some(location) = crate::util::catch_panic_unwind_safe(
-                    "goto_definition",
-                    &uri_clone,
-                    Some(position),
-                    || backend.blade_component_tag_definition(&uri_clone, position),
-                )
-                .flatten()
-            {
-                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
-            }
-            // For Blade files, check if the cursor is on a `{{`/`}}` echo
-            // delimiter first, so go-to-definition agrees with hover on the
-            // same position (the implicit `e()` call) instead of falling
-            // through to the virtual PHP content, where the position maps
-            // to whichever expression happens to start at that offset.
-            if backend.is_blade_file(&uri_clone)
-                && let Some(delimiter_result) =
-                    backend.blade_echo_delimiter_definition(&uri_clone, position)
-            {
-                return Ok(delimiter_result.map(GotoDefinitionResponse::Scalar));
-            }
-            backend.handle_with_position("goto_definition", &uri_clone, position, |content, pos| {
-                let locs = backend.resolve_definition(&uri_clone, content, pos);
-                if locs.is_empty() {
-                    None
-                } else if locs.len() == 1 {
-                    Some(GotoDefinitionResponse::Scalar(
-                        backend.translate_location(locs[0].clone()),
-                    ))
-                } else {
-                    Some(GotoDefinitionResponse::Array(
-                        locs.into_iter()
-                            .map(|l| backend.translate_location(l))
-                            .collect(),
-                    ))
+                {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                 }
-            })
-        })
+                // For Blade files, check if the cursor is on a `{{`/`}}` echo
+                // delimiter first, so go-to-definition agrees with hover on the
+                // same position (the implicit `e()` call) instead of falling
+                // through to the virtual PHP content, where the position maps
+                // to whichever expression happens to start at that offset.
+                if backend.is_blade_file(uri)
+                    && let Some(delimiter_result) =
+                        backend.blade_echo_delimiter_definition(uri, position)
+                {
+                    return Ok(delimiter_result.map(GotoDefinitionResponse::Scalar));
+                }
+                backend.handle_with_position("goto_definition", uri, position, |content, pos| {
+                    let locs = backend.resolve_definition(uri, content, pos);
+                    if locs.is_empty() {
+                        None
+                    } else if locs.len() == 1 {
+                        Some(GotoDefinitionResponse::Scalar(
+                            backend.translate_location(locs[0].clone()),
+                        ))
+                    } else {
+                        Some(GotoDefinitionResponse::Array(
+                            locs.into_iter()
+                                .map(|l| backend.translate_location(l))
+                                .collect(),
+                        ))
+                    }
+                })
+            },
+        )
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn goto_implementation(
@@ -1225,27 +1256,29 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let backend = self.clone_for_blocking();
-        let uri_clone = uri.clone();
-        run_blocking_cancel_safe("goto_type_definition", move || {
-            backend.handle_with_position(
-                "goto_type_definition",
-                &uri_clone,
-                position,
-                |content, pos| {
-                    backend
-                        .resolve_type_definition(&uri_clone, content, pos)
-                        .map(|locs| {
-                            locs.into_iter()
-                                .map(|l| backend.translate_location(l))
-                                .collect()
-                        })
-                        .and_then(wrap_locations)
-                },
-            )
-        })
+        self.run_position_request(
+            "goto_type_definition",
+            uri,
+            position,
+            |backend, uri, position| {
+                backend.handle_with_position(
+                    "goto_type_definition",
+                    uri,
+                    position,
+                    |content, pos| {
+                        backend
+                            .resolve_type_definition(uri, content, pos)
+                            .map(|locs| {
+                                locs.into_iter()
+                                    .map(|l| backend.translate_location(l))
+                                    .collect()
+                            })
+                            .and_then(wrap_locations)
+                    },
+                )
+            },
+        )
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -1256,31 +1289,28 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let backend = self.clone_for_blocking();
-        let uri_clone = uri.clone();
-        run_blocking_cancel_safe("hover", move || {
+        self.run_position_request("hover", uri, position, |backend, uri, position| {
             // For Blade files, check if the cursor is on a `{{` or `{!!` echo
             // delimiter. If so, return hover for `e()` (escaped echo) or a
             // raw-echo explanation, rather than falling through to the virtual
             // PHP content where the position maps into boilerplate.
-            if backend.is_blade_file(&uri_clone)
-                && let Some(hover) = backend.blade_echo_delimiter_hover(&uri_clone, position)
+            if backend.is_blade_file(uri)
+                && let Some(hover) = backend.blade_echo_delimiter_hover(uri, position)
             {
                 return Ok(Some(hover));
             }
 
-            backend.handle_with_position("hover", &uri_clone, position, |content, pos| {
-                let mut hover = backend.handle_hover(&uri_clone, content, pos)?;
-                if backend.is_blade_file(&uri_clone)
+            backend.handle_with_position("hover", uri, position, |content, pos| {
+                let mut hover = backend.handle_hover(uri, content, pos)?;
+                if backend.is_blade_file(uri)
                     && let Some(range) = &mut hover.range
                 {
-                    *range = backend.translate_blade_range(&uri_clone, *range);
+                    *range = backend.translate_blade_range(uri, *range);
                 }
                 Some(hover)
             })
         })
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -1432,15 +1462,12 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let backend = self.clone_for_blocking();
-        let uri_clone = uri.clone();
-        run_blocking_cancel_safe("signature_help", move || {
-            backend.handle_with_position("signature_help", &uri_clone, position, |content, pos| {
-                backend.handle_signature_help(&uri_clone, content, pos)
+        self.run_position_request("signature_help", uri, position, |backend, uri, position| {
+            backend.handle_with_position("signature_help", uri, position, |content, pos| {
+                backend.handle_signature_help(uri, content, pos)
             })
         })
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn document_highlight(
@@ -1454,31 +1481,27 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let backend = self.clone_for_blocking();
-        let uri_clone = uri.clone();
-        run_blocking_cancel_safe("document_highlight", move || {
-            backend.handle_with_position(
-                "document_highlight",
-                &uri_clone,
-                position,
-                |content, pos| {
+        self.run_position_request(
+            "document_highlight",
+            uri,
+            position,
+            |backend, uri, position| {
+                backend.handle_with_position("document_highlight", uri, position, |content, pos| {
                     backend
-                        .handle_document_highlight(&uri_clone, content, pos)
+                        .handle_document_highlight(uri, content, pos)
                         .map(|highlights| {
                             highlights
                                 .into_iter()
                                 .filter_map(|mut h| {
-                                    h.range =
-                                        backend.try_translate_blade_range(&uri_clone, h.range)?;
+                                    h.range = backend.try_translate_blade_range(uri, h.range)?;
                                     Some(h)
                                 })
                                 .collect()
                         })
-                },
-            )
-        })
+                })
+            },
+        )
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn prepare_rename(
@@ -1488,23 +1511,18 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
-        let backend = self.clone_for_blocking();
-        let uri_clone = uri.clone();
-        run_blocking_cancel_safe("prepare_rename", move || {
-            backend.handle_with_position("prepare_rename", &uri_clone, position, |content, pos| {
+        self.run_position_request("prepare_rename", uri, position, |backend, uri, position| {
+            backend.handle_with_position("prepare_rename", uri, position, |content, pos| {
                 backend
-                    .handle_prepare_rename(&uri_clone, content, pos)
+                    .handle_prepare_rename(uri, content, pos)
                     .and_then(|res| match res {
                         PrepareRenameResponse::Range(r) => backend
-                            .try_translate_blade_range(&uri_clone, r)
+                            .try_translate_blade_range(uri, r)
                             .map(PrepareRenameResponse::Range),
                         PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
-                            backend
-                                .try_translate_blade_range(&uri_clone, range)
-                                .map(|range| PrepareRenameResponse::RangeWithPlaceholder {
-                                    range,
-                                    placeholder,
-                                })
+                            backend.try_translate_blade_range(uri, range).map(|range| {
+                                PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }
+                            })
                         }
                         PrepareRenameResponse::DefaultBehavior { default_behavior } => {
                             Some(PrepareRenameResponse::DefaultBehavior { default_behavior })
@@ -1513,7 +1531,6 @@ impl LanguageServer for Backend {
             })
         })
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -1716,20 +1733,23 @@ impl LanguageServer for Backend {
             .uri
             .to_string();
         let position = params.text_document_position_params.position;
-        let backend = self.clone_for_blocking();
-        let request_uri = uri.clone();
-        run_blocking_cancel_safe("prepare_call_hierarchy", move || {
-            backend.handle_with_position(
-                "prepare_call_hierarchy",
-                &request_uri,
-                position,
-                |content, translated_position| {
-                    backend.prepare_call_hierarchy_impl(&request_uri, content, translated_position)
-                },
-            )
-        })
+
+        self.run_position_request(
+            "prepare_call_hierarchy",
+            uri,
+            position,
+            |backend, uri, position| {
+                backend.handle_with_position(
+                    "prepare_call_hierarchy",
+                    uri,
+                    position,
+                    |content, translated_position| {
+                        backend.prepare_call_hierarchy_impl(uri, content, translated_position)
+                    },
+                )
+            },
+        )
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn incoming_calls(
@@ -1766,27 +1786,35 @@ impl LanguageServer for Backend {
             .uri
             .to_string();
         let position = params.text_document_position_params.position;
-        let backend = self.clone_for_blocking();
-        let u = uri.clone();
-        run_blocking_cancel_safe("prepare_type_hierarchy", move || {
-            backend.handle_with_position("prepare_type_hierarchy", &u, position, |content, pos| {
-                backend
-                    .prepare_type_hierarchy_impl(&u, content, pos)
-                    .map(|items| {
-                        items
-                            .into_iter()
-                            .map(|mut item| {
-                                item.range = backend.translate_blade_range(&u, item.range);
-                                item.selection_range =
-                                    backend.translate_blade_range(&u, item.selection_range);
-                                item
+
+        self.run_position_request(
+            "prepare_type_hierarchy",
+            uri,
+            position,
+            |backend, uri, position| {
+                backend.handle_with_position(
+                    "prepare_type_hierarchy",
+                    uri,
+                    position,
+                    |content, pos| {
+                        backend
+                            .prepare_type_hierarchy_impl(uri, content, pos)
+                            .map(|items| {
+                                items
+                                    .into_iter()
+                                    .map(|mut item| {
+                                        item.range = backend.translate_blade_range(uri, item.range);
+                                        item.selection_range = backend
+                                            .translate_blade_range(uri, item.selection_range);
+                                        item
+                                    })
+                                    .collect()
                             })
-                            .collect()
-                    })
-            })
-        })
+                    },
+                )
+            },
+        )
         .await
-        .unwrap_or(Ok(None))
     }
 
     async fn supertypes(

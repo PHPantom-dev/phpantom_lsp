@@ -212,33 +212,13 @@ impl Backend {
     /// `file_context`.  In multi-namespace files it picks the correct
     /// namespace block for the cursor position.
     pub(crate) fn file_context_at(&self, uri: &str, byte_offset: u32) -> FileContext {
-        let classes = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let use_map = self
-            .file_imports
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let (first_namespace, namespace_spans) = self.namespace_and_spans(uri);
-        let namespace = match namespace_spans.as_ref() {
-            Some(_) => self.namespace_at_offset(uri, byte_offset),
-            None => first_namespace,
-        };
-        let resolved_names = self.resolved_names.read().get(uri).cloned();
-
-        FileContext {
-            classes,
-            use_map,
-            namespace,
-            namespace_spans,
-            resolved_names,
+        let mut ctx = self.file_context(uri);
+        // A file with only one namespace has nothing to pick between, so
+        // the namespace `file_context` already found stands.
+        if ctx.namespace_spans.is_some() {
+            ctx.namespace = self.namespace_at_offset(uri, byte_offset);
         }
+        ctx
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers

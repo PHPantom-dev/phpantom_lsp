@@ -19,7 +19,7 @@ use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{offset_to_position, ranges_overlap};
 use crate::util::{build_fqn, strip_fqn_prefix};
 
-use super::RenameOutcome;
+use super::{RenameOutcome, parse_edit_target_uri};
 
 impl Backend {
     /// Plan a class move without requiring an LSP cursor position.
@@ -215,13 +215,7 @@ impl Backend {
             new_short_name.to_string()
         };
 
-        let mut locations_by_file: HashMap<String, Vec<&Location>> = HashMap::new();
-        for loc in locations {
-            locations_by_file
-                .entry(loc.uri.to_string())
-                .or_default()
-                .push(loc);
-        }
+        let locations_by_file = group_locations_by_file(locations);
 
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
@@ -241,14 +235,8 @@ impl Backend {
                 .cloned()
                 .unwrap_or_default();
 
-            let parsed_uri = match Url::parse(file_uri_str) {
-                Ok(u) => u,
-                Err(e) => {
-                    tracing::warn!(
-                        "rename: dropping edits for file with unparseable URI {file_uri_str:?}: {e}"
-                    );
-                    continue;
-                }
+            let Some(parsed_uri) = parse_edit_target_uri(file_uri_str) else {
+                continue;
             };
 
             let import_info = find_import_for_fqn(&file_use_map, old_fqn_normalized);
@@ -420,13 +408,7 @@ impl Backend {
             return Err(occupant);
         }
 
-        let mut locations_by_file: HashMap<String, Vec<&Location>> = HashMap::new();
-        for loc in locations {
-            locations_by_file
-                .entry(loc.uri.to_string())
-                .or_default()
-                .push(loc);
-        }
+        let locations_by_file = group_locations_by_file(locations);
 
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
@@ -446,14 +428,8 @@ impl Backend {
                 None => continue,
             };
 
-            let parsed_uri = match Url::parse(file_uri_str) {
-                Ok(u) => u,
-                Err(e) => {
-                    tracing::warn!(
-                        "rename: dropping edits for file with unparseable URI {file_uri_str:?}: {e}"
-                    );
-                    continue;
-                }
+            let Some(parsed_uri) = parse_edit_target_uri(file_uri_str) else {
+                continue;
             };
 
             let file_use_map = self
@@ -623,7 +599,7 @@ impl Backend {
                     // one offset land in whichever order the client
                     // applies them.  Writing both as one edit fixes the
                     // order.
-                    let insert_line = find_namespace_insert_line(&file_content);
+                    let insert_line = crate::text_scan::header_insert_line(&file_content);
                     let mut new_text = format!("namespace {};\n\n", ns);
                     for import in &siblings {
                         new_text.push_str(&import.statement);
@@ -1147,6 +1123,17 @@ fn build_sibling_import_edits(content: &str, imports: &[SiblingImport]) -> Vec<T
 
 // ─── Import analysis helpers ────────────────────────────────────────────────
 
+/// Group reference locations by the file they fall in, in the shape
+/// [`build_class_rename_edit`] and [`build_class_move_edit`] both walk
+/// one file at a time in.
+fn group_locations_by_file(locations: &[Location]) -> HashMap<String, Vec<&Location>> {
+    let mut by_file: HashMap<String, Vec<&Location>> = HashMap::new();
+    for loc in locations {
+        by_file.entry(loc.uri.to_string()).or_default().push(loc);
+    }
+    by_file
+}
+
 /// Information about how a class is imported in a file.
 struct ImportInfo {
     /// The alias (short name) used in code.  For `use Ns\Foo;` this is
@@ -1493,29 +1480,6 @@ fn compute_psr4_path(
     }
 
     None
-}
-
-/// Find the line number after `<?php` (and any `declare` statements)
-/// where a `namespace` declaration should be inserted.
-fn find_namespace_insert_line(content: &str) -> u32 {
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("<?php") {
-            return (i + 1) as u32;
-        }
-        if trimmed.starts_with("declare(") || trimmed.starts_with("declare (") {
-            continue;
-        }
-        if !trimmed.is_empty()
-            && !trimmed.starts_with("//")
-            && !trimmed.starts_with("/*")
-            && !trimmed.starts_with("*")
-            && !trimmed.starts_with("<?")
-        {
-            return i as u32;
-        }
-    }
-    1
 }
 
 /// What the source around a `namespace` name turns out to be, once the

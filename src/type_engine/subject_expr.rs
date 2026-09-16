@@ -795,7 +795,7 @@ fn split_last_arrow_raw(subject: &str) -> Option<(&str, &str)> {
 ///
 /// Returns `(call_body, args_text)` where `call_body` is the expression
 /// before `(` and `args_text` is the trimmed content between `(` and `)`.
-fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
     let inner = subject.strip_suffix(')')?;
     let bytes = inner.as_bytes();
     let mut depth: u32 = 0;

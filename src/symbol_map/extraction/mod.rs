@@ -118,7 +118,7 @@ struct ExtractionCtx<'a> {
 mod class_like;
 mod expressions;
 mod keywords;
-mod laravel;
+pub(crate) mod laravel;
 mod phpunit;
 mod statements;
 mod subject_text;

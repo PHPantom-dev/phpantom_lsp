@@ -18,15 +18,15 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{LendsLoaders, Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
-use super::type_errors::{has_strict_types, is_type_compatible};
+use super::helpers::{collect_type_check, find_innermost_enclosing_class};
+use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_RETURN_CODE: &str = "type_mismatch_return";
@@ -164,86 +164,67 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let file_ctx = self.file_context(uri);
-
-        let _parse_guard = with_parse_cache(content);
-
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader(&file_ctx);
-
-        // Walk the AST, find return statements in method/function
-        // bodies, resolve their types, and pair them with the declared
-        // return type.
-        let results: Vec<ResolvedReturn> =
-            with_parsed_program(content, "return_type_diagnostics", |program, _content| {
-                let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
-
-                for stmt in program.statements.iter() {
-                    process_top_level_statement(
-                        stmt,
-                        uri,
-                        content,
-                        &file_ctx,
-                        &class_loader,
-                        &function_loader_cl,
-                        &constant_loader_cl,
-                        self,
-                        &mut resolved_returns,
-                    );
-                }
-
-                resolved_returns
-            });
-
-        // Emit diagnostics for incompatible returns.
-        let strict_types_for_check = with_parsed_program(content, "return_strict", |program, _| {
-            has_strict_types(program)
-        });
-
-        for ret in &results {
-            let range = match self.offset_range_to_lsp_range(uri, content, ret.start, ret.end) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            let message = match &ret.ty {
-                // Bare `return;` in a void function — OK.
-                None if ret.declared_type.is_void() => continue,
-                // Bare `return;` in a non-void function — error.
-                None => format!(
-                    "Function with return type {} must not return without a value",
-                    ret.declared_type,
-                ),
-                // `return $expr;` in a void function — error.
-                Some(_) if ret.declared_type.is_void() => {
-                    "Void function must not return a value".to_string()
-                }
-                // `return $expr;` with a compatible type — OK.
-                Some(ty)
-                    if is_type_compatible(
-                        ty,
-                        &ret.declared_type,
-                        &class_loader,
-                        strict_types_for_check,
-                    ) =>
-                {
-                    continue;
-                }
-                // `return $expr;` with an incompatible type — error.
-                Some(ty) => format!(
-                    "Return type {} is incompatible with declared return type {}",
-                    ty, ret.declared_type,
-                ),
-            };
-
-            out.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                TYPE_MISMATCH_RETURN_CODE,
-                message,
-            ));
-        }
+        collect_type_check(
+            self,
+            uri,
+            content,
+            TYPE_MISMATCH_RETURN_CODE,
+            out,
+            // Walk the AST, find return statements in method/function
+            // bodies, resolve their types, and pair them with the
+            // declared return type.
+            |ctx| {
+                with_parsed_program(content, "return_type_diagnostics", |program, _content| {
+                    let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
+                    for stmt in program.statements.iter() {
+                        process_top_level_statement(
+                            stmt,
+                            uri,
+                            content,
+                            ctx.file_ctx,
+                            ctx.class_loader,
+                            ctx.function_loader,
+                            ctx.constant_loader,
+                            self,
+                            &mut resolved_returns,
+                        );
+                    }
+                    resolved_returns
+                })
+            },
+            |ret, ctx| {
+                let message = match &ret.ty {
+                    // Bare `return;` in a void function — OK.
+                    None if ret.declared_type.is_void() => return None,
+                    // Bare `return;` in a non-void function — error.
+                    None => format!(
+                        "Function with return type {} must not return without a value",
+                        ret.declared_type,
+                    ),
+                    // `return $expr;` in a void function — error.
+                    Some(_) if ret.declared_type.is_void() => {
+                        "Void function must not return a value".to_string()
+                    }
+                    // `return $expr;` with a compatible type — OK.
+                    Some(ty)
+                        if is_type_compatible(
+                            ty,
+                            &ret.declared_type,
+                            &ctx.class_loader,
+                            ctx.strict_types,
+                        ) =>
+                    {
+                        return None;
+                    }
+                    // `return $expr;` with an incompatible type — error.
+                    Some(ty) => format!(
+                        "Return type {} is incompatible with declared return type {}",
+                        ty, ret.declared_type,
+                    ),
+                };
+                Some(((ret.start, ret.end), message))
+            },
+        );
     }
 }
 
@@ -580,14 +561,8 @@ fn process_top_level_statement(
                 backend,
             );
 
-            let config_resolver = |key: &str| backend.resolve_config_type(key);
-            let trans_resolver = |key: &str| backend.resolve_trans_type(key);
-            let loaders = Loaders {
-                function_loader: Some(function_loader),
-                constant_loader: Some(constant_loader),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
+            let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
+            let loaders = owned_loaders.loaders();
 
             for (maybe_expr, start, end, stmt_start) in returns {
                 resolve_return_and_push(
@@ -730,14 +705,8 @@ fn process_class_member(
         backend,
     );
 
-    let config_resolver = |key: &str| backend.resolve_config_type(key);
-    let trans_resolver = |key: &str| backend.resolve_trans_type(key);
-    let loaders = Loaders {
-        function_loader: Some(function_loader),
-        constant_loader: Some(constant_loader),
-        config_resolver: Some(&config_resolver),
-        trans_resolver: Some(&trans_resolver),
-    };
+    let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
+    let loaders = owned_loaders.loaders();
 
     for (maybe_expr, start, end, stmt_start) in returns {
         resolve_return_and_push(

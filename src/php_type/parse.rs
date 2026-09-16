@@ -376,20 +376,7 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
 
         // -- Shape types ------------------------------------------------------
         cst::Type::Shape(s) => {
-            let entries: Vec<ShapeEntry> = s
-                .fields
-                .iter()
-                .map(|field| {
-                    let key = field.key.as_ref().map(|k| shape_key_text(src, &k.key));
-                    let optional = field.is_optional();
-                    let value_type = convert(src, field.value);
-                    ShapeEntry {
-                        key,
-                        value_type,
-                        optional,
-                    }
-                })
-                .collect();
+            let entries = shape_entries(src, s.fields.iter());
 
             match s.kind {
                 cst::ShapeTypeKind::Array
@@ -404,20 +391,7 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         // -- Object type (with optional shape) --------------------------------
         cst::Type::Object(o) => match &o.properties {
             Some(props) => {
-                let entries: Vec<ShapeEntry> = props
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let key = field.key.as_ref().map(|k| shape_key_text(src, &k.key));
-                        let optional = field.is_optional();
-                        let value_type = convert(src, field.value);
-                        ShapeEntry {
-                            key,
-                            value_type,
-                            optional,
-                        }
-                    })
-                    .collect();
+                let entries = shape_entries(src, props.fields.iter());
                 PhpType::object_shape(entries)
             }
             None => PhpType::object(),
@@ -584,27 +558,54 @@ fn convert_keyword_with_optional_generics(
     }
 }
 
+/// Convert the fields of an `array{…}` or `object{…}` shape to
+/// [`ShapeEntry`] values.
+fn shape_entries<'a, 'ast: 'a>(
+    src: &str,
+    fields: impl Iterator<Item = &'a cst::ShapeField<'ast>>,
+) -> Vec<ShapeEntry> {
+    fields
+        .map(|field| ShapeEntry {
+            key: field.key.as_ref().map(|k| shape_key_text(src, &k.key)),
+            optional: field.is_optional(),
+            value_type: convert(src, field.value),
+        })
+        .collect()
+}
+
 /// Recursively flatten a left-leaning binary union tree into a flat `Vec`.
 fn flatten_union(src: &str, ty: &cst::Type<'_>) -> Vec<PhpType> {
-    match ty {
-        cst::Type::Union(u) => {
-            let mut types = flatten_union(src, u.left);
-            types.extend(flatten_union(src, u.right));
-            types
-        }
-        other => vec![convert(src, other)],
-    }
+    flatten_binary(src, ty, |ty| match ty {
+        cst::Type::Union(u) => Some((u.left, u.right)),
+        _ => None,
+    })
 }
 
 /// Recursively flatten a left-leaning binary intersection tree into a flat `Vec`.
 fn flatten_intersection(src: &str, ty: &cst::Type<'_>) -> Vec<PhpType> {
-    match ty {
-        cst::Type::Intersection(i) => {
-            let mut types = flatten_intersection(src, i.left);
-            types.extend(flatten_intersection(src, i.right));
+    flatten_binary(src, ty, |ty| match ty {
+        cst::Type::Intersection(i) => Some((i.left, i.right)),
+        _ => None,
+    })
+}
+
+/// Flatten a left-leaning binary type tree, with `split` naming the two
+/// sides of the node kind being flattened.
+///
+/// Anything `split` does not recognise is a leaf and is converted as it
+/// stands.
+fn flatten_binary<'ast>(
+    src: &str,
+    ty: &cst::Type<'ast>,
+    split: impl Copy + Fn(&cst::Type<'ast>) -> Option<(&'ast cst::Type<'ast>, &'ast cst::Type<'ast>)>,
+) -> Vec<PhpType> {
+    match split(ty) {
+        Some((left, right)) => {
+            let mut types = flatten_binary(src, left, split);
+            types.extend(flatten_binary(src, right, split));
             types
         }
-        other => vec![convert(src, other)],
+        None => vec![convert(src, ty)],
     }
 }
 

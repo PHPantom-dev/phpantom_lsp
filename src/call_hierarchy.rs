@@ -460,6 +460,47 @@ fn declaration_body(symbol_map: &SymbolMap, name_offset: u32, upper: u32) -> Opt
         .min_by_key(|(start, _)| *start)
 }
 
+/// The call-hierarchy item for a declaration, and the body range a walk
+/// for outgoing calls reads.
+///
+/// `name_offset` and `name` place the item's selection range, which is
+/// what an editor highlights; the item's own range runs from there to the
+/// end of the body, so folding the item folds the whole declaration.
+/// `data` is the payload a follow-up incoming/outgoing request hands back,
+/// which is what lets the answer be resolved without re-finding the
+/// declaration.
+fn build_callable(
+    uri: &str,
+    content: &str,
+    (name, name_offset): (&str, u32),
+    kind: LspSymbolKind,
+    detail: Option<String>,
+    data: serde_json::Value,
+    body: Option<(u32, u32)>,
+) -> Option<PhpCallable> {
+    let uri = Url::parse(uri).ok()?;
+    let selection_range = offset_range(content, name_offset, name.len() as u32);
+    let range = Range::new(
+        selection_range.start,
+        body.map_or(selection_range.end, |(_, end)| {
+            offset_to_position(content, end as usize)
+        }),
+    );
+    Some(PhpCallable {
+        item: CallHierarchyItem {
+            name: name.to_string(),
+            kind,
+            tags: None,
+            detail,
+            uri,
+            range,
+            selection_range,
+            data: Some(data),
+        },
+        body,
+    })
+}
+
 fn build_method_callable(
     uri: &str,
     content: &str,
@@ -467,33 +508,21 @@ fn build_method_callable(
     method: &MethodInfo,
     body: Option<(u32, u32)>,
 ) -> Option<PhpCallable> {
-    let uri = Url::parse(uri).ok()?;
-    let selection_range = offset_range(content, method.name_offset, method.name.len() as u32);
-    let range = Range::new(
-        selection_range.start,
-        body.map_or(selection_range.end, |(_, end)| {
-            offset_to_position(content, end as usize)
-        }),
-    );
     let class_fqn = class.fqn().to_string();
-    Some(PhpCallable {
-        item: CallHierarchyItem {
-            name: method.name.to_string(),
-            kind: LspSymbolKind::METHOD,
-            tags: None,
-            detail: Some(class_fqn.clone()),
-            uri,
-            range,
-            selection_range,
-            data: Some(serde_json::json!({
-                "kind": "php",
-                "owner": class_fqn,
-                "method": method.name.as_str(),
-                "offset": method.name_offset,
-            })),
-        },
+    build_callable(
+        uri,
+        content,
+        (&method.name, method.name_offset),
+        LspSymbolKind::METHOD,
+        Some(class_fqn.clone()),
+        serde_json::json!({
+            "kind": "php",
+            "owner": class_fqn,
+            "method": method.name.as_str(),
+            "offset": method.name_offset,
+        }),
         body,
-    })
+    )
 }
 
 fn build_function_callable(
@@ -503,31 +532,19 @@ fn build_function_callable(
     function: &FunctionInfo,
     body: Option<(u32, u32)>,
 ) -> Option<PhpCallable> {
-    let uri = Url::parse(uri).ok()?;
-    let selection_range = offset_range(content, function.name_offset, function.name.len() as u32);
-    let range = Range::new(
-        selection_range.start,
-        body.map_or(selection_range.end, |(_, end)| {
-            offset_to_position(content, end as usize)
+    build_callable(
+        uri,
+        content,
+        (&function.name, function.name_offset),
+        LspSymbolKind::FUNCTION,
+        function.namespace.clone(),
+        serde_json::json!({
+            "kind": "php",
+            "function": fqn,
+            "offset": function.name_offset,
         }),
-    );
-    Some(PhpCallable {
-        item: CallHierarchyItem {
-            name: function.name.to_string(),
-            kind: LspSymbolKind::FUNCTION,
-            tags: None,
-            detail: function.namespace.clone(),
-            uri,
-            range,
-            selection_range,
-            data: Some(serde_json::json!({
-                "kind": "php",
-                "function": fqn,
-                "offset": function.name_offset,
-            })),
-        },
         body,
-    })
+    )
 }
 
 fn offset_range(content: &str, start: u32, len: u32) -> Range {

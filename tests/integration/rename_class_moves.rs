@@ -932,3 +932,38 @@ async fn a_namespace_move_rewrites_an_import_inside_a_php_block() {
         "the alias names the same class and must be left alone:\n{result}"
     );
 }
+
+/// PHP requires `declare(strict_types=1)` to be the file's very first
+/// statement, so a `namespace` written above it is a fatal error rather
+/// than a formatting quibble.
+#[tokio::test]
+async fn moving_a_class_into_a_namespace_writes_it_after_a_declare() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "declare(strict_types=1);\n",
+        "\n",
+        "class Foo {}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 4, 6, "App\\Foo")
+        .await
+        .expect("expected an edit");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    let declare_at = result
+        .find("declare(strict_types=1);")
+        .expect("the declare has to survive the move");
+    let namespace_at = result
+        .find("namespace App;")
+        .expect("the move has to declare the namespace it moved into");
+    assert!(
+        declare_at < namespace_at,
+        "the namespace must be written below the declare:\n{result}"
+    );
+}

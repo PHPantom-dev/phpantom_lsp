@@ -56,10 +56,7 @@ pub(crate) fn apply_in_array_narrowing<'b>(
     ctx: &ForwardWalkCtx<'_>,
     inverted: bool,
 ) {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
 
     // Unwrap parentheses and detect negation.
     let (inner, negated) = narrowing::unwrap_condition_negation(condition);
@@ -229,10 +226,7 @@ pub(crate) fn resolve_in_array_element_type_fw(
 
     // For non-variable expressions (method calls, property access, etc.),
     // try resolving via the expression resolution pipeline.
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_ctx = build_var_ctx("", ctx, &scope_resolver);
     let raw_type =
         crate::type_engine::variable::resolution::resolve_arg_raw_type(haystack_expr, &var_ctx);

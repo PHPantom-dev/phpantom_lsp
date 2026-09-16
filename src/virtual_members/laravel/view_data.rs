@@ -20,9 +20,9 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::const_eval::{Scope, const_string};
-use super::provider_resources::is_app_container_expr;
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
+use crate::symbol_map::extraction::laravel::is_laravel_container_expr;
 
 /// A variable a service provider puts into template scope: its name, and
 /// where the expression that gives it a value sits.
@@ -161,7 +161,7 @@ fn is_view_facade(class: &Expression<'_>) -> bool {
 fn is_view_factory_expr(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::ArrayAccess(access) => {
-            is_app_container_expr(access.array) && is_view_key(access.index)
+            is_laravel_container_expr(access.array) && is_view_key(access.index)
         }
         Expression::Call(Call::Function(fc)) => {
             let Expression::Identifier(ident) = fc.function else {
@@ -181,7 +181,7 @@ fn is_view_factory_expr(expr: &Expression<'_>) -> bool {
                 return false;
             };
             method.value.eq_ignore_ascii_case(b"make")
-                && is_app_container_expr(mc.object)
+                && is_laravel_container_expr(mc.object)
                 && mc
                     .argument_list
                     .arguments

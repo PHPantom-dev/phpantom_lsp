@@ -14,8 +14,8 @@ use crate::config::Config;
 use crate::types::ClassInfo;
 
 use super::output::{
-    print_error_box, print_file_table, print_github_annotations, print_json_output,
-    print_success_box,
+    dispatch_report, print_error_box, print_file_table, print_github_annotations,
+    print_json_output, print_success_box,
 };
 use super::{FileDiagnostic, OutputFormat};
 
@@ -157,35 +157,28 @@ pub(super) fn report(
     use_colour: bool,
 ) -> i32 {
     if diagnostics.is_empty() {
-        match output_format {
-            OutputFormat::Table => print_success_box(" [OK] No errors ", use_colour),
-            OutputFormat::Github => {} // no output on success
-            OutputFormat::Json => print_json_output(&[], 0),
-        }
+        dispatch_report(
+            output_format,
+            || print_success_box(" [OK] No errors ", use_colour),
+            || {}, // no output on success
+            || print_json_output(&[], 0),
+        );
         return 0;
     }
 
     let total_errors: usize = diagnostics.iter().map(|(_, diags)| diags.len()).sum();
 
-    match output_format {
-        OutputFormat::Table => {
-            // When running in GitHub Actions, also emit annotations
-            // alongside the table (same behaviour as PHPStan).
-            if std::env::var("GITHUB_ACTIONS").is_ok() {
-                print_github_annotations(diagnostics);
-            }
+    dispatch_report(
+        output_format,
+        || {
             for (path, file_diagnostics) in diagnostics {
                 print_file_table(path, file_diagnostics, use_colour);
             }
             print_error_box(total_errors, file_count, use_colour);
-        }
-        OutputFormat::Github => {
-            print_github_annotations(diagnostics);
-        }
-        OutputFormat::Json => {
-            print_json_output(diagnostics, total_errors);
-        }
-    }
+        },
+        || print_github_annotations(diagnostics),
+        || print_json_output(diagnostics, total_errors),
+    );
 
     1
 }

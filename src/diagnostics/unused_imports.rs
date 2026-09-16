@@ -17,7 +17,7 @@ use crate::symbol_map::SymbolKind;
 
 use super::helpers::{
     ByteRange, compute_use_line_ranges, compute_use_statement_spans, find_use_statement,
-    is_offset_in_ranges,
+    is_offset_in_ranges, make_tagged_diagnostic,
 };
 
 impl Backend {
@@ -177,17 +177,13 @@ impl Backend {
             if let Some(range) =
                 find_use_statement_range(self, uri, content, alias, fqn, &use_statement_spans)
             {
-                out.push(Diagnostic {
+                out.push(make_tagged_diagnostic(
                     range,
-                    severity: Some(DiagnosticSeverity::HINT),
-                    code: Some(NumberOrString::String("unused_import".to_string())),
-                    code_description: None,
-                    source: Some("phpantom".to_string()),
-                    message: format!("Unused import '{}'", fqn),
-                    related_information: None,
-                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                    data: None,
-                });
+                    DiagnosticSeverity::HINT,
+                    "unused_import",
+                    format!("Unused import '{}'", fqn),
+                    Some(DiagnosticTag::UNNECESSARY),
+                ));
             }
         }
     }

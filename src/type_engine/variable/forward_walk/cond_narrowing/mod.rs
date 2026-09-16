@@ -6,6 +6,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::parser::unwrap_parens;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
@@ -75,10 +76,7 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
         return;
     }
 
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_ctx = build_var_ctx(subject_var, ctx, &scope_resolver);
     let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
     if union.is_empty() {
@@ -294,10 +292,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
     // narrowing functions can find and narrow them.
     seed_property_keys_into_scope(condition, scope, ctx);
 
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
     // where `$foobar` was never assigned).  After the guard clause,

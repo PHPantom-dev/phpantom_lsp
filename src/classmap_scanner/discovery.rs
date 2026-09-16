@@ -568,35 +568,46 @@ pub fn scan_workspace_fallback(
     scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths)
 }
 
-/// Scan a batch of files for class names in parallel and return a classmap.
+/// Scan `files` in parallel, calling `emit` on each to append the
+/// `(fqcn, path)` pairs it declares, and merge the result into one
+/// classmap where the first file to declare a name wins.
 ///
-/// Uses [`std::thread::scope`] with one thread per CPU core.  Small
-/// batches (≤ 4 files) are processed sequentially to avoid thread
-/// overhead.
-fn scan_files_parallel_classes(
-    files: &[PathBuf],
+/// Small batches (≤ 4 files) run sequentially: splitting them over
+/// threads costs more than the scan itself. `name` names the scan in the
+/// log line a panicking worker leaves behind.
+fn scan_files_parallel<T: Sync>(
+    files: &[T],
     progress: Option<&ScanProgress>,
+    name: &'static str,
+    emit: impl Fn(&T, &mut Vec<(String, PathBuf)>) + Sync,
 ) -> HashMap<String, PathBuf> {
     if files.is_empty() {
         return HashMap::new();
     }
 
-    // Small batches: sequential
-    if files.len() <= 4 {
-        let mut classmap = HashMap::new();
-        for path in files {
-            progress_add_done(progress);
-            if let Ok(content) = read_for_scan(path) {
-                for fqcn in scan_content(&content) {
-                    classmap.entry(fqcn).or_insert_with(|| path.clone());
-                }
+    let merge = |batches: Vec<Vec<(String, PathBuf)>>| {
+        let total: usize = batches.iter().map(Vec::len).sum();
+        let mut classmap = HashMap::with_capacity(total);
+        for batch in batches {
+            for (fqcn, path) in batch {
+                classmap.entry(fqcn).or_insert(path);
             }
         }
-        return classmap;
+        classmap
+    };
+
+    if files.len() <= 4 {
+        let mut local = Vec::new();
+        for file in files {
+            progress_add_done(progress);
+            emit(file, &mut local);
+        }
+        return merge(vec![local]);
     }
 
     let n_threads = thread_count().min(files.len());
     let chunk_size = files.len().div_ceil(n_threads);
+    let emit = &emit;
 
     let results: Vec<Vec<(String, PathBuf)>> = std::thread::scope(|s| {
         let handles: Vec<_> = files
@@ -604,13 +615,9 @@ fn scan_files_parallel_classes(
             .map(|chunk| {
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
-                    for path in chunk {
+                    for file in chunk {
                         progress_add_done(progress);
-                        if let Ok(content) = read_for_scan(path) {
-                            for fqcn in scan_content(&content) {
-                                local.push((fqcn, path.clone()));
-                            }
-                        }
+                        emit(file, &mut local);
                     }
                     local
                 })
@@ -620,25 +627,36 @@ fn scan_files_parallel_classes(
             .into_iter()
             .map(|h| {
                 h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in scan_files_parallel_classes");
+                    tracing::error!("PHPantom: thread panic in {name}");
                     Vec::new()
                 })
             })
             .collect()
     });
 
-    let total: usize = results.iter().map(|v| v.len()).sum();
-    let mut classmap = HashMap::with_capacity(total);
-    for batch in results {
-        for (fqcn, path) in batch {
-            classmap.entry(fqcn).or_insert(path);
-        }
-    }
-    classmap
+    merge(results)
 }
 
-/// Scan a batch of files for class names with PSR-4 filtering in
-/// parallel.
+/// Scan a batch of files for the class names they declare.
+fn scan_files_parallel_classes(
+    files: &[PathBuf],
+    progress: Option<&ScanProgress>,
+) -> HashMap<String, PathBuf> {
+    scan_files_parallel(
+        files,
+        progress,
+        "scan_files_parallel_classes",
+        |path, out| {
+            if let Ok(content) = read_for_scan(path) {
+                for fqcn in scan_content(&content) {
+                    out.push((fqcn, path.clone()));
+                }
+            }
+        },
+    )
+}
+
+/// Scan a batch of files for class names with PSR-4 filtering.
 ///
 /// Each entry is `(file_path, expected_fqn)`.  Only classes whose FQN
 /// matches the expected FQN are included.
@@ -646,68 +664,72 @@ fn scan_files_parallel_psr4(
     files: &[(PathBuf, String)],
     progress: Option<&ScanProgress>,
 ) -> HashMap<String, PathBuf> {
-    if files.is_empty() {
-        return HashMap::new();
-    }
-
-    // Small batches: sequential
-    if files.len() <= 4 {
-        let mut classmap = HashMap::new();
-        for (path, expected_fqn) in files {
-            progress_add_done(progress);
+    scan_files_parallel(
+        files,
+        progress,
+        "scan_files_parallel_psr4",
+        |(path, expected_fqn), out| {
             if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     if &fqcn == expected_fqn {
-                        classmap.entry(fqcn).or_insert_with(|| path.clone());
+                        out.push((fqcn, path.clone()));
                     }
                 }
             }
-        }
-        return classmap;
-    }
+        },
+    )
+}
 
-    let n_threads = thread_count().min(files.len());
-    let chunk_size = files.len().div_ceil(n_threads);
-
-    let results: Vec<Vec<(String, PathBuf)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                s.spawn(move || {
-                    let mut local: Vec<(String, PathBuf)> = Vec::new();
-                    for (path, expected_fqn) in chunk {
-                        progress_add_done(progress);
-                        if let Ok(content) = read_for_scan(path) {
-                            for fqcn in scan_content(&content) {
-                                if &fqcn == expected_fqn {
-                                    local.push((fqcn, path.clone()));
-                                }
-                            }
-                        }
-                    }
-                    local
-                })
+/// Merge one scanned file's symbols into `result`.
+///
+/// The first file to declare a name wins, except that a later file whose
+/// stem matches the class's short name displaces one whose stem does not:
+/// a package with conditional loading declares the same trait in
+/// `ArraySubsetAsserts.php` and `ArraySubsetAssertsEmpty.php`, and PSR-4
+/// says the first of those is the real one. The origin tier follows
+/// whichever file the classmap ends up pointing at.
+fn merge_scanned_file(
+    result: &mut WorkspaceScanResult,
+    scan: ScanResult,
+    path: &Path,
+    origin: crate::ClassCompletionOrigin,
+) {
+    for fqcn in scan.classes {
+        let class_short_name = crate::util::short_name(&fqcn).to_owned();
+        let mut origin_wins = false;
+        result
+            .classmap
+            .entry(fqcn.clone())
+            .and_modify(|existing| {
+                let existing_stem = existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if existing_stem != class_short_name && new_stem == class_short_name {
+                    *existing = path.to_path_buf();
+                    origin_wins = true;
+                }
             })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in scan_files_parallel_psr4");
-                    Vec::new()
-                })
-            })
-            .collect()
-    });
-
-    let total: usize = results.iter().map(|v| v.len()).sum();
-    let mut classmap = HashMap::with_capacity(total);
-    for batch in results {
-        for (fqcn, path) in batch {
-            classmap.entry(fqcn).or_insert(path);
+            .or_insert_with(|| {
+                origin_wins = true;
+                path.to_path_buf()
+            });
+        if origin_wins {
+            result.class_origins.insert(fqcn, origin);
         }
     }
-    classmap
+    for fqn in scan.functions {
+        result
+            .function_index
+            .entry(fqn.clone())
+            .or_insert_with(|| path.to_path_buf());
+        result.function_origins.entry(fqn).or_insert(origin);
+    }
+    for name in scan.constants {
+        result
+            .constant_index
+            .entry(name.clone())
+            .or_insert_with(|| path.to_path_buf());
+        result.constant_origins.entry(name).or_insert(origin);
+    }
 }
 
 /// Scan a batch of files for all symbols (classes, functions, constants)
@@ -732,44 +754,7 @@ fn scan_files_parallel_full(
         for (path, origin) in files {
             progress_add_done(progress);
             if let Ok(content) = read_for_scan(path) {
-                let scan = super::find_symbols(&content);
-                for fqcn in scan.classes {
-                    let class_short_name = fqcn_short_name(&fqcn).to_owned();
-                    let mut origin_wins = false;
-                    result
-                        .classmap
-                        .entry(fqcn.clone())
-                        .and_modify(|existing| {
-                            let existing_stem =
-                                existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                            let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                            if existing_stem != class_short_name && new_stem == class_short_name {
-                                *existing = path.clone();
-                                origin_wins = true;
-                            }
-                        })
-                        .or_insert_with(|| {
-                            origin_wins = true;
-                            path.clone()
-                        });
-                    if origin_wins {
-                        result.class_origins.insert(fqcn, *origin);
-                    }
-                }
-                for fqn in scan.functions {
-                    result
-                        .function_index
-                        .entry(fqn.clone())
-                        .or_insert_with(|| path.clone());
-                    result.function_origins.entry(fqn).or_insert(*origin);
-                }
-                for name in scan.constants {
-                    result
-                        .constant_index
-                        .entry(name.clone())
-                        .or_insert_with(|| path.clone());
-                    result.constant_origins.entry(name).or_insert(*origin);
-                }
+                merge_scanned_file(&mut result, super::find_symbols(&content), path, *origin);
             }
         }
         return result;
@@ -833,49 +818,7 @@ fn scan_files_parallel_full(
     let mut result = WorkspaceScanResult::default();
     for (_, batch) in results {
         for (scan, path, origin) in batch {
-            for fqcn in scan.classes {
-                let class_short_name = fqcn_short_name(&fqcn).to_owned();
-                let mut origin_wins = false;
-                result
-                    .classmap
-                    .entry(fqcn.clone())
-                    .and_modify(|existing| {
-                        // When two files declare the same FQN, prefer the one
-                        // whose filename matches the class's short name (PSR-4
-                        // convention). This handles packages with conditional
-                        // loading (e.g. ArraySubsetAsserts.php vs
-                        // ArraySubsetAssertsEmpty.php both defining the same
-                        // trait name).
-                        let existing_stem =
-                            existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                        let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                        if existing_stem != class_short_name && new_stem == class_short_name {
-                            *existing = path.clone();
-                            origin_wins = true;
-                        }
-                    })
-                    .or_insert_with(|| {
-                        origin_wins = true;
-                        path.clone()
-                    });
-                if origin_wins {
-                    result.class_origins.insert(fqcn, origin);
-                }
-            }
-            for fqn in scan.functions {
-                result
-                    .function_index
-                    .entry(fqn.clone())
-                    .or_insert_with(|| path.clone());
-                result.function_origins.entry(fqn).or_insert(origin);
-            }
-            for name in scan.constants {
-                result
-                    .constant_index
-                    .entry(name.clone())
-                    .or_insert_with(|| path.clone());
-                result.constant_origins.entry(name).or_insert(origin);
-            }
+            merge_scanned_file(&mut result, scan, &path, origin);
         }
     }
     result
@@ -1003,14 +946,6 @@ fn is_drupal_php_file(path: &Path) -> bool {
         path.extension().and_then(|e| e.to_str()),
         Some("php" | "module" | "install" | "theme" | "profile" | "inc" | "engine")
     )
-}
-
-/// Extract the short (unqualified) class name from a fully-qualified name.
-///
-/// For example, `"DMS\\PHPUnitExtensions\\ArraySubset\\ArraySubsetAsserts"`
-/// yields `"ArraySubsetAsserts"`.
-fn fqcn_short_name(fqcn: &str) -> &str {
-    fqcn.rsplit('\\').next().unwrap_or(fqcn)
 }
 
 /// Extract string values from a JSON value that is either a single

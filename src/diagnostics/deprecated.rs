@@ -31,7 +31,7 @@ use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
 use super::helpers::{
     FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
-    resolve_to_fqn,
+    make_tagged_diagnostic, resolve_to_fqn,
 };
 use super::subject_cache::SubjectCacheKey;
 
@@ -432,17 +432,13 @@ fn deprecated_diagnostic(
         format!("'{}' is deprecated: {}", display, full_message)
     };
 
-    Diagnostic {
+    make_tagged_diagnostic(
         range,
-        severity: Some(DiagnosticSeverity::HINT),
-        code: Some(NumberOrString::String("deprecated_usage".to_string())),
-        code_description: None,
-        source: Some("phpantom".to_string()),
+        DiagnosticSeverity::HINT,
+        "deprecated_usage",
         message,
-        related_information: None,
-        tags: Some(vec![DiagnosticTag::DEPRECATED]),
-        data: None,
-    }
+        Some(DiagnosticTag::DEPRECATED),
+    )
 }
 
 /// Whether `offset` sits inside a scope that PHPStan's own deprecation

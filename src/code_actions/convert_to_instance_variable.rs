@@ -472,37 +472,17 @@ impl Backend {
 
         // 2. Replace each occurrence of $varname with the instance/static access.
         for (offset, _kind) in &occurrences {
-            let start = *offset as usize;
-            let end = start + var_name.len();
-
-            if end > content.len() {
-                continue;
+            if let Some(edit) = crate::code_actions::occurrence_replacement_edit(
+                content,
+                *offset as usize,
+                &var_name,
+                &replacement,
+            ) {
+                edits.push(edit);
             }
-
-            // Verify the text at this offset matches.
-            if content[start..end] != *var_name {
-                continue;
-            }
-
-            let start_pos = offset_to_position(content, start);
-            let end_pos = offset_to_position(content, end);
-            edits.push(TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: replacement.clone(),
-            });
         }
 
-        // Sort edits by position.
-        edits.sort_by(|a, b| {
-            a.range
-                .start
-                .line
-                .cmp(&b.range.start.line)
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        crate::code_actions::sort_edits_by_position(&mut edits);
 
         Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }

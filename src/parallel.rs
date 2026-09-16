@@ -22,12 +22,34 @@ where
     R: Send,
     F: Fn(usize, usize) -> Option<R> + Sync,
 {
+    map_indexed_with_threads(thread_name, count, None, work)
+}
+
+/// [`map_indexed`], with the pool sized by the caller.
+///
+/// `threads` overrides the one-worker-per-core default, for a command
+/// that takes the count from its own options (`analyze --threads`). It
+/// is still capped at `count`, for the reason [`map_indexed`] gives.
+pub(crate) fn map_indexed_with_threads<R, F>(
+    thread_name: &'static str,
+    count: usize,
+    threads: Option<usize>,
+    work: F,
+) -> Vec<(usize, R)>
+where
+    R: Send,
+    F: Fn(usize, usize) -> Option<R> + Sync,
+{
     if count == 0 {
         return Vec::new();
     }
-    let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
+    let n_threads = threads
+        .filter(|n| *n > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        })
         .min(count);
     let next_idx = AtomicUsize::new(0);
     let work = &work;

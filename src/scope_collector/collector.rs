@@ -6,7 +6,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
-use crate::type_engine::variable::forward_walk::unwrap_parens;
+use crate::parser::unwrap_parens;
 
 use super::scope_map::*;
 

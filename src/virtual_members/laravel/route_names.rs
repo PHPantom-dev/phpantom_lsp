@@ -650,15 +650,7 @@ pub(super) fn for_each_nested_statement(stmt: &Statement<'_>, f: &mut dyn FnMut(
     match stmt {
         Statement::Namespace(ns) => visit(ns.statements().as_slice()),
         Statement::Block(b) => visit(b.statements.as_slice()),
-        Statement::If(if_stmt) => {
-            visit(if_stmt.body.statements());
-            for statements in if_stmt.body.else_if_statements() {
-                visit(statements);
-            }
-            if let Some(statements) = if_stmt.body.else_statements() {
-                visit(statements);
-            }
-        }
+        Statement::If(if_stmt) => crate::parser::for_each_if_branch(if_stmt, visit),
         Statement::While(w) => visit(w.body.statements()),
         Statement::DoWhile(dw) => f(dw.statement),
         Statement::For(fs) => visit(fs.body.statements()),

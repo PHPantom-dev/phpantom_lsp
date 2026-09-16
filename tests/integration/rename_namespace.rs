@@ -167,6 +167,50 @@ async fn rename_namespace_updates_use_statements_cross_file() {
     );
 }
 
+/// PHP is not sensitive to whitespace between tokens outside of strings,
+/// so a plain (brace-less) `use` import can legally wrap its FQN across
+/// several lines. The statement has to be read as a whole, or the import
+/// is silently left stale after the move.
+#[tokio::test]
+async fn rename_namespace_updates_a_plain_use_statement_wrapped_across_lines() {
+    let backend = create_test_backend();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\\n",
+        "    PaymentService;\n",
+        "function demo(PaymentService $p): void {}\n",
+    );
+
+    open_php(&backend, &uri_a, text_a).await;
+    open_php(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    assert!(
+        !edits_b.is_empty(),
+        "Expected the wrapped use statement to be edited"
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("use App\\Handlers\\\n    PaymentService;"),
+        "Wrapped use statement should be updated: {}",
+        result_b
+    );
+}
+
 #[tokio::test]
 async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
     use std::path::PathBuf;

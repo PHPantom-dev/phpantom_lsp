@@ -16,6 +16,46 @@ use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
 use crate::util::build_fqn;
 
+/// What one file needs to turn a class-reference span into a
+/// fully-qualified name.
+///
+/// The `use` map is loaded on the first span that needs it: most spans
+/// are answered by the name resolver alone, and most files carry no span
+/// the search is interested in at all.
+struct SpanFqnResolver<'a> {
+    backend: &'a Backend,
+    file_uri: &'a str,
+    namespace: &'a Option<String>,
+    resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
+    use_map: std::cell::OnceCell<std::collections::HashMap<String, String>>,
+}
+
+impl SpanFqnResolver<'_> {
+    /// The fully-qualified name the span at `span_start` refers to.
+    ///
+    /// A name written fully qualified already is one; otherwise the name
+    /// resolver's answer for that offset wins, and failing that (a
+    /// docblock-sourced reference, which the resolver does not track) the
+    /// file's `use` map and namespace decide.
+    fn fqn(&self, name: &str, is_fqn: bool, span_start: u32) -> String {
+        if is_fqn {
+            return name.to_string();
+        }
+        if let Some(fqn) = self.resolved_names.and_then(|rn| rn.get(span_start)) {
+            return fqn.to_string();
+        }
+        let use_map = self.use_map.get_or_init(|| {
+            self.backend
+                .file_imports
+                .read()
+                .get(self.file_uri)
+                .cloned()
+                .unwrap_or_default()
+        });
+        Backend::resolve_to_fqn(name, use_map, self.namespace)
+    }
+}
+
 impl Backend {
     /// Find all references to a class/interface/trait/enum across all files.
     ///
@@ -44,7 +84,13 @@ impl Backend {
             // mago-names (e.g. docblock-sourced references).
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
             let file_namespace = self.first_file_namespace(file_uri);
-            let file_use_map = std::cell::OnceCell::new();
+            let fqn_resolver = SpanFqnResolver {
+                backend: self,
+                file_uri,
+                namespace: &file_namespace,
+                resolved_names: resolved_names.as_deref(),
+                use_map: std::cell::OnceCell::new(),
+            };
 
             // First pass: resolved-name check to avoid unnecessary content work.
             // Aliased imports (`use Foo as Bar; new Bar`) must still reach the
@@ -54,20 +100,7 @@ impl Backend {
                     if crate::util::short_name(name).eq_ignore_ascii_case(target_short) {
                         true
                     } else {
-                        let resolved = if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn.to_string()
-                        } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
+                        let resolved = fqn_resolver.fqn(name, false, span.start);
                         class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                     }
                 }
@@ -93,22 +126,7 @@ impl Backend {
             for span in &symbol_map.spans {
                 let matched = match &span.kind {
                     SymbolKind::ClassReference { name, is_fqn, .. } => {
-                        let resolved = if *is_fqn {
-                            name.to_string()
-                        } else if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn.to_string()
-                        } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
+                        let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
                         class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                     }
                     SymbolKind::ClassDeclaration { name } if include_declaration => {
@@ -152,15 +170,7 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
-
-        locations.dedup();
+        super::sort_locations_for_references(&mut locations);
         locations
     }
 
@@ -216,7 +226,13 @@ impl Backend {
             self.request_scan_file_done();
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
             let file_namespace = self.first_file_namespace(file_uri);
-            let file_use_map = std::cell::OnceCell::new();
+            let fqn_resolver = SpanFqnResolver {
+                backend: self,
+                file_uri,
+                namespace: &file_namespace,
+                resolved_names: resolved_names.as_deref(),
+                use_map: std::cell::OnceCell::new(),
+            };
             let file_ctx = std::cell::OnceCell::new();
 
             let Some(parsed_uri) = Url::parse(file_uri).ok() else {
@@ -236,23 +252,8 @@ impl Backend {
                         is_fqn,
                         context: ClassRefContext::New | ClassRefContext::Attribute,
                     } => {
-                        let resolved = if *is_fqn {
-                            name
-                        } else if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn
-                        } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            &Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
-                        scoped.contains(&fold_class_fqn(resolved))
+                        let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
+                        scoped.contains(&fold_class_fqn(&resolved))
                     }
                     // `new self()` / `new static()` / `new parent()` carry
                     // `SelfStaticParent` spans rather than `ClassReference`,
@@ -356,14 +357,7 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
-        locations.dedup();
+        super::sort_locations_for_references(&mut locations);
         locations
     }
 

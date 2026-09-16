@@ -31,16 +31,16 @@
 //! rules use a `phpstan.` prefix (`phpstan.return.unusedType`). PHPStan
 //! rules are only available when `--with-phpstan` is passed.
 
-use std::collections::HashSet;
-use std::fmt::Write as _;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
+use serde::Serialize;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::analyse::{
-    Colour, OpenedProject, OutputFormat, TableRow, github_annotation, note_plain_php_project,
-    open_project, print_box, print_success_box, print_table, progress_bar,
+    Colour, OpenedProject, OutputFormat, TableRow, dispatch_report, github_annotation,
+    note_plain_php_project, open_project, print_box, print_success_box, print_table, progress_bar,
 };
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
@@ -334,35 +334,28 @@ pub async fn run(options: FixOptions) -> i32 {
     sorted_results.sort_by(|a, b| a.display_path.cmp(&b.display_path));
 
     if sorted_results.is_empty() {
-        match output_format {
-            OutputFormat::Table => print_success_box(" [OK] No fixable issues found ", use_colour),
-            OutputFormat::Github => {} // no output on success
-            OutputFormat::Json => print_fix_json(&[], 0, dry_run),
-        }
+        dispatch_report(
+            output_format,
+            || print_success_box(" [OK] No fixable issues found ", use_colour),
+            || {}, // no output on success
+            || print_fix_json(&[], 0, dry_run),
+        );
         return 0;
     }
 
     let total_fixes: usize = sorted_results.iter().map(|r| r.fixes.len()).sum();
     let files_changed = sorted_results.len();
 
-    match output_format {
-        OutputFormat::Table => {
-            // When running in GitHub Actions, also emit annotations
-            // alongside the table (same behaviour as PHPStan).
-            if std::env::var("GITHUB_ACTIONS").is_ok() {
-                print_fix_github_annotations(&sorted_results);
-            }
+    dispatch_report(
+        output_format,
+        || {
             for result in &sorted_results {
                 print_fix_table(&result.display_path, &result.fixes, use_colour);
             }
-        }
-        OutputFormat::Github => {
-            print_fix_github_annotations(&sorted_results);
-        }
-        OutputFormat::Json => {
-            print_fix_json(&sorted_results, total_fixes, dry_run);
-        }
-    }
+        },
+        || print_fix_github_annotations(&sorted_results),
+        || print_fix_json(&sorted_results, total_fixes, dry_run),
+    );
 
     if dry_run {
         if output_format == OutputFormat::Table {
@@ -448,6 +441,35 @@ fn print_fix_github_annotations(results: &[FileFixResult]) {
     }
 }
 
+/// One entry of the `fix` report's `"files"` object.
+#[derive(Serialize)]
+struct FixFileEntry<'a> {
+    fixes: usize,
+    changes: Vec<FixChange<'a>>,
+}
+
+/// One applied fix inside a [`FixFileEntry`].
+#[derive(Serialize)]
+struct FixChange<'a> {
+    line: u32,
+    rule: &'a str,
+    description: &'a str,
+}
+
+/// The whole `fix` report; see [`print_fix_json`].
+#[derive(Serialize)]
+struct FixReport<'a> {
+    totals: FixTotals,
+    files: BTreeMap<&'a str, FixFileEntry<'a>>,
+}
+
+/// The `"totals"` object of the `fix` report.
+#[derive(Serialize)]
+struct FixTotals {
+    fixes: usize,
+    dry_run: bool,
+}
+
 /// Print fix results as a single JSON object.
 ///
 /// ```json
@@ -464,48 +486,38 @@ fn print_fix_github_annotations(results: &[FileFixResult]) {
 /// }
 /// ```
 fn print_fix_json(results: &[FileFixResult], total_fixes: usize, dry_run: bool) {
-    let mut out = String::from("{\n");
-    let _ = writeln!(
-        out,
-        "  \"totals\": {{ \"fixes\": {}, \"dry_run\": {} }},",
-        total_fixes, dry_run
-    );
+    println!("{}", fix_json_body(results, total_fixes, dry_run));
+}
 
-    if results.is_empty() {
-        out.push_str("  \"files\": {}\n");
-    } else {
-        out.push_str("  \"files\": {\n");
-        for (i, result) in results.iter().enumerate() {
-            let _ = write!(
-                out,
-                "    {}: {{\n      \"fixes\": {},\n      \"changes\": [\n",
-                crate::analyse::json_escape(&result.display_path),
-                result.fixes.len()
-            );
-            for (j, fix) in result.fixes.iter().enumerate() {
-                let _ = write!(
-                    out,
-                    "        {{ \"line\": {}, \"rule\": {}, \"description\": {} }}",
-                    fix.line,
-                    crate::analyse::json_escape(&fix.rule),
-                    crate::analyse::json_escape(&fix.description),
-                );
-                if j + 1 < result.fixes.len() {
-                    out.push(',');
-                }
-                out.push('\n');
-            }
-            out.push_str("      ]\n    }");
-            if i + 1 < results.len() {
-                out.push(',');
-            }
-            out.push('\n');
-        }
-        out.push_str("  }\n");
-    }
-
-    out.push('}');
-    println!("{out}");
+/// Build the `fix` JSON document; see [`print_fix_json`].
+fn fix_json_body(results: &[FileFixResult], total_fixes: usize, dry_run: bool) -> String {
+    let report = FixReport {
+        totals: FixTotals {
+            fixes: total_fixes,
+            dry_run,
+        },
+        files: results
+            .iter()
+            .map(|result| {
+                (
+                    result.display_path.as_str(),
+                    FixFileEntry {
+                        fixes: result.fixes.len(),
+                        changes: result
+                            .fixes
+                            .iter()
+                            .map(|fix| FixChange {
+                                line: fix.line,
+                                rule: &fix.rule,
+                                description: &fix.description,
+                            })
+                            .collect(),
+                    },
+                )
+            })
+            .collect(),
+    };
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]

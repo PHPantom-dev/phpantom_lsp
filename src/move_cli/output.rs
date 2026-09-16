@@ -6,11 +6,14 @@
 //! shaped like the one `analyze` emits.
 
 use std::collections::BTreeMap;
-use std::fmt::Write;
 
-use crate::analyse::{format_github_message, github_annotation, json_escape};
+use serde::Serialize;
 
-use super::{MoveSummary, MoveWarning};
+use crate::analyse::{
+    JsonFileEntry, JsonMessage, JsonTotals, format_github_message, github_annotation,
+};
+
+use super::MoveSummary;
 
 /// The diagnostic identifier every move warning carries, so a consumer
 /// filtering `analyze` output by identifier can filter these too.
@@ -74,6 +77,28 @@ pub(super) fn print_github_annotations(summary: &MoveSummary) {
     }
 }
 
+/// The move's own counters, reported under a `move` key rather than
+/// mixed into `totals`, which stays a count of what went wrong.
+#[derive(Serialize)]
+struct MoveCounters<'a> {
+    dry_run: bool,
+    kind: &'a str,
+    from: &'a str,
+    to: &'a str,
+    files_changed: usize,
+    paths_moved: usize,
+}
+
+/// The whole `move` report; see [`json_body`].
+#[derive(Serialize)]
+struct MoveReport<'a> {
+    totals: JsonTotals,
+    files: BTreeMap<&'a str, JsonFileEntry<'a>>,
+    errors: Vec<&'a str>,
+    #[serde(rename = "move")]
+    move_: MoveCounters<'a>,
+}
+
 /// Print the move as a JSON object shaped like `analyze`'s.
 pub(super) fn print_json(summary: &MoveSummary) {
     println!("{}", json_body(summary));
@@ -85,92 +110,56 @@ pub(super) fn print_json(summary: &MoveSummary) {
 /// output, so the two can be consumed by the same tooling: warnings that
 /// name a file are grouped under it with a line number, and the ones
 /// that name none (an unmapped destination namespace, say) land in the
-/// top-level `errors` array. The move's own counters hang off a `move`
-/// key rather than being mixed into `totals`, which stays a count of
-/// what went wrong.
+/// top-level `errors` array.
 fn json_body(summary: &MoveSummary) -> String {
-    let mut by_file: BTreeMap<&str, Vec<&MoveWarning>> = BTreeMap::new();
-    let mut global: Vec<&MoveWarning> = Vec::new();
+    let mut by_file: BTreeMap<&str, Vec<JsonMessage<'_>>> = BTreeMap::new();
+    let mut global: Vec<&str> = Vec::new();
     for warning in &summary.warnings {
         match warning.file.as_deref() {
-            Some(file) => by_file.entry(file).or_default().push(warning),
-            None => global.push(warning),
+            Some(file) => by_file.entry(file).or_default().push(JsonMessage {
+                message: &warning.message,
+                line: warning.line.unwrap_or(1) as u64,
+                severity: "warning",
+                identifier: Some(IDENTIFIER),
+            }),
+            None => global.push(&warning.message),
         }
     }
-    let file_warnings: usize = by_file.values().map(Vec::len).sum();
 
-    let mut out = String::from("{\n");
-    let _ = writeln!(
-        out,
-        "  \"totals\": {{ \"errors\": {}, \"file_errors\": {} }},",
-        global.len(),
-        file_warnings
-    );
-
-    if by_file.is_empty() {
-        out.push_str("  \"files\": {},\n");
-    } else {
-        out.push_str("  \"files\": {\n");
-        for (i, (file, warnings)) in by_file.iter().enumerate() {
-            let _ = write!(
-                out,
-                "    {}: {{\n      \"errors\": {},\n      \"messages\": [\n",
-                json_escape(file),
-                warnings.len()
-            );
-            for (j, warning) in warnings.iter().enumerate() {
-                let _ = write!(
-                    out,
-                    "        {{ \"message\": {}, \"line\": {}, \"severity\": \"warning\", \
-                     \"identifier\": \"{IDENTIFIER}\" }}",
-                    json_escape(&warning.message),
-                    warning.line.unwrap_or(1),
-                );
-                if j + 1 < warnings.len() {
-                    out.push(',');
-                }
-                out.push('\n');
-            }
-            out.push_str("      ]\n    }");
-            if i + 1 < by_file.len() {
-                out.push(',');
-            }
-            out.push('\n');
-        }
-        out.push_str("  },\n");
-    }
-
-    if global.is_empty() {
-        out.push_str("  \"errors\": [],\n");
-    } else {
-        out.push_str("  \"errors\": [\n");
-        for (i, warning) in global.iter().enumerate() {
-            let _ = write!(out, "    {}", json_escape(&warning.message));
-            if i + 1 < global.len() {
-                out.push(',');
-            }
-            out.push('\n');
-        }
-        out.push_str("  ],\n");
-    }
-
-    let _ = write!(
-        out,
-        "  \"move\": {{ \"dry_run\": {}, \"kind\": \"{}\", \"from\": {}, \"to\": {}, \
-         \"files_changed\": {}, \"paths_moved\": {} }}\n}}",
-        summary.dry_run,
-        summary.kind,
-        json_escape(&summary.from),
-        json_escape(&summary.to),
-        summary.files_changed,
-        summary.paths_moved,
-    );
-    out
+    let report = MoveReport {
+        totals: JsonTotals {
+            errors: global.len(),
+            file_errors: by_file.values().map(Vec::len).sum(),
+        },
+        files: by_file
+            .into_iter()
+            .map(|(file, messages)| {
+                (
+                    file,
+                    JsonFileEntry {
+                        errors: messages.len(),
+                        messages,
+                    },
+                )
+            })
+            .collect(),
+        errors: global,
+        move_: MoveCounters {
+            dry_run: summary.dry_run,
+            kind: summary.kind,
+            from: &summary.from,
+            to: &summary.to,
+            files_changed: summary.files_changed,
+            paths_moved: summary.paths_moved,
+        },
+    };
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::move_cli::MoveWarning;
 
     fn summary(warnings: Vec<MoveWarning>) -> MoveSummary {
         MoveSummary {

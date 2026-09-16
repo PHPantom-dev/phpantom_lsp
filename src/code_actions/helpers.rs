@@ -33,6 +33,50 @@ pub(crate) fn multi_file_edit(changes: HashMap<Url, Vec<TextEdit>>) -> Workspace
     }
 }
 
+/// The edit that replaces one occurrence of a variable at `offset` with
+/// `replacement`, or `None` when `content` no longer spells `var_name`
+/// there.
+///
+/// Every occurrence-rewriting action (inlining a variable, promoting one
+/// to a property) collects offsets from a pre-computed scan and only
+/// turns each into an edit once it re-reads the live text at that
+/// position, since the scan and the edit can be separated by other edits
+/// changing the file in between.
+pub(crate) fn occurrence_replacement_edit(
+    content: &str,
+    offset: usize,
+    var_name: &str,
+    replacement: &str,
+) -> Option<TextEdit> {
+    let end = offset + var_name.len();
+    if end > content.len() || content[offset..end] != *var_name {
+        return None;
+    }
+    Some(TextEdit {
+        range: Range {
+            start: crate::text_position::offset_to_position(content, offset),
+            end: crate::text_position::offset_to_position(content, end),
+        },
+        new_text: replacement.to_string(),
+    })
+}
+
+/// Sort text edits into document order.
+///
+/// An occurrence-rewriting action collects one edit per reference as it
+/// finds them, which need not be in source order (a static-property
+/// reference documented ahead of the declaration it promotes, say); most
+/// editors apply edits as given rather than sorting them first.
+pub(crate) fn sort_edits_by_position(edits: &mut [TextEdit]) {
+    edits.sort_by(|a, b| {
+        a.range
+            .start
+            .line
+            .cmp(&b.range.start.line)
+            .then(a.range.start.character.cmp(&b.range.start.character))
+    });
+}
+
 /// Build a [`WorkspaceEdit`] that applies a single text edit to one file.
 ///
 /// Convenience wrapper over [`single_file_edit`] for the common case of one

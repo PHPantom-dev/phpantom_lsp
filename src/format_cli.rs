@@ -36,12 +36,14 @@
 //! - `1` — a file could not be read, formatted, or written.
 //! - `2` — `--check` found files that are not formatted.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
+use serde::Serialize;
+
 use crate::analyse::{
-    Colour, OutputFormat, github_annotation, note_plain_php_project, print_box, progress_bar,
+    Colour, OutputFormat, dispatch_report, github_annotation, note_plain_php_project, print_box,
+    progress_bar,
 };
 use crate::config::FormattingConfig;
 use crate::formatting::blade::{BladeFormatOptions, BladeFormattingStrategy};
@@ -399,18 +401,12 @@ fn report(outcomes: &Outcomes, options: &FormatOptions) {
         failures,
         ..
     } = outcomes;
-    match options.output_format {
-        OutputFormat::Table => {
-            // Annotate in CI without giving up the readable summary, the
-            // way `analyze`, `fix`, and `move` do.
-            if std::env::var("GITHUB_ACTIONS").is_ok() {
-                print_github_annotations(reformatted, failures, options.check);
-            }
-            print_table(outcomes, options);
-        }
-        OutputFormat::Github => print_github_annotations(reformatted, failures, options.check),
-        OutputFormat::Json => println!("{}", json_report(reformatted, failures, options.check)),
-    }
+    dispatch_report(
+        options.output_format,
+        || print_table(outcomes, options),
+        || print_github_annotations(reformatted, failures, options.check),
+        || println!("{}", json_report(reformatted, failures, options.check)),
+    );
 }
 
 /// List the affected files and close with a summary box.
@@ -510,6 +506,29 @@ fn github_annotations(
         .collect()
 }
 
+/// The `"totals"` object of the `format` report.
+#[derive(Serialize)]
+struct FormatTotals {
+    files: usize,
+    errors: usize,
+    check: bool,
+}
+
+/// A file the run could not format, as reported in JSON.
+#[derive(Serialize)]
+struct FormatError<'a> {
+    file: &'a str,
+    message: &'a str,
+}
+
+/// The whole `format` report; see [`json_report`].
+#[derive(Serialize)]
+struct FormatReport<'a> {
+    totals: FormatTotals,
+    files: Vec<&'a str>,
+    errors: Vec<FormatError<'a>>,
+}
+
 /// The run as a single JSON object.
 ///
 /// ```json
@@ -520,42 +539,25 @@ fn github_annotations(
 /// }
 /// ```
 fn json_report(reformatted: &[Reformatted], failures: &[Failure], check: bool) -> String {
-    let mut out = String::from("{\n");
-    let _ = writeln!(
-        out,
-        "  \"totals\": {{ \"files\": {}, \"errors\": {}, \"check\": {} }},",
-        reformatted.len(),
-        failures.len(),
-        check,
-    );
-
-    out.push_str("  \"files\": [");
-    for (i, file) in reformatted.iter().enumerate() {
-        let _ = write!(
-            out,
-            "\n    {}{}",
-            crate::analyse::json_escape(&file.display_path),
-            if i + 1 < reformatted.len() {
-                ","
-            } else {
-                "\n  "
-            },
-        );
-    }
-    out.push_str("],\n");
-
-    out.push_str("  \"errors\": [");
-    for (i, failure) in failures.iter().enumerate() {
-        let _ = write!(
-            out,
-            "\n    {{ \"file\": {}, \"message\": {} }}{}",
-            crate::analyse::json_escape(&failure.display_path),
-            crate::analyse::json_escape(&failure.message),
-            if i + 1 < failures.len() { "," } else { "\n  " },
-        );
-    }
-    out.push_str("]\n}");
-    out
+    let report = FormatReport {
+        totals: FormatTotals {
+            files: reformatted.len(),
+            errors: failures.len(),
+            check,
+        },
+        files: reformatted
+            .iter()
+            .map(|file| file.display_path.as_str())
+            .collect(),
+        errors: failures
+            .iter()
+            .map(|failure| FormatError {
+                file: &failure.display_path,
+                message: &failure.message,
+            })
+            .collect(),
+    };
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]

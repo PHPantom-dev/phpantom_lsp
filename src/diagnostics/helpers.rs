@@ -10,11 +10,85 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
-use crate::text_scan::find_matching_forward_bytes;
+use crate::text_scan::{find_matching_forward_bytes, find_unmatched_close_bytes};
 use crate::types::{ClassInfo, FileContext};
 
 /// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
+
+// ── Type-checking collectors ────────────────────────────────────────────────
+
+/// What a type-checking diagnostic collector reads from the file before
+/// it walks the AST.
+///
+/// Built by [`collect_type_check`], which owns the `FileContext` and the
+/// loader closures this borrows.
+pub(crate) struct TypeCheckCtx<'a> {
+    /// Classes, use-map, namespace, and resolved names for the file.
+    pub(crate) file_ctx: &'a FileContext,
+    pub(crate) class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub(crate) function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    pub(crate) constant_loader: &'a dyn Fn(&str, u32) -> Option<Option<String>>,
+    /// Whether the file declares `strict_types=1`, which decides how
+    /// forgiving the compatibility checks are.
+    pub(crate) strict_types: bool,
+}
+
+/// Run a type-checking collector over one file.
+///
+/// `collect` walks the AST and gathers the sites it checks; `report`
+/// turns each one into a byte range and a message, or `None` for a site
+/// that turns out to be fine. Both see the same [`TypeCheckCtx`], so the
+/// loaders the walk resolves through are the ones the check reads back.
+///
+/// A site whose range has no position in the file is dropped: a Blade
+/// template is checked as the virtual PHP it lowers to, and a range in
+/// the generated prologue belongs to no line of the template.
+pub(crate) fn collect_type_check<S>(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    code: &str,
+    out: &mut Vec<Diagnostic>,
+    collect: impl FnOnce(&TypeCheckCtx<'_>) -> Vec<S>,
+    report: impl Fn(&S, &TypeCheckCtx<'_>) -> Option<(ByteRange, String)>,
+) {
+    let file_ctx = backend.file_context(uri);
+
+    // Activate the thread-local parse cache so every `with_parsed_program`
+    // in the resolution pipeline below reuses one parsed AST.
+    let _parse_guard = crate::parser::with_parse_cache(content);
+
+    let class_loader = backend.class_loader(&file_ctx);
+    let function_loader = backend.function_loader(&file_ctx);
+    let constant_loader = backend.constant_loader(&file_ctx);
+    let strict_types = crate::parser::with_parsed_program(content, "strict_types", |program, _| {
+        super::type_errors::has_strict_types(program)
+    });
+
+    let ctx = TypeCheckCtx {
+        file_ctx: &file_ctx,
+        class_loader: &class_loader,
+        function_loader: &function_loader,
+        constant_loader: &constant_loader,
+        strict_types,
+    };
+
+    for site in collect(&ctx) {
+        let Some(((start, end), message)) = report(&site, &ctx) else {
+            continue;
+        };
+        let Some(range) = backend.offset_range_to_lsp_range(uri, content, start, end) else {
+            continue;
+        };
+        out.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            code,
+            message,
+        ));
+    }
+}
 
 /// Per-file snapshot shared by the "symbol-span" diagnostic collectors
 /// (unknown class/function/member, deprecated, implementation errors,
@@ -683,7 +757,7 @@ fn find_negated_guard_range(
 
     // Determine end of the if-statement and check for early exit.
     let if_stmt_end = if bytes[body_start_pos] == b'{' {
-        let block_end = find_matching_brace(bytes, body_start_pos)?;
+        let block_end = find_matching_forward_bytes(bytes, body_start_pos, b'{', b'}')?;
         let body_content = &bytes[body_start_pos + 1..block_end];
         if !contains_early_exit(body_content) {
             return None;
@@ -722,36 +796,10 @@ fn contains_early_exit(body: &[u8]) -> bool {
         || trimmed.starts_with("break")
 }
 
-/// Find the end of the enclosing scope from a given position.
-/// Returns the position of the next `}` at depth 0, or EOF.
+/// Find the end of the enclosing scope from a given position: the next
+/// `}` that does not close a block opened after `from`, or EOF.
 fn find_enclosing_scope_end(bytes: &[u8], from: usize) -> usize {
-    let len = bytes.len();
-    let mut depth: u32 = 0;
-    let mut i = from;
-    while i < len {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                if depth == 0 {
-                    return i;
-                }
-                depth -= 1;
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    len
+    find_unmatched_close_bytes(bytes, from, b'{', b'}').unwrap_or(bytes.len())
 }
 
 /// Try to parse an existence-check call starting at position `i`.
@@ -920,7 +968,9 @@ fn find_guarded_range(bytes: &[u8], call_start: usize, call_end: usize) -> Optio
             if body_start_pos < len {
                 if bytes[body_start_pos] == b'{' {
                     // Block body: find matching `}`.
-                    if let Some(block_end) = find_matching_brace(bytes, body_start_pos) {
+                    if let Some(block_end) =
+                        find_matching_forward_bytes(bytes, body_start_pos, b'{', b'}')
+                    {
                         // Guard covers from start of condition (to catch && patterns
                         // in the condition itself) through the block end.
                         return Some((paren_start, block_end + 1));
@@ -969,40 +1019,6 @@ fn find_preceding_if(bytes: &[u8], pos: usize) -> Option<usize> {
         if j == 0 {
             break;
         }
-    }
-    None
-}
-
-/// Find matching `}` for `{` at `pos`.
-fn find_matching_brace(bytes: &[u8], pos: usize) -> Option<usize> {
-    let len = bytes.len();
-    if pos >= len || bytes[pos] != b'{' {
-        return None;
-    }
-    let mut depth = 0u32;
-    let mut i = pos;
-    while i < len {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
     }
     None
 }
@@ -1168,6 +1184,21 @@ pub(crate) fn make_diagnostic(
     code: &str,
     message: String,
 ) -> Diagnostic {
+    make_tagged_diagnostic(range, severity, code, message, None)
+}
+
+/// [`make_diagnostic`], carrying a `DiagnosticTag`.
+///
+/// The tag is what makes an editor render the range as dimmed
+/// ([`DiagnosticTag::UNNECESSARY`]) or struck through
+/// ([`DiagnosticTag::DEPRECATED`]) rather than underlining it.
+pub(crate) fn make_tagged_diagnostic(
+    range: Range,
+    severity: DiagnosticSeverity,
+    code: &str,
+    message: String,
+    tag: Option<DiagnosticTag>,
+) -> Diagnostic {
     Diagnostic {
         range,
         severity: Some(severity),
@@ -1176,7 +1207,7 @@ pub(crate) fn make_diagnostic(
         source: Some("phpantom".to_string()),
         message,
         related_information: None,
-        tags: None,
+        tags: tag.map(|t| vec![t]),
         data: None,
     }
 }

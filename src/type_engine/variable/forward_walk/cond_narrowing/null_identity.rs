@@ -51,10 +51,7 @@ pub(super) fn expr_accepts_null(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_ctx = build_var_ctx("", ctx, &scope_resolver);
     crate::type_engine::variable::resolution::resolve_arg_raw_type(expr, &var_ctx)
         .is_none_or(|ty| ty.accepts_null())

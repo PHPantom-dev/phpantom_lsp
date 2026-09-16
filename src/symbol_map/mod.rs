@@ -27,7 +27,7 @@
 //!   `extract_from_*` helpers)
 
 pub(crate) mod docblock;
-mod extraction;
+pub(crate) mod extraction;
 
 use crate::atom::Atom;
 use crate::php_type::PhpType;

@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
     DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::analyse::OutputFormat;
+use crate::analyse::dispatch_report;
 use crate::{Backend, composer, config};
 
 use super::{MoveOptions, MovePlan, MoveSummary, MoveWarning, output, residual};
@@ -39,18 +39,12 @@ enum AutoloadRisk {
 pub async fn run(options: MoveOptions) -> i32 {
     match execute(&options).await {
         Ok(summary) => {
-            match options.output_format {
-                OutputFormat::Table => {
-                    // Annotate in CI without giving up the readable
-                    // summary, the way `analyze` and `fix` do.
-                    if std::env::var("GITHUB_ACTIONS").is_ok() {
-                        output::print_github_annotations(&summary);
-                    }
-                    output::print_table(&summary, options.use_colour);
-                }
-                OutputFormat::Github => output::print_github_annotations(&summary),
-                OutputFormat::Json => output::print_json(&summary),
-            }
+            dispatch_report(
+                options.output_format,
+                || output::print_table(&summary, options.use_colour),
+                || output::print_github_annotations(&summary),
+                || output::print_json(&summary),
+            );
             0
         }
         Err(message) => {

@@ -1,5 +1,30 @@
 use super::*;
 
+/// Remove every class in `classes` from what `var_name` could hold, and
+/// record each exclusion so a later check knows the branch ruled it out.
+///
+/// A negated `instanceof` does not eliminate `null`: `!$x instanceof Foo`
+/// is true when `$x` is null, so `null` stays in the union. A subject the
+/// exclusions empty is left as it was, since an operand that proves
+/// nothing must not erase what the scope already knew.
+fn exclude_classes_in_scope(
+    var_name: &str,
+    classes: &[PhpType],
+    var_ctx: &VarResolutionCtx<'_>,
+    scope: &mut ScopeState,
+) {
+    let mut results = scope.get(var_name).to_vec();
+    for cls in classes {
+        ResolvedType::apply_narrowing(&mut results, |class_list| {
+            narrowing::apply_instanceof_exclusion(cls, var_ctx, class_list)
+        });
+        scope.record_exclusion(var_name, cls);
+    }
+    if !results.is_empty() {
+        scope.set(var_name, results);
+    }
+}
+
 /// Narrow every subject the `&&` chain's operands prove an
 /// `instanceof`-style check about, and write the result to the scope.
 ///
@@ -18,10 +43,7 @@ pub(super) fn commit_chain_instanceof<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<String> {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
 
     // Track which variables have been narrowed by instanceof across
     // `&&` operands so we can merge them, plus where each subject's
@@ -68,16 +90,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if alias.extraction.negated {
                     // `!$isNode` — no leg of the chain held, so every one
                     // of them is excluded.
-                    let mut results = scope.get(var_name).to_vec();
-                    for cls in &classes {
-                        ResolvedType::apply_narrowing(&mut results, |class_list| {
-                            narrowing::apply_instanceof_exclusion(cls, &var_ctx, class_list)
-                        });
-                        scope.record_exclusion(var_name, cls);
-                    }
-                    if !results.is_empty() {
-                        scope.set(var_name, results);
-                    }
+                    exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
                 } else {
                     let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
                     if !union.is_empty() {
@@ -101,16 +114,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if !targets.is_empty() {
                     let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                     if negated {
-                        let mut results = scope.get(var_name).to_vec();
-                        for target in &targets {
-                            ResolvedType::apply_narrowing(&mut results, |classes| {
-                                narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
-                            });
-                            scope.record_exclusion(var_name, target);
-                        }
-                        if !results.is_empty() {
-                            scope.set(var_name, results);
-                        }
+                        exclude_classes_in_scope(var_name, &targets, &var_ctx, scope);
                     } else {
                         let mut resolved = Vec::new();
                         for target in &targets {
@@ -159,21 +163,12 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if extraction.negated {
                     // Negated instanceof: apply exclusion to the current
                     // scope immediately (each negation removes one type).
-                    let mut results = scope.get(var_name).to_vec();
-                    ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_exclusion(
-                            &extraction.class_type,
-                            &var_ctx,
-                            classes,
-                        )
-                    });
-                    scope.record_exclusion(var_name, &extraction.class_type);
-                    // Negated instanceof exclusion does NOT eliminate
-                    // null — `!$x instanceof Foo` is true when $x is
-                    // null, so null stays in the union.  No stripping.
-                    if !results.is_empty() {
-                        scope.set(var_name, results);
-                    }
+                    exclude_classes_in_scope(
+                        var_name,
+                        std::slice::from_ref(&extraction.class_type),
+                        &var_ctx,
+                        scope,
+                    );
                 } else {
                     // Positive instanceof: resolve and accumulate into
                     // the per-variable union.  For a single operand this
@@ -259,10 +254,7 @@ pub(super) fn dynamic_instanceof_targets(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_ctx = build_var_ctx("", ctx, &scope_resolver);
     let Some(resolved) =
         crate::type_engine::variable::resolution::resolve_arg_raw_type(rhs, &var_ctx)

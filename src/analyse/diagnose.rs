@@ -16,6 +16,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::diagnostics::ignore_rules::CompiledIgnoreRule;
 use crate::parser::with_parse_cache;
+use crate::type_engine::resolver::LendsLoaders;
 use crate::virtual_members::with_active_resolved_class_cache;
 
 use super::output::progress_bar;
@@ -66,33 +67,16 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
     } = pass;
     let file_count = files.len();
 
-    let next_idx = AtomicUsize::new(0);
     let done_count = AtomicUsize::new(0);
 
-    // Phase 2 diagnostic threads need large stacks because the forward
-    // walker + type resolution pipeline can nest deeply on files with
-    // many class hierarchies and virtual members.  Spawned threads get a
-    // 2 MB stack by default (only the main thread gets the 8 MB OS
-    // default), so set it explicitly.
-    std::thread::scope(|s| {
-        let handles: Vec<_> =
-            (0..n_threads)
-                .map(|worker| {
-                    let next_idx = &next_idx;
-                    let done_count = &done_count;
-                    std::thread::Builder::new()
-                    .name("diag-worker".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                    let mut results: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
-                    loop {
-                        let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                        if i >= file_count {
-                            break;
-                        }
+    crate::parallel::map_indexed_with_threads(
+        "diag-worker",
+        file_count,
+        Some(n_threads),
+        |worker, i| {
                         let (uri, original_content) = match &file_data[i] {
                             Some(pair) => (&pair.0, &pair.1),
-                            None => continue, // file that failed to read
+                            None => return None, // file that failed to read
                         };
 
                         // Announce the file when it *starts* so that on a
@@ -109,21 +93,11 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                         }
                         let file_t0 = Instant::now();
 
-                        // For Blade files, use the preprocessed virtual PHP
-                        // content instead of the raw Blade template.  The
-                        // virtual content was produced by `update_ast` in
-                        // Phase 1 and stored in `blade_virtual_content`.
-                        let blade_content;
-                        let content = if crate::blade::is_blade_file(uri) {
-                            if let Some(vc) = backend.blade_virtual_content.read().get(uri.as_str()) {
-                                blade_content = vc.clone();
-                                &blade_content
-                            } else {
-                                original_content
-                            }
-                        } else {
-                            original_content
-                        };
+                        // A Blade template is analysed as the virtual PHP it
+                        // lowers to, which `update_ast` produced in Phase 1;
+                        // every other file is analysed as itself.
+                        let analysable = backend.analysable_content_or(uri, original_content);
+                        let content: &str = &analysable;
 
                         // Activate ONE parse cache for the entire file so
                         // all collectors share the same parsed AST.  Each
@@ -150,22 +124,13 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                         {
                             let file_ctx = backend.file_context(uri);
                             let class_loader = backend.class_loader(&file_ctx);
-                            let function_loader_cl = backend.function_loader(&file_ctx);
-                            let constant_loader_cl = backend.constant_loader(&file_ctx);
-                            let config_resolver = |key: &str| backend.resolve_config_type(key);
-                            let trans_resolver = |key: &str| backend.resolve_trans_type(key);
-                            let loaders = crate::type_engine::resolver::Loaders {
-                                function_loader: Some(&function_loader_cl),
-                                constant_loader: Some(&constant_loader_cl),
-                                config_resolver: Some(&config_resolver),
-                                trans_resolver: Some(&trans_resolver),
-                            };
+                            let owned_loaders = backend.diagnostic_loaders(&file_ctx);
                             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,
                                 &file_ctx.classes,
                                 &class_loader,
                                 Some(backend),
-                                loaders,
+                                owned_loaders.loaders(),
                                 Some(&backend.resolved_class_cache),
                             );
                         }
@@ -351,38 +316,27 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                             }
                         }
 
-                        if !filtered.is_empty() {
-                            filtered.sort_by(|a, b| {
-                                a.line
-                                    .cmp(&b.line)
-                                    .then(a.column.cmp(&b.column))
-                                    .then(a.identifier.cmp(&b.identifier))
-                                    .then(a.message.cmp(&b.message))
-                            });
-                            let display_path = files[i]
-                                .strip_prefix(root)
-                                .unwrap_or(&files[i])
-                                .to_string_lossy()
-                                .to_string();
-                            results.push((display_path, filtered));
+                        if filtered.is_empty() {
+                            return None;
                         }
-                    }
-                    results
-                })
-                })
-                .collect();
-
-        let mut merged: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
-        for handle in handles {
-            merged.extend(
-                handle
-                    .expect("diagnostic worker thread spawn failed")
-                    .join()
-                    .unwrap_or_default(),
-            );
-        }
-        merged
-    })
+                        filtered.sort_by(|a, b| {
+                            a.line
+                                .cmp(&b.line)
+                                .then(a.column.cmp(&b.column))
+                                .then(a.identifier.cmp(&b.identifier))
+                                .then(a.message.cmp(&b.message))
+                        });
+                        let display_path = files[i]
+                            .strip_prefix(root)
+                            .unwrap_or(&files[i])
+                            .to_string_lossy()
+                            .to_string();
+                        Some((display_path, filtered))
+        },
+    )
+    .into_iter()
+    .map(|(_, result)| result)
+    .collect()
 }
 
 // ── Severity helpers ────────────────────────────────────────────────────────

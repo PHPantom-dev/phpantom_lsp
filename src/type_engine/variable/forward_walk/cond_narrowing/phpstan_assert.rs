@@ -41,10 +41,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
     // Determine whether the function returned true in this branch.
     let function_returned_true = !(inverted ^ condition_negated);
 
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
 
     // Try to extract assertion info from function calls and static method calls.
     match call {
