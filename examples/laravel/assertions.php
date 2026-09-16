@@ -1468,6 +1468,28 @@ check("url('/login') returns a string", is_string(url('/login')));
 
 \Illuminate\Container\Container::setInstance($previousContainer);
 
+// ─── UUID and ULID primary keys ─────────────────────────────────────────────
+
+$uuidOrder = new \App\Models\BakeryOrder();
+$ulidDelivery = new \App\Models\Delivery();
+$uuidOrder->setUniqueIds();
+$ulidDelivery->setUniqueIds();
+
+check('HasUuids generates a string id', is_string($uuidOrder->id));
+check('HasUuids generates a valid UUID', \Illuminate\Support\Str::isUuid($uuidOrder->id));
+check('HasUuids overrides the default key type', $uuidOrder->getKeyType() === 'string');
+check('HasUuids disables incrementing', $uuidOrder->getIncrementing() === false);
+check('HasUlids respects a custom primary key', $ulidDelivery->getKeyName() === 'tracking_id');
+check('HasUlids generates a string key', is_string($ulidDelivery->tracking_id));
+check('HasUlids generates a valid ULID', \Illuminate\Support\Str::isUlid($ulidDelivery->tracking_id));
+check('HasUlids overrides the default key type', $ulidDelivery->getKeyType() === 'string');
+check('HasUlids disables incrementing', $ulidDelivery->getIncrementing() === false);
+check(
+    'Unique identifier demo reads both string keys',
+    (new \App\Demo())->uniqueIdentifiers($uuidOrder, $ulidDelivery)
+        === $uuidOrder->id . ':' . $ulidDelivery->tracking_id
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
