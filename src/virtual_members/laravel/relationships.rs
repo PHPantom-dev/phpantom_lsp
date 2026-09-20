@@ -16,18 +16,16 @@ use crate::util::{short_name, strip_fqn_prefix};
 
 use super::helpers::{camel_to_snake, snake_to_camel};
 
-/// Methods on `Builder` / `QueriesRelationships` that accept a relation
-/// name string as the first argument and a closure typed as
-/// `Closure(Builder<TRelatedModel>): mixed` as the second argument
-/// (or at the listed position).
-///
-/// When one of these methods is detected, the closure parameter
-/// inference overrides `TModel` with the related model resolved from
-/// the relation name string. The `*Morph*` methods take the candidate
-/// models from their `$types` argument instead, falling back to the
-/// relation's declared target. `withWhereHas` and `withWhereRelation` also
-/// run the closure for eager loading, so it receives the terminal relation
-/// alongside the builder.
+/// Eloquent query methods whose constraint callback depends on a relation
+/// argument. Argument binding locates each method's relation and callback,
+/// and callable inference refines the callback's parameter from the
+/// relation argument's type (a name, a union of names, or a relation
+/// object). Existence constraints receive the related model's builder. The
+/// `*Morph*` methods take the candidate models from their `$types` argument
+/// instead, falling back to the relation's declared target. `with` receives
+/// the terminal relation, and `withWhereHas` and `withWhereRelation`, which
+/// also run the closure for eager loading, receive the relation alongside
+/// the builder.
 pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "has",
     "orHas",
@@ -35,11 +33,15 @@ pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "orDoesntHave",
     "whereHas",
     "orWhereHas",
+    "with",
     "withWhereHas",
     "withWhereRelation",
     "whereDoesntHave",
     "orWhereDoesntHave",
     "whereRelation",
+    "orWhereRelation",
+    "whereDoesntHaveRelation",
+    "orWhereDoesntHaveRelation",
     "hasMorph",
     "doesntHaveMorph",
     "whereHasMorph",
