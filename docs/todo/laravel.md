@@ -249,37 +249,6 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L63. Infer morph constraint callbacks from candidate models
-
-**Impact: Medium · Complexity: Medium-High**
-
-The `whereHasMorph` family does not participate in relation-query
-inference. A literal model class or an array of candidates falls back to
-`Builder<Model>` in the assertion fixture, losing both the related
-models and their custom builders. The second `$type` callback parameter
-already resolves to `string` from Laravel's declaration and must stay
-typed when the first parameter is refined.
-
-**Reproducer:** The `morphs()` assertions in
-`tests/phpstan_nsrt/laravel-builder-relations.php` cover all six
-callback-taking existence methods, single and multiple candidates,
-reordered named arguments, wildcard and empty-list fallbacks, and a
-declared `MorphTo<Team>` target. The desired builder types remain in the
-`SKIP` assertions; the `$type` assertions and the `MorphTo<Model>`
-wildcard and empty-list cases, whose `Builder<Model>` fallback is already
-correct, run normally.
-
-**Where to change:** Extend shared callable inference using bound
-`relation`, `types`, and `callback` arguments. Build a union of candidate
-builders, preserving custom builders. For unresolved/wildcard candidates,
-use the relation's declared target, falling back to `Model` when that is
-all the declaration knows. Also cover class-string variables and mixed
-known/unknown candidate arrays, as
-[Larastan's callback extension](https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/src/ClosureTypes/RelationshipQueryCallbackExtension.php)
-does. Do not boot the application or query the database for wildcard
-discovery. Check the `whereMorphRelation` shortcuts when sharing the
-callback logic.
-
 #### L64. Infer both callback receivers for withWhereHas
 
 **Impact: Medium · Complexity: Medium-High**

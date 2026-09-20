@@ -35,6 +35,16 @@ pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "whereDoesntHave",
     "orWhereDoesntHave",
     "whereRelation",
+    "hasMorph",
+    "doesntHaveMorph",
+    "whereHasMorph",
+    "orWhereHasMorph",
+    "whereDoesntHaveMorph",
+    "orWhereDoesntHaveMorph",
+    "whereMorphRelation",
+    "orWhereMorphRelation",
+    "whereMorphDoesntHaveRelation",
+    "orWhereMorphDoesntHaveRelation",
 ];
 
 /// Fully-qualified relationship class names used by
