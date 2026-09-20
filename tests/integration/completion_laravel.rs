@@ -214,6 +214,13 @@ class Builder {
     /** @return string */
     public function toSql(): string { return ''; }
     /**
+     * @template TRelatedModel of \\Illuminate\\Database\\Eloquent\\Model
+     * @param  \\Illuminate\\Database\\Eloquent\\Relations\\Relation<TRelatedModel, *, *>|string  $relation
+     * @param  (\\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TRelatedModel>): mixed)|null  $callback
+     * @return $this
+     */
+    public function has($relation, $operator = '>=', $count = 1, $boolean = 'and', ?\\Closure $callback = null) { return $this; }
+    /**
      * @param  string  $relation
      * @param  (\\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TModel>): mixed)|null  $callback
      * @return static
@@ -2461,6 +2468,80 @@ class User extends Model {
         hover_text.contains("User") && !hover_text.contains("TModel"),
         "hover on $user after a custom-builder chain should be User, got: {hover_text}"
     );
+}
+
+/// Exercise the custom builder after inherited and query-builder mixin calls,
+/// through both the model's static forwarding and an instance query.
+#[tokio::test]
+async fn test_builder_audit_custom_chain_completion() {
+    for generics in [
+        "",
+        "/** @template TModel of Model\n * @extends Builder<TModel> */",
+    ] {
+        let builder = format!(
+            "<?php namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Builder;
+use Illuminate\\Database\\Eloquent\\Model;
+{generics}
+class TeamBuilder extends Builder {{
+    /** @return $this */
+    public function active() {{ return $this; }}
+}}"
+        );
+        let model = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+class Team extends Model {
+    public function newEloquentBuilder($query): TeamBuilder { return new TeamBuilder(); }
+    public function teamName(): string { return ''; }
+}"#;
+        let (backend, dir) = make_workspace(&[
+            ("src/Models/TeamBuilder.php", &builder),
+            ("src/Models/Team.php", model),
+        ]);
+        for chain in [
+            "Team::query()->where('active', true)->orderBy('id')",
+            "Team::where('active', true)->orderBy('id')",
+            "Team::active()->whereIn('id', [1])->lockForUpdate()",
+        ] {
+            let content = format!(
+                "<?php namespace App\\Models;\n$query = {chain};\n$query->active();\n$query->"
+            );
+            let position = crate::common::position_after(&content, "\n$query->active();\n$query->");
+            let items = complete_at(
+                &backend,
+                &dir,
+                "audit.php",
+                &content,
+                position.line,
+                position.character,
+            )
+            .await;
+            let methods = method_names(&items);
+            for expected in ["active", "where", "orderBy", "whereIn", "firstOrFail"] {
+                assert!(
+                    methods.contains(&expected),
+                    "{generics}: {chain} lost {expected}: {methods:?}"
+                );
+            }
+
+            let content =
+                format!("<?php namespace App\\Models;\n$model = {chain}->firstOrFail();\n$model->");
+            let position = crate::common::position_after(&content, "$model->");
+            let items = complete_at(
+                &backend,
+                &dir,
+                "audit.php",
+                &content,
+                position.line,
+                position.character,
+            )
+            .await;
+            assert!(
+                method_names(&items).contains(&"teamName"),
+                "{chain} lost its model"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -14732,6 +14813,93 @@ class User extends Model {
 }
 
 // ─── whereHas / whereDoesntHave closure param from relation chain ───────────
+
+/// Completion and the diagnostics walk must agree on the final dotted segment,
+/// including arrow functions and callbacks after the comparison arguments.
+#[tokio::test]
+async fn test_builder_audit_relation_callback_consumers() {
+    let model = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+class Team extends Model {
+    /** @return HasMany<Stock, $this> */
+    public function stocks(): HasMany {}
+    public function scopeTeamOnly(Builder $query): void {}
+}"#;
+    let stock = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+class Stock extends Model {
+    /** @return BelongsTo<Warehouse, $this> */
+    public function warehouse(): BelongsTo {}
+    public function scopeStockOnly(Builder $query): void {}
+}"#;
+    let warehouse = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+class Warehouse extends Model {
+    public function scopeWarehouseOnly(Builder $query): void {}
+    public function warehouseName(): string { return ''; }
+}"#;
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Team.php", model),
+        ("src/Models/Stock.php", stock),
+        ("src/Models/Warehouse.php", warehouse),
+    ]);
+    for call in [
+        "Team::whereHas('stocks.warehouse', function ($q) { BODY });",
+        "Team::whereHas('stocks.warehouse', fn ($q) => BODY);",
+        "Team::has('stocks.warehouse', '>=', 1, 'and', function ($q) { BODY });",
+        "Team::has('stocks.warehouse', '>=', 1, 'and', fn ($q) => BODY);",
+        "Stock::query()->whereHas('warehouse', function ($q) { BODY });",
+        "Team::whereHas('stocks.warehouse', function (Builder $q) { BODY });",
+    ] {
+        let header = "<?php namespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Builder;\n";
+        let content = format!("{header}{}", call.replace("BODY", "$q->"));
+        let position = crate::common::position_after(&content, "$q->");
+        let items = complete_at(
+            &backend,
+            &dir,
+            "audit.php",
+            &content,
+            position.line,
+            position.character,
+        )
+        .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"warehouseOnly"), "{call}: {methods:?}");
+        assert!(
+            !methods.contains(&"stockOnly"),
+            "{call}: intermediate model leaked"
+        );
+        assert!(!methods.contains(&"teamOnly"), "{call}: outer model leaked");
+
+        let body = if call.contains("fn (") {
+            "$q->warehouseOnly()->firstOrFail()->warehouseName()"
+        } else {
+            "$q->warehouseOnly()->firstOrFail()->warehouseName();"
+        };
+        let content = format!("{header}{}", call.replace("BODY", body));
+        let uri = Url::from_file_path(dir.path().join("audit.php")).unwrap();
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+
+        let content = content.replace("warehouseName()", "missingWarehouseMethod()");
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("missingWarehouseMethod"));
+    }
+}
 
 #[tokio::test]
 async fn test_where_has_closure_resolves_to_related_model() {
