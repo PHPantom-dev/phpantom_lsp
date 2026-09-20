@@ -805,3 +805,61 @@ fn with_pivot_absent_returns_empty() {
     let body = "{ return $this->belongsToMany(Role::class); }";
     assert!(extract_with_pivot_columns(body).is_empty());
 }
+
+#[test]
+fn relation_chain_details_keep_the_terminal_declaring_model() {
+    let mut team = make_class("Team");
+    for (name, return_type) in [
+        ("stocks", Some("HasMany<Stock, $this>")),
+        ("scalar", Some("string")),
+        ("untyped", None),
+        ("unknown", Some("HasMany<Missing, $this>")),
+    ] {
+        team.methods.push(Arc::new(make_method(name, return_type)));
+    }
+    let mut stock = make_class("Stock");
+    stock.methods.push(Arc::new(make_method(
+        "warehouse",
+        Some("BelongsTo<Warehouse, $this>"),
+    )));
+    let mut warehouse = make_class("Warehouse");
+    warehouse.methods.push(Arc::new(make_method(
+        "parent",
+        Some("HasOne<$this, static>"),
+    )));
+    let classes = [Arc::new(team), Arc::new(stock), Arc::new(warehouse)];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let relation =
+        resolve_relation_chain_details(&classes[0], " stocks . warehouse ", &loader, None).unwrap();
+    assert_eq!(relation.model.fqn(), "Warehouse");
+    assert_eq!(
+        relation.relation_type,
+        PhpType::parse("BelongsTo<Warehouse, Stock>")
+    );
+    let relation =
+        resolve_relation_chain_details(&classes[0], "stocks.warehouse.parent", &loader, None)
+            .unwrap();
+    assert_eq!(
+        relation.relation_type,
+        PhpType::parse("HasOne<Warehouse, Warehouse>")
+    );
+    assert_eq!(
+        resolve_relation_chain(&classes[0], "stocks.warehouse", &loader, None).as_deref(),
+        Some("Warehouse")
+    );
+    for chain in [
+        "",
+        ".stocks",
+        "stocks.",
+        "stocks..warehouse",
+        "stocks.missing",
+        "scalar",
+        "untyped",
+        "unknown",
+    ] {
+        assert!(
+            resolve_relation_chain_details(&classes[0], chain, &loader, None).is_none(),
+            "{chain}"
+        );
+    }
+}

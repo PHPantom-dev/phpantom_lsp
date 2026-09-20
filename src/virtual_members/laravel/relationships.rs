@@ -34,6 +34,7 @@ pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "whereHas",
     "orWhereHas",
     "withWhereHas",
+    "withWhereRelation",
     "whereDoesntHave",
     "orWhereDoesntHave",
     "whereRelation",
@@ -552,6 +553,35 @@ pub(crate) fn resolve_relation_type(
 ) -> Option<PhpType> {
     walk_relation_chain(model, chain, class_loader, cache, |ty, declaring| {
         Some(ty.resolve_self_refs_bounded(&declaring.fqn(), declaring.parent_class.as_deref()))
+    })
+}
+
+/// The terminal relationship and related model of a dotted relation path.
+pub(crate) struct ResolvedRelation {
+    /// The final related model, used to select its query builder.
+    pub model: Arc<ClassInfo>,
+    /// The relationship with self references bound to its declaring model.
+    pub relation_type: PhpType,
+}
+
+/// Walk the same chain [`resolve_relation_chain`] does, retaining both the
+/// related model and the terminal relation.  Eager constraints receive this
+/// relationship, constructed on the model at the preceding segment, as well
+/// as its builder for the existence query.
+pub(crate) fn resolve_relation_chain_details(
+    model: &ClassInfo,
+    chain: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&super::super::ResolvedClassCache>,
+) -> Option<ResolvedRelation> {
+    walk_relation_chain(model, chain, class_loader, cache, |ty, declaring| {
+        let related = extract_related_type_for_chain(ty, declaring)?;
+        Some(ResolvedRelation {
+            model: resolve_related_fqn(&related, declaring, class_loader)?,
+            // Eager loading builds the relation on a fresh instance of
+            // the declaring model, so `$this`/`static` name it exactly.
+            relation_type: ty.replace_self_bound(&declaring.fqn(), None),
+        })
     })
 }
 

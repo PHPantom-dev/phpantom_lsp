@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Eager relation constraints keep both callback types.** `withWhereHas()` and `withWhereRelation()` now retain the related builder and relation through fluent calls, including dotted paths and explicit union hints. Contributed by @shuvroroy.
 - **Polymorphic relation callbacks know their candidate models.** Closures passed to `whereHasMorph()` and related methods are now typed from the listed model classes, including their custom builders. Unknown candidates and `'*'` use the relation's declared model. Contributed by @shuvroroy.
 - **Named relation callbacks keep their model types.** Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.
 - **Relation callbacks keep custom builders.** Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare `Builder` parameter hints. Contributed by @shuvroroy.
