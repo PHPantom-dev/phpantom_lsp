@@ -5,7 +5,7 @@
 //! call site are what say which of those ways this is: a key or no key, a
 //! default or no default.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{FORM_REQUEST_STUB, create_psr4_workspace, hover_text_at, split_cursor};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -70,15 +70,6 @@ class UploadedFile {
 }
 ";
 
-const FORM_REQUEST_PHP: &str = "\
-<?php
-namespace Illuminate\\Foundation\\Http;
-use Illuminate\\Http\\Request;
-class FormRequest extends Request {
-    public function rules(): array { return []; }
-}
-";
-
 /// One field validated as a single upload and one as a list of them, which
 /// is the only thing that tells `file('…')`'s two shapes apart.
 const STORE_POST_REQUEST_PHP: &str = "\
@@ -103,7 +94,7 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         ("vendor/illuminate/Http/UploadedFile.php", UPLOADED_FILE_PHP),
         (
             "vendor/illuminate/Foundation/Http/FormRequest.php",
-            FORM_REQUEST_PHP,
+            FORM_REQUEST_STUB,
         ),
         (
             "src/Http/Requests/StorePostRequest.php",
@@ -116,11 +107,7 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
 
 /// Open `content` (cursor marked `§`) and return the hover text there.
 async fn hover_text(content: &str) -> String {
-    let offset = content.find('§').expect("test source needs a § cursor");
-    let stripped = content.replace('§', "");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
+    let (stripped, position) = split_cursor(content);
 
     let mut files = base_files();
     files.push(("src/PostController.php", stripped.as_str()));
@@ -138,23 +125,9 @@ async fn hover_text(content: &str) -> String {
         })
         .await;
 
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    hover_text_at(&backend, &uri, position.line, position.character)
         .await
-        .unwrap();
-
-    match hover.map(|h| h.contents) {
-        Some(HoverContents::Markup(markup)) => markup.value,
-        Some(HoverContents::Scalar(MarkedString::String(s))) => s,
-        Some(HoverContents::Scalar(MarkedString::LanguageString(ls))) => ls.value,
-        _ => String::new(),
-    }
+        .unwrap_or_default()
 }
 
 /// Wrap a controller body in the namespace and imports every test needs.

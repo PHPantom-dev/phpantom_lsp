@@ -13,7 +13,6 @@
 
 use mago_span::{HasSpan, Position, Span};
 use mago_syntax::cst::argument::{PartialArgument, PartialArgumentList};
-use mago_syntax::cst::*;
 
 use super::*;
 

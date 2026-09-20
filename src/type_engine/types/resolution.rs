@@ -144,6 +144,27 @@ pub(crate) fn type_hint_to_classes_typed(
     type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0)
 }
 
+/// Type `hint` as the classes it names, or as a bare type string when it
+/// names none.
+///
+/// The fallback is what keeps a non-class type alive: `list<Rule>`,
+/// `int`, and a class name nothing can load all reach it, and dropping
+/// them would leave the subject untyped rather than typed by something
+/// that simply is not a loadable class.
+pub(crate) fn resolved_types_for_hint(
+    hint: crate::php_type::PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Vec<crate::types::ResolvedType> {
+    let classes = type_hint_to_classes_typed(&hint, owning_class_name, all_classes, class_loader);
+    if classes.is_empty() {
+        vec![crate::types::ResolvedType::from_type_string(hint)]
+    } else {
+        crate::types::ResolvedType::from_classes_with_hint(classes, hint)
+    }
+}
+
 /// Inner implementation with a recursion depth guard to prevent
 /// infinite loops from circular type aliases.
 fn type_hint_to_classes_typed_depth(

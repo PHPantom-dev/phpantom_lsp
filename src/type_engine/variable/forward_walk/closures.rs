@@ -2,11 +2,159 @@ use super::*;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
+use mago_syntax::cst::function_like::closure::ClosureUseClause;
 
 use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 
+// ─── Closure return edges ───────────────────────────────────────────────────
+
+/// What one entry of the [`RETURN_EDGES`] stack is doing.
+enum ReturnFrame {
+    /// Accumulates the states that `return` out of the body being walked.
+    /// `None` until the first `return` is seen.
+    ///
+    /// Boxed because a `ScopeState` is far larger than the other variant,
+    /// and the stack holds one frame per body being walked rather than one
+    /// per statement, so the indirection is paid once per closure.
+    Open(Option<Box<ScopeState>>),
+    /// A nested body's returns say nothing about the body outside it.
+    Barrier,
+}
+
+thread_local! {
+    /// One frame per body being walked for the types it writes to its
+    /// `use (&$x)` captures, innermost last.
+    ///
+    /// The branch merge drops a branch that returns, because such a branch
+    /// does not reach the statement after the `if`.  The end of a closure
+    /// body is not that statement: a by-reference capture written on a
+    /// path that returns early is visible to the caller all the same.  So
+    /// a `return` records the state it leaves with here, and the walk that
+    /// opened the frame folds those states into the body's exit state.
+    ///
+    /// Set and cleared within a single synchronous walk, like the loop
+    /// exit edges in `loop_control`.
+    static RETURN_EDGES: RefCell<Vec<ReturnFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Open a frame for a closure body about to be walked for its by-reference
+/// captures.
+pub(crate) fn push_return_frame() {
+    RETURN_EDGES.with(|frames| frames.borrow_mut().push(ReturnFrame::Open(None)));
+}
+
+/// Close the innermost frame and return the state its `return`s carried
+/// out, or `None` when the body has no reachable `return`.
+pub(crate) fn pop_return_frame() -> Option<ScopeState> {
+    RETURN_EDGES.with(|frames| match frames.borrow_mut().pop() {
+        Some(ReturnFrame::Open(state)) => state.map(|s| *s),
+        _ => None,
+    })
+}
+
+/// Lifts the barrier [`suspend_return_edges`] put in place.
+pub(crate) struct ReturnEdgeBarrierGuard {
+    pushed: bool,
+}
+
+impl Drop for ReturnEdgeBarrierGuard {
+    fn drop(&mut self) {
+        if self.pushed {
+            RETURN_EDGES.with(|frames| {
+                frames.borrow_mut().pop();
+            });
+        }
+    }
+}
+
+/// Stop `return`s from reaching the enclosing closure's frame for the
+/// lifetime of the returned guard.
+///
+/// A nested body — another closure, an anonymous class method, or a callee
+/// whose return type is being inferred — is walked by the same
+/// [`walk_body_forward`] machinery, and its `return`s belong to it rather
+/// than to whatever closure is being walked further out.
+pub(crate) fn suspend_return_edges() -> ReturnEdgeBarrierGuard {
+    let pushed = RETURN_EDGES.with(|frames| {
+        let mut frames = frames.borrow_mut();
+        // Nothing to shield when no frame is collecting.
+        if frames.is_empty() {
+            return false;
+        }
+        frames.push(ReturnFrame::Barrier);
+        true
+    });
+    ReturnEdgeBarrierGuard { pushed }
+}
+
+/// Record the state a `return` carries out of the body being walked.
+pub(crate) fn record_return_edge(scope: &ScopeState) {
+    if scope.unreachable {
+        return;
+    }
+    RETURN_EDGES.with(|frames| {
+        if let Some(ReturnFrame::Open(state)) = frames.borrow_mut().last_mut() {
+            match state {
+                Some(accumulated) => accumulated.merge_branch(scope),
+                None => *state = Some(Box::new(scope.clone())),
+            }
+        }
+    });
+}
+
 // ─── Closure handling ───────────────────────────────────────────────────────
+
+/// Seed a closure's own scope with what it captures from the scope it is
+/// written in: `$this`, the `use (…)` variables, and the state recorded
+/// against paths read through either of them.
+///
+/// The paths matter as much as the variables themselves.  A guard above
+/// the closure records what it proved under the spelling it tested —
+///
+/// ```php
+/// if ($param->type === null) { continue; }
+/// $errors[] = static fn () => new Pair($param->type);   // still non-null
+/// ```
+///
+/// — so a closure scope that carries `$param` but not `$param->type` makes
+/// the body fall back to the declaration and report the `null` the guard
+/// has already ruled out.
+pub(crate) fn seed_closure_captures(
+    closure_scope: &mut ScopeState,
+    outer: &ScopeState,
+    use_clause: Option<&ClosureUseClause<'_>>,
+) {
+    let carry_paths_through = |root: &str, closure_scope: &mut ScopeState| {
+        for (key, types) in outer.locals.iter() {
+            if crate::type_engine::types::narrowing::key_reads_variable(key.as_str(), root) {
+                closure_scope.set(key.as_str(), types.clone());
+            }
+        }
+    };
+
+    // PHP closures implicitly capture `$this` from the enclosing class
+    // method.
+    let this_types = outer.get("$this");
+    if !this_types.is_empty() {
+        closure_scope.set("$this", this_types.to_vec());
+        carry_paths_through("$this", closure_scope);
+    }
+
+    let Some(use_clause) = use_clause else {
+        return;
+    };
+    for use_var in use_clause.variables.iter() {
+        let var_name = bytes_to_str(use_var.variable.name).to_string();
+        let from_outer = outer.get(&var_name);
+        if !from_outer.is_empty() {
+            closure_scope.set(&var_name, from_outer.to_vec());
+        } else if outer.contains(&var_name) {
+            closure_scope.set_empty(&var_name);
+        }
+        carry_paths_through(&var_name, closure_scope);
+    }
+}
 
 /// Try to enter a closure or arrow function if the cursor is inside one.
 ///
@@ -96,23 +244,7 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 // isolated scope in PHP).
                 let mut closure_scope = ScopeState::new();
 
-                // PHP closures implicitly capture `$this` from the
-                // enclosing class method.
-                let this_types = scope.get("$this");
-                if !this_types.is_empty() {
-                    closure_scope.set("$this", this_types.to_vec());
-                }
-
-                // Seed with `use(...)` variables from the outer scope.
-                if let Some(ref use_clause) = closure.use_clause {
-                    for use_var in use_clause.variables.iter() {
-                        let var_name = bytes_to_str(use_var.variable.name).to_string();
-                        let from_outer = scope.get(&var_name);
-                        if !from_outer.is_empty() {
-                            closure_scope.set(&var_name, from_outer.to_vec());
-                        }
-                    }
-                }
+                seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
 
                 // Seed with parameter types, using callable inference
                 // when available.
@@ -126,7 +258,10 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     ctx,
                 );
 
-                walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
+                {
+                    let _barrier = suspend_return_edges();
+                    walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
+                }
 
                 *scope = closure_scope;
                 return true;
@@ -167,7 +302,18 @@ pub(crate) fn try_enter_closure_expr<'b>(
             return try_enter_closure_expr(inner.expression, scope, ctx, None);
         }
         Expression::Assignment(assignment) => {
-            // Process the assignment first so the LHS var is in scope.
+            // A closure the cursor sits in has to be written on the
+            // right-hand side, and only then is processing the assignment
+            // first (so the left-hand side is in scope for it) worth
+            // anything.  Every other cursor position would apply the
+            // assignment a second time — `process_statement` walks it too
+            // — and `$x = $x->format()` would resolve against the string
+            // the first pass already stored rather than the object.
+            let rhs_span = assignment.rhs.span();
+            if ctx.cursor_offset < rhs_span.start.offset || ctx.cursor_offset > rhs_span.end.offset
+            {
+                return false;
+            }
             process_assignment_expr(expr, scope, ctx);
             return try_enter_closure_expr(assignment.rhs, scope, ctx, None);
         }
@@ -219,6 +365,15 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     return true;
                 }
             }
+        }
+        // The immediately indexed dispatch table
+        // (`['a' => fn (X $x) => …][$name]`) writes its closures inside
+        // the subscripted expression, so both halves are searched.
+        Expression::ArrayAccess(aa) => {
+            if try_enter_closure_expr(aa.array, scope, ctx, None) {
+                return true;
+            }
+            return try_enter_closure_expr(aa.index, scope, ctx, None);
         }
         _ => {}
     }

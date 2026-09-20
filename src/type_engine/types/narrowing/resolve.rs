@@ -32,6 +32,45 @@ pub(in crate::type_engine) fn resolve_extraction_to_fqn(
     }
 }
 
+/// Resolve the classes an `instanceof`-style check names.
+///
+/// The same as [`type_hint_to_classes_typed`] except for one case it has
+/// no way to answer: a trait.  No value is ever an instance of a trait,
+/// so a check that resolves to one is really a check against the classes
+/// that use it — which is what `instanceof self` inside a trait method
+/// means, `self` there being the host class rather than the trait.
+/// Narrowing to the trait instead loses every member the hosts declare
+/// themselves, since a trait need not declare what its methods use.
+///
+/// [`type_hint_to_classes_typed`]: super::super::resolution::type_hint_to_classes_typed
+pub(in crate::type_engine) fn resolve_narrowing_target(
+    ty: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    let resolved = super::super::resolution::type_hint_to_classes_typed(
+        ty,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let mut out: Vec<Arc<ClassInfo>> = Vec::with_capacity(resolved.len());
+    for cls in resolved {
+        let hosts = crate::type_engine::trait_context::trait_host_classes(
+            &cls,
+            ctx.all_classes,
+            ctx.class_loader,
+            ctx.backend,
+        );
+        match hosts.is_empty() {
+            // Either not a trait, or one whose hosts we cannot enumerate;
+            // the trait itself is still the best answer available.
+            true => ClassInfo::push_unique_arc(&mut out, cls),
+            false => ClassInfo::extend_unique_arc(&mut out, hosts),
+        }
+    }
+    out
+}
+
 /// Resolve a list of `PhpType` values into a deduplicated `Vec<ClassInfo>`.
 ///
 /// This is a shared helper for the compound instanceof/assert narrowing
@@ -42,17 +81,24 @@ pub(crate) fn resolve_class_names_to_union(
 ) -> Vec<ClassInfo> {
     let mut union = Vec::new();
     for ty in classes {
-        let resolved = super::super::resolution::type_hint_to_classes_typed(
-            ty,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
-        for arc_cls in resolved {
+        for arc_cls in resolve_narrowing_target(ty, ctx) {
             ClassInfo::push_unique(&mut union, Arc::unwrap_or_clone(arc_cls));
         }
     }
     union
+}
+
+/// The subject key a property read keys under: the receiver's own key
+/// followed by `->` and the property name.
+fn property_subject_key(
+    object: &Expression<'_>,
+    property: &ClassLikeMemberSelector<'_>,
+) -> Option<String> {
+    let object_key = expr_to_subject_key(object)?;
+    let ClassLikeMemberSelector::Identifier(ident) = property else {
+        return None;
+    };
+    Some(format!("{}->{}", object_key, bytes_to_str(ident.value)))
 }
 
 /// Convert an AST expression to a subject key string for narrowing comparison.
@@ -70,22 +116,15 @@ pub(crate) fn resolve_class_names_to_union(
 pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
-        Expression::Access(Access::Property(pa)) => {
-            let obj = expr_to_subject_key(pa.object)?;
-            if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                Some(format!("{}->{}", obj, bytes_to_str(ident.value)))
-            } else {
-                None
-            }
-        }
-        Expression::Access(Access::NullSafeProperty(pa)) => {
-            let obj = expr_to_subject_key(pa.object)?;
-            if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                Some(format!("{}->{}", obj, bytes_to_str(ident.value)))
-            } else {
-                None
-            }
-        }
+        // `->` and `?->` read the same storage, so both key under `->`.
+        Expression::Access(
+            Access::Property(PropertyAccess {
+                object, property, ..
+            })
+            | Access::NullSafeProperty(NullSafePropertyAccess {
+                object, property, ..
+            }),
+        ) => property_subject_key(object, property),
         // `self::$repo`, `static::$repo`, `Foo::$repo` — keyed under the
         // class as the source names it.  Two spellings of the same
         // storage (`self::$x` in `Foo` and `Foo::$x`) get different keys,
@@ -107,12 +146,20 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
         // subject in its own right — a call whose argument is itself a
         // statement (an assignment, an increment) is not the same call
         // twice.
-        Expression::Call(Call::Method(mc)) => {
-            method_call_key(mc.object, &mc.method, &mc.argument_list)
-        }
-        Expression::Call(Call::NullSafeMethod(mc)) => {
-            method_call_key(mc.object, &mc.method, &mc.argument_list)
-        }
+        Expression::Call(
+            Call::Method(MethodCall {
+                object,
+                method,
+                argument_list,
+                ..
+            })
+            | Call::NullSafeMethod(NullSafeMethodCall {
+                object,
+                method,
+                argument_list,
+                ..
+            }),
+        ) => method_call_key(object, method, argument_list),
         Expression::Call(Call::StaticMethod(sc)) => {
             let class = static_class_key(sc.class)?;
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
@@ -296,14 +343,16 @@ fn is_name_char(c: char) -> bool {
 }
 
 /// Build the subject key for an array access: `$a["k"]` for a literal
-/// index, `$a[$i]` for a variable one.
+/// index, `$a[$i]` or `$a[$count-2]` for a computed one.
 ///
-/// A variable index addresses one element just as a literal one does, for
-/// as long as the index holds the value it held at the check. Writing to
-/// it drops the key — [`key_reads_variable`] sees the index inside the
-/// brackets — which is the rule a call key's arguments already follow.
-/// The index is left unquoted so it cannot collide with a literal key that
-/// happens to spell a variable name.
+/// A computed index addresses one element just as a literal one does, for
+/// as long as every variable it reads holds the value it held at the
+/// check. Writing to one of them drops the key — [`key_reads_variable`]
+/// sees the index inside the brackets — which is the rule a call key's
+/// arguments already follow. That is also why an index with no variable
+/// in it is left out: it buys nothing the literal form does not already
+/// cover. The index is left unquoted so it cannot collide with a literal
+/// key that happens to spell a variable name.
 ///
 /// Kept out of [`expr_to_subject_key`] so its frame stays small: a long
 /// method chain recurses once per link and pays for every local the match
@@ -314,10 +363,69 @@ fn array_access_subject_key(aa: &mago_syntax::cst::ArrayAccess<'_>) -> Option<St
     if let Some(key) = array_access_key_as_string(aa) {
         return Some(format!("{}[\"{}\"]", base, key));
     }
-    let index = expr_to_subject_key(aa.index)?;
-    index
-        .starts_with('$')
-        .then(|| format!("{}[{}]", base, index))
+    let index = array_index_key(aa.index)?;
+    index.contains('$').then(|| format!("{}[{}]", base, index))
+}
+
+/// Render an index expression that is not a literal key.
+///
+/// A bare variable (`$i`) is the common case; an offset computed from one
+/// (`$count - 2`, `$i + 1`) is the same read written with arithmetic, so
+/// it renders to a key too. Spaces are dropped so `$count - 2` and
+/// `$count-2` are one subject, and parentheses are kept so `1-($i-2)` and
+/// `(1-$i)-2` are not.
+///
+/// Only the arithmetic operators are rendered. An index that writes
+/// (`$i++`), concatenates, or compares is not the same read twice, and
+/// falls back to whatever [`expr_to_subject_key`] makes of it — for those
+/// shapes, nothing.
+pub(crate) fn array_index_key(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Binary(bin) => {
+            let operator = arithmetic_operator_text(&bin.operator)?;
+            let lhs = array_index_key(bin.lhs)?;
+            let rhs = array_index_key(bin.rhs)?;
+            Some(format!("{}{}{}", lhs, operator, rhs))
+        }
+        Expression::UnaryPrefix(unary) => {
+            use mago_syntax::cst::unary::UnaryPrefixOperator;
+            let sign = match unary.operator {
+                UnaryPrefixOperator::Negation(_) => '-',
+                UnaryPrefixOperator::Plus(_) => '+',
+                _ => return None,
+            };
+            Some(format!("{}{}", sign, array_index_key(unary.operand)?))
+        }
+        Expression::Parenthesized(inner) => {
+            let rendered = array_index_key(inner.expression)?;
+            // Only a compound operand needs its grouping recorded; `($i)`
+            // and `$i` are the same read and should share a key.
+            Some(match inner.expression {
+                Expression::Binary(_) => format!("({})", rendered),
+                _ => rendered,
+            })
+        }
+        Expression::Literal(Literal::Integer(i)) => Some(
+            i.value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| bytes_to_str(i.raw).to_string()),
+        ),
+        other => expr_to_subject_key(other),
+    }
+}
+
+/// The written form of an operator that computes an offset, or `None` for
+/// one that does something else with its operands.
+fn arithmetic_operator_text(operator: &BinaryOperator<'_>) -> Option<&'static str> {
+    match operator {
+        BinaryOperator::Addition(_) => Some("+"),
+        BinaryOperator::Subtraction(_) => Some("-"),
+        BinaryOperator::Multiplication(_) => Some("*"),
+        BinaryOperator::Division(_) => Some("/"),
+        BinaryOperator::Modulo(_) => Some("%"),
+        BinaryOperator::Exponentiation(_) => Some("**"),
+        _ => None,
+    }
 }
 
 /// Build the subject key for a method call, matching the
@@ -527,8 +635,17 @@ const NON_DETERMINISTIC_FUNCTIONS: &[&str] = &[
 pub(in crate::type_engine) fn array_access_key_as_string(
     aa: &mago_syntax::cst::ArrayAccess<'_>,
 ) -> Option<String> {
+    array_index_literal_key(aa.index)
+}
+
+/// The same literal-key extraction [`array_access_key_as_string`] does,
+/// taken directly from an index expression rather than the `ArrayAccess`
+/// node that wraps it. Lets a caller that only has the index (e.g. one
+/// key of a write's flattened `key_chain`) render it the same way a read
+/// through the full `ArrayAccess` would.
+pub(in crate::type_engine) fn array_index_literal_key(index: &Expression<'_>) -> Option<String> {
     use mago_syntax::cst::Literal;
-    match aa.index {
+    match index {
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to stripping
             // quotes from `raw`.

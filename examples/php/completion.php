@@ -322,6 +322,31 @@ class TypeNarrowingDemo
         }
         echo $isRock ? $stored->crush() : $stored->peel();   // both branches narrowed
 
+        // The value a ternary arm *yields* is narrowed too, not just the
+        // members reachable inside it.
+        $chosen = $isRock ? $stored : new Scaffolding\Rock();
+        Scaffolding\crushOneRock($chosen);        // Scaffolding\Rock, from the $isRock arm
+
+        // A boolean holding an `||` chain stands for the whole disjunction:
+        // the subject is one of the classes it lists.
+        $shelved = Scaffolding\pickRockOrBanana();
+        $isKnown = $shelved instanceof Scaffolding\Rock || $shelved instanceof Scaffolding\Banana;
+        if ($isKnown) {
+            $shelved->weigh();                    // Scaffolding\Rock|Scaffolding\Banana
+        }
+
+        // A variable a guarded branch fills stands for the guard itself:
+        // reaching the `!== null` test means the branch ran, so whatever
+        // it narrowed is narrowed again.
+        $weighed = Scaffolding\pickRockOrBanana();
+        $label = null;
+        if ($weighed instanceof Scaffolding\Rock) {
+            $label = new Scaffolding\SpecimenLabel('rock');
+        }
+        if ($label !== null) {
+            Scaffolding\crushOneRock($weighed);    // Scaffolding\Rock, proven by $label
+        }
+
         // The negated form works as a guard clause too.
         $held = Scaffolding\pickRockOrBanana();
         $isBanana = $held instanceof Scaffolding\Banana;
@@ -411,23 +436,55 @@ class CompoundNarrowingDemo
     }
 
     /**
-     * A proof lasts as long as the state it was made about.  A call on the
-     * same receiver can change what the checked call answers, so it drops
-     * the proof; a callee declared `@phpstan-pure` cannot, so it keeps it.
+     * A ternary condition proves the same thing an `if` condition does,
+     * and its arms are where the repeated call gets written: the
+     * re-check-and-reuse idiom for a call that reports "nothing here"
+     * with a value rather than an exception.
+     */
+    public function repeatedCallInTernary(Scaffolding\SpecimenHolder $holder): string
+    {
+        // The true arm re-evaluates the same call, and the check has
+        // already ruled out the `null` it could have answered, so the
+        // result satisfies a parameter that does not accept `null`.
+        $found = $holder->lookUp('rock') !== null
+            ? $holder->lookUp('rock')             // narrowed to Scaffolding\Rock|Banana
+            : new Scaffolding\Rock();
+
+        // The else arm of the negated spelling carries the same proof.
+        $weight = $holder->lookUp('rock') === null
+            ? 0.0
+            : $holder->lookUp('rock')->weigh();   // narrowed, so `weigh()` resolves
+
+        return $holder->labelFor($found)->render() . $weight;
+    }
+
+    /**
+     * A proof lasts as long as the state it was made about.  What a later
+     * call on the same receiver does to it is read off the declaration:
+     * `@phpstan-pure` keeps it, a method that hands nothing back was called
+     * for its effect and drops it, and `@impure` drops it even though the
+     * call returns a value.  Anything else computes a value and keeps it.
      */
     public function callInvalidation(Scaffolding\SpecimenHolder $holder): string
     {
         if ($holder->lookUp('rock') instanceof Scaffolding\Rock) {
             $label = $holder->shelfLabel();       // pure — the proof stands
+            $count = $holder->shelfCount();       // returns a value — so does this
             $rock = $holder->lookUp('rock');      // still Scaffolding\Rock
             $rock->crush();
 
-            $holder->restock();                   // impure — the shelf moved on
+            $holder->restock();                   // returns nothing — the shelf moved on
             // Try: put the cursor after the `->` below.  The call is back to
             // `Rock|Banana|null`, so `crush()` is no longer offered alone.
             // $holder->lookUp('rock')->
 
-            return $label;
+            return $label . $count;
+        }
+
+        if ($holder->lookUp('rock') instanceof Scaffolding\Rock) {
+            $holder->rotate();                    // @impure — same effect on the proof
+            // Try: put the cursor after the `->` below.  Same widened call.
+            // $holder->lookUp('rock')->
         }
 
         return '';
@@ -603,6 +660,64 @@ class NullsafeComparisonDemo
         }
 
         return 'different';
+    }
+}
+
+
+// ── Variables Filled Together in One Branch Share Their Null ────────────────
+// `$label` is written on exactly the path that leaves `$specimen` holding a
+// value, so the two are null together or not at all.  The merge at the end of
+// the branch records that, which is what lets a later check on one of them
+// settle the other, even though the check never names it.
+
+class CorrelatedNullDemo
+{
+    public function describe(Scaffolding\SpecimenHolder $holder, string $name): string
+    {
+        $label = null;
+        $specimen = null;
+
+        if ($name !== '') {
+            $specimen = $holder->lookUp($name);
+            if ($specimen !== null) {
+                $label = $holder->labelFor($specimen);
+            }
+        }
+
+        if ($specimen !== null) {
+            // Try: put the cursor after the `->` below.  `$label` is a
+            // `Scaffolding\SpecimenLabel` here rather than a nullable one:
+            // the only path that leaves `$specimen` holding a value is the
+            // one that filled `$label` too.
+            return $label->render();
+        }
+
+        return 'nothing on the shelf';
+    }
+
+    /**
+     * Two variables filled under conditions of their own are not a pair,
+     * however alike the branches look, so `$label` keeps its `null` here.
+     */
+    public function unrelated(bool $wantSpecimen, bool $wantLabel): string
+    {
+        $label = null;
+        $specimen = null;
+
+        if ($wantSpecimen) {
+            $specimen = new Scaffolding\Rock();
+        }
+        if ($wantLabel) {
+            $label = new Scaffolding\SpecimenLabel('1kg');
+        }
+
+        if ($specimen !== null) {
+            // `$label` is still `Scaffolding\SpecimenLabel|null` here, which
+            // is why the `?->` is the only safe way to read it.
+            return $label?->render() ?? 'unlabelled';
+        }
+
+        return 'nothing on the shelf';
     }
 }
 
@@ -1035,6 +1150,75 @@ class InstanceofSelfDemo extends Scaffolding\ScaffoldingSedan
 }
 
 
+// ── Negated Disjunction and Subclass Subtraction ────────────────────────────
+
+class NegatedDisjunctionDemo
+{
+    /**
+     * A guard that rules out two types at once leaves the value narrowed to
+     * both of them, and a check that fails rules out the subclasses of the
+     * class it names along with the class itself.
+     */
+    public function demo(Scaffolding\ScaffoldingMotor $motor): string
+    {
+        // Everything that is neither type leaves here, so `$motor` is
+        // Scaffolding\ScaffoldingSedan|Scaffolding\ScaffoldingCoupe below.
+        if (!($motor instanceof Scaffolding\ScaffoldingSedan
+            || $motor instanceof Scaffolding\ScaffoldingCoupe)) {
+            return 'other';
+        }
+        // Try: completion here offers start() from the base class of both.
+        $motor->start();
+
+        if (!$motor instanceof Scaffolding\ScaffoldingSedan) {
+            return $motor->race();                // Scaffolding\ScaffoldingCoupe
+        }
+        $motor->cruise();                         // Scaffolding\ScaffoldingSedan
+        return 'sedan';
+    }
+
+    /**
+     * A subclass passes a check on its parent and stays as itself, so
+     * launch() is still reachable inside the branch.
+     *
+     * @param Scaffolding\ScaffoldingSportSedan|Scaffolding\ScaffoldingCoupe $motor
+     */
+    public function keepsSubclass($motor): string
+    {
+        if ($motor instanceof Scaffolding\ScaffoldingSedan) {
+            return $motor->launch();              // Scaffolding\ScaffoldingSportSedan
+        }
+        // A ScaffoldingSportSedan is a ScaffoldingSedan, so the failed check
+        // ruled it out here too and only the coupe is left.
+        return $motor->race();                    // Scaffolding\ScaffoldingCoupe
+    }
+
+    /**
+     * A disjunction proves that one of its legs held, not that any
+     * particular one did. Which is why a check standing beside an
+     * unrelated operand narrows nothing, while two checks on the same
+     * subject leave the union of what they name.
+     */
+    public function provesOneLegOnly(Scaffolding\ScaffoldingMotor $motor, bool $flag): string
+    {
+        if ($motor instanceof Scaffolding\ScaffoldingCoupe || $flag) {
+            // The flag gets in on its own, so `$motor` is still the
+            // Scaffolding\ScaffoldingMotor it was on the way in and race()
+            // is not offered here.
+            $motor->start();                      // Scaffolding\ScaffoldingMotor
+        }
+
+        if ($motor instanceof Scaffolding\ScaffoldingSedan
+            || $motor instanceof Scaffolding\ScaffoldingCoupe) {
+            // Try: completion here offers start(), which both legs share.
+            $motor->start();                      // Sedan|Coupe
+        }
+
+        return 'motor';
+    }
+}
+
+
 // ── Custom Assert Narrowing ─────────────────────────────────────────────────
 
 class AssertNarrowingDemo
@@ -1440,6 +1624,16 @@ class SplWrapperIterationDemo
         foreach (new \DirectoryIterator(__DIR__) as $entry) {
             $entry->isFile();                     // DirectoryIterator → current(): DirectoryIterator
         }
+
+        // `RecursiveIteratorIterator` says nothing about what it yields on
+        // its own: the wrapped iterator does, and the wrapper carries it
+        // through. This is the directory-walk idiom.
+        $tree = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(__DIR__, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($tree as $file) {
+            $file->getExtension();                // SplFileInfo from RecursiveDirectoryIterator
+        }
     }
 }
 
@@ -1701,6 +1895,53 @@ class ConditionalReturnDemo
         // `abs()` returns the type it was given.
         $magnitude = abs(-7);
         echo $magnitude << 1;                     // int argument → int, not int|float
+
+        // `var_export()` renders to a string only for the `$return = true`
+        // form; the default prints and hands back nothing at all.
+        $exported = var_export(['a' => 1], true);
+        strtoupper($exported);                    // captured → string
+
+        // One name, two functions: without an argument each of these reads,
+        // with one it writes and reports whether the write took.
+        $encoding = mb_internal_encoding();
+        strtoupper($encoding);                    // getter form → string
+        $ordering = version_compare(PHP_VERSION, '8.2.0');
+        echo $ordering << 1;                      // no operator → int, not int|bool
+
+        // The `scanf` family collects into an array, or fills by-reference
+        // targets and reports how many it filled.
+        $collected = sscanf('12 apples', '%d %s');
+        echo count($collected ?? []);             // no targets → array|null
+        $filled = sscanf('12 apples', '%d %s', $count, $fruit);
+        echo $filled << 1;                        // targets passed → int
+
+        // A `range()` of integers stays integral; one fractional bound makes
+        // every element a float.
+        $steps = range(0, 10, 2);
+        echo $steps[0] << 1;                      // all-int bounds → list<int>
+        $fractions = range(0, 1, 0.25);
+        echo $fractions[0] + 0.5;                 // fractional step → list<float>
+
+        // `array_reduce()` only answers null for the one case that produces
+        // it: an empty array with no initial value.
+        $total = array_reduce([1, 2, 3], static fn (int $carry, int $n): int => $carry + $n, 0);
+        echo $total << 1;                         // seeded → int, never null
+
+        // `pow()`'s `object` branch belongs to the operator-overloading
+        // extensions; two numbers can only produce a number.
+        $raised = pow(2, 10);
+        echo $raised + 1;                         // numeric operands → int|float
+
+        // `ini_get()` reports false for a directive that is not set, which
+        // the core ones always are.
+        $limit = ini_get('memory_limit');
+        strtoupper($limit);                       // core directive → string
+
+        // `get_class()` names the class of the object it was handed, so the
+        // result can be instantiated or passed on as a class-string.
+        $pen = new Scaffolding\Pen();
+        $penClass = get_class($pen);
+        (new $penClass())->write();               // class-string<Scaffolding\Pen>
     }
 }
 
@@ -2048,6 +2289,61 @@ class LoopCarriedAssignmentDemo
 
         return $joined;
     }
+
+    /**
+     * The fold-into-an-accumulator loop: seed on the pass where the
+     * variable is still `null`, merge into it on every pass after. On the
+     * first pass the merge branch cannot be entered at all, so the
+     * impossible `null->mergeWith()` it would perform is not an
+     * alternative to what the seed branch produced.
+     *
+     * @param list<Scaffolding\DrawingStep> $steps
+     */
+    public function foldAccumulator(array $steps): int
+    {
+        $tally = null;
+        foreach ($steps as $step) {
+            if ($tally === null) {
+                $tally = $step->tally();
+                continue;
+            }
+            $tally = $tally->mergeWith($step->tally());   // Scaffolding\InkTally
+        }
+
+        // Try: put the cursor after the `?->` below. The loop may not have
+        // run at all, so `$tally` is `Scaffolding\InkTally|null` here.
+        // $tally?->
+
+        return $tally?->total() ?? 0;
+    }
+
+    /**
+     * The same fold written as an `if`/`else`, and as the ternary the
+     * idiom is usually compressed into. Both branches of the check are
+     * the same two the guard-clause form above spells out.
+     *
+     * @param list<Scaffolding\DrawingStep> $steps
+     */
+    public function foldAccumulatorTernary(array $steps): int
+    {
+        $viaElse = null;
+        foreach ($steps as $step) {
+            if ($viaElse === null) {
+                $viaElse = $step->tally();
+            } else {
+                $viaElse = $viaElse->mergeWith($step->tally());   // Scaffolding\InkTally
+            }
+        }
+
+        $viaTernary = null;
+        foreach ($steps as $step) {
+            $viaTernary = $viaTernary === null
+                ? $step->tally()
+                : $viaTernary->mergeWith($step->tally());         // Scaffolding\InkTally
+        }
+
+        return ($viaElse?->total() ?? 0) + ($viaTernary?->total() ?? 0);
+    }
 }
 
 
@@ -2120,6 +2416,129 @@ class NonEmptyLoopDemo
         }
 
         return $last;                             // Scaffolding\Pen|null
+    }
+}
+
+
+// ── Pre-Validation Loops ────────────────────────────────────────────────────
+// A loop that rejects the whole collection the moment one entry fails a
+// check only falls out of its own bottom once every entry has passed, so
+// the code after it may treat the collection as holding the checked type.
+// Whether the collection was empty does not matter: the claim is vacuously
+// true when the body never ran.
+
+class PreValidationLoopDemo
+{
+    /**
+     * Validate every node up front, then walk the list again to use them.
+     * The second loop reads members the first loop proved are there
+     * without checking a second time.
+     *
+     * @param list<Scaffolding\SketchGroup> $groups
+     */
+    public function captions(array $groups): string
+    {
+        $out = '';
+        foreach ($groups as $group) {
+            foreach ($group->nodes as $node) {
+                // `break 2` skips the second loop entirely, so reaching it
+                // means every node passed.
+                if (!$node instanceof Scaffolding\LabelledSketchNode) {
+                    break 2;
+                }
+            }
+
+            foreach ($group->nodes as $checked) {
+                $out .= $checked->caption();      // Scaffolding\LabelledSketchNode
+            }
+        }
+
+        return $out;
+    }
+
+    /** A `return` guard proves it for the rest of the function the same way. */
+    public function firstCaption(Scaffolding\SketchGroup $group): string
+    {
+        foreach ($group->nodes as $node) {
+            if (!$node instanceof Scaffolding\LabelledSketchNode) {
+                return '';
+            }
+        }
+
+        foreach ($group->nodes as $checked) {
+            return $checked->caption();           // Scaffolding\LabelledSketchNode
+        }
+
+        return '';
+    }
+
+    /**
+     * A plain `break` jumps to exactly the code the claim would be about,
+     * and a `continue` skips the entry rather than the rest of the
+     * program, so neither proves anything about the collection.
+     */
+    public function unproven(Scaffolding\SketchGroup $group): string
+    {
+        $out = '';
+        foreach ($group->nodes as $node) {
+            if (!$node instanceof Scaffolding\LabelledSketchNode) {
+                break;
+            }
+        }
+
+        // Try: put the cursor after the `->` below. The list is still
+        // `Scaffolding\SketchNode`, so only `kind()` is offered.
+        foreach ($group->nodes as $unchecked) {
+            $out .= $unchecked->kind();           // Scaffolding\SketchNode
+        }
+
+        return $out;
+    }
+}
+
+
+// ── By-Reference Capture Written on the Way Out ─────────────────────────────
+// A callback that gathers what it is looking for into a `use (&$x)` capture
+// pushes and returns in the same branch. Returning out of a closure ends it
+// just as falling off the bottom does, so what the capture was handed on the
+// way out still reaches the caller.
+
+class ByRefCaptureGatherDemo
+{
+    /** Gather every labelled node, then read the captions off the pile. */
+    public function captions(Scaffolding\SketchGroup $group): string
+    {
+        $labelled = [];
+        $group->walk(static function (Scaffolding\SketchNode $node) use (&$labelled): void {
+            if ($node instanceof Scaffolding\LabelledSketchNode) {
+                $labelled[] = $node;
+                return;
+            }
+        });
+
+        $out = '';
+        // Try: put the cursor after the `->` below. The pushed element type
+        // outlives the closure's `return`, so `caption()` is offered.
+        foreach ($labelled as $node) {
+            $out .= $node->caption();             // Scaffolding\LabelledSketchNode
+        }
+
+        return $out;
+    }
+
+    /** A plain variable written in a guard clause carries the same way. */
+    public function firstCaption(Scaffolding\SketchGroup $group): string
+    {
+        $found = null;
+        $group->walk(static function (Scaffolding\SketchNode $node) use (&$found): void {
+            if ($found === null && $node instanceof Scaffolding\LabelledSketchNode) {
+                $found = $node;
+                return;
+            }
+        });
+
+        // The callback may never have run, so the capture is still nullable.
+        return $found?->caption() ?? '';          // Scaffolding\LabelledSketchNode|null
     }
 }
 
@@ -3226,6 +3645,29 @@ class IterationDemo
             $shapePen->write();
         }
 
+        // A `Pen[]` shorthand names only the value type, so its keys are
+        // whatever PHP allows. Passing one to `strlen()` is accepted because
+        // the union stands in for an annotation nobody wrote, and `is_int()`
+        // narrows the rest of the loop to the other half.
+        foreach ($src->openKeyed() as $openKey => $openPen) {
+            strlen($openKey);             // int|string (the whole key domain)
+            $openPen->write();
+            if (is_int($openKey)) {
+                continue;
+            }
+            strtoupper($openKey);         // string (the guard ruled the ints out)
+        }
+
+        // Collecting those keys keeps them exactly as lenient: the element
+        // type of the array is the same open key domain the loop bound, so
+        // an array built out of them is accepted wherever one key would be.
+        $collectedKeys = [];
+        foreach ($src->openKeyed() as $collectedKey => $collectedPen) {
+            $collectedKeys[] = $collectedKey; // list<int|string>
+            $collectedPen->write();
+        }
+        implode(', ', $collectedKeys);
+
         // WeakMap keys
         /** @var \WeakMap<Scaffolding\Pen, Scaffolding\Pencil> $mapping */
         $mapping = new \WeakMap();
@@ -3261,6 +3703,21 @@ class IterationDemo
         strlen($label);                   // string from outer position 0
         $nestedPen->write();              // Scaffolding\Pen from inner position 0
         $nestedPencil->sketch();          // Scaffolding\Pencil from inner position 1
+
+        // Skipped positions still count: a hole names nothing but occupies
+        // its slot, so everything after it shifts along with it.
+        /** @var array{string, Scaffolding\Pen, Scaffolding\Pencil} $triple */
+        $triple = ['label', new Scaffolding\Pen(), new Scaffolding\Pencil()];
+        [, $skippedPen, ] = $triple;
+        $skippedPen->write();             // Scaffolding\Pen from position 1
+        [, , $skippedPencil] = $triple;
+        $skippedPencil->sketch();         // Scaffolding\Pencil from position 2
+
+        /** @var array<int, array{string, Scaffolding\Pen}> $labelled */
+        $labelled = [];
+        foreach ($labelled as [, $rowPen]) {
+            $rowPen->write();             // Scaffolding\Pen from position 1
+        }
     }
 }
 
@@ -3440,6 +3897,25 @@ class ArrayFuncDemo
         // An all-int array cannot sum to a float.
         $total = array_sum($src->weights());
         intdiv($total, 1);                // int
+
+        // array_merge is the one member of the family that concatenates
+        // rather than rearranges, so every argument contributes to the
+        // element type. The [] an accumulator starts as contributes nothing,
+        // which is what keeps the loop's result typed.
+        $collected = [];
+        foreach ([$src->roster(), $src->roster()] as $batch) {
+            $collected = array_merge($collected, $batch);
+        }
+        $collected[0]->write();           // list<Scaffolding\Pen>
+
+        // Two different element types union, so only what they share is here.
+        $writers = array_merge($src->roster(), $src->mixedWriters());
+        $writers[0]->label();             // list<Scaffolding\Pen|Scaffolding\Pencil>
+
+        // PHP renumbers integer keys as it appends and carries string keys
+        // over, so merging a list into a string-keyed array holds both.
+        $everyone = array_merge($src->roster(), $src->byName());
+        $everyone['blue']->write();       // array<int|string, Scaffolding\Pen>
     }
 
     /** @return array{names: list<string>, first: string, total: int} */
@@ -3452,6 +3928,38 @@ class ArrayFuncDemo
             'first' => array_values($present)[0],
             'total' => array_sum($src->weights()),
         ];
+    }
+
+    /**
+     * The user-comparison sorts hand their callback two entries of the array
+     * they are sorting: two values for usort and uasort, two keys for
+     * uksort. Neither the call nor the callback spells the type out.
+     *
+     * Try: trigger completion after each `->` below.
+     */
+    public function sortCallbacks(Scaffolding\ScaffoldingArrayFunc $src): void
+    {
+        $roster = $src->roster();
+        usort($roster, static fn($a, $b) => strcmp($a->color(), $b->color()));
+        $roster[0]->write();              // list<Scaffolding\Pen> survives the sort
+
+        $byName = $src->byName();
+        uasort($byName, static fn($a, $b) => strcmp($a->color(), $b->color()));
+        uksort($byName, static fn($a, $b) => strcmp($a, $b));  // $a, $b are the string keys
+        $byName['blue']->write();         // array<string, Scaffolding\Pen> survives both
+    }
+
+    /**
+     * A callback may annotate a return type wider than what its body hands
+     * back; the narrower one is what the mapped array holds.
+     */
+    public function mappedSubclass(Scaffolding\ScaffoldingArrayFunc $src): void
+    {
+        $renamed = array_map(
+            static fn(Scaffolding\Marker $m): Scaffolding\Pen => $m->rename('wide'),
+            $src->markers()
+        );
+        $renamed[0]->highlight();         // Scaffolding\Marker: rename() returns static
     }
 }
 
@@ -3798,6 +4306,30 @@ class ClosureParamInferenceDemo
         $tools->each(function (Scaffolding\Pen|Scaffolding\Pencil $item): void {
             $item->label();               // resolves on both union arms
         });
+    }
+
+    /**
+     * A doc comment written above the statement a closure is assigned in
+     * still types the closure. PHP attaches the comment to the statement,
+     * but its `@param` tags describe the closure's own parameters.
+     *
+     * Try: trigger completion after `$pen->` inside the closure body.
+     */
+    public function docblockedClosure(): string
+    {
+        /**
+         * @param list<Scaffolding\Pen> $pens
+         */
+        $labels = static function (array $pens): string {
+            $out = '';
+            foreach ($pens as $pen) {
+                $out .= $pen->color();    // Scaffolding\Pen from the docblock above the assignment
+            }
+
+            return $out;
+        };
+
+        return $labels([new Scaffolding\Pen('blue')]);
     }
 }
 
@@ -4269,6 +4801,26 @@ class PassByReferenceDemo
         // Instance method calls ($this->method) with by-ref parameters:
         $this->init($thisPen);
         $thisPen->write();                // $thisPen is now Scaffolding\Pen
+
+        // The declared type says what may go *in*. What the callee assigns
+        // on every path is what comes back out, so the null `?Pen` allows
+        // is gone by the time the call returns and a parameter that will
+        // not take null accepts it.
+        Scaffolding\initPen($writtenPen);
+        Scaffolding\describePen($writtenPen);  // Scaffolding\Pen, never null
+
+        // A callee that only writes on one branch leaves the null in place.
+        Scaffolding\initPenWhen(false, $maybePen);
+        $maybePen?->write();              // still ?Scaffolding\Pen
+
+        // The value an out-parameter already holds is never checked against
+        // the declared type: on the second pass `$matches` still holds the
+        // offset-capture shape the first left behind, and `preg_match_all()`
+        // overwrites it either way.
+        foreach (['a 1', 'b 2'] as $line) {
+            preg_match_all('/(\w+)/', $line, $matches, PREG_OFFSET_CAPTURE);
+            echo $matches[1][0][1] << 1;  // list<array{string, int<-1, max>}>
+        }
     }
 
     private function init(?Scaffolding\Pen &$pen): void
@@ -4535,6 +5087,79 @@ class ConditionalLoopShapeDemo
         foreach ($grouped as $entry) {
             $entry['tool']->write();      // Scaffolding\Pen method via shape tracking
         }
+    }
+}
+
+
+// ── Arrays the code proved have entries ─────────────────────────────────────
+//
+// A `null` seeded above a loop only survives the loop if the loop might run
+// zero times.  `count($xs) > 0`, the fall-through of `count($xs) === 0`, and
+// writing an element all say the array has entries, so a loop over it runs at
+// least once and the sentinel is gone by the time the code below reads it.
+
+class ProvenNonEmptyDemo
+{
+    /** @param list<Scaffolding\Pen> $pens */
+    public function afterCountGuard(array $pens): Scaffolding\Pen
+    {
+        $last = null;
+        if (count($pens) > 0) {
+            foreach ($pens as $pen) {
+                $last = $pen;
+            }
+
+            // Try: `$last->` — Scaffolding\Pen, not Scaffolding\Pen|null
+            return $last;                         // Scaffolding\Pen
+        }
+
+        return new Scaffolding\Pen('black');
+    }
+
+    /** @param list<Scaffolding\Pen> $pens */
+    public function afterEmptyGuard(array $pens): Scaffolding\Pen
+    {
+        if (count($pens) === 0) {
+            throw new \RuntimeException('no pens');
+        }
+
+        // $pens is non-empty-list<Scaffolding\Pen> below the guard.
+        $last = null;
+        foreach ($pens as $pen) {
+            $last = $pen;
+        }
+
+        return $last;                             // Scaffolding\Pen
+    }
+
+    public function afterElementWrite(Scaffolding\Pen $pen): Scaffolding\Pen
+    {
+        $collected = [];
+        $collected[] = $pen;                      // non-empty-list<Scaffolding\Pen>
+
+        $last = null;
+        foreach ($collected as $item) {
+            $last = $item;
+        }
+
+        return $last;                             // Scaffolding\Pen
+    }
+
+    /** A write on only one path gives the promise back where they join. */
+    public function afterConditionalWrite(Scaffolding\Pen $pen, bool $keep): ?Scaffolding\Pen
+    {
+        $collected = [];
+        if ($keep) {
+            $collected[] = $pen;                  // array{}|non-empty-list<Scaffolding\Pen>
+        }
+
+        $last = null;
+        foreach ($collected as $item) {
+            $last = $item;
+        }
+
+        // Try: hover `$last` — Scaffolding\Pen|null, since the loop may not run
+        return $last;                             // Scaffolding\Pen|null
     }
 }
 
@@ -4843,6 +5468,23 @@ class ReflectionInstantiationDemo
     }
 
     /**
+     * The same read, written without the `ReflectionClass` step.
+     *
+     * `new \ReflectionProperty($class, $name)` and
+     * `(new \ReflectionClass($class))->getProperty($name)` build the same
+     * value, so the direct spelling carries the class and the name too.
+     */
+    public function directWidget(Scaffolding\ReflectedHolder $holder): ?Scaffolding\ReflectedWidget
+    {
+        // ReflectionProperty<Demo\Scaffolding\ReflectedHolder, 'widget'>
+        $property = new \ReflectionProperty(Scaffolding\ReflectedHolder::class, 'widget');
+
+        // Try: `$property->getValue($holder)->` — Scaffolding\ReflectedWidget
+        // members (label()), the same as the getProperty() spelling above
+        return $property->getValue($holder);          // ?Scaffolding\ReflectedWidget
+    }
+
+    /**
      * A reflection-based accessor, which is how the read above is usually
      * written: the object and the property name both arrive as arguments,
      * so nothing the signature could say would be true of every call.  The
@@ -4960,5 +5602,139 @@ class MagicConstantDemo
     public function ownName(): string
     {
         return __CLASS__;                           // class-string<MagicConstantDemo>
+    }
+}
+
+// ── Proofs the condition never states outright ──────────────────────────────
+//
+// A guard records what it proved under the spelling it tested, and three
+// idioms read that proof back through something the condition never names:
+// a disjunction whose surviving leg is picked further down, the identical
+// condition tested a second time, and a closure that captures a value a
+// guard above it already narrowed.
+
+class ReconstructedProofDemo
+{
+    /**
+     * The `||` proves only that one leg held.  Ruling the `=== null` leg
+     * out leaves the other one, and with it the `is_string` it carried.
+     */
+    public function keyName(Scaffolding\ScaffoldingLoopNode $node): ?string
+    {
+        if (
+            is_string($node->valueVar->name)
+            && (
+                $node->keyVar === null
+                || ($node->keyVar instanceof Scaffolding\ScaffoldingNameNode && is_string($node->keyVar->name))
+            )
+        ) {
+            // Try: hover `$node->keyVar->name` — string, not string|ScaffoldingNameNode
+            return $node->keyVar instanceof Scaffolding\ScaffoldingNameNode
+                ? $node->keyVar->name
+                : null;                                 // ?string
+        }
+
+        return null;
+    }
+
+    /**
+     * The second `count($args) > 0` re-establishes what the first one did,
+     * and that branch is the only thing that fills `$acceptor`.
+     *
+     * @param string[] $args
+     */
+    public function describeArguments(array $args): string
+    {
+        $acceptor = null;
+        if (count($args) > 0) {
+            $acceptor = Scaffolding\scaffoldingSelectAcceptor($args);
+        }
+
+        if (count($args) > 0) {
+            // Try: `$acceptor->` — ScaffoldingArgumentAcceptor members, no null
+            return $acceptor->describe($args);      // Scaffolding\ScaffoldingArgumentAcceptor
+        }
+
+        return '';
+    }
+
+    /**
+     * `use ($holder)` captures the value `$holder->label` is read through,
+     * so the guard above the closure still holds inside its body.
+     */
+    public function labelPrinter(Scaffolding\ScaffoldingOptionalLabel $holder): \Closure
+    {
+        if ($holder->label === null) {
+            return static fn (): string => '';
+        }
+
+        return static function () use ($holder): string {
+            // Try: hover `$holder->label` — string, not ?string
+            return strtoupper($holder->label);      // string
+        };
+    }
+
+    /**
+     * A plain boolean is a condition of its own.  The branch it guards is
+     * the only thing that fills `$acceptor`, so re-testing the flag is
+     * testing whether that branch ran.
+     *
+     * @param string[] $args
+     */
+    public function describeWhenFlagged(array $args, bool $wanted): string
+    {
+        $acceptor = null;
+        if ($wanted) {
+            $acceptor = Scaffolding\scaffoldingSelectAcceptor($args);
+        }
+
+        if ($wanted) {
+            // Try: `$acceptor->` — ScaffoldingArgumentAcceptor members, no null
+            return $acceptor->describe($args);      // Scaffolding\ScaffoldingArgumentAcceptor
+        }
+
+        // Try: hover `$wanted` — false, since the branch above was skipped
+        return $wanted ? 'unreachable' : '';        // string
+    }
+
+    /**
+     * The path that failed `instanceof ScaffoldingQualifiedName` keeps the
+     * parent class, which spans the one the check named, so the types the
+     * two paths leave behind say nothing about which of them ran.  What
+     * does is the class the failing check ruled out.
+     */
+    public function qualifiedLabel(Scaffolding\ScaffoldingNameNode $node): string
+    {
+        $acceptor = null;
+        if ($node instanceof Scaffolding\ScaffoldingQualifiedName) {
+            $acceptor = Scaffolding\scaffoldingSelectAcceptor(['q']);
+        }
+
+        // Try: `$acceptor->` — ScaffoldingArgumentAcceptor members, no null
+        return $node instanceof Scaffolding\ScaffoldingQualifiedName
+            ? $acceptor->describe(['q'])            // Scaffolding\ScaffoldingArgumentAcceptor
+            : '';
+    }
+
+    /**
+     * Past the guard at least one of the two flags held, so the arm that
+     * knows `$firstIsQualified` is false knows `$secondIsQualified` is
+     * not, and with it what the check behind that flag proved about
+     * `$second`.  Neither arm names the flag it relies on.
+     */
+    public function eitherPrefix(
+        Scaffolding\ScaffoldingNameNode $first,
+        Scaffolding\ScaffoldingNameNode $second
+    ): string {
+        $firstIsQualified = $first instanceof Scaffolding\ScaffoldingQualifiedName;
+        $secondIsQualified = $second instanceof Scaffolding\ScaffoldingQualifiedName;
+        if (!$firstIsQualified && !$secondIsQualified) {
+            return '';
+        }
+
+        // Try: `$qualified->` — ScaffoldingQualifiedName members from both arms
+        $qualified = $firstIsQualified ? $first : $second;
+
+        return $qualified->namespacePrefix;         // string
     }
 }

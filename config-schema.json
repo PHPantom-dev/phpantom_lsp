@@ -35,6 +35,11 @@
           "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
           "default": false
         },
+        "downgrade-nullable-argument-mismatch": {
+          "type": "boolean",
+          "description": "Downgrade type_mismatch_argument to a warning when the only reason an argument's type fails to satisfy the parameter is a stray null (every non-null member of the argument's type is already compatible).",
+          "default": false
+        },
         "workspace": {
           "type": "boolean",
           "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Off by default: it costs a project-wide sweep every session. Requires the default \"full\" indexing strategy.",
@@ -88,6 +93,22 @@
           "type": "boolean",
           "description": "Follow directory symlinks found inside the workspace during workspace walks. Off by default: a symlinked directory is not descended into, so a link pointing at an external framework tree is skipped. When enabled the walk enters the link target and the symlink spelling is preserved in the index. The Composer pipeline, Drupal scanner, and Laravel migration walk are unaffected. Changes on disk inside a linked target directory do not trigger re-indexing; reload the window after such changes.",
           "default": false
+        },
+"exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing / anchors to the root, a trailing / restricts to directories, and a leading ! re-includes. Applies to background discovery and to the directories analyze walks. A file you open in the editor, or name outright on the analyze command line, is always served.",
+          "default": []
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. [\"module\", \"inc\", \"theme\"] for Drupal. .php is always included.",
+          "default": []
         }
       }
     },

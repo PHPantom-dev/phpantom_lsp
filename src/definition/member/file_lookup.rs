@@ -262,9 +262,11 @@ impl Backend {
 
                     let trimmed = line.trim().trim_start_matches('*').trim();
                     if trimmed.starts_with("@method") {
+                        // `col` is a byte offset; LSP positions are UTF-16
+                        // columns, exactly as the `@property` scan above.
                         return Some(Position {
                             line: line_idx as u32,
-                            character: col as u32,
+                            character: crate::text_position::byte_offset_to_utf16_col(line, col),
                         });
                     }
                 }

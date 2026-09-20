@@ -219,15 +219,10 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) -> bool {
-    let narrowed: Vec<ClassInfo> = super::super::resolution::type_hint_to_classes_typed(
-        ty,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    )
-    .into_iter()
-    .map(Arc::unwrap_or_clone)
-    .collect();
+    let narrowed: Vec<ClassInfo> = super::resolve::resolve_narrowing_target(ty, ctx)
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .collect();
     if narrowed.is_empty() {
         // The instanceof target class could not be resolved (e.g. it
         // lives inside a phar that we cannot index).  The developer
@@ -318,6 +313,12 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
 
 /// Remove the resolved classes for `ty` from `results`.
 ///
+/// A failed check rules out the class it names *and every subtype of it*:
+/// a value that is not an `Identifier` cannot be a `VarLikeIdentifier`
+/// either, so the else branch of `instanceof Identifier` must drop both.
+/// Comparing names alone left the subclass behind and reported the union
+/// as still holding it.
+///
 /// Always returns `false`: exclusion only rules out one possibility and
 /// never concludes the variable's full type, so leftover non-class
 /// entries (e.g. `mixed`) that [`ResolvedType::apply_narrowing`] tracks
@@ -327,19 +328,62 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) -> bool {
-    let excluded: Vec<ClassInfo> = super::super::resolution::type_hint_to_classes_typed(
-        ty,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    )
-    .into_iter()
-    .map(Arc::unwrap_or_clone)
-    .collect();
+    let excluded: Vec<ClassInfo> = super::resolve::resolve_narrowing_target(ty, ctx)
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .collect();
     if !excluded.is_empty() {
-        results.retain(|r| !excluded.iter().any(|e| e.name == r.name));
+        results.retain(|r| {
+            !excluded.iter().any(|e| {
+                e.name == r.name
+                    || crate::class_lookup::is_subtype_of_names(
+                        &r.fqn(),
+                        &e.fqn(),
+                        ctx.class_loader,
+                    )
+            })
+        });
     }
     false
+}
+
+/// If `expr` is `$var instanceof <value>` — an `instanceof` whose
+/// right-hand side is a value rather than a literal class name — return
+/// that right-hand side and whether the check is negated.
+///
+/// PHP resolves `$x instanceof $class` against whatever `$class` holds:
+/// a `class-string` names the class directly, and an object stands for
+/// its own class.  Which it is takes a type resolution the extractors in
+/// this module have no context for, so the expression is handed back for
+/// the caller to resolve.
+pub(in crate::type_engine) fn try_extract_dynamic_instanceof<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+) -> Option<(&'b Expression<'b>, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_dynamic_instanceof(inner.expression, var_name)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            try_extract_dynamic_instanceof(prefix.operand, var_name)
+                .map(|(rhs, negated)| (rhs, !negated))
+        }
+        Expression::Binary(bin) if bin.operator.is_instanceof() => {
+            if expr_to_subject_key(bin.lhs).as_deref() != Some(var_name) {
+                return None;
+            }
+            match bin.rhs {
+                // A literal class name needs no resolution, and is what
+                // `try_extract_instanceof` already reads.
+                Expression::Identifier(_)
+                | Expression::Self_(_)
+                | Expression::Static(_)
+                | Expression::Parent(_) => None,
+                rhs => Some((rhs, false)),
+            }
+        }
+        _ => None,
+    }
 }
 
 /// If `expr` is `$var instanceof ClassName` and the variable name
@@ -477,7 +521,7 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<(Php
             Expression::Identifier(ident) => bytes_to_str(ident.value()),
             _ => return None,
         };
-        if func_name != "is_a" {
+        if !crate::util::strip_fqn_prefix(func_name).eq_ignore_ascii_case("is_a") {
             return None;
         }
         let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
@@ -489,11 +533,7 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<(Php
             Argument::Positional(pos) => pos.value,
             Argument::Named(named) => named.value,
         };
-        let first_var = match first_expr {
-            Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
-            _ => return None,
-        };
-        if first_var != var_name {
+        if expr_to_subject_key(first_expr).as_deref() != Some(var_name) {
             return None;
         }
         // Second argument should be ClassName::class
@@ -584,56 +624,51 @@ fn match_class_identity_pair<'b>(
     rhs: &'b Expression<'b>,
     var_name: &str,
 ) -> Option<PhpType> {
-    let is_class_of_var =
-        is_get_class_of_var(lhs, var_name) || is_var_class_constant(lhs, var_name);
-    if !is_class_of_var {
+    if class_identity_subject_key(lhs).as_deref() != Some(var_name) {
         return None;
     }
     extract_class_string_from_expr(rhs).map(|n| PhpType::named(atom(n.as_ref())))
 }
 
-/// Check if `expr` is `get_class($var)` where the variable matches.
-fn is_get_class_of_var(expr: &Expression<'_>, var_name: &str) -> bool {
+/// The subject an expression asks the runtime class of, as a narrowing
+/// key: `get_class($x)` and `$x::class` both name `$x`.
+///
+/// The two spellings are the same question, and either side of an
+/// identity comparison can hold it, so the callers that need to know
+/// *which* value a `=== Foo::class` test speaks about share this one
+/// answer.
+pub(in crate::type_engine) fn class_identity_subject_key(expr: &Expression<'_>) -> Option<String> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
     };
-    if let Expression::Call(Call::Function(func_call)) = expr {
-        let func_name = match func_call.function {
-            Expression::Identifier(ident) => bytes_to_str(ident.value()),
-            _ => return false,
-        };
-        if func_name != "get_class" {
-            return false;
-        }
-        if let Some(first_arg) = func_call.argument_list.arguments.iter().next() {
-            let arg_expr = match first_arg {
+    match expr {
+        Expression::Call(Call::Function(func_call)) => {
+            let Expression::Identifier(ident) = func_call.function else {
+                return None;
+            };
+            if !crate::util::strip_fqn_prefix(bytes_to_str(ident.value()))
+                .eq_ignore_ascii_case("get_class")
+            {
+                return None;
+            }
+            let first_arg = func_call.argument_list.arguments.iter().next()?;
+            expr_to_subject_key(match first_arg {
                 Argument::Positional(pos) => pos.value,
                 Argument::Named(named) => named.value,
+            })
+        }
+        Expression::Access(Access::ClassConstant(cca)) => {
+            let ClassLikeConstantSelector::Identifier(ident) = &cca.constant else {
+                return None;
             };
-            if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-                return bytes_to_str(dv.name) == var_name;
+            if ident.value != b"class" {
+                return None;
             }
+            expr_to_subject_key(cca.class)
         }
+        _ => None,
     }
-    false
-}
-
-/// Check if `expr` is `$var::class` where the variable matches.
-fn is_var_class_constant(expr: &Expression<'_>, var_name: &str) -> bool {
-    if let Expression::Access(Access::ClassConstant(cca)) = expr {
-        // The class part must be our variable
-        if let Expression::Variable(Variable::Direct(dv)) = cca.class {
-            if bytes_to_str(dv.name) != var_name {
-                return false;
-            }
-            // The constant selector must be `class`
-            if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
-                return ident.value == b"class";
-            }
-        }
-    }
-    false
 }
 
 /// Extract the variable a `match` subject of the form `$var::class`

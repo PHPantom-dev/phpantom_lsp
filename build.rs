@@ -416,7 +416,7 @@ fn sha256_hex(data: &[u8]) -> String {
     padded.extend_from_slice(&bit_len.to_be_bytes());
 
     // Process each 512-bit (64-byte) block.
-    for block in padded.chunks_exact(64) {
+    for block in padded.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
         for i in 0..16 {
             w[i] = u32::from_be_bytes([

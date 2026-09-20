@@ -294,12 +294,7 @@ impl PhpType {
             }
         }
 
-        let mut index = 0;
-        flattened.retain(|_| {
-            let retain = keep[index];
-            index += 1;
-            retain
-        });
+        crate::util::retain_by_mask(&mut flattened, &keep);
 
         match flattened.len() {
             0 => PhpType::never(),
@@ -394,6 +389,18 @@ pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -
     // closure capture starts from out of the joined result.
     if subtype.is_empty_array_shape() && supertype.accepts_empty_array() {
         return true;
+    }
+
+    // `flatten` keeps a union supertype atomic when it is wrapped in a
+    // marker (`Benevolent`'s failure branch has to survive on whatever
+    // entry represents it — see `ResolvedType::types_joined`), so a
+    // `Benevolent(int|float)` reaches here as one member rather than
+    // decomposed into `int` and `float`.  A sibling that only duplicates
+    // one of its members is still redundant, so check containment against
+    // each member without decomposing (and so without disturbing) the
+    // union itself.
+    if let TypeKind::Union(members) = supertype.kind() {
+        return members.iter().any(|m| is_runtime_value_subtype(subtype, m));
     }
 
     if !is_runtime_scalar_value_domain(subtype) || !is_runtime_scalar_value_domain(supertype) {
@@ -879,6 +886,11 @@ pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
         return false;
     }
 
+    let mut changed = absorb_empty_shape_into_non_empty_array(types);
+    if types.len() < 2 {
+        return true;
+    }
+
     let keep: Vec<bool> = types
         .iter()
         .map(|ty| match unrefined_base(ty) {
@@ -889,14 +901,44 @@ pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
         })
         .collect();
 
-    let mut index = 0;
     let before = types.len();
-    types.retain(|_| {
-        let retain = keep[index];
-        index += 1;
-        retain
-    });
-    types.len() != before
+    crate::util::retain_by_mask(types, &keep);
+    changed |= types.len() != before;
+    changed
+}
+
+/// Widen `array{} | non-empty-array<K, V>` back to `array<K, V>`.
+///
+/// The empty shape supplies the one value the refinement rules out, so
+/// between them the two members are exactly the unrefined base. This is
+/// the join a conditional element write produces (`$rows = []; if ($c) {
+/// $rows[$id] = …; }`), where spelling both halves out would read as two
+/// different types and would let a read of any key pick up the empty
+/// half's missing-key `null`.
+///
+/// Only array refinements pair with an empty *array* shape; a
+/// `non-empty-string` beside one is an unrelated union member.
+fn absorb_empty_shape_into_non_empty_array(types: &mut Vec<PhpType>) -> bool {
+    if !types.iter().any(PhpType::is_empty_array_shape)
+        || !types.iter().any(is_non_empty_array_refinement)
+    {
+        return false;
+    }
+    for ty in types.iter_mut() {
+        if is_non_empty_array_refinement(ty)
+            && let Some(base) = unrefined_base(ty)
+        {
+            *ty = base;
+        }
+    }
+    types.retain(|ty| !ty.is_empty_array_shape());
+    true
+}
+
+/// Whether a type is a `non-empty-` refinement of an array type, as
+/// opposed to `non-empty-string` and friends.
+fn is_non_empty_array_refinement(ty: &PhpType) -> bool {
+    is_non_empty_refinement(ty) && ty.is_array_like()
 }
 
 /// The name a `non-empty-` type refines, or `None` for anything else.
@@ -950,6 +992,18 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
                 continue;
             }
 
+            // `int` (and its refinements) is a subtype of `float` for
+            // compatibility checks (PHP silently widens an int to a
+            // float), but the two remain distinct scalar domains rather
+            // than one refining the other: `int|float` must stay
+            // `int|float`, not collapse to `float`, the way a genuine
+            // same-domain refinement (`positive-int|int` → `int`) does.
+            if normalize_alias(&supertype.to_ascii_lowercase()) == "float"
+                && normalize_alias(&subtype.to_ascii_lowercase()) != "float"
+            {
+                continue;
+            }
+
             let equivalent = is_named_subtype(supertype, subtype);
             if !equivalent || candidate < index {
                 keep[index] = false;
@@ -979,10 +1033,5 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
         };
     }
 
-    let mut index = 0;
-    types.retain(|_| {
-        let retain = keep[index];
-        index += 1;
-        retain
-    });
+    crate::util::retain_by_mask(types, &keep);
 }

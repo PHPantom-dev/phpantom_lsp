@@ -26,6 +26,35 @@ impl Default for BladeSourceMap {
     }
 }
 
+/// Which side of an anchor pair a lookup compares against.
+#[derive(Clone, Copy)]
+enum AnchorSide {
+    /// The template's own column.
+    Blade,
+    /// The virtual PHP's column.
+    Php,
+}
+
+/// The last anchor on a line whose `side` column is at or before
+/// `character`, as `(index, blade_column, php_column)`.
+///
+/// Anchors are recorded in column order, so the first one past
+/// `character` ends the search.
+fn anchor_at(line_adj: &[(u32, u32)], character: u32, side: AnchorSide) -> (usize, u32, u32) {
+    let mut best = (0, 0, 0);
+    for (i, (blade, php)) in line_adj.iter().enumerate() {
+        let column = match side {
+            AnchorSide::Blade => *blade,
+            AnchorSide::Php => *php,
+        };
+        if column > character {
+            break;
+        }
+        best = (i, *blade, *php);
+    }
+    best
+}
+
 impl BladeSourceMap {
     pub fn blade_to_php(&self, pos: Position) -> Position {
         let line = pos.line as usize;
@@ -46,18 +75,7 @@ impl BladeSourceMap {
             };
         }
 
-        let mut best_b = 0;
-        let mut best_p = 0;
-
-        for (b, p) in line_adj.iter() {
-            if *b <= pos.character {
-                best_b = *b;
-                best_p = *p;
-            } else {
-                break;
-            }
-        }
-
+        let (_, best_b, best_p) = anchor_at(line_adj, pos.character, AnchorSide::Blade);
         let char_offset = pos.character.saturating_sub(best_b);
 
         Position {
@@ -107,20 +125,7 @@ impl BladeSourceMap {
             });
         }
 
-        let mut best_idx = 0;
-        let mut best_b = 0;
-        let mut best_p = 0;
-
-        for (i, (b, p)) in line_adj.iter().enumerate() {
-            if *p <= pos.character {
-                best_idx = i;
-                best_b = *b;
-                best_p = *p;
-            } else {
-                break;
-            }
-        }
-
+        let (best_idx, best_b, best_p) = anchor_at(line_adj, pos.character, AnchorSide::Php);
         let mut char_offset = pos.character.saturating_sub(best_p);
 
         if let Some((next_b, next_p)) = line_adj.get(best_idx + 1) {
@@ -283,7 +288,7 @@ mod tests {
                 let end = start
                     + text[start + 1..]
                         .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-                        .map_or(text.len() - start - 1, |offset| offset)
+                        .unwrap_or(text.len() - start - 1)
                     + 1;
                 for character in start..end {
                     let position = at(line as u32, character as u32);
@@ -315,6 +320,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             map.prologue_lines > super::super::PROLOGUE_LINES,

@@ -7,14 +7,12 @@
 //! ability that exists nowhere — or that exists but not for the model the
 //! check names — is flagged.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_psr4_workspace, definition_locations,
+    goto_definition_at, hover_text_at, open_php_str, position_after,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const PROVIDERS_PHP: &str = "\
 <?php
@@ -83,43 +81,11 @@ class LegacyVideoPolicy
 }
 ";
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
-/// Position of the cursor immediately after the first occurrence of `needle`.
-fn position_after(content: &str, needle: &str) -> Position {
-    let idx = content.find(needle).expect("needle not found") + needle.len();
-    let mut line = 0u32;
-    let mut character = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i == idx {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-    Position { line, character }
-}
-
 /// Build a workspace with the provider, both models, both policies, and
 /// `src/Consumer.php`.
 async fn workspace(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, String) {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -135,42 +101,8 @@ async fn workspace(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir,
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
     (backend, dir, uri)
-}
-
-async fn hover_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    position: Position,
-) -> Option<String> {
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()?;
-    match hover.contents {
-        HoverContents::Markup(markup) => Some(markup.value),
-        HoverContents::Scalar(MarkedString::String(s)) => Some(s),
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => Some(ls.value),
-        HoverContents::Array(items) => Some(
-            items
-                .into_iter()
-                .map(|item| match item {
-                    MarkedString::String(s) => s,
-                    MarkedString::LanguageString(ls) => ls.value,
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
-    }
 }
 
 async fn definition_uris(
@@ -178,30 +110,12 @@ async fn definition_uris(
     uri: &str,
     position: Position,
 ) -> Vec<String> {
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
-    match result {
-        None => Vec::new(),
-        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc.uri.to_string()],
-        Some(GotoDefinitionResponse::Array(locs)) => {
-            locs.into_iter().map(|l| l.uri.to_string()).collect()
-        }
-        Some(GotoDefinitionResponse::Link(links)) => links
-            .into_iter()
-            .map(|l| l.target_uri.to_string())
-            .collect(),
-    }
+    let uri = Url::parse(uri).unwrap();
+    let response = goto_definition_at(backend, &uri, position.line, position.character).await;
+    definition_locations(response)
+        .into_iter()
+        .map(|location| location.uri.to_string())
+        .collect()
 }
 
 fn ability_diagnostics(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
@@ -211,36 +125,6 @@ fn ability_diagnostics(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
             matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_ability")
         })
         .collect()
-}
-
-async fn completion_labels(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    position: Position,
-) -> Vec<String> {
-    let response = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-    match response {
-        Some(CompletionResponse::Array(items)) => {
-            items.into_iter().map(|item| item.label).collect()
-        }
-        Some(CompletionResponse::List(list)) => {
-            list.items.into_iter().map(|item| item.label).collect()
-        }
-        None => Vec::new(),
-    }
 }
 
 // ─── Completion ──────────────────────────────────────────────────────────────
@@ -259,7 +143,14 @@ class Consumer {
 ";
     let (backend, _dir, uri) = workspace(consumer).await;
 
-    let labels = completion_labels(&backend, &uri, position_after(consumer, "allows('")).await;
+    let position = position_after(consumer, "allows('");
+    let labels = complete_labels_at_opened(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     assert!(
         labels.contains(&"manage-billing".to_string()),
         "should offer the Gate::define() ability, got {labels:?}"
@@ -297,14 +188,27 @@ class Consumer {
 ";
     let (backend, _dir, uri) = workspace(consumer).await;
 
-    let can_labels = completion_labels(&backend, &uri, position_after(consumer, "can('")).await;
+    let position = position_after(consumer, "can('");
+    let can_labels = complete_labels_at_opened(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     assert!(
         can_labels.contains(&"update".to_string()),
         "$user->can() should complete abilities, got {can_labels:?}"
     );
 
-    let authorize_labels =
-        completion_labels(&backend, &uri, position_after(consumer, "authorize('")).await;
+    let position = position_after(consumer, "authorize('");
+    let authorize_labels = complete_labels_at_opened(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     assert!(
         authorize_labels.contains(&"update".to_string()),
         "$this->authorize() should complete abilities, got {authorize_labels:?}"
@@ -326,7 +230,14 @@ class Consumer {
 ";
     let (backend, _dir, uri) = workspace(consumer).await;
 
-    let labels = completion_labels(&backend, &uri, position_after(consumer, "can('")).await;
+    let position = position_after(consumer, "can('");
+    let labels = complete_labels_at_opened(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await;
     assert!(
         !labels.contains(&"manage-billing".to_string()),
         "an unrelated ->can() must not complete abilities, got {labels:?}"
@@ -349,9 +260,15 @@ class Consumer {
 ";
     let (backend, _dir, uri) = workspace(consumer).await;
 
-    let hover = hover_at(&backend, &uri, position_after(consumer, "allows('mana"))
-        .await
-        .expect("an ability should hover");
+    let position = position_after(consumer, "allows('mana");
+    let hover = hover_text_at(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await
+    .expect("an ability should hover");
     assert!(
         hover.contains("Gate::define()"),
         "hover should name the registration, got: {hover}"
@@ -380,9 +297,15 @@ class Consumer {
 ";
     let (backend, _dir, uri) = workspace(consumer).await;
 
-    let hover = hover_at(&backend, &uri, position_after(consumer, "can('upd"))
-        .await
-        .expect("an ability should hover");
+    let position = position_after(consumer, "can('upd");
+    let hover = hover_text_at(
+        &backend,
+        &Url::parse(&uri).unwrap(),
+        position.line,
+        position.character,
+    )
+    .await
+    .expect("an ability should hover");
     assert!(
         hover.contains("App\\Policies\\PostPolicy::update"),
         "hover should name the policy method, got: {hover}"
@@ -470,7 +393,7 @@ class PostPolicy extends BasePolicy
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -486,7 +409,7 @@ class PostPolicy extends BasePolicy
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -539,7 +462,7 @@ class PostPolicy
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -554,7 +477,7 @@ class PostPolicy
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -707,7 +630,7 @@ async fn the_gate_define_registration_itself_is_never_flagged() {
     let (backend, dir, _uri) = workspace(consumer).await;
 
     let uri = provider_uri(&dir);
-    open(&backend, &uri, AUTH_PROVIDER_PHP).await;
+    open_php_str(&backend, &uri, AUTH_PROVIDER_PHP).await;
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, AUTH_PROVIDER_PHP, &mut diags);
     assert!(
@@ -773,7 +696,7 @@ use Illuminate\\Database\\Eloquent\\Model;
 class Post extends Model {}
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -788,7 +711,7 @@ class Post extends Model {}
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -889,12 +812,13 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &[("src/Consumer.php", consumer)]);
+    let (backend, dir) =
+        create_psr4_workspace(LARAVEL_SRC_COMPOSER, &[("src/Consumer.php", consumer)]);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -945,7 +869,7 @@ class Consumer {
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -989,7 +913,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", provider),
@@ -1000,7 +924,7 @@ class Consumer {
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -1058,7 +982,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", providers),
             ("src/Providers/AuthServiceProvider.php", two_in_one_file),
@@ -1069,7 +993,7 @@ class Consumer {
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
 
     // Both files' abilities are indexed, and the file shared by two providers
     // contributed each of its registrations once.
@@ -1100,7 +1024,7 @@ class Consumer {
 }
 ";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -1124,7 +1048,7 @@ class Consumer {
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
         .unwrap()
         .to_string();
-    open(&backend, &uri, consumer).await;
+    open_php_str(&backend, &uri, consumer).await;
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
     // Whether `manage-billing` survived the deletion is not the point; that
@@ -1151,7 +1075,7 @@ class Gate {
 }
 ";
     let (_backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
@@ -1166,7 +1090,7 @@ class Gate {
 
     phpantom_lsp::analyse::run(phpantom_lsp::analyse::AnalyseOptions {
         workspace_root: dir.path().to_path_buf(),
-        path_filter: Some(dir.path().join("src/Consumer.php")),
+        path_filters: vec![dir.path().join("src/Consumer.php")],
         severity_filter: phpantom_lsp::analyse::SeverityFilter::All,
         use_colour: false,
         output_format: phpantom_lsp::analyse::OutputFormat::Json,
@@ -1223,7 +1147,7 @@ async fn the_can_blade_directive_checks_its_ability() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, template).unwrap();
     let uri = Url::from_file_path(&path).unwrap().to_string();
-    open(&backend, &uri, template).await;
+    open_php_str(&backend, &uri, template).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, template, &mut diags);

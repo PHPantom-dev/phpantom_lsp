@@ -135,6 +135,11 @@ function sscanf(
 ```
 
 Affected functions: `microtime`, `gettimeofday`, `sscanf`, `fscanf`.
+Three of the four already carry a hand-written conditional return type in
+`stub_patches`, which is what makes them resolve today; `gettimeofday` is
+the one still on its declared union. Reading the attribute would replace
+all four hand-written patches with one rule, and cover any function
+phpstorm-stubs annotates next.
 
 **Implementation:** When resolving a call to one of these functions,
 check whether the annotated parameter was passed (for `exists`/

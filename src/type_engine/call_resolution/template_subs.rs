@@ -56,6 +56,34 @@ impl Backend {
             _ => return HashMap::new(),
         };
 
+        let mut subs = Self::bind_method_template_args(&method, arg_texts, ctx);
+
+        finish_template_subs(
+            &mut subs,
+            &method.template_params,
+            &method.template_param_bounds,
+            method.return_type.as_ref(),
+            ctx,
+        );
+
+        subs
+    }
+
+    /// The argument-binding half of [`build_method_template_subs`]: resolve
+    /// each of `method`'s `@template` bindings from `arg_texts` and return
+    /// the map, without filling in the params nothing bound.
+    ///
+    /// A caller that has its own idea of what an unbound param should fall
+    /// back to (e.g. `new` binding a *class*-level template through an
+    /// inherited constructor, where the right bound lives on the class,
+    /// not the constructor) calls this directly instead of
+    /// [`build_method_template_subs`], which always finishes against the
+    /// method's own bounds.
+    pub(crate) fn bind_method_template_args(
+        method: &MethodInfo,
+        arg_texts: &[&str],
+        ctx: &ResolutionCtx<'_>,
+    ) -> HashMap<String, PhpType> {
         let mut subs = HashMap::new();
 
         // Bind the raw source-order argument texts to parameters by PHP's
@@ -529,17 +557,15 @@ impl Backend {
                     {
                         // Extract the element type from array-like types
                         // so we bind T to the element, not the whole array.
-                        if let Some(elem_type) = resolved_type.extract_value_type(false) {
-                            crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                elem_type.clone(),
-                            );
-                        } else {
-                            crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
+                        if let Some(elem_type) =
+                            crate::type_engine::variable::rhs_resolution::array_element_binding(
                                 resolved_type,
+                            )
+                        {
+                            crate::type_engine::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                elem_type,
                             );
                         }
                     }
@@ -559,14 +585,6 @@ impl Backend {
                 }
             }
         }
-
-        finish_template_subs(
-            &mut subs,
-            &method.template_params,
-            &method.template_param_bounds,
-            method.return_type.as_ref(),
-            ctx,
-        );
 
         subs
     }
@@ -947,6 +965,19 @@ impl Backend {
         // Pre-resolve each typed parameter to its classes so the
         // injected resolver is a cheap map lookup.
         let owning_class_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
+        let seed_one = |ty: PhpType| -> Vec<ResolvedType> {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                &ty,
+                owning_class_name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            if classes.is_empty() {
+                vec![ResolvedType::from_type_string(ty)]
+            } else {
+                ResolvedType::from_classes_with_hint(classes, ty)
+            }
+        };
         let param_types: HashMap<String, Vec<ResolvedType>> = typed_params
             .into_iter()
             .map(|(name, ty)| {
@@ -954,16 +985,17 @@ impl Backend {
                 // file's own spelling of the class name; canonicalise it so
                 // the seeded type matches one resolved any other way.
                 let ty = crate::util::resolve_php_type_names(&ty, ctx.class_loader);
-                let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    &ty,
-                    owning_class_name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                let resolved = if classes.is_empty() {
-                    vec![ResolvedType::from_type_string(ty)]
-                } else {
-                    ResolvedType::from_classes_with_hint(classes, ty)
+                // Each alternative of a union is seeded on its own so it
+                // keeps its own generic arguments. Two instantiations of the
+                // same class (`Builder<A>|Builder<B>`) resolve to one class,
+                // and a single entry could only carry the whole union as its
+                // type string — leaving a `@return T` on the class with no
+                // instantiation to substitute from.
+                let resolved = match ty.kind() {
+                    TypeKind::Union(members) => {
+                        members.iter().cloned().flat_map(&seed_one).collect()
+                    }
+                    _ => seed_one(ty),
                 };
                 (name, resolved)
             })
@@ -1399,11 +1431,86 @@ pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) 
     (evaluated != *ty).then_some(evaluated)
 }
 
-/// Finish a template substitution map: bind the constants its types read
-/// through a type operator, then fill in the template params no argument
-/// bound.
+/// Recover a template parameter no argument names directly, from the
+/// *bound* of a template that an argument did bind.
 ///
-/// Both halves exist so a raw name never leaks downstream. An unbound
+/// `usort`'s stub declares `@template T` and `@template TArray of array<T>`
+/// with `@param TArray $array` / `@param callable(T, T): int $callback`.
+/// Nothing at the call site binds `T`: the array argument binds `TArray`,
+/// and the callback is the very thing whose parameters `T` is meant to
+/// type. Unifying `TArray`'s bound (`array<T>`) against what `TArray` was
+/// bound to (`list<Error>`) recovers `T = Error`, which is what turns an
+/// untyped `usort($errors, fn ($a, $b) => …)` callback into a typed one.
+///
+/// The bound may also name a *supertype* of what the other template was
+/// bound to rather than its own shape. `CollectedDataNode::get()` declares
+/// `@template TCollector of Collector<Node, TValue>` with
+/// `@param class-string<TCollector>`, so `TValue` is whatever the collector
+/// class's own `@implements Collector<…, …>` says it is — read off the
+/// class's ancestry rather than off the argument's shape.
+///
+/// Runs before the fill-in below, so it only ever reads bindings that came
+/// from real arguments, never a bound standing in for a missing one.
+fn propagate_bound_template_bindings(
+    subs: &mut HashMap<String, PhpType>,
+    template_params: &[Atom],
+    template_param_bounds: &crate::atom::AtomMap<PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) {
+    for tpl_name in template_params {
+        if subs.contains_key(tpl_name.as_str()) {
+            continue;
+        }
+        // Iterate the declared order rather than the bounds map so the
+        // binding a template picks up does not depend on hash order.
+        for other in template_params {
+            if other == tpl_name {
+                continue;
+            }
+            let Some(bound) = template_param_bounds.get(other) else {
+                continue;
+            };
+            let Some(bound_to) = subs.get(other.as_str()) else {
+                continue;
+            };
+            if let Some(recovered) = unify_template(bound, bound_to, tpl_name)
+                .or_else(|| ancestor_bound_binding(bound, bound_to, tpl_name, ctx))
+            {
+                subs.insert(tpl_name.to_string(), recovered);
+                break;
+            }
+        }
+    }
+}
+
+/// Read `tpl_name` off the ancestry of what another template was bound to,
+/// for a bound that names a generic supertype (`@template TCollector of
+/// Collector<Node, TValue>`).
+///
+/// A `class-string<TCollector>` parameter binds the class itself, so the
+/// generic arguments live on its `@extends`/`@implements` clauses, not on
+/// the bound type it was matched against.
+fn ancestor_bound_binding(
+    bound: &PhpType,
+    bound_to: &PhpType,
+    tpl_name: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let TypeKind::Generic(g) = bound.kind() else {
+        return None;
+    };
+    let position = g.args.iter().position(|a| a.is_named(tpl_name))?;
+    let subject = bound_to.unwrap_class_string_inner().unwrap_or(bound_to);
+    crate::type_engine::variable::rhs_resolution::extract_generic_arg_from_ancestor(
+        subject, &g.name, position, ctx,
+    )
+}
+
+/// Finish a template substitution map: bind the constants its types read
+/// through a type operator, recover the templates only another template's
+/// bound names, then fill in the template params no argument bound.
+///
+/// The halves exist so a raw name never leaks downstream. An unbound
 /// template resolves to its declared upper bound (`@template T of Foo` →
 /// `Foo`) or `mixed`, following PHPStan's `resolveToBounds()`. A constant
 /// operand resolves to the array shape it names, which is what lets the
@@ -1421,6 +1528,8 @@ pub(crate) fn finish_template_subs(
     return_type: Option<&PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) {
+    propagate_bound_template_bindings(subs, template_params, template_param_bounds, ctx);
+
     let constant_subs = constant_operand_subs(
         return_type
             .into_iter()

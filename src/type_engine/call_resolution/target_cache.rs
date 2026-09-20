@@ -83,20 +83,6 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) struct CallableTargetCacheGuard {
-    owns: bool,
-}
-
-impl Drop for CallableTargetCacheGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            CALLABLE_TARGET_CACHE.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
 /// Activate the thread-local callable target cache.
 ///
 /// While the returned guard is alive, `resolve_instance_method_callable`
@@ -104,44 +90,22 @@ impl Drop for CallableTargetCacheGuard {
 /// that the same method on the same class is resolved at most once per
 /// diagnostic pass, regardless of how many different chain expressions
 /// lead to it.
+/// The guard [`with_callable_target_cache`] hands back.
+type CallableTargetCacheGuard =
+    crate::type_engine::MemoGuard<HashMap<String, Option<ResolvedCallableTarget>>>;
+
 fn with_callable_target_cache() -> CallableTargetCacheGuard {
-    let already_active = CALLABLE_TARGET_CACHE.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return CallableTargetCacheGuard { owns: false };
-    }
-    CALLABLE_TARGET_CACHE.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    CallableTargetCacheGuard { owns: true }
+    crate::type_engine::activate_memo(&CALLABLE_TARGET_CACHE)
 }
 
 // ── Body return type inference ──────────────────────────────────────────────
 
-/// RAII guard that clears [`BODY_INFER_MEMO`] on drop.
-pub(crate) struct BodyInferMemoGuard {
-    owns: bool,
-}
-
-impl Drop for BodyInferMemoGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            BODY_INFER_MEMO.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
 /// Activate the body-return-inference memo for the current thread.
+/// The guard [`with_body_infer_memo`] hands back.
+type BodyInferMemoGuard = crate::type_engine::MemoGuard<BodyInferMemo>;
+
 fn with_body_infer_memo() -> BodyInferMemoGuard {
-    let already_active = BODY_INFER_MEMO.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return BodyInferMemoGuard { owns: false };
-    }
-    BODY_INFER_MEMO.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    BodyInferMemoGuard { owns: true }
+    crate::type_engine::activate_memo(&BODY_INFER_MEMO)
 }
 
 // ── Call-site argument frames ───────────────────────────────────────────────
@@ -228,7 +192,10 @@ pub(crate) fn try_infer_body_return_type(
     // already interned, so the key adds no new entries to the global
     // interner (a joined `"FQN::method"` string would leak one entry per
     // distinct pair for the process lifetime).  The memo keeps the
-    // argument types too, since they are what the answer depends on.
+    // argument types too, since they are what the answer depends on; the
+    // re-entry guard is keyed without them on purpose, so a method that
+    // calls itself with a different argument type on every hop still
+    // re-enters the same key and stops at the depth cap.
     let visited_key = (atom(class_fqn), method.name);
     let memo_key = (
         visited_key.0,
@@ -236,63 +203,20 @@ pub(crate) fn try_infer_body_return_type(
         Box::<[PhpType]>::from(call_args),
     );
 
-    // Serve a memoized result from an earlier completed inference in
-    // this request.  Checked before the depth cap so that deep call
-    // chains still benefit from results computed at shallower depths.
-    let memoized = BODY_INFER_MEMO.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .and_then(|m| m.get(&memo_key).cloned())
-    });
-    if let Some(cached) = memoized {
-        return cached;
-    }
-
-    // Depth cap: avoid long chains of sequential body scans.
-    let depth = BODY_INFER_DEPTH.with(|cell| cell.get());
-    if depth >= MAX_BODY_INFER_DEPTH {
-        return None;
-    }
-
-    // Check + insert into the visited set (re-entry guard).  Keyed
-    // without the arguments on purpose: a method that calls itself with
-    // a different argument type on every hop would otherwise never
-    // re-enter the same key and recurse until the depth cap.
-    let already_visiting = BODY_INFER_VISITED.with(|cell| {
-        let mut set = cell.borrow_mut();
-        !set.insert(visited_key)
-    });
-    if already_visiting {
-        return None;
-    }
-
-    BODY_INFER_DEPTH.with(|cell| cell.set(depth + 1));
-
-    // Filter out `mixed` and `void` — these are not useful as
-    // inferred return types for completion/hover.
-    let result = infer_body_return_type(backend, class_fqn, method, call_args)
-        .filter(|t| !t.is_mixed() && !t.is_void());
-
-    // Restore depth and remove from visited set so the same method
-    // can be inferred again from a different call chain.
-    BODY_INFER_DEPTH.with(|cell| cell.set(depth));
-    BODY_INFER_VISITED.with(|cell| {
-        cell.borrow_mut().remove(&visited_key);
-    });
-
-    // Memoize only completed runs (the depth-cap and re-entry
-    // short-circuits above return early and are never stored, so a
-    // cut-off `None` cannot shadow a later real result).  A result
-    // computed mid-chain may itself have had its nested inference
-    // depth-capped; serving it to shallower callers trades a sliver of
-    // precision for never walking the same body twice in one request.
-    BODY_INFER_MEMO.with(|cell| {
-        if let Some(memo) = cell.borrow_mut().as_mut() {
-            memo.insert(memo_key, result.clone());
-        }
-    });
-
-    result
+    crate::type_engine::memoized_bounded_inference(
+        &BODY_INFER_MEMO,
+        &BODY_INFER_VISITED,
+        &BODY_INFER_DEPTH,
+        MAX_BODY_INFER_DEPTH,
+        memo_key,
+        visited_key,
+        || {
+            // Filter out `mixed` and `void` — these are not useful as
+            // inferred return types for completion/hover.
+            infer_body_return_type(backend, class_fqn, method, call_args)
+                .filter(|t| !t.is_mixed() && !t.is_void())
+        },
+    )
 }
 
 /// Scan a method body for its return type.
@@ -389,6 +313,26 @@ fn infer_body_return_type(
 
     let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
 
+    // A declaration the caller can fall back on is only worth replacing
+    // with a reading the body actually agrees on. `mixed` is the one
+    // declaration this is reached with (it says nothing, so the body is
+    // read for something better), and a body whose `return` statements
+    // disagree has not said anything better: the union is this walk's
+    // reconstruction of the control flow, complete only as far as the
+    // branch analysis behind it goes. `processArgument()` in PHPStan's own
+    // source returns a schema, an array, or its own `mixed` argument, and
+    // reading it as `Schema|Statement` claimed the array could not happen
+    // — which then rejected the caller that hands the result straight to a
+    // `Schema` parameter. `mixed` is the sound answer there.
+    //
+    // Returns that agree leave nothing to reconstruct: one `return` (or
+    // several with the same type) resolves to whatever that expression is,
+    // nullable or generic included, and that is a real narrowing of a
+    // declaration that promised nothing.
+    if method.return_type.is_some() && !result.returns_agree {
+        return None;
+    }
+
     // Prefer the effective type (richer, e.g. `list<string>`)
     // over the native type (e.g. `array`).
     let inferred = result.effective.unwrap_or(result.native);
@@ -420,13 +364,16 @@ fn infer_body_return_type(
 
 /// The request-scoped memos the type engine keeps, activated as a unit.
 ///
-/// Both are pure memos: without them the type engine reaches the same
-/// answers, just by re-doing work it has already done for this file.
+/// All four are pure memos: without them the type engine reaches the
+/// same answers, just by re-doing work it has already done for this
+/// file.
 /// They are activated at the chokepoints every request passes through so
 /// no feature pays for a cold cache the one next to it already warmed.
 pub(crate) struct TypeEngineCaches {
     _callable_target: CallableTargetCacheGuard,
     _body_infer: BodyInferMemoGuard,
+    _out_type: super::out_param::OutTypeMemoGuard,
+    _var_type: crate::type_engine::variable::resolution::VarTypeMemoGuard,
 }
 
 /// Activate every request-scoped type-engine memo for the current
@@ -443,6 +390,8 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
     TypeEngineCaches {
         _callable_target: with_callable_target_cache(),
         _body_infer: with_body_infer_memo(),
+        _out_type: super::out_param::with_out_type_memo(),
+        _var_type: crate::type_engine::variable::resolution::with_var_type_memo(),
     }
 }
 

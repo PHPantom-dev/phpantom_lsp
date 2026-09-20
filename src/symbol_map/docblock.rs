@@ -286,6 +286,21 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
             }
         }
 
+        // ── Type alias declarations ─────────────────────────────────
+        // The alias name itself is not a class and gets no span, but the
+        // definition behind it is an ordinary type, and the class an
+        // import names is an ordinary reference to it.
+        TagValue::TypeAlias(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::TypeAliasImport(value) => {
+            let span = value.imported_from.span();
+            emit_identifier_span(
+                crate::atom::bytes_to_str(value.imported_from.value),
+                span.start.offset,
+                span.end.offset,
+                sink.spans,
+            );
+        }
+
         // ── Tags that declare a member or a template parameter ──────
         TagValue::Method(value) => emit_method_tag_symbols(value, docblock, base_offset, sink),
         TagValue::Property(value)
@@ -779,11 +794,11 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
         // ── int-mask / int-mask-of ──────────────────────────────────
         type_ast::Type::IntMask(m) => {
             for entry in &m.parameters.entries {
-                emit_type_symbols(&entry.inner, sink);
+                emit_int_mask_member_symbols(&entry.inner, sink);
             }
         }
         type_ast::Type::IntMaskOf(m) => {
-            emit_type_symbols(&m.parameter.entry.inner, sink);
+            emit_int_mask_member_symbols(&m.parameter.entry.inner, sink);
         }
 
         // ── properties-of ───────────────────────────────────────────
@@ -914,6 +929,25 @@ fn emit_type_operand_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_
                 sink.spans,
             );
         }
+        _ => emit_type_symbols(ty, sink),
+    }
+}
+
+/// Emit the members of an `int-mask<A, B>` / `int-mask-of<A|B>` bitmask.
+///
+/// The parameters name the int constants that make up the mask, so a bare
+/// identifier there is a global constant (`PREG_OFFSET_CAPTURE`), never a
+/// class. Like the `self::FOO` spelling of the same thing, it is not
+/// navigable, so no span is emitted for it. Anything else (a literal, a
+/// nested type) is emitted as usual.
+fn emit_int_mask_member_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
+    match ty {
+        type_ast::Type::Union(u) => {
+            emit_int_mask_member_symbols(u.left, sink);
+            emit_int_mask_member_symbols(u.right, sink);
+        }
+        type_ast::Type::Parenthesized(p) => emit_int_mask_member_symbols(p.inner, sink),
+        type_ast::Type::Reference(r) if r.parameters.is_none() => {}
         _ => emit_type_symbols(ty, sink),
     }
 }

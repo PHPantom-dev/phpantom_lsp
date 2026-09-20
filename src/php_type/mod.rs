@@ -364,6 +364,23 @@ pub struct ConditionalType {
     pub then_type: PhpType,
     /// The type when the condition is false.
     pub else_type: PhpType,
+    /// Whether an undecidable condition answers with `else_type` rather
+    /// than the union of both branches.
+    ///
+    /// A conditional someone wrote in a docblock describes two outcomes
+    /// the call really can have, so an argument that settles neither
+    /// leaves both on the table. A conditional we synthesised to patch a
+    /// stub can be modelling something narrower: `pow()`'s `object`
+    /// branch exists only for the operator-overloading extensions (GMP,
+    /// BCMath), and an argument nobody gave a type is no reason to
+    /// believe one of those is in play. Setting this on such a
+    /// conditional keeps the ordinary answer instead of widening to a
+    /// union with a branch the call almost certainly does not take.
+    ///
+    /// Never set from parsed PHPDoc — [`PhpType::conditional`] leaves it
+    /// off, and only [`PhpType::conditional_defaulting_to_else`] turns
+    /// it on.
+    pub else_when_undecided: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -840,6 +857,28 @@ impl PhpType {
             condition,
             then_type,
             else_type,
+            else_when_undecided: false,
+        })
+    }
+
+    /// Conditional type whose `then` branch needs proof.
+    ///
+    /// See [`ConditionalType::else_when_undecided`] for when to reach
+    /// for this instead of [`PhpType::conditional`].
+    pub fn conditional_defaulting_to_else(
+        param: impl AsRef<str>,
+        negated: bool,
+        condition: PhpType,
+        then_type: PhpType,
+        else_type: PhpType,
+    ) -> PhpType {
+        PhpType::conditional_type(ConditionalType {
+            param: atom(param.as_ref()),
+            negated,
+            condition,
+            then_type,
+            else_type,
+            else_when_undecided: true,
         })
     }
 
@@ -1651,60 +1690,7 @@ impl PhpType {
     /// - Unions/intersections of native types are preserved
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
-        match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.to_native_hint(),
-            TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
-                native_scalar_name(s).map(|n| n.to_string())
-            }
-            TypeKind::Generic(g) => {
-                // Generic classes: strip the generic params.
-                // `array<K,V>` → `array`, `Collection<T>` → `Collection`
-                native_scalar_name(&g.name)
-                    .map(|n| n.to_string())
-                    .or_else(|| Some(g.name.to_string()))
-            }
-            TypeKind::Nullable(inner) => inner.to_native_hint().map(|n| format!("?{}", n)),
-            TypeKind::Union(members) => {
-                let native: Vec<String> =
-                    members.iter().filter_map(|m| m.to_native_hint()).collect();
-                if native.len() != members.len() {
-                    return None; // some members have no native form
-                }
-                // Deduplicate (e.g. `list<string>|array<int>` both → `array`)
-                let mut deduped = native;
-                deduped.sort();
-                deduped.dedup();
-                Some(deduped.join("|"))
-            }
-            TypeKind::Intersection(members) => {
-                let native: Vec<String> =
-                    members.iter().filter_map(|m| m.to_native_hint()).collect();
-                if native.len() != members.len() {
-                    return None;
-                }
-                Some(native.join("&"))
-            }
-            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some("array".to_string()),
-            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some("string".to_string()),
-            TypeKind::IntRange(_, _) => Some("int".to_string()),
-            TypeKind::Literal(l) => Some(
-                match **l {
-                    LiteralValue::String(_) => "string",
-                    LiteralValue::Int(_) => "int",
-                    LiteralValue::Float(_) => "float",
-                }
-                .to_string(),
-            ),
-            TypeKind::ObjectShape(_) => Some("object".to_string()),
-            TypeKind::Callable(c) => Some(c.kind.to_string()),
-            // Conditionals, key-of, value-of, index-access, and raw
-            // types have no native form.
-            TypeKind::Conditional(_)
-            | TypeKind::KeyOf(_)
-            | TypeKind::ValueOf(_)
-            | TypeKind::IndexAccess(_, _)
-            | TypeKind::Raw(_) => None,
-        }
+        self.to_native_hint_typed().map(|ty| ty.to_string())
     }
 
     /// Like [`to_native_hint`] but returns a structured [`PhpType`] instead of a string,
@@ -1906,13 +1892,6 @@ impl PhpType {
                         // the constant, its runtime array key may be int or
                         // string (`Foo::class` is safely covered as a subset).
                         Some(key) if key.contains("::") => {
-                            PhpType::union(vec![PhpType::int(), PhpType::string()])
-                        }
-                        // Shape keys retain escape spelling rather than a
-                        // decoded runtime value. An escaped string may decode
-                        // to a canonical decimal key (e.g. `"\x38"`), so both
-                        // legal PHP key domains must remain possible.
-                        Some(key) if key.contains('\\') => {
                             PhpType::union(vec![PhpType::int(), PhpType::string()])
                         }
                         Some(key) if is_decimal_int_array_key(key) => PhpType::int(),
@@ -2138,33 +2117,24 @@ impl PhpType {
     /// found.
     pub fn extract_shape_key_type(&self, key: &str) -> Option<PhpType> {
         match self.kind() {
-            TypeKind::ArrayShape(entries) => {
-                if let Some(entry) = entries.iter().find(|e| e.key.as_deref() == Some(key)) {
-                    return if entry.optional {
-                        Some(PhpType::nullable(entry.value_type.clone()))
-                    } else {
-                        Some(entry.value_type.clone())
-                    };
+            TypeKind::ArrayShape(_) => self.shape_entry(key).map(|entry| {
+                if entry.optional {
+                    PhpType::nullable(entry.value_type.clone())
+                } else {
+                    entry.value_type.clone()
                 }
-                if let Ok(idx) = key.parse::<usize>() {
-                    let mut positional_idx = 0usize;
-                    for entry in entries {
-                        if entry.key.is_none() {
-                            if positional_idx == idx {
-                                return if entry.optional {
-                                    Some(PhpType::nullable(entry.value_type.clone()))
-                                } else {
-                                    Some(entry.value_type.clone())
-                                };
-                            }
-                            positional_idx += 1;
-                        }
-                    }
-                }
-                None
-            }
+            }),
             TypeKind::Nullable(inner) => inner.extract_shape_key_type(key),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.extract_shape_key_type(key)),
+            TypeKind::Union(members) => {
+                // Every alternative contributes its own entry: reading
+                // offset 1 of `array{string, null}|array{string, Err}` is
+                // `null|Err`, not whichever alternative comes first.
+                let found: Vec<PhpType> = members
+                    .iter()
+                    .filter_map(|m| m.extract_shape_key_type(key))
+                    .collect();
+                (!found.is_empty()).then(|| PhpType::union(found))
+            }
             _ => None,
         }
     }
@@ -2187,13 +2157,10 @@ impl PhpType {
 
     /// Return `true` if this type is an array shape (`array{…}`).
     ///
-    /// Also returns `true` for `?array{…}`.
+    /// Also returns `true` for nullable shapes written as either
+    /// `?array{…}` or `array{…}|null`.
     pub fn is_array_shape(&self) -> bool {
-        match self.kind() {
-            TypeKind::ArrayShape(_) => true,
-            TypeKind::Nullable(inner) => inner.is_array_shape(),
-            _ => false,
-        }
+        self.nullable_array_shape_parts().is_some()
     }
 
     /// Return `true` if this type is a list shape (`list{…}`), which an
@@ -2235,23 +2202,55 @@ impl PhpType {
     /// which turns large procedural methods with hundreds of
     /// conditional writes into quadratic-and-worse walks.
     ///
-    /// Handles `?array{…}` on either side (the join is nullable when
-    /// either side is).  Returns `None` when either side is not an
-    /// array shape or contains positional (unkeyed) entries — those are
-    /// list-style shapes where a per-key join is not meaningful.
+    /// Handles nullable shapes written as `?array{…}` or
+    /// `array{…}|null` on either side (the join is nullable when either
+    /// side is). Returns `None` when either side is not an array shape or
+    /// contains positional (unkeyed) entries — those are list-style shapes
+    /// where a per-key join is not meaningful.
     pub fn join_shapes(&self, other: &PhpType) -> Option<PhpType> {
-        match (self.kind(), other.kind()) {
-            (TypeKind::ArrayShape(a), TypeKind::ArrayShape(b)) => {
-                Some(PhpType::array_shape(Self::join_shape_entries(a, b)?))
+        let (left, left_nullable) = self.nullable_array_shape_parts()?;
+        let (right, right_nullable) = other.nullable_array_shape_parts()?;
+        let joined = PhpType::array_shape(Self::join_shape_entries(left, right)?);
+        if left_nullable || right_nullable {
+            Some(PhpType::nullable(joined))
+        } else {
+            Some(joined)
+        }
+    }
+
+    /// Extract the one array shape this type describes, plus whether it
+    /// also admits `null`.
+    ///
+    /// PHPDoc accepts both `?array{…}` and `array{…}|null`, and
+    /// [`union`](Self::union) does not fold the second spelling into the
+    /// first, so the two arrive here as different type kinds. Branch
+    /// merging has to treat them as one type or every write to a nullable
+    /// shape leaves a separate alternative behind.
+    ///
+    /// A union naming more than one shape, or anything besides a shape and
+    /// `null`, has no single shape to answer with and returns `None`.
+    fn nullable_array_shape_parts(&self) -> Option<(&[ShapeEntry], bool)> {
+        match self.kind() {
+            TypeKind::ArrayShape(entries) => Some((entries, false)),
+            TypeKind::Nullable(inner) => {
+                let (entries, _) = inner.nullable_array_shape_parts()?;
+                Some((entries, true))
             }
-            (TypeKind::Nullable(a), TypeKind::Nullable(b)) => {
-                Some(PhpType::nullable(a.join_shapes(b)?))
-            }
-            (TypeKind::Nullable(a), TypeKind::ArrayShape(_)) => {
-                Some(PhpType::nullable(a.join_shapes(other)?))
-            }
-            (TypeKind::ArrayShape(_), TypeKind::Nullable(b)) => {
-                Some(PhpType::nullable(self.join_shapes(b)?))
+            TypeKind::Union(members) => {
+                let mut shape: Option<&[ShapeEntry]> = None;
+                let mut nullable = false;
+                for member in members {
+                    if member.is_null() {
+                        nullable = true;
+                    } else if let TypeKind::ArrayShape(entries) = member.kind() {
+                        if shape.replace(entries).is_some() {
+                            return None;
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                shape.map(|entries| (entries, nullable))
             }
             _ => None,
         }
@@ -2570,8 +2569,56 @@ impl PhpType {
         }
     }
 
+    /// Return the part of a type that can be falsy.
+    ///
+    /// The mirror of [`Self::truthy_type`], for the branch an `if ($x)`
+    /// skips rather than the one it enters. Members that are *always*
+    /// truthy are dropped and `bool` keeps only its `false` half; `None`
+    /// comes back when nothing the type describes could have been falsy.
+    ///
+    /// As on the truthy side, refinements the test justifies but PHP has
+    /// no plain spelling for are left alone: `string` stays `string`
+    /// rather than becoming the pair of empty spellings that are falsy,
+    /// and `int` stays `int` rather than becoming `0`.
+    pub fn falsy_type(&self) -> Option<PhpType> {
+        let mut falsy = Vec::new();
+        self.push_falsy_members(&mut falsy);
+        match falsy.len() {
+            0 => None,
+            1 => falsy.pop(),
+            _ => Some(PhpType::union(falsy)),
+        }
+    }
+
+    /// Append this type's falsy members to `out`.
+    ///
+    /// The unions and nullables a type is built from are flattened on the
+    /// way, so [`Self::union`] is handed one list of atoms and can
+    /// deduplicate the `null` that every nullable member contributes:
+    /// `?int|?string` is falsy as `int|null|string`, not as a union with
+    /// the same `null` in it twice.
+    fn push_falsy_members(&self, out: &mut Vec<PhpType>) {
+        match self.kind() {
+            // `null` is falsy, so it survives whatever the inner type does.
+            TypeKind::Nullable(inner) => {
+                inner.push_falsy_members(out);
+                out.push(PhpType::null());
+            }
+            TypeKind::Union(members) => {
+                for member in members.iter() {
+                    member.push_falsy_members(out);
+                }
+            }
+            _ if self.truthiness() == Some(true) => {}
+            _ if self.is_bool() => out.push(PhpType::false_()),
+            _ => out.push(self.clone()),
+        }
+    }
+
     /// The non-empty counterpart of an array type: `array<K, V>` becomes
     /// `non-empty-array<K, V>` and `list<T>` becomes `non-empty-list<T>`.
+    /// The `T[]` slice spelling is sugar for `array<T>` and refines the
+    /// same way.
     ///
     /// Everything else comes back unchanged, including a shape (its own
     /// entries already say whether it can be empty) and a type that is
@@ -2585,6 +2632,9 @@ impl PhpType {
             }
             TypeKind::Generic(generic) if generic.name == "list" => {
                 PhpType::generic_atom(atom("non-empty-list"), generic.args.clone())
+            }
+            TypeKind::Array(element) => {
+                PhpType::generic_atom(atom("non-empty-array"), vec![element.clone()])
             }
             _ => self.clone(),
         }
@@ -2919,6 +2969,24 @@ impl PhpType {
     /// Whether this type is `mixed` (top type).
     pub fn is_mixed(&self) -> bool {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("mixed"))
+    }
+
+    /// Whether `mixed` reaches the top level of this type.
+    ///
+    /// `mixed` is the top type, so a union or nullable that holds it holds
+    /// every value: `mixed|Foo` and `?mixed` are both just `mixed`.
+    /// [`simplified`](Self::simplified) folds them, but a caller that only
+    /// needs the answer and not the folded type gets it here without
+    /// rebuilding every member on the way.
+    pub fn contains_mixed(&self) -> bool {
+        if self.is_mixed() {
+            return true;
+        }
+        match self.kind() {
+            TypeKind::Union(members) => members.iter().any(PhpType::contains_mixed),
+            TypeKind::Nullable(inner) => inner.contains_mixed(),
+            _ => false,
+        }
     }
 
     /// Whether this type is `void`.

@@ -18,27 +18,11 @@
 
 use std::collections::HashSet;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use crate::scope_collector::ScopeBody;
-
-/// Emit [`Walker`] overrides that stop traversal at nested variable
-/// scopes (closures, arrow functions, named function declarations) while
-/// still walking an anonymous class's constructor arguments, which belong
-/// to the enclosing scope.
-macro_rules! stop_at_inner_scopes {
-    ($ctx:ty) => {
-        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
-        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
-        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
-        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
-            if let Some(argument_list) = &node.argument_list {
-                self.walk_partial_argument_list(argument_list, context);
-            }
-        }
-    };
-}
 
 // ─── Dynamic variable / extract detection ───────────────────────────────────
 
@@ -217,6 +201,37 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for GetDefinedVarsWalker {
     }
 
     stop_at_inner_scopes!(bool);
+}
+
+// ─── include / require detection ────────────────────────────────────────────
+
+/// Collect the start offset of every `include`/`include_once`/`require`/
+/// `require_once` construct in the body, nested scopes included.
+///
+/// The included file's code runs in the *including* scope, so it can read
+/// any local there by name — a known idiom for handing a variable to
+/// dynamically included code (`(function () use ($container) { require
+/// $file; })()`). Since the target is resolved at runtime, no analysis can
+/// tell which names it reads, so the whole scope's variables have to count
+/// as used.
+///
+/// Offsets are collected rather than a single flag because the caller
+/// needs to know which frame's scope each import sits in, and unlike the
+/// other detectors here that means walking into nested scopes.
+pub(crate) fn collect_import_offsets(body: ScopeBody<'_, '_>) -> Vec<u32> {
+    let mut offsets = Vec::new();
+    body.walk_with(&ImportWalker, &mut offsets);
+    offsets
+}
+
+struct ImportWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<u32>> for ImportWalker {
+    fn walk_in_construct(&self, node: &'ast Construct<'arena>, context: &mut Vec<u32>) {
+        if node.is_import() {
+            context.push(node.span().start.offset);
+        }
+    }
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────

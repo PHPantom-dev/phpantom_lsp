@@ -681,14 +681,17 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
         resolve_literal_test_var(content, "$nested"),
         "array{meta: array{'a'|'b'}}"
     );
-    assert_eq!(resolve_literal_test_var(content, "$pushed"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$pushed"),
+        "non-empty-list<string>"
+    );
     assert_eq!(
         resolve_literal_test_var(content, "$written"),
         "array{state: string}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$dynamic"),
-        "array<string, int>"
+        "non-empty-array<string, int>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$from_variable"),
@@ -885,59 +888,59 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
 
     assert_eq!(
         resolve_literal_test_var(content, "$int_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$float_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$union_map"),
-        "array<int|string, string>"
+        "non-empty-array<int|string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$null_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$nullable_map"),
-        "array<int|string, string>"
+        "non-empty-array<int|string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$decimal_string_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$leading_zero_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     // A broad `string` key stays `string`: only a *literal* decimal-integer
     // string is known to become an int key at runtime.
     assert_eq!(
         resolve_literal_test_var(content, "$broad_string_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     // An explicit `(string)` cast and an int-typed step expression keep their
     // own key domain rather than falling back to `array-key`.
     assert_eq!(
         resolve_literal_test_var(content, "$cast_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$pre_increment_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$post_increment_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_negative_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_leading_zero_map"),
@@ -1021,36 +1024,42 @@ fn element_writes_refine_the_type_they_are_written_into() {
             vec![shape("rows"), ArrayWriteKey::Append],
             "string",
         ),
-        "array{rows: list<string>}"
+        "array{rows: non-empty-list<string>}"
     );
     // A dynamic key may land on any entry, so the shape widens instead of
     // standing still.
     assert_eq!(
         write(
             "array{name: string}",
-            vec![ArrayWriteKey::Keyed(PhpType::string())],
+            vec![ArrayWriteKey::Keyed {
+                key_type: PhpType::string(),
+                slot: None,
+            }],
             "int",
         ),
-        "array<string, string|int>"
+        "non-empty-array<string, string|int>"
     );
     // A keyed array keeps its key and value types through a literal-key
     // write and through an append.
     assert_eq!(
         write("array<string, int>", vec![shape("name")], "int"),
-        "array<string, int>"
+        "non-empty-array<string, int>"
     );
     assert_eq!(
         write("array<string, int>", vec![ArrayWriteKey::Append], "int"),
-        "array<string|int, int>"
+        "non-empty-array<string|int, int>"
     );
     // An auto-vivified level starts from what the base says sits there.
+    // The written key is non-empty afterwards, but it joins the entries
+    // the write did not touch, so the outer value domain stays the wider
+    // `list<string>`.
     assert_eq!(
         write(
             "array<string, list<string>>",
             vec![shape("words"), ArrayWriteKey::Append],
             "string",
         ),
-        "array<string, list<string>>"
+        "non-empty-array<string, list<string>>"
     );
 }
 
@@ -1295,8 +1304,8 @@ function test() {
         "List element type should contain User, got: {ts}"
     );
     assert!(
-        ts.starts_with("list<"),
-        "Should be a list<> type, got: {ts}"
+        ts.starts_with("non-empty-list<"),
+        "Should be a non-empty-list<> type, got: {ts}"
     );
 }
 
@@ -1359,7 +1368,7 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "list<string>",
+        ts, "non-empty-list<string>",
         "Duplicate pushes of same type should not duplicate, got: {ts}"
     );
 }
@@ -1393,7 +1402,7 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $x to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "list<string>",
+        ts, "non-empty-list<string>",
         "Reassignment should reset; only 'string' push should remain, got: {ts}"
     );
 }
@@ -2282,6 +2291,96 @@ $foo;
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(ts, "null|1");
+}
+
+#[test]
+fn by_ref_closure_capture_sees_an_assignment_on_a_returning_path() {
+    // The assignment sits in a branch that `return`s, so it never reaches
+    // the end of the closure body.  The caller still sees it: a
+    // by-reference capture written before the closure returns is written.
+    let content = r#"<?php
+$foo = null;
+
+\Some\Unknown\Helper::run(function (bool $b) use (&$foo) {
+    if ($b) {
+        $foo = 'string';
+        return;
+    }
+});
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|'string'");
+}
+
+#[test]
+fn by_ref_closure_capture_sees_a_narrowed_push_on_a_returning_path() {
+    // The gather-into-an-array idiom: the closure narrows its parameter
+    // with `instanceof`, pushes it onto a captured array and returns.  The
+    // array's element type has to reach the enclosing `foreach`.
+    let content = r#"<?php
+class Node {}
+class ExecutionEndNode extends Node {}
+
+function run() {
+    $executionEnds = [];
+    \Some\Unknown\Runner::process(static function (Node $node) use (&$executionEnds): void {
+        if ($node instanceof ExecutionEndNode) {
+            $executionEnds[] = $node;
+            return;
+        }
+    });
+
+    foreach ($executionEnds as $executionEnd) {
+        $executionEnd;
+    }
+}
+"#;
+    let node = make_class("Node");
+    let mut end_node = make_class("ExecutionEndNode");
+    end_node.parent_class = Some(atom("Node"));
+    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(node.clone()), Arc::new(end_node.clone())];
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Node" => Some(Arc::new(node.clone())),
+            "ExecutionEndNode" => Some(Arc::new(end_node.clone())),
+            _ => None,
+        }
+    };
+    let cursor_offset = content.rfind("$executionEnd;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$executionEnd",
+        &ClassInfo::default(),
+        &all_classes,
+        content,
+        cursor_offset,
+        &class_loader,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(
+        !results.is_empty(),
+        "Should resolve $executionEnd to a type"
+    );
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "ExecutionEndNode");
 }
 
 /// `array_reduce` with a class initial value should resolve to that class.

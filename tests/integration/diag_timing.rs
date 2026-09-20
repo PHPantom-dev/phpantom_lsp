@@ -2407,3 +2407,145 @@ fn argument_diagnostics_scale_linearly_on_large_file() {
         budget_secs,
     );
 }
+
+/// Regression test for re-entrant property narrowing beside a chained
+/// call.
+///
+/// `if ($o->a)` sends the property pipeline back over the whole body
+/// looking for a check on `$o->a`.  That re-walk resolves the chained
+/// `$h->getWork()` it runs into, which re-enters the same walk for the
+/// call key, which resolves the chain again.  Without a cycle break each
+/// added pair multiplied the work by roughly ten: 6 pairs measured 0.4 s,
+/// 7 measured 3.5 s, and 8 measured 50 s.
+#[test]
+fn property_narrowing_beside_a_chained_call_stays_bounded() {
+    const PAIRS: usize = 12;
+
+    let mut php = String::from(
+        r#"<?php
+class Work   { public function changed(string $k): bool { return true; } public function run(): void {} }
+class Holder { public function getWork(): Work { return new Work(); } }
+class Ops    { public bool $a = false; }
+
+function probe(Holder $h): void {
+    $o = new Ops();
+"#,
+    );
+    for _ in 0..PAIRS {
+        php.push_str("    if ($h->getWork()->changed(\"k\")) { $o->a = true; }\n");
+        php.push_str("    if ($o->a) { $h->getWork()->run(); }\n");
+    }
+    php.push_str("}\n");
+
+    let uri = "file:///test/reentrant_narrowing.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== Property narrowing beside a chained call ===");
+    eprintln!(
+        "  {} guard/chain pairs: {:>10.3?}  ({} diagnostics)",
+        PAIRS,
+        elapsed,
+        out.len()
+    );
+    eprintln!();
+
+    // Every member named here exists, so nothing is left to report.
+    assert!(
+        out.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+
+    // Budget: 10 s in debug, 2 s in release.  With the cycle broken this
+    // measures ~1 s and ~0.1 s respectively, while the exponential
+    // behaviour blew past 50 s at only 8 pairs, so either budget catches
+    // a regression while leaving ~10x headroom for a slower machine.
+    let budget_secs = if cfg!(debug_assertions) { 10.0 } else { 2.0 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "Narrowing {PAIRS} guard/chain pairs took {elapsed:.3?} which exceeds \
+         the {budget_secs:.0} s budget.  The property-narrowing re-entry \
+         guard may have regressed.",
+    );
+}
+
+/// Regression test for narrowing walks nesting inside one another.
+///
+/// A chained call in a conditional is resolved to answer whether the
+/// branch exits, and resolving it sends the property pipeline back over
+/// the whole body looking for a check on that call.  The re-walk meets
+/// the *other* conditionals, resolves their chains, and each of those
+/// starts a walk of its own under a different key, so the walks nest one
+/// per distinct chain.  Blocking a walk while another is already running
+/// over the same source keeps that flat: before it, 6 chains measured
+/// 1.5 s and 8 never finished, which is what made
+/// `phpstan-src`'s `AnalyseCommand::execute` unanalysable.
+#[test]
+fn chained_calls_in_conditionals_do_not_nest_narrowing_walks() {
+    const CHAINS: usize = 20;
+
+    let mut php = String::from(
+        r#"<?php
+class Style  { public function error(string $m): void {} }
+class Out    { public function getStyle(): Style { return new Style(); } }
+class Report {
+"#,
+    );
+    for i in 0..CHAINS {
+        php.push_str(&format!(
+            "    public function get{i}(): Out {{ return new Out(); }}\n"
+        ));
+    }
+    php.push_str("}\n\nfunction probe(Report $r, bool $flag): void {\n");
+    for i in 0..CHAINS {
+        php.push_str(&format!(
+            "    if ($flag) {{ $r->get{i}()->getStyle()->error(\"m{i}\"); }}\n"
+        ));
+    }
+    php.push_str("}\n");
+
+    let uri = "file:///test/nested_narrowing_walks.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== Chained calls in conditionals ===");
+    eprintln!(
+        "  {} chains: {:>10.3?}  ({} diagnostics)",
+        CHAINS,
+        elapsed,
+        out.len()
+    );
+    eprintln!();
+
+    // Every member named here exists, so nothing is left to report.
+    assert!(
+        out.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+
+    // Budget: 10 s in debug, 2 s in release.  With the walks kept flat
+    // this measures well under a second either way, while the nesting
+    // never finished at 8 chains, so both budgets catch a regression
+    // with room to spare on a slower machine.
+    let budget_secs = if cfg!(debug_assertions) { 10.0 } else { 2.0 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "Diagnosing {CHAINS} chained calls took {elapsed:.3?} which exceeds \
+         the {budget_secs:.0} s budget.  Narrowing walks may be nesting \
+         inside one another again.",
+    );
+}

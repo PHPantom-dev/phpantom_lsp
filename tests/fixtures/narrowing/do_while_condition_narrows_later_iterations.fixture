@@ -1,0 +1,20 @@
+// test: a do-while condition narrows the body from the second iteration on
+// feature: hover
+// expect_hover: $current => ClassRef
+// expect_absent: null
+---
+<?php
+
+class ClassRef
+{
+    public function getParentClass(): ?ClassRef { return null; }
+}
+
+function chain(ClassRef $c): void
+{
+    do {
+        $current = $c;
+        echo $curr<>ent;
+        $c = $c->getParentClass();
+    } while ($c !== null);
+}

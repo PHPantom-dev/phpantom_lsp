@@ -465,6 +465,9 @@ impl Backend {
         );
         let resolved_cache = &self.resolved_class_cache;
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
 
         for span in &symbol_map.spans {
             let SymbolKind::MemberAccess {
@@ -493,7 +496,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
 
             // `$this->ownProperty = …` inside the constructor is the
             // shape most writes in a file have.  Settling it before

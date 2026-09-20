@@ -1381,9 +1381,12 @@ async fn test_completion_ambiguous_variable_if_else_union() {
         "}\n",
         "\n",
         "class App {\n",
-        "    public function run(): void {\n",
+        // The condition has to be one the source cannot decide: a
+        // literal `true` makes the else branch dead, so `$out` would be
+        // a plain `Printer` there and the union under test never forms.
+        "    public function run(bool $direct): void {\n",
         "        $out = new Writer();\n",
-        "        if (true) {\n",
+        "        if ($direct) {\n",
         "            $out = new Printer();\n",
         "        } else {\n",
         "            $out = new Sender();\n",

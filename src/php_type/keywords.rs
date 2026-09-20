@@ -8,15 +8,17 @@
 /// of them is one of PHP's actual reserved type keywords (those are `int`,
 /// `float`, `bool`, and `string`; PHP has no `resource` type-hint at all), so
 /// a class can legally be named `Integer`, `Boolean`, `Double`, `Resource`,
-/// `Number` (PHP 8.4's `BcMath\Number`), or `Real`. `integer`, `boolean`, and
-/// `double` are only aliases `gettype()`/legacy PHPDoc use for `int`/`bool`/
-/// `float`; `number` is a PHPDoc-only pseudo-type (`int|float`); `real` was
+/// `Number` (PHP 8.4's `BcMath\Number`), `Real`, `Scalar` (nikic/php-parser's
+/// `PhpParser\Node\Scalar`), or `Numeric`. `integer`, `boolean`, and `double`
+/// are only aliases `gettype()`/legacy PHPDoc use for `int`/`bool`/`float`;
+/// `number` (`int|float`), `scalar` (`int|float|string|bool`) and `numeric`
+/// (`int|float|numeric-string`) are PHPDoc-only pseudo-types; `real` was
 /// removed from PHP in 8.0. Any casing other than all-lowercase is a class
 /// reference and must not be folded into the scalar/alias.
 pub(crate) fn is_lowercase_only_pseudo_type(lower: &str) -> bool {
     matches!(
         lower,
-        "number" | "real" | "integer" | "boolean" | "double" | "resource"
+        "number" | "real" | "integer" | "boolean" | "double" | "resource" | "scalar" | "numeric"
     )
 }
 
@@ -295,13 +297,14 @@ pub(crate) fn is_scalar_name(name: &str) -> bool {
         return true;
     }
     let lower = name.to_ascii_lowercase();
-    // `integer`, `boolean`, `double`, and `resource` are PHP aliases/pseudo-
-    // types, not reserved keywords (see `is_lowercase_only_pseudo_type`), so
-    // a project may legally declare a class of one of these names. Only the
-    // exact lowercase spelling counts as the alias.
+    // `integer`, `boolean`, `double`, `resource`, `scalar`, and `numeric` are
+    // PHP aliases/pseudo-types, not reserved keywords (see
+    // `is_lowercase_only_pseudo_type`), so a project may legally declare a
+    // class of one of these names — `PhpParser\Node\Scalar` is one such class.
+    // Only the exact lowercase spelling counts as the alias.
     if matches!(
         lower.as_str(),
-        "integer" | "boolean" | "double" | "resource"
+        "integer" | "boolean" | "double" | "resource" | "scalar" | "numeric"
     ) {
         return name == lower;
     }

@@ -1,57 +1,8 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a document and trigger completion at the given line/column.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    src: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: src.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
-
-fn property_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
 
 // ─── Closure literal with native return type hint ───────────────────────────
 
@@ -747,5 +698,33 @@ async fn test_invoke_parenthesized_property() {
     assert!(
         methods.contains(&"write"),
         "Expected write from ($this->invoker)() __invoke(), got: {methods:?}"
+    );
+}
+
+/// `($this->prop)()->` on a property annotated `@var callable(): T` reads
+/// the return type out of the callable type itself — there is no class with
+/// an `__invoke()` method to go through.
+#[tokio::test]
+async fn test_invoke_callable_typed_property() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/invoke_callable_prop.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class InvScope5 { public function getType(): string {} }\n",
+        "class InvApp5 {\n",
+        "    /** @var callable(): InvScope5 */\n",
+        "    private $factory;\n",
+        "    public function demo(): void {\n",
+        "        ($this->factory)()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, src, 6, 28).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getType"),
+        "Expected getType from ($this->factory)() callable return type, got: {methods:?}"
     );
 }

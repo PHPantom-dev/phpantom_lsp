@@ -101,6 +101,28 @@ check(
     'Bakery::masterRecipe() exists',
     method_exists(\App\Models\Bakery::class, 'masterRecipe')
 );
+$masterRecipe = (new \App\Models\Bakery())->masterRecipe();
+check(
+    'Bakery::masterRecipe() keeps the default pivot accessor',
+    $masterRecipe->getPivotAccessor() === 'pivot'
+);
+check(
+    'Bakery::masterRecipe() uses RecipeIngredient as its pivot model',
+    $masterRecipe->getPivotClass() === \App\Models\RecipeIngredient::class
+);
+check(
+    'Bakery::seasonalRecipes() exists',
+    method_exists(\App\Models\Bakery::class, 'seasonalRecipes')
+);
+$seasonalRecipes = (new \App\Models\Bakery())->seasonalRecipes();
+check(
+    'Bakery::seasonalRecipes() renames the pivot accessor to ingredient',
+    $seasonalRecipes->getPivotAccessor() === 'ingredient'
+);
+check(
+    'Bakery::seasonalRecipes() uses RecipeIngredient as its pivot model',
+    $seasonalRecipes->getPivotClass() === \App\Models\RecipeIngredient::class
+);
 
 // ─── Accessor methods ───────────────────────────────────────────────────────
 
@@ -1053,6 +1075,29 @@ check(
     (new \Illuminate\View\ComponentSlot('<b>hi</b>'))->toHtml() === '<b>hi</b>'
 );
 
+// A named slot (`<x-slot:title>`) files under the component it is written
+// inside, via ManagesComponents::slot()/endSlot(), and lands in the data
+// componentData() hands the view keyed by exactly the name given — the
+// same variable the LSP declares in the receiving component's template,
+// never in the caller that writes the tag.
+$factory = (new ReflectionClass(\Illuminate\View\Factory::class))->newInstanceWithoutConstructor();
+$factory->startComponent('components.alert');
+$factory->slot('title');
+echo 'Latest update';
+$factory->endSlot();
+// `renderComponent()` pops the component off the stack before reading
+// `componentData()`, which indexes by the stack's count; mimic that pop
+// without going through `renderComponent()` itself, which would try to
+// actually render the (unregistered) view.
+(new ReflectionProperty(\Illuminate\View\Factory::class, 'componentStack'))->setValue($factory, []);
+$componentData = new ReflectionMethod(\Illuminate\View\Factory::class, 'componentData');
+$data = $componentData->invoke($factory);
+check(
+    'a named slot is handed to the component view as a ComponentSlot keyed by its name',
+    $data['title'] instanceof \Illuminate\View\ComponentSlot
+        && (string) $data['title'] === 'Latest update'
+);
+
 // `AnonymousComponent::data()` merges every tag attribute into the view
 // data, whether or not `@props` names it — this is the runtime fact the
 // LSP's call-site inference for `<x-…>` tags relies on: a component with
@@ -1316,6 +1361,19 @@ check(
         $compiler->compileString("@include('partials.author_badge')"),
         'get_defined_vars()'
     )
+);
+
+// ─── Escaped Blade echoes ───────────────────────────────────────────────────
+
+// A leading @ makes either echo form literal template text. PHPantom must
+// keep their frontend-only contents out of the virtual PHP for the same reason.
+check(
+    'an @-escaped Blade echo stays literal',
+    $compiler->compileString('@{{.Image}}') === '{{.Image}}'
+);
+check(
+    'an @-escaped raw Blade echo stays literal',
+    $compiler->compileString('@{!! $name !!}') === '{!! $name !!}'
 );
 
 // ─── @each item and key variables ────────────────────────────────────────────

@@ -1,0 +1,25 @@
+// test: static method's @template bound at the call site types the closure's own parameter
+// feature: completion
+// expect: isReadOnly(
+---
+<?php
+
+class PropertyNode {
+    public function isReadOnly(): bool { return true; }
+}
+
+class Fixer {
+    /**
+     * @template TNode
+     * @param TNode $node
+     * @param callable(TNode): void $cb
+     */
+    public static function fixNode($node, callable $cb): void {}
+}
+
+function run(PropertyNode $property): void
+{
+    Fixer::fixNode($property, function ($node) {
+        $node-><>
+    });
+}

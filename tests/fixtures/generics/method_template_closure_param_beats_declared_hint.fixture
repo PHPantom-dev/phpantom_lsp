@@ -1,0 +1,40 @@
+// test: a template bound to a subclass beats the closure's wider declared hint
+// feature: completion
+// The call binds TNode to PropertyNode, so the closure parameter is that
+// subclass even though it declares the base class — which is what PHPStan
+// infers for `RuleErrorBuilder::fixNode()`-shaped signatures.
+// expect: isReadOnly(
+---
+<?php
+
+class NodeBase {
+    public function getLine(): int { return 0; }
+}
+
+class PropertyNode extends NodeBase {
+    public function isReadOnly(): bool { return true; }
+}
+
+class ErrorBuilder {
+    public static function message(string $msg): self { return new self(); }
+
+    public function identifier(string $id): self { return $this; }
+
+    /**
+     * @template TNode of NodeBase
+     * @param TNode $node
+     * @param callable(TNode): NodeBase $cb
+     */
+    public function fixNode(NodeBase $node, callable $cb): self { return $this; }
+}
+
+class Rule {
+    public function run(PropertyNode $originalNode): void
+    {
+        ErrorBuilder::message('x')
+            ->identifier('y')
+            ->fixNode($originalNode, function (NodeBase $property) {
+                $property-><>
+            });
+    }
+}

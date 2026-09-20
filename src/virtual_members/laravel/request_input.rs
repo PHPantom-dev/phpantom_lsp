@@ -168,9 +168,9 @@ fn whole_source_type(accessor: InputAccessor) -> PhpType {
 /// fields, and the request's validation rules are what say which is which
 /// (`'photos' => 'array'` with `'photos.*' => 'file'`). A project that
 /// takes several files under one key without validating it is the one
-/// case this reads as a single upload — the same trade Larastan makes by
-/// declaring the union benevolent, except the null a missing file
-/// produces stays checkable.
+/// case this reads as a single upload.  That is the same trade the Laravel
+/// PHPStan extensions make by declaring the union benevolent, except the
+/// null a missing file produces stays checkable.
 fn file_key_type(
     receiver: &ClassInfo,
     key: &str,

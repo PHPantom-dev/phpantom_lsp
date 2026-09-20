@@ -71,8 +71,9 @@ pub(crate) fn try_inject_builder_scopes(
 /// At runtime `Relation::__call` delegates to the query builder and returns
 /// `$this` (the relation) whenever the forwarded call returned the builder,
 /// so a chain like `$this->belongsTo(Author::class)->withTrashed()` stays on
-/// the relation.  This mirrors Larastan's `RelationForwardsCallsExtension`,
-/// which rewrites any return the Builder is a supertype of to a `ThisType`.
+/// the relation.  Any return the Builder is a supertype of is therefore
+/// rewritten to the relation, which is what the Laravel PHPStan extensions
+/// do as well.
 ///
 /// The concrete relation type is stored rather than the `$this` keyword
 /// because a self-like return only resolves through a receiver that carries

@@ -41,7 +41,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::text_position::position_to_offset;
+use crate::text_position::{LineIndex, line_start_byte_offset, position_to_offset};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, short_name};
@@ -807,27 +807,19 @@ impl Backend {
             if let Some(p) = progress {
                 p.add_done(1);
             }
-            if seen_fqns.contains(fqn) {
-                continue;
-            }
             if project_only && uri.contains("/vendor/") {
                 continue;
             }
-            if let Some(cls) = class_loader(fqn)
-                && self.class_implements_or_extends(
-                    &cls,
-                    target_short,
-                    target_fqn,
-                    class_loader,
-                    include_abstract,
-                    direct_only,
-                )
-            {
-                let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-                if seen_fqns.insert(cls_fqn) {
-                    result.push(Arc::unwrap_or_clone(cls));
-                }
-            }
+            self.check_candidate_fqn(
+                fqn,
+                target_short,
+                target_fqn,
+                class_loader,
+                include_abstract,
+                direct_only,
+                &mut seen_fqns,
+                &mut result,
+            );
         }
 
         // ── Phase 3: scan class index files with string pre-filter ────────
@@ -870,23 +862,16 @@ impl Backend {
 
             // Parse the file, cache it, and check every class it defines.
             if let Some(classes) = self.parse_and_cache_file(path) {
-                for cls in &classes {
-                    let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-                    if seen_fqns.contains(&cls_fqn) {
-                        continue;
-                    }
-                    if self.class_implements_or_extends(
-                        cls,
-                        target_short,
-                        target_fqn,
-                        class_loader,
-                        include_abstract,
-                        direct_only,
-                    ) {
-                        seen_fqns.insert(cls_fqn);
-                        result.push(ClassInfo::clone(cls));
-                    }
-                }
+                self.check_candidates_in_file(
+                    &classes,
+                    target_short,
+                    target_fqn,
+                    class_loader,
+                    include_abstract,
+                    direct_only,
+                    &mut seen_fqns,
+                    &mut result,
+                );
             }
         }
 
@@ -905,29 +890,21 @@ impl Backend {
                 if let Some(p) = progress {
                     p.add_done(1);
                 }
-                if seen_fqns.contains(stub_name) {
-                    continue;
-                }
                 // Cheap pre-filter: skip stubs whose source doesn't mention
                 // the target name at all.
                 if !stub_source.contains(target_short) {
                     continue;
                 }
-                if let Some(cls) = class_loader(stub_name)
-                    && self.class_implements_or_extends(
-                        &cls,
-                        target_short,
-                        target_fqn,
-                        class_loader,
-                        include_abstract,
-                        direct_only,
-                    )
-                {
-                    let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-                    if seen_fqns.insert(cls_fqn) {
-                        result.push(Arc::unwrap_or_clone(cls));
-                    }
-                }
+                self.check_candidate_fqn(
+                    stub_name,
+                    target_short,
+                    target_fqn,
+                    class_loader,
+                    include_abstract,
+                    direct_only,
+                    &mut seen_fqns,
+                    &mut result,
+                );
             }
         }
 
@@ -957,8 +934,9 @@ impl Backend {
             let loaded_uris_p5: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
             let follow_links = self.config().indexing.follow_links();
 
+            let filters = self.index_filters();
             for dir in &psr4_dirs {
-                let php_files = collect_php_files(dir, &vendor_dir_paths, follow_links);
+                let php_files = collect_php_files(dir, &vendor_dir_paths, &filters, follow_links);
                 if let Some(p) = progress {
                     p.add_total(php_files.len() as u64);
                 }
@@ -985,30 +963,95 @@ impl Backend {
                     }
 
                     if let Some(classes) = self.parse_and_cache_file(&php_file) {
-                        for cls in &classes {
-                            let cls_fqn =
-                                crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-                            if seen_fqns.contains(&cls_fqn) {
-                                continue;
-                            }
-                            if self.class_implements_or_extends(
-                                cls,
-                                target_short,
-                                target_fqn,
-                                class_loader,
-                                include_abstract,
-                                direct_only,
-                            ) {
-                                seen_fqns.insert(cls_fqn);
-                                result.push(ClassInfo::clone(cls));
-                            }
-                        }
+                        self.check_candidates_in_file(
+                            &classes,
+                            target_short,
+                            target_fqn,
+                            class_loader,
+                            include_abstract,
+                            direct_only,
+                            &mut seen_fqns,
+                            &mut result,
+                        );
                     }
                 }
             }
         }
 
         result
+    }
+
+    /// Check a single already-known candidate FQN against the target and,
+    /// if it matches, record it in `result`/`seen_fqns`.  Shared by the
+    /// phases that already have a resolved name to check (the class index
+    /// scan and the embedded stub scan) rather than a freshly parsed
+    /// file's classes.
+    #[allow(clippy::too_many_arguments)]
+    fn check_candidate_fqn(
+        &self,
+        fqn: &str,
+        target_short: &str,
+        target_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        include_abstract: bool,
+        direct_only: bool,
+        seen_fqns: &mut HashSet<String>,
+        result: &mut Vec<ClassInfo>,
+    ) {
+        if seen_fqns.contains(fqn) {
+            return;
+        }
+        if let Some(cls) = class_loader(fqn)
+            && self.class_implements_or_extends(
+                &cls,
+                target_short,
+                target_fqn,
+                class_loader,
+                include_abstract,
+                direct_only,
+            )
+        {
+            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
+            if seen_fqns.insert(cls_fqn) {
+                result.push(Arc::unwrap_or_clone(cls));
+            }
+        }
+    }
+
+    /// Check every class defined in a freshly parsed file's `classes`
+    /// against the target and record matches.  Shared by the phases that
+    /// pre-filter a file's content by different means (an mmap-backed
+    /// byte search for indexed/vendor files, a `read_to_string` scan for a
+    /// PSR-4 directory walk) before parsing it.
+    #[allow(clippy::too_many_arguments)]
+    fn check_candidates_in_file(
+        &self,
+        classes: &[Arc<ClassInfo>],
+        target_short: &str,
+        target_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        include_abstract: bool,
+        direct_only: bool,
+        seen_fqns: &mut HashSet<String>,
+        result: &mut Vec<ClassInfo>,
+    ) {
+        for cls in classes {
+            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
+            if seen_fqns.contains(&cls_fqn) {
+                continue;
+            }
+            if self.class_implements_or_extends(
+                cls,
+                target_short,
+                target_fqn,
+                class_loader,
+                include_abstract,
+                direct_only,
+            ) {
+                seen_fqns.insert(cls_fqn);
+                result.push(ClassInfo::clone(cls));
+            }
+        }
     }
 
     /// Check whether `cls` implements the target interface or extends the
@@ -1164,45 +1207,27 @@ impl Backend {
             return false;
         };
 
-        // Check `parent_class` (first extended interface stored here for
-        // backward compatibility).
-        if let Some(parent) = iface_cls.parent_class {
-            let parent_short = short_name(&parent);
-            if &*parent == target_fqn || (!has_fqn && parent_short == target_short) {
-                return true;
-            }
-            if Self::interface_extends_target(
-                &parent,
-                target_short,
-                target_fqn,
-                has_fqn,
-                class_loader,
-                depth + 1,
-            ) {
-                return true;
-            }
-        }
-
-        // Check all entries in `interfaces` (covers multi-extends for
-        // interfaces that extend more than one parent).
-        for parent_iface in &iface_cls.interfaces {
-            let parent_short = short_name(parent_iface);
-            if *parent_iface == target_fqn || (!has_fqn && parent_short == target_short) {
-                return true;
-            }
-            if Self::interface_extends_target(
-                parent_iface,
-                target_short,
-                target_fqn,
-                has_fqn,
-                class_loader,
-                depth + 1,
-            ) {
-                return true;
-            }
-        }
-
-        false
+        // `parent_class` stores the first extended interface (kept for
+        // backward compatibility); `interfaces` covers the rest, for
+        // interfaces that extend more than one parent.
+        iface_cls
+            .parent_class
+            .iter()
+            .copied()
+            .chain(iface_cls.interfaces.iter().copied())
+            .any(|parent_iface| {
+                let parent_short = short_name(&parent_iface);
+                parent_iface == target_fqn
+                    || (!has_fqn && parent_short == target_short)
+                    || Self::interface_extends_target(
+                        &parent_iface,
+                        target_short,
+                        target_fqn,
+                        has_fqn,
+                        class_loader,
+                        depth + 1,
+                    )
+            })
     }
 
     /// Find a member position scoped to a specific class body.
@@ -1225,26 +1250,17 @@ impl Backend {
             return Self::find_member_position(content, member_name, kind, name_offset);
         }
 
-        // Convert byte offsets to line numbers.
-        let start_line = content
-            .get(..cls.start_offset as usize)
-            .map(|s| s.matches('\n').count())
-            .unwrap_or(0);
-        let end_line = content
-            .get(..cls.end_offset as usize)
-            .map(|s| s.matches('\n').count())
-            .unwrap_or(usize::MAX);
+        // Restrict the search to lines within the class's byte range, so
+        // that a member name shared with another class in the same file
+        // resolves to this class's own definition.
+        let index = LineIndex::new(content);
+        let start_line = index.line_of(cls.start_offset as usize);
+        let end_line = index.line_of(cls.end_offset as usize);
+        let start_byte = line_start_byte_offset(content, start_line);
+        let end_byte = line_start_byte_offset(content, end_line + 1);
+        let class_body = &content[start_byte..end_byte];
 
-        // Build a sub-content containing only the class body lines and
-        // delegate to the existing searcher, adjusting the result line.
-        let class_lines: Vec<&str> = content
-            .lines()
-            .skip(start_line)
-            .take(end_line - start_line + 1)
-            .collect();
-        let class_body = class_lines.join("\n");
-
-        Self::find_member_position(&class_body, member_name, kind, None).map(|pos| Position {
+        Self::find_member_position(class_body, member_name, kind, None).map(|pos| Position {
             line: pos.line + start_line as u32,
             character: pos.character,
         })

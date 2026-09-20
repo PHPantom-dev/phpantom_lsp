@@ -15,6 +15,26 @@ use crate::types::ResolvedType;
 
 // ─── Control flow handling ──────────────────────────────────────────────────
 
+/// The conditions of an `if`'s `elseif` clauses, in source order.
+///
+/// Both body styles carry the same clauses under different types, and
+/// several passes need to treat an `elseif`'s condition exactly as they
+/// treat the leading `if`'s.
+pub(crate) fn elseif_conditions<'b>(body: &'b IfBody<'b>) -> Vec<&'b Expression<'b>> {
+    match body {
+        IfBody::Statement(body) => body
+            .else_if_clauses
+            .iter()
+            .map(|clause| clause.condition)
+            .collect(),
+        IfBody::ColonDelimited(body) => body
+            .else_if_clauses
+            .iter()
+            .map(|clause| clause.condition)
+            .collect(),
+    }
+}
+
 /// Process an `if` statement with branch merging.
 pub(crate) fn process_if<'b>(
     if_stmt: &'b If<'b>,
@@ -40,7 +60,7 @@ pub(crate) fn process_if<'b>(
     }
 
     // Assignment in condition: `if ($x = expr())`
-    process_condition_assignment(if_stmt.condition, scope, ctx);
+    process_nested_assignments(if_stmt.condition, scope, ctx);
 
     // Pass-by-reference in condition: `if (preg_match(..., $matches))`
     seed_pass_by_ref_in_condition(if_stmt.condition, scope, ctx);
@@ -80,6 +100,33 @@ pub(crate) fn process_if_statement_body<'b>(
     let then_span = body.statement.span();
     let cursor_in_then =
         ctx.cursor_offset >= then_span.start.offset && ctx.cursor_offset <= then_span.end.offset;
+
+    // Which branches a decidable guard rules out.  Recorded before the
+    // cursor dispatch below so the ranges are collected whichever branch
+    // the walk goes on to take.
+    let dead = dead_if_branches(
+        if_stmt.condition,
+        body.else_if_clauses.iter().map(|ei| ei.condition),
+        body.else_clause.is_some(),
+        ctx,
+    );
+    if dead.any() {
+        if dead.then_branch {
+            record_unreachable_range((then_span.start.offset, then_span.end.offset));
+        }
+        for (ei, ei_dead) in body.else_if_clauses.iter().zip(dead.else_if_clauses.iter()) {
+            if *ei_dead {
+                let sp = ei.statement.span();
+                record_unreachable_range((sp.start.offset, sp.end.offset));
+            }
+        }
+        if dead.else_clause
+            && let Some(ref else_clause) = body.else_clause
+        {
+            let sp = else_clause.statement.span();
+            record_unreachable_range((sp.start.offset, sp.end.offset));
+        }
+    }
 
     let cursor_in_elseif = body.else_if_clauses.iter().any(|ei| {
         let sp = ei.statement.span();
@@ -141,7 +188,7 @@ pub(crate) fn process_if_statement_body<'b>(
                 // truthy test can strip its falsy members, and
                 // `elseif (preg_match(…, $m))` has to seed `$m` before the
                 // test can rule out the failed match.
-                process_condition_assignment(ei.condition, scope, ctx);
+                process_nested_assignments(ei.condition, scope, ctx);
                 seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
                 apply_condition_narrowing(ei.condition, scope, ctx);
                 walk_body_forward(std::iter::once(ei.statement), scope, ctx);
@@ -163,24 +210,23 @@ pub(crate) fn process_if_statement_body<'b>(
 
     // Cursor is AFTER the if/else block.  We need to merge all branches.
     let pre_if_scope = scope.clone();
-    let pre_if_unreachable = pre_if_scope.unreachable;
 
-    // Walk each branch independently and merge results.
+    // Walk each branch independently and merge results.  A branch the
+    // guard rules out is still walked (the cursor may be inside it), but
+    // it is marked so the merge below drops what it established.
     let mut then_scope = scope.clone();
+    then_scope.unreachable |= dead.then_branch;
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(std::iter::once(body.statement), &mut then_scope, ctx);
     let then_exits = branch_exits(body.statement, &then_scope, ctx);
 
     let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::new();
-    for ei in body.else_if_clauses.iter() {
+    for (ei_idx, ei) in body.else_if_clauses.iter().enumerate() {
         let mut ei_scope = pre_if_scope.clone();
+        ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
         apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
-        for (prev_idx, prev_ei) in body.else_if_clauses.iter().enumerate() {
-            if std::ptr::eq(prev_ei, ei) {
-                break;
-            }
+        for prev_ei in body.else_if_clauses.iter().take(ei_idx) {
             apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
-            let _ = prev_idx;
         }
         // Record a scope snapshot at the elseif condition boundary so
         // that diagnostic variable lookups inside the condition don't
@@ -188,7 +234,10 @@ pub(crate) fn process_if_statement_body<'b>(
         if is_diagnostic_scope_active() {
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
-        process_condition_assignment(ei.condition, &mut ei_scope, ctx);
+        // An `elseif`'s own `&&` / `||` chain narrows its later operands
+        // just as the leading `if`'s does.
+        record_short_circuit_snapshots(ei.condition, &ei_scope, ctx);
+        process_nested_assignments(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(std::iter::once(ei.statement), &mut ei_scope, ctx);
@@ -198,6 +247,7 @@ pub(crate) fn process_if_statement_body<'b>(
 
     let (else_scope, else_exits) = if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
+        else_scope.unreachable |= dead.else_clause;
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
         for ei in body.else_if_clauses.iter() {
             apply_condition_narrowing_inverse(ei.condition, &mut else_scope, ctx);
@@ -215,120 +265,19 @@ pub(crate) fn process_if_statement_body<'b>(
         (None, false)
     };
 
-    // Merge: collect all surviving (non-exiting) branch scopes.  A branch
-    // that returns, throws, or jumps out of the enclosing loop does not
-    // reach the statement after the `if`, so it contributes nothing here;
-    // a `break`/`continue` branch reaches the loop's own join instead,
-    // which `record_exit_edge` has already been handed.
-    //
-    // When there is no else clause, the pre-if scope represents the
-    // implicit "condition was false" path.  We apply inverse condition
-    // narrowing to it so that information from the condition (e.g.
-    // `$a["test"] === null` → `$a["test"]` is NOT null in the else
-    // path) is reflected in the merge.
-    let mut implicit_else_scope;
-    let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
-
-    if !then_exits {
-        surviving_scopes.push(&then_scope);
-    }
-    for (ei_scope, ei_exits) in elseif_scopes.iter() {
-        if !ei_exits {
-            surviving_scopes.push(ei_scope);
-        }
-    }
-    if let Some(ref es) = else_scope {
-        if !else_exits {
-            surviving_scopes.push(es);
-        }
-    } else {
-        // No else clause — the pre-if scope is an implicit surviving path.
-        // When the then-body does NOT exit, apply inverse condition
-        // narrowing so that information from the condition (e.g.
-        // `$a["test"] === null` → `$a["test"]` is NOT null in the
-        // implicit else path) is reflected in the merge.
-        //
-        // When the then-body DOES exit (guard clause), skip inverse
-        // narrowing here — the dedicated guard clause section below
-        // handles it.  Applying it in both places would double-narrow.
-        implicit_else_scope = pre_if_scope.clone();
-        if !then_exits {
-            apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
-        }
-        // The implicit else path precedes the then-body in source order, so
-        // it goes first: the merge below preserves this order in each
-        // variable's type list, and hover renders the first entry as the
-        // headline type.
-        surviving_scopes.insert(0, &implicit_else_scope);
-    }
-
-    // A branch whose condition proved impossible describes a run that
-    // cannot happen.  Dropping it is what makes a reassignment inside
-    // `if ($v instanceof AbstractNode) { $v = $v->getNode(); }` the
-    // post-if type of `$v` when `$v` was already an `AbstractNode`: the
-    // implicit else has no value to carry.  If every path is impossible
-    // the whole `if` is, and the pre-if scope is the least surprising
-    // answer.
-    if surviving_scopes.iter().any(|s| !s.unreachable) {
-        surviving_scopes.retain(|s| !s.unreachable);
-    }
-
-    if surviving_scopes.is_empty() {
-        // Every branch returns, throws, or jumps, and the branches cover
-        // every case: nothing falls out of the bottom of this `if`.  The
-        // pre-if types are the least surprising answer for a cursor in
-        // the dead code that follows, but a join further out must not
-        // count this path — an enclosing loop whose body always `break`s
-        // has no fall-through edge, only the break edges.
-        *scope = pre_if_scope;
-        scope.unreachable = true;
-        return;
-    } else if surviving_scopes.len() == 1 {
-        *scope = surviving_scopes[0].clone();
-    } else {
-        // Merge all surviving scopes.
-        let mut merged = surviving_scopes[0].clone();
-        for s in &surviving_scopes[1..] {
-            merged.merge_branch(s);
-        }
-        // Simplify unions where a child class is merged with its
-        // parent — e.g. `ClassResolvesBackChild | ClassResolvesBack`
-        // collapses to `ClassResolvesBack`.
-        simplify_class_hierarchy_unions(&mut merged, ctx.class_loader);
-        *scope = merged;
-    }
-
-    // Drop synthetic property access keys that only some branches
-    // established: those represent narrowing (or an assignment) that
-    // holds within one branch and says nothing about the others.  Keys
-    // every surviving path carries are kept, so their merged union is
-    // the type the property has once the branches reconverge.  This
-    // must run BEFORE guard clause narrowing so that
-    // guard-clause-narrowed property keys (e.g. `$this->model`
-    // narrowed to `Order` after
-    // `if (!$this->model instanceof Order) { return; }`) survive into
-    // the post-if scope.
-    retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
-
-    // Guard clause narrowing: when the if body unconditionally exits
-    // and there are no elseif/else branches, apply inverse narrowing.
-    // This applies to ALL exit types (return, throw, break, continue)
-    // because the code after the if in the current scope does not
-    // execute in that path.
-    if enclosing_stmt.span().end.offset < ctx.cursor_offset
-        && then_exits
-        && body.else_if_clauses.is_empty()
-        && body.else_clause.is_none()
-    {
-        apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-        apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
-    }
-
-    // Impossibility is a property of one branch's path conditions, not of
-    // the join: the statement after the `if` is reached by whichever branch
-    // *was* possible.  Restoring the pre-if reachability keeps a dropped
-    // branch from erasing the rest of the walk.
-    scope.unreachable = pre_if_unreachable;
+    merge_if_branches(
+        if_stmt,
+        IfBranchScopes {
+            pre_if: pre_if_scope,
+            then_branch: (then_scope, then_exits),
+            else_ifs: elseif_scopes,
+            else_branch: else_scope.map(|s| (s, else_exits)),
+            else_if_conditions: body.else_if_clauses.iter().map(|ei| ei.condition).collect(),
+        },
+        enclosing_stmt,
+        scope,
+        ctx,
+    );
 }
 
 /// Process if with colon-delimited body.
@@ -357,6 +306,30 @@ pub(crate) fn process_if_colon_body<'b>(
 
     let then_start = body.colon.start.offset;
     let cursor_in_then = ctx.cursor_offset >= then_start && ctx.cursor_offset < then_end;
+
+    // Which branches a decidable guard rules out.  See the brace-body
+    // variant for why this runs before the cursor dispatch.
+    let dead = dead_if_branches(
+        if_stmt.condition,
+        body.else_if_clauses.iter().map(|ei| ei.condition),
+        body.else_clause.is_some(),
+        ctx,
+    );
+    if dead.any() {
+        if dead.then_branch {
+            record_statements_unreachable(body.statements.iter());
+        }
+        for (ei, ei_dead) in body.else_if_clauses.iter().zip(dead.else_if_clauses.iter()) {
+            if *ei_dead {
+                record_statements_unreachable(ei.statements.iter());
+            }
+        }
+        if dead.else_clause
+            && let Some(ref else_clause) = body.else_clause
+        {
+            record_statements_unreachable(else_clause.statements.iter());
+        }
+    }
 
     if cursor_in_then {
         apply_condition_narrowing(if_stmt.condition, scope, ctx);
@@ -393,7 +366,7 @@ pub(crate) fn process_if_colon_body<'b>(
             for prev_ei in body.else_if_clauses.iter().take(idx) {
                 apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
             }
-            process_condition_assignment(ei.condition, scope, ctx);
+            process_nested_assignments(ei.condition, scope, ctx);
             seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
             apply_condition_narrowing(ei.condition, scope, ctx);
             walk_body_forward(ei.statements.iter(), scope, ctx);
@@ -420,24 +393,22 @@ pub(crate) fn process_if_colon_body<'b>(
 
     // Cursor is after the if — merge branches.
     let pre_if_scope = scope.clone();
-    let pre_if_unreachable = pre_if_scope.unreachable;
 
     let mut then_scope = scope.clone();
+    then_scope.unreachable |= dead.then_branch;
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(body.statements.iter(), &mut then_scope, ctx);
     let then_exits = branch_exits_stmts(body.statements.iter(), &then_scope, ctx);
 
     let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::new();
-    for ei in body.else_if_clauses.iter() {
+    for (ei_idx, ei) in body.else_if_clauses.iter().enumerate() {
         let mut ei_scope = pre_if_scope.clone();
+        ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
         // The elseif branch only runs when the if condition and every
         // preceding elseif condition were false, so apply their inverse
         // narrowing before walking this branch.
         apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
-        for prev_ei in body.else_if_clauses.iter() {
-            if std::ptr::eq(prev_ei, ei) {
-                break;
-            }
+        for prev_ei in body.else_if_clauses.iter().take(ei_idx) {
             apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
         }
         // Record a scope snapshot at the elseif condition boundary so
@@ -446,7 +417,10 @@ pub(crate) fn process_if_colon_body<'b>(
         if is_diagnostic_scope_active() {
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
-        process_condition_assignment(ei.condition, &mut ei_scope, ctx);
+        // An `elseif`'s own `&&` / `||` chain narrows its later operands
+        // just as the leading `if`'s does.
+        record_short_circuit_snapshots(ei.condition, &ei_scope, ctx);
+        process_nested_assignments(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(ei.statements.iter(), &mut ei_scope, ctx);
@@ -456,6 +430,7 @@ pub(crate) fn process_if_colon_body<'b>(
 
     let (else_scope, else_exits) = if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
+        else_scope.unreachable |= dead.else_clause;
         // The else branch only runs when the if condition and every
         // elseif condition were false, so apply the inverse of all of
         // them.
@@ -476,85 +451,178 @@ pub(crate) fn process_if_colon_body<'b>(
         (None, false)
     };
 
-    // Merge: collect all surviving (non-exiting) branch scopes, mirroring
-    // `process_if_statement_body`'s brace-delimited merge so a guard
-    // clause written with `if (): ... endif;` narrows the same way as
-    // `if () { ... }`.
+    merge_if_branches(
+        if_stmt,
+        IfBranchScopes {
+            pre_if: pre_if_scope,
+            then_branch: (then_scope, then_exits),
+            else_ifs: elseif_scopes,
+            else_branch: else_scope.map(|s| (s, else_exits)),
+            else_if_conditions: body.else_if_clauses.iter().map(|ei| ei.condition).collect(),
+        },
+        enclosing_stmt,
+        scope,
+        ctx,
+    );
+}
+
+/// The branch scopes an `if` chain produced, with whether each of them
+/// reaches the statement after the chain.
+struct IfBranchScopes<'e> {
+    /// The scope as it stood before the `if`.
+    pre_if: ScopeState,
+    /// The then-body's scope, and whether it exits.
+    then_branch: (ScopeState, bool),
+    /// One entry per `elseif`, in source order.
+    else_ifs: Vec<(ScopeState, bool)>,
+    /// `None` when the chain has no `else` clause.
+    else_branch: Option<(ScopeState, bool)>,
+    /// Each `elseif` condition, for the inverse narrowing the implicit
+    /// fall-through path carries.
+    else_if_conditions: Vec<&'e Expression<'e>>,
+}
+
+/// Join the branch scopes of an `if` chain back into `scope`, and apply
+/// the narrowing a guard clause leaves behind.
+///
+/// Both spellings of an `if` (braced and `:`-delimited) reconverge the
+/// same way, so they share this half; they differ only in how they reach
+/// the branches in the first place.
+///
+/// A branch that returns, throws, or jumps out of the enclosing loop does
+/// not reach the statement after the `if`, so it contributes nothing
+/// here; a `break`/`continue` branch reaches the loop's own join instead,
+/// which `record_exit_edge` has already been handed.
+fn merge_if_branches(
+    if_stmt: &If<'_>,
+    branches: IfBranchScopes<'_>,
+    enclosing_stmt: &Statement<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let IfBranchScopes {
+        pre_if,
+        then_branch: (then_scope, then_exits),
+        else_ifs,
+        else_branch,
+        else_if_conditions,
+    } = branches;
+    let pre_if_unreachable = pre_if.unreachable;
+
     let mut implicit_else_scope;
     let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
 
     if !then_exits {
         surviving_scopes.push(&then_scope);
     }
-    for (ei_scope, ei_exits) in elseif_scopes.iter() {
+    for (ei_scope, ei_exits) in else_ifs.iter() {
         if !ei_exits {
             surviving_scopes.push(ei_scope);
         }
     }
-    if let Some(ref es) = else_scope {
-        if !else_exits {
-            surviving_scopes.push(es);
+    match &else_branch {
+        Some((es, else_exits)) => {
+            if !else_exits {
+                surviving_scopes.push(es);
+            }
         }
-    } else {
-        // No else clause — the pre-if scope is an implicit surviving path.
-        // Apply the inverse of every elseif condition unconditionally
-        // (the implicit path requires all of them to be false), but only
-        // apply the inverse of the `if` condition here when it is not
-        // about to be applied by the dedicated guard clause section
-        // below — applying it in both places would double-narrow.
-        implicit_else_scope = pre_if_scope.clone();
-        if !then_exits || !body.else_if_clauses.is_empty() {
-            apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+        None => {
+            // No else clause — the pre-if scope is an implicit surviving
+            // path.  Falling out of the bottom means every condition in
+            // the chain was false, so each one's inverse narrowing holds
+            // here (e.g. `$a["test"] === null` → `$a["test"]` is NOT null
+            // in the implicit else path).
+            //
+            // The leading condition is the exception: when the then-body
+            // exits and there is no `elseif`, the dedicated guard clause
+            // section below applies its inverse to the merged scope, and
+            // applying it in both places would double-narrow.  With an
+            // `elseif` present that section bails out, so this is the only
+            // place the fall-through path learns the leading condition was
+            // false.
+            implicit_else_scope = pre_if.clone();
+            if !then_exits || !else_if_conditions.is_empty() {
+                apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+            }
+            for condition in &else_if_conditions {
+                apply_condition_narrowing_inverse(condition, &mut implicit_else_scope, ctx);
+            }
+            // The implicit else path precedes the then-body in source
+            // order, so it goes first: the merge below preserves this
+            // order in each variable's type list, and hover renders the
+            // first entry as the headline type.
+            surviving_scopes.insert(0, &implicit_else_scope);
         }
-        for ei in body.else_if_clauses.iter() {
-            apply_condition_narrowing_inverse(ei.condition, &mut implicit_else_scope, ctx);
-        }
-        // Source order: the implicit else path comes before the then-body,
-        // matching `process_if_statement_body`.
-        surviving_scopes.insert(0, &implicit_else_scope);
     }
 
-    // See `process_if_statement_body` for why impossible paths are
-    // dropped before the join.
+    // A branch whose condition proved impossible describes a run that
+    // cannot happen.  Dropping it is what makes a reassignment inside
+    // `if ($v instanceof AbstractNode) { $v = $v->getNode(); }` the
+    // post-if type of `$v` when `$v` was already an `AbstractNode`: the
+    // implicit else has no value to carry.  If every path is impossible
+    // the whole `if` is, and the pre-if scope is the least surprising
+    // answer.
     if surviving_scopes.iter().any(|s| !s.unreachable) {
         surviving_scopes.retain(|s| !s.unreachable);
     }
 
     if surviving_scopes.is_empty() {
-        // See `process_if_statement_body`: no path falls out of the bottom.
-        *scope = pre_if_scope;
+        // Every branch returns, throws, or jumps, and the branches cover
+        // every case: nothing falls out of the bottom of this `if`.  The
+        // pre-if types are the least surprising answer for a cursor in
+        // the dead code that follows, but a join further out must not
+        // count this path — an enclosing loop whose body always `break`s
+        // has no fall-through edge, only the break edges.
+        *scope = pre_if;
         scope.unreachable = true;
         return;
     } else if surviving_scopes.len() == 1 {
         *scope = surviving_scopes[0].clone();
     } else {
-        // Merge all surviving scopes.
         let mut merged = surviving_scopes[0].clone();
         for s in &surviving_scopes[1..] {
             merged.merge_branch(s);
         }
+        // Simplify unions where a child class is merged with its
+        // parent — e.g. `ClassResolvesBackChild | ClassResolvesBack`
+        // collapses to `ClassResolvesBack`.
         simplify_class_hierarchy_unions(&mut merged, ctx.class_loader);
         *scope = merged;
     }
 
+    // Drop synthetic property access keys that only some branches
+    // established: those represent narrowing (or an assignment) that
+    // holds within one branch and says nothing about the others.  Keys
+    // every surviving path carries are kept, so their merged union is
+    // the type the property has once the branches reconverge.  This
+    // must run BEFORE guard clause narrowing so that
+    // guard-clause-narrowed property keys (e.g. `$this->model`
+    // narrowed to `Order` after
+    // `if (!$this->model instanceof Order) { return; }`) survive into
+    // the post-if scope.
     retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
-
-    // Guard clause narrowing: when the if body unconditionally exits and
-    // there are no elseif/else branches, apply inverse narrowing.
-    if enclosing_stmt.span().end.offset < ctx.cursor_offset
-        && then_exits
-        && body.else_if_clauses.is_empty()
-        && body.else_clause.is_none()
-    {
-        apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
-        apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
-    }
 
     // Impossibility is a property of one branch's path conditions, not of
     // the join: the statement after the `if` is reached by whichever branch
     // *was* possible.  Restoring the pre-if reachability keeps a dropped
-    // branch from erasing the rest of the walk.
+    // branch from erasing the rest of the walk.  The guard clause narrowing
+    // below runs after the restore because what *it* proves impossible is a
+    // property of the continuation, not of a branch that was dropped.
     scope.unreachable = pre_if_unreachable;
+
+    // Guard clause narrowing: when the if body unconditionally exits
+    // and there are no elseif/else branches, apply inverse narrowing.
+    // This applies to ALL exit types (return, throw, break, continue)
+    // because the code after the if in the current scope does not
+    // execute in that path.
+    if enclosing_stmt.span().end.offset < ctx.cursor_offset
+        && then_exits
+        && else_if_conditions.is_empty()
+        && else_branch.is_none()
+    {
+        apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
+        apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
+    }
 }
 
 /// Check whether an if/elseif/else branch terminates, so its
@@ -565,7 +633,7 @@ pub(crate) fn process_if_colon_body<'b>(
 /// not just `$this->fail()`.
 fn branch_exits(stmt: &Statement<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
     let var_types = |var_name: &str| scope.get(var_name).to_vec();
-    let receiver_resolver = |expr: &Expression<'_>| receiver_class_names(expr, scope, ctx);
+    let receiver_resolver = |expr: &Expression<'_>| resolved_receiver_class_names(expr, scope, ctx);
     narrowing::statement_unconditionally_exits(
         stmt,
         &narrowing::ExitCtx {
@@ -587,7 +655,7 @@ fn branch_exits(stmt: &Statement<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'
 /// RHS pipeline with the walker's in-progress scope injected as the
 /// variable resolver, so it answers from types already established
 /// rather than re-walking the body it was called from.
-fn receiver_class_names(
+fn resolved_receiver_class_names(
     expr: &Expression<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -607,7 +675,7 @@ fn branch_exits_stmts<'s>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
     let var_types = |var_name: &str| scope.get(var_name).to_vec();
-    let receiver_resolver = |expr: &Expression<'_>| receiver_class_names(expr, scope, ctx);
+    let receiver_resolver = |expr: &Expression<'_>| resolved_receiver_class_names(expr, scope, ctx);
     let exit_ctx = narrowing::ExitCtx {
         current_class: ctx.current_class,
         class_loader: ctx.class_loader,
@@ -771,16 +839,19 @@ pub(crate) fn collect_assignment_deps(
             }
         }
         // Nested loops: walk their bodies too.
-        Statement::Foreach(f) => match &f.body {
-            ForeachBody::Statement(s) => {
-                collect_assignment_deps(s, deps);
-            }
-            ForeachBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
+        Statement::Foreach(f) => {
+            collect_foreach_header_deps(f, deps);
+            match &f.body {
+                ForeachBody::Statement(s) => {
                     collect_assignment_deps(s, deps);
                 }
+                ForeachBody::ColonDelimited(body) => {
+                    for s in body.statements.iter() {
+                        collect_assignment_deps(s, deps);
+                    }
+                }
             }
-        },
+        }
         Statement::While(w) => match &w.body {
             WhileBody::Statement(s) => {
                 collect_assignment_deps(s, deps);
@@ -813,16 +884,151 @@ pub(crate) fn collect_expr_assignment_deps(
     expr: &Expression<'_>,
     deps: &mut HashMap<String, HashSet<String>>,
 ) {
+    let Expression::Assignment(assign) = expr else {
+        return;
+    };
+
+    let mut rhs_vars = HashSet::new();
+    collect_rhs_variables(assign.rhs, &mut rhs_vars);
+
+    // A write through an index or a property (`$a[$k] = …`, `$a->p = …`)
+    // keeps everything the target already held, so the new type of the
+    // base variable depends on its own previous type as well as on the
+    // RHS.  Recording that self-edge is what makes a loop that both
+    // reads and writes the same array iterate until the element type
+    // settles, instead of stopping after the first walk.
+    let mut targets = HashSet::new();
+    collect_assignment_target_vars(assign.lhs, &mut targets);
+    let indexed_write = !matches!(
+        assign.lhs,
+        Expression::Variable(mago_syntax::cst::variable::Variable::Direct(_))
+            | Expression::Array(_)
+            | Expression::List(_)
+    );
+    if indexed_write {
+        // The index/receiver sub-expressions are reads, not writes.
+        collect_lhs_index_variables(assign.lhs, &mut rhs_vars);
+    }
+
+    for target in targets {
+        let entry = deps.entry(target.clone()).or_default();
+        entry.extend(rhs_vars.iter().cloned());
+        if indexed_write {
+            entry.insert(target);
+        }
+    }
+}
+
+/// Collect the variables an assignment target writes to.
+///
+/// A direct variable writes itself, a destructuring pattern writes each
+/// variable it binds, and an indexed or property write is attributed to
+/// the variable at the base of the chain (`$a[$k][0] = …` writes `$a`).
+pub(crate) fn collect_assignment_target_vars(target: &Expression<'_>, out: &mut HashSet<String>) {
+    use mago_syntax::cst::access::Access;
     use mago_syntax::cst::variable::Variable;
 
-    if let Expression::Assignment(assign) = expr
-        && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-    {
-        let lhs_name = bytes_to_str(dv.name).to_string();
-        let mut rhs_vars = HashSet::new();
-        collect_rhs_variables(assign.rhs, &mut rhs_vars);
-        deps.entry(lhs_name).or_default().extend(rhs_vars);
+    match target {
+        Expression::Variable(Variable::Direct(dv)) => {
+            out.insert(bytes_to_str(dv.name).to_string());
+        }
+        Expression::Array(_) | Expression::List(_) => {
+            for value_expr in destructuring_element_exprs(target) {
+                collect_assignment_target_vars(value_expr, out);
+            }
+        }
+        Expression::ArrayAccess(aa) => collect_assignment_target_vars(aa.array, out),
+        Expression::ArrayAppend(aa) => collect_assignment_target_vars(aa.array, out),
+        Expression::Access(access) => match access {
+            Access::Property(pa) => collect_assignment_target_vars(pa.object, out),
+            Access::NullSafeProperty(pa) => collect_assignment_target_vars(pa.object, out),
+            _ => {}
+        },
+        Expression::Parenthesized(p) => collect_assignment_target_vars(p.expression, out),
+        _ => {}
     }
+}
+
+/// Collect the variables read by the index expressions of a write target.
+///
+/// `$a[$k] = …` reads `$k` to decide where to write, so `$k` belongs in
+/// the dependency set even though `$a` is what gets assigned.
+fn collect_lhs_index_variables(target: &Expression<'_>, vars: &mut HashSet<String>) {
+    use mago_syntax::cst::access::Access;
+
+    match target {
+        Expression::ArrayAccess(aa) => {
+            collect_rhs_variables(aa.index, vars);
+            collect_lhs_index_variables(aa.array, vars);
+        }
+        Expression::ArrayAppend(aa) => collect_lhs_index_variables(aa.array, vars),
+        Expression::Access(access) => match access {
+            Access::Property(pa) => collect_lhs_index_variables(pa.object, vars),
+            Access::NullSafeProperty(pa) => collect_lhs_index_variables(pa.object, vars),
+            _ => {}
+        },
+        Expression::Parenthesized(p) => collect_lhs_index_variables(p.expression, vars),
+        _ => {}
+    }
+}
+
+/// The value expressions of a destructuring pattern's elements.
+fn destructuring_element_exprs<'b>(pattern: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    let elements: Vec<&ArrayElement<'b>> = match pattern {
+        Expression::Array(arr) => arr.elements.iter().collect(),
+        Expression::List(list) => list.elements.iter().collect(),
+        _ => return Vec::new(),
+    };
+    elements
+        .into_iter()
+        .filter_map(|elem| match elem {
+            ArrayElement::KeyValue(kv) => Some(kv.value),
+            ArrayElement::Value(val) => Some(val.value),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Record the dependency a `foreach` header creates: every variable the
+/// target binds takes its type from the iterated expression.
+///
+/// Without this edge a loop that destructures an array it also writes to
+/// looks dependency-free, so the fixed-point walk stops before the
+/// element type it wrote has been read back.
+fn collect_foreach_header_deps(foreach: &Foreach<'_>, deps: &mut HashMap<String, HashSet<String>>) {
+    let mut iter_vars = HashSet::new();
+    collect_rhs_variables(foreach.expression, &mut iter_vars);
+    if iter_vars.is_empty() {
+        return;
+    }
+
+    let mut bound = HashSet::new();
+    match &foreach.target {
+        ForeachTarget::Value(val) => collect_foreach_bound_vars(val.value, &mut bound),
+        ForeachTarget::KeyValue(kv) => {
+            collect_foreach_bound_vars(kv.key, &mut bound);
+            collect_foreach_bound_vars(kv.value, &mut bound);
+        }
+    }
+
+    for name in bound {
+        deps.entry(name)
+            .or_default()
+            .extend(iter_vars.iter().cloned());
+    }
+}
+
+/// Collect the variables a `foreach` target binds, unwrapping `&$v` and
+/// recursing through destructuring patterns.
+fn collect_foreach_bound_vars(target: &Expression<'_>, out: &mut HashSet<String>) {
+    let target = if let Expression::UnaryPrefix(up) = target
+        && matches!(up.operator, UnaryPrefixOperator::Reference(_))
+    {
+        up.operand
+    } else {
+        target
+    };
+    collect_assignment_target_vars(target, out);
 }
 
 /// Collect all variable references from an expression (cheap, no type resolution).
@@ -1168,6 +1374,16 @@ pub(crate) fn process_foreach<'b>(
         }
     }
 
+    // The iterable expression is an expression position like any other,
+    // so the narrowing its own short-circuit chains, ternary branches and
+    // `match (true)` arms prove has to reach the code inside them.
+    // `foreach ($t instanceof UnionType ? $t->getTypes() : [$t] as $inner)`
+    // reads `getTypes()` off the narrowed subject, not the declared one.
+    record_short_circuit_snapshots(foreach.expression, scope, ctx);
+    if is_diagnostic_scope_active() {
+        record_match_ternary_snapshots(foreach.expression, scope, ctx);
+    }
+
     // Resolve the iterable expression's type.
     let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);
 
@@ -1225,7 +1441,7 @@ pub(crate) fn process_foreach<'b>(
         && let Some(doc_start) = trimmed.rfind("/**")
     {
         let doc_text = &trimmed[doc_start..trimmed.len()];
-        let var_annotations = parse_all_var_docblock_annotations(doc_text);
+        let var_annotations = parse_var_docblock_pairs(doc_text);
         for (doc_var, php_type) in &var_annotations {
             if let Some(ref vn) = value_var_name
                 && doc_var == vn
@@ -1263,6 +1479,11 @@ pub(crate) fn process_foreach<'b>(
         scope.set(vn, vec![ResolvedType::from_type_string(PhpType::mixed())]);
     }
 
+    // What one entry looks like before the body has said anything about
+    // it, which is the baseline the loop's own guards narrow.
+    let entry_value_types: Option<Vec<ResolvedType>> =
+        value_var_name.as_ref().map(|vn| scope.get(vn).to_vec());
+
     // ── Assignment-depth-bounded loop iteration ─────────────────
     //
     // Walk the body once (always needed).  Then check whether any
@@ -1277,6 +1498,29 @@ pub(crate) fn process_foreach<'b>(
     };
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+
+    // A `foreach` over an array the engine watched being built and knows
+    // is still empty runs zero times, so it cannot change any type.  The
+    // body is still walked so that a cursor or diagnostic inside it is
+    // answered, but its writes are dropped afterwards.
+    //
+    // Keeping them would poison an enclosing loop's fixed point: the
+    // first walk of an outer loop reaches an inner `foreach` over the
+    // accumulator before anything has been written to it, and the
+    // unresolved element types that walk produces would be unioned into
+    // the accumulator for good, so the element type never converges.
+    if iter_type
+        .as_ref()
+        .is_some_and(|it| it.is_empty_array_shape())
+    {
+        let restored = pre_loop_scope.clone();
+        push_exit_frame();
+        walk_body_forward(body_stmts.iter().copied(), scope, ctx);
+        pop_exit_frame();
+        *scope = restored;
+        leave_loop(loop_depth);
+        return;
+    }
 
     push_exit_frame();
     walk_loop_body_to_fixed_point(
@@ -1349,13 +1593,178 @@ pub(crate) fn process_foreach<'b>(
     // fall-through alone does not describe it.
     if !cursor_in_body {
         merge_exit_edges(scope, &exits.breaks);
+        let _ = narrow_iterated_collection(
+            foreach,
+            &body_stmts,
+            iter_type.as_ref(),
+            entry_value_types.as_deref(),
+            scope,
+            ctx,
+        );
     }
 
     leave_loop(loop_depth);
 }
 
+/// Narrow the collection a loop iterated to what the loop proved about
+/// every one of its entries.
+///
+/// `foreach ($conds as $cond) { if (!$cond instanceof C) { break 2; } … }`
+/// only falls out of its own bottom once every entry has passed the guard,
+/// so the code after it may treat the whole collection as `C[]` — which is
+/// what a second loop over the same expression, the idiom this exists for,
+/// then reads its own variable from.  An empty collection makes the claim
+/// vacuously true, so whether the body ran does not matter.
+///
+/// A `break` or `continue` naming only this loop proves nothing: the first
+/// jumps straight to the code being narrowed, and the second skips the
+/// entry rather than the rest of the program.
+fn narrow_iterated_collection<'b>(
+    foreach: &'b Foreach<'b>,
+    body_stmts: &[&'b Statement<'b>],
+    iter_type: Option<&PhpType>,
+    entry_value_types: Option<&[ResolvedType]>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<()> {
+    // A braced body arrives as a single `Block` statement, and the guards
+    // are its children rather than the body's.  Checked before anything is
+    // allocated: a loop that does not open with a guard is the common case
+    // and there is nothing here for it.
+    let leading = match body_stmts {
+        [Statement::Block(block)] => block.statements.first(),
+        _ => body_stmts.first().copied(),
+    };
+    guard_past_loop_condition(leading?)?;
+
+    let entry_value_types = entry_value_types.filter(|types| !types.is_empty())?;
+    let iter_type = iter_type?;
+    let value_expr = match &foreach.target {
+        ForeachTarget::Value(val) => val.value,
+        ForeachTarget::KeyValue(kv) => kv.value,
+    };
+    // A by-reference loop writes through the entries it visits, so what a
+    // guard proved about one need not still hold afterwards.
+    if let Expression::UnaryPrefix(up) = value_expr
+        && matches!(up.operator, UnaryPrefixOperator::Reference(_))
+    {
+        return None;
+    }
+    let Expression::Variable(Variable::Direct(dv)) = value_expr else {
+        return None;
+    };
+    let var_name = bytes_to_str(dv.name).to_string();
+    let collection_key = narrowing::expr_to_subject_key(foreach.expression)?;
+
+    // Replay the leading guards against the entry binding alone: what
+    // survives all of them is what every entry had to be to get here.
+    let mut guard_scope = ScopeState::new();
+    guard_scope.set(&var_name, entry_value_types.to_vec());
+    let unwrapped: Vec<&Statement<'_>> = match body_stmts {
+        [Statement::Block(block)] => block.statements.iter().collect(),
+        _ => body_stmts.to_vec(),
+    };
+    for stmt in &unwrapped {
+        let Some(condition) = guard_past_loop_condition(stmt) else {
+            break;
+        };
+        apply_condition_narrowing_inverse(condition, &mut guard_scope, ctx);
+        if guard_scope.unreachable {
+            return None;
+        }
+    }
+
+    let narrowed = guard_scope.get(&var_name);
+    if narrowed.is_empty() || !narrowing_changed_types(entry_value_types, narrowed) {
+        return None;
+    }
+    let element = ResolvedType::types_joined(narrowed);
+    let collection_type =
+        crate::type_engine::variable::array_func_rules::with_element_type(iter_type, element)?;
+    // Keep whatever class backs the container itself (a `Collection` object
+    // rather than a plain array); only its element type changed.
+    let mut entry = scope
+        .get(&collection_key)
+        .first()
+        .cloned()
+        .unwrap_or_else(|| ResolvedType::from_type_string(collection_type.clone()));
+    entry.type_string = collection_type;
+    scope.set(&collection_key, vec![entry]);
+    Some(())
+}
+
+/// The condition of a leading `if (…) { <jump past the loop> }` guard.
+///
+/// An `elseif` or `else` means the `if` is a branch rather than a guard, so
+/// falling out of its bottom proves nothing about the condition.
+fn guard_past_loop_condition<'b>(stmt: &'b Statement<'b>) -> Option<&'b Expression<'b>> {
+    let Statement::If(if_stmt) = stmt else {
+        return None;
+    };
+    let IfBody::Statement(body) = &if_stmt.body else {
+        return None;
+    };
+    if !body.else_if_clauses.is_empty() || body.else_clause.is_some() {
+        return None;
+    }
+    // A condition that assigns changes the entry the guard then talks
+    // about, so what it proves is not a claim about what the collection
+    // holds.
+    let mut writes = HashMap::new();
+    collect_expr_assignment_deps(if_stmt.condition, &mut writes);
+    if !writes.is_empty() {
+        return None;
+    }
+    statement_leaves_loop(body.statement).then_some(if_stmt.condition)
+}
+
+/// Whether a statement jumps somewhere that the code right after the
+/// enclosing loop cannot be reached from.
+///
+/// Any `break`/`continue` level above 1 qualifies: it leaves the loop plus
+/// at least one structure the code after the loop is itself inside.
+fn statement_leaves_loop(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::Return(_) => true,
+        Statement::Break(brk) => exit_level(brk.level).is_some_and(|level| level >= 2),
+        Statement::Continue(cont) => exit_level(cont.level).is_some_and(|level| level >= 2),
+        Statement::Expression(es) => matches!(
+            es.expression,
+            Expression::Throw(_)
+                | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
+                | Expression::Construct(mago_syntax::cst::Construct::Die(_))
+        ),
+        Statement::Block(block) => block.statements.iter().any(statement_leaves_loop),
+        _ => false,
+    }
+}
+
 /// Resolve the iterable expression's type for a foreach.
+///
+/// Every answer is run through `resolve_type_alias_typed` so a
+/// `@phpstan-type` / `@phpstan-import-type` alias is expanded to the array
+/// type it names before the caller reads a key or element type off it.
+/// The expansion lives here rather than in each branch of
+/// [`resolve_foreach_iterable_type_raw`] so a new branch cannot forget it.
 pub(crate) fn resolve_foreach_iterable_type<'b>(
+    foreach: &'b Foreach<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let raw = resolve_foreach_iterable_type_raw(foreach, scope, ctx)?;
+    Some(
+        crate::type_engine::type_resolution::resolve_type_alias_typed(
+            &raw,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )
+        .unwrap_or(raw),
+    )
+}
+
+/// The unexpanded iterable type, tried source by source.
+fn resolve_foreach_iterable_type_raw<'b>(
     foreach: &'b Foreach<'b>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -1372,17 +1781,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
     // Fall back to resolve_rhs_expression for complex expressions.
     let resolved = resolve_rhs_with_scope(foreach.expression, scope, ctx);
     if !resolved.is_empty() {
-        let joined = ResolvedType::types_joined(&resolved);
-        // Expand type aliases (e.g. `@phpstan-type UserList array<int, User>`)
-        // so that `extract_value_type` can see the underlying generic type.
-        let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
-            &joined,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        )
-        .unwrap_or(joined);
-        return Some(expanded);
+        return Some(ResolvedType::types_joined(&resolved));
     }
 
     // Fallback: for simple `$variable` iterators, check for an inline
@@ -1399,15 +1798,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
         )
         .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
         {
-            // Expand type aliases on the docblock result too.
-            let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
-                &docblock_type,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-            .unwrap_or(docblock_type);
-            return Some(expanded);
+            return Some(docblock_type);
         }
     }
 
@@ -1444,14 +1835,13 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
     }
 
     // Build a ResolutionCtx from the forward walker's context.
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = move |var_name: &str| -> Vec<ResolvedType> {
-        scope_snapshot
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
-    let var_ctx = ctx.var_ctx_for_with_scope("$__foreach", expr_span.start.offset, &scope_resolver);
+    let scope_resolver = scope.snapshot_resolver();
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        "$__foreach",
+        expr_span.start.offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
     let rctx = var_ctx.as_resolution_ctx();
 
     let resolved = crate::type_engine::resolver::resolve_target_classes(
@@ -1542,20 +1932,7 @@ pub(crate) fn bind_foreach_value<'b>(
             // (or, for tuple-style shapes, the union of positional values).
             let value_php_type = it.iterable_element_type();
             if let Some(vt) = value_php_type {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    &vt,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                if !resolved.is_empty() {
-                    scope.set(
-                        &var_name,
-                        ResolvedType::from_classes_with_hint(resolved, vt.clone()),
-                    );
-                } else {
-                    scope.set(&var_name, vec![ResolvedType::from_type_string(vt.clone())]);
-                }
+                scope.set(&var_name, ctx.resolved_types_for(vt.clone()));
                 return;
             }
 
@@ -1564,23 +1941,7 @@ pub(crate) fn bind_foreach_value<'b>(
             if let Some(element_type) = element_via_class
                 && !is_unsubstituted_template_param(&element_type)
             {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    &element_type,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                if !resolved.is_empty() {
-                    scope.set(
-                        &var_name,
-                        ResolvedType::from_classes_with_hint(resolved, element_type),
-                    );
-                } else {
-                    scope.set(
-                        &var_name,
-                        vec![ResolvedType::from_type_string(element_type)],
-                    );
-                }
+                scope.set(&var_name, ctx.resolved_types_for(element_type));
             }
 
             // Strategy 3: union type fallback — try each member individually.
@@ -1689,6 +2050,12 @@ pub(crate) fn bind_foreach_value<'b>(
                         } else {
                             continue;
                         }
+                    }
+                    // A hole (`foreach ($x as [, $parameter])`) names nothing
+                    // but still consumes the position.
+                    ArrayElement::Missing(_) => {
+                        positional_index += 1;
+                        continue;
                     }
                     _ => continue,
                 };
@@ -1858,22 +2225,16 @@ pub(crate) fn bind_foreach_key<'b>(
                 &iterable_ctx(ctx),
             )
         });
-        let key_type =
-            key_type.unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
-        let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            &key_type,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
-        if !resolved.is_empty() {
-            scope.set(
-                &var_name,
-                ResolvedType::from_classes_with_hint(resolved, key_type),
-            );
-        } else {
-            scope.set(&var_name, vec![ResolvedType::from_type_string(key_type)]);
-        }
+        // Benevolent, because `int|string` here is not something the array
+        // said — it is the whole of PHP's key domain, standing in for a key
+        // type nobody wrote down.  Holding the user to both branches of a
+        // union we invented turns every `substr($key, …)` into a false
+        // positive, so a single branch satisfies it (`is_type_compatible`
+        // implements that half).
+        let key_type = key_type.unwrap_or_else(|| {
+            PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]))
+        });
+        scope.set(&var_name, ctx.resolved_types_for(key_type));
     }
 }
 
@@ -1906,7 +2267,7 @@ pub(crate) fn process_while<'b>(
     // narrowing below so a condition that assigns and checks in one
     // expression (`while (($line = fgets($h)) !== false)`) finds the
     // variable in scope and can strip the sentinel from it.
-    process_condition_assignment(while_stmt.condition, scope, ctx);
+    process_nested_assignments(while_stmt.condition, scope, ctx);
 
     // Pass-by-reference in condition: `while (preg_match(..., $matches))`
     seed_pass_by_ref_in_condition(while_stmt.condition, scope, ctx);
@@ -1965,7 +2326,7 @@ pub(crate) fn process_while<'b>(
             if point != LoopSeedPoint::Entry {
                 return;
             }
-            process_condition_assignment(while_stmt.condition, next_scope, ctx);
+            process_nested_assignments(while_stmt.condition, next_scope, ctx);
             seed_pass_by_ref_in_condition(while_stmt.condition, next_scope, ctx);
             apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
         },
@@ -2032,7 +2393,7 @@ pub(crate) fn process_for<'b>(
     // Process condition assignments (e.g. `for (; $x = nextItem(); )`)
     // and pass-by-ref in conditions (e.g. `for (; preg_match(..., $m); )`).
     for cond_expr in for_stmt.conditions.iter() {
-        process_condition_assignment(cond_expr, scope, ctx);
+        process_nested_assignments(cond_expr, scope, ctx);
         seed_pass_by_ref_in_condition(cond_expr, scope, ctx);
     }
 
@@ -2122,7 +2483,7 @@ pub(crate) fn process_for<'b>(
             }
             LoopSeedPoint::Entry => {
                 for cond_expr in for_stmt.conditions.iter() {
-                    process_condition_assignment(cond_expr, next_scope, ctx);
+                    process_nested_assignments(cond_expr, next_scope, ctx);
                     seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
                     apply_condition_narrowing(cond_expr, next_scope, ctx);
                 }
@@ -2231,12 +2592,27 @@ pub(crate) fn process_do_while<'b>(
             ctx,
             discovery_ctx: ctx,
         },
-        |next_scope, point| {
-            if point != LoopSeedPoint::Entry {
-                return;
+        |next_scope, point| match point {
+            // The condition is tested after the body and the loop only
+            // re-enters when it held, so every iteration past the first
+            // starts from a body-exit state the condition has narrowed:
+            // `do { … $c = $c->getParent(); } while ($c !== null);` reads
+            // a non-null `$c` at the top of iteration two onwards. This
+            // narrows the body-exit state alone, before it is merged with
+            // the pre-loop state the first iteration ran on.
+            LoopSeedPoint::AfterBody => {
+                apply_condition_narrowing(dw.condition, next_scope, ctx);
             }
-            process_condition_assignment(dw.condition, next_scope, ctx);
-            seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
+            LoopSeedPoint::Entry => {
+                process_nested_assignments(dw.condition, next_scope, ctx);
+                seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
+                // The assignment above re-runs `$c = $c->getParent()` on
+                // the merged scope, which puts the declared `?Category`
+                // back over the narrowing `AfterBody` applied. The loop
+                // only re-enters when the condition held, so that
+                // narrowing has to go back on top of it.
+                apply_condition_narrowing(dw.condition, next_scope, ctx);
+            }
         },
     );
     let exits = pop_exit_frame();
@@ -2263,6 +2639,33 @@ pub(crate) fn process_do_while<'b>(
     leave_loop(loop_depth);
 }
 
+/// Bind the exception variable a `catch` clause names into `scope`.
+///
+/// A clause that names none (`catch (LogicException)`) binds nothing, and
+/// so does one whose hint resolves to no class: leaving the variable
+/// unset beats recording it as untyped, which would mask whatever the
+/// scope already knew about that name.
+fn bind_catch_variable(
+    catch: &TryCatchClause<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let Some(ref var) = catch.variable else {
+        return;
+    };
+    let parsed_hint = extract_hint_type(&catch.hint);
+    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &parsed_hint,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let exception_types = ResolvedType::from_classes_with_hint(resolved, parsed_hint);
+    if !exception_types.is_empty() {
+        scope.set(bytes_to_str(var.name), exception_types);
+    }
+}
+
 /// Process a `try-catch-finally` statement.
 pub(crate) fn process_try<'b>(
     try_stmt: &'b Try<'b>,
@@ -2285,27 +2688,11 @@ pub(crate) fn process_try<'b>(
         if ctx.cursor_offset >= catch_span.start.offset
             && ctx.cursor_offset <= catch_span.end.offset
         {
-            // Bind the caught exception variable.
-            if let Some(ref var) = catch.variable {
-                let var_name = bytes_to_str(var.name).to_string();
-                let parsed_hint = extract_hint_type(&catch.hint);
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    &parsed_hint,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                let exception_types = ResolvedType::from_classes_with_hint(resolved, parsed_hint);
-                // Merge pre-try scope (since the exception could have
-                // been thrown at any point in the try body) with the
-                // catch variable.
-                *scope = pre_try_scope.clone();
-                if !exception_types.is_empty() {
-                    scope.set(&var_name, exception_types);
-                }
-            } else {
-                *scope = pre_try_scope.clone();
-            }
+            // Start from the pre-try scope, since the exception could
+            // have been thrown at any point in the try body, and bind the
+            // caught exception variable on top of it.
+            *scope = pre_try_scope.clone();
+            bind_catch_variable(catch, scope, ctx);
             walk_body_forward(catch.block.statements.iter(), scope, ctx);
             return;
         }
@@ -2331,20 +2718,7 @@ pub(crate) fn process_try<'b>(
     let mut all_scopes = vec![try_scope];
     for catch in try_stmt.catch_clauses.iter() {
         let mut catch_scope = pre_try_scope.clone();
-        if let Some(ref var) = catch.variable {
-            let var_name = bytes_to_str(var.name).to_string();
-            let parsed_hint = extract_hint_type(&catch.hint);
-            let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &parsed_hint,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            let exception_types = ResolvedType::from_classes_with_hint(resolved, parsed_hint);
-            if !exception_types.is_empty() {
-                catch_scope.set(&var_name, exception_types);
-            }
-        }
+        bind_catch_variable(catch, &mut catch_scope, ctx);
         walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
         // A catch that rethrows or returns never reaches the statement
         // after the `try`, so the state it leaves must not be merged in:

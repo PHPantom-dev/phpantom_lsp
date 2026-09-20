@@ -96,11 +96,9 @@ impl Backend {
 
     /// The source every offset in a file's symbol map indexes: a Blade
     /// template's virtual PHP, and any other file's own text.
-    fn effective_content(&self, uri: &str) -> Option<String> {
-        if let Some(virtual_php) = self.blade_virtual_content.read().get(uri) {
-            return Some(virtual_php.clone());
-        }
-        self.get_file_content(uri)
+    fn effective_content(&self, uri: &str) -> Option<Arc<String>> {
+        self.blade_virtual_php_arc(uri)
+            .or_else(|| self.get_file_content_arc(uri))
     }
 
     /// Resolve the receiver of every candidate site and keep the spans of
@@ -151,6 +149,7 @@ impl Backend {
                     branch_aware: false,
                     match_arm_narrowing: HashMap::new(),
                     scope_var_resolver: None,
+                    scope_proofs: None,
                 };
                 let Some(ty) =
                     crate::type_engine::variable::foreach_resolution::resolve_expression_type(

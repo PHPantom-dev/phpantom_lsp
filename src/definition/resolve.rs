@@ -299,7 +299,7 @@ impl Backend {
                 };
                 let mctx = MemberDefinitionCtx {
                     member_name,
-                    subject: subject_text.as_str(content),
+                    subject: subject_text.as_str(self.symbol_map_source(uri, content)?),
                     access_kind,
                     access_hint,
                 };
@@ -349,24 +349,13 @@ impl Backend {
             }
 
             SymbolKind::ClassDeclaration { name } => {
-                // If this class extends a parent, jump to the parent
-                // class declaration.
-                let ctx = self.file_context(uri);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-                if let Some(cls) = current_class
-                    && let Some(ref parent_name) = cls.parent_class
-                    && let Some(loc) = self.resolve_class_reference(
-                        uri,
-                        content,
-                        parent_name,
-                        parent_name.contains('\\'),
-                        cursor_offset,
-                    )
-                {
-                    return Some(vec![loc]);
-                }
-
+                // Answer with the declaration's own location even when the
+                // class extends a parent: editors read "definition == cursor
+                // position" as the cue to show usages instead (PHPStorm's
+                // CMD+B, VS Code's alternative-definition command).  Jumping
+                // to the parent here would make usages unreachable for any
+                // class with an `extends` clause; the `extends` clause itself
+                // is the place that navigates to the parent.
                 self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 

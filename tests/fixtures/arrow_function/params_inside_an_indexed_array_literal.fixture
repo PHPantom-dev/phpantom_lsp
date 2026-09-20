@@ -1,0 +1,19 @@
+// test: an arrow function in an immediately indexed array literal keeps its parameters
+// feature: completion
+// expect: isNull(
+---
+<?php
+
+class TypeInfo
+{
+    public function isNull(): bool { return false; }
+    public function toBoolean(): bool { return false; }
+}
+
+function pick(string $name): void
+{
+    $check = [
+        'isNull' => static fn (TypeInfo $type) => $type-><>,
+        'isTruthy' => static fn (TypeInfo $type) => $type->toBoolean(),
+    ][$name];
+}

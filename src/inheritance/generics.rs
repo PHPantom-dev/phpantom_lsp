@@ -211,6 +211,28 @@ pub(crate) fn property_references_params(
         .is_some_and(|h| h.references_any_template_param(template_params))
 }
 
+/// Fill in every template parameter of `source` that `subs` leaves
+/// unbound, using the parameter's declared bound (`@template T of object`
+/// → `object`) or `mixed` where it declares none.
+///
+/// A class that extends, uses, or implements a generic without saying what
+/// it binds the parameters to would otherwise leak the raw template names
+/// into the members it inherits.
+pub(crate) fn fill_template_bounds(source: &ClassInfo, subs: &mut HashMap<String, PhpType>) {
+    for param_name in &source.template_params {
+        let key = param_name.to_string();
+        if subs.contains_key(key.as_str()) {
+            continue;
+        }
+        let bound = source
+            .template_param_bounds
+            .get(param_name)
+            .cloned()
+            .unwrap_or_else(PhpType::mixed);
+        subs.insert(key, bound);
+    }
+}
+
 /// Build a substitution map for a parent class based on the child's
 /// `@extends` generics and the parent's `@template` parameters.
 ///

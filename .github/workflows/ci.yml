@@ -135,9 +135,22 @@ jobs:
             git push origin "$commit:refs/heads/gh-pages"
           fi
       - name: Run benchmarks
-        run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
+        shell: bash
+        run: |
+          # History lives on gh-pages, so Criterion's own baseline is
+          # unused -- and the restored target cache leaves a partial one
+          # behind that it then errors on for every benchmark.
+          rm -rf target/criterion
+          cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
-        run: python3 benches/format_bench_output.py < raw_output.txt > output.json
+        shell: bash
+        run: |
+          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
+            echo "::group::raw_output.txt"
+            cat raw_output.txt
+            echo "::endgroup::"
+            exit 1
+          }
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -178,10 +191,20 @@ jobs:
           fi
       - name: Run benchmarks
         if: steps.check-gh-pages.outputs.exists == 'true'
-        run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
+        shell: bash
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'
-        run: python3 benches/format_bench_output.py < raw_output.txt > output.json
+        shell: bash
+        run: |
+          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
+            echo "::group::raw_output.txt"
+            cat raw_output.txt
+            echo "::endgroup::"
+            exit 1
+          }
       - name: Compare against baseline
         if: steps.check-gh-pages.outputs.exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1
@@ -226,6 +249,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Measure memory usage
+        shell: bash
         run: |
           # THP mode affects resident memory (2 MiB backing pages in
           # `always` mode); log it so the numbers are interpretable.
@@ -277,6 +301,7 @@ jobs:
           fi
       - name: Measure memory usage
         if: steps.check-gh-pages.outputs.exists == 'true'
+        shell: bash
         run: |
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
           python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json

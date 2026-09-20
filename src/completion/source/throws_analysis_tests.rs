@@ -822,6 +822,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         })
         .collect();
 

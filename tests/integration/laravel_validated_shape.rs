@@ -5,7 +5,7 @@
 //! shape rather than plain `array`.  These tests drive it through hover and
 //! completion, the two surfaces a user actually sees it on.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{FORM_REQUEST_STUB, create_psr4_workspace, hover_text_at, split_cursor};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -46,15 +46,6 @@ const UPLOADED_FILE_PHP: &str = "\
 namespace Illuminate\\Http;
 class UploadedFile {
     public function store($path): string { return ''; }
-}
-";
-
-const FORM_REQUEST_PHP: &str = "\
-<?php
-namespace Illuminate\\Foundation\\Http;
-use Illuminate\\Http\\Request;
-class FormRequest extends Request {
-    public function rules(): array { return []; }
 }
 ";
 
@@ -209,7 +200,7 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         ("vendor/illuminate/Http/UploadedFile.php", UPLOADED_FILE_PHP),
         (
             "vendor/illuminate/Foundation/Http/FormRequest.php",
-            FORM_REQUEST_PHP,
+            FORM_REQUEST_STUB,
         ),
         (
             "vendor/illuminate/Support/ValidatedInput.php",
@@ -251,23 +242,9 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
 async fn hover_text(content: &str) -> String {
     let (backend, _dir, uri, position) = open_at_cursor(content).await;
 
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    hover_text_at(&backend, &uri, position.line, position.character)
         .await
-        .unwrap();
-
-    match hover.map(|h| h.contents) {
-        Some(HoverContents::Markup(markup)) => markup.value,
-        Some(HoverContents::Scalar(MarkedString::String(s))) => s,
-        Some(HoverContents::Scalar(MarkedString::LanguageString(ls))) => ls.value,
-        _ => String::new(),
-    }
+        .unwrap_or_default()
 }
 
 /// Open `content` (cursor marked `§`) and return the completion labels there.
@@ -298,11 +275,7 @@ async fn complete_labels(content: &str) -> Vec<String> {
 async fn open_at_cursor(
     content: &str,
 ) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Position) {
-    let offset = content.find('§').expect("test source needs a § cursor");
-    let stripped = content.replace('§', "");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
+    let (stripped, position) = split_cursor(content);
 
     let mut files = base_files();
     files.push(("src/PostController.php", stripped.as_str()));
@@ -320,7 +293,7 @@ async fn open_at_cursor(
         })
         .await;
 
-    (backend, dir, uri, Position { line, character })
+    (backend, dir, uri, position)
 }
 
 /// Wrap a controller body in the namespace and imports every test needs.

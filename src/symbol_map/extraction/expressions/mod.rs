@@ -1,6 +1,5 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
-use mago_syntax::cst::*;
 
 use super::*;
 

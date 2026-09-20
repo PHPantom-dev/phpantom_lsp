@@ -57,14 +57,16 @@
 //!    resolved classes, we're done — no diagnostic, no re-resolution.
 //!
 //! 2. **Narrowing fallback** (uncached, rare): when the member is
-//!    NOT found on the coarsely-resolved classes AND the subject is
-//!    a bare variable, re-resolve with the exact cursor position.
-//!    If the re-resolution finds the member (because ternary/`&&`
-//!    narrowing refined the type), suppress the diagnostic.
+//!    NOT found on the coarsely-resolved classes, re-resolve the
+//!    subject with the exact cursor position.  If the re-resolution
+//!    finds the member (because ternary/`&&` narrowing refined the
+//!    type), suppress the diagnostic.
 //!
 //! This makes the common case (member exists) O(1) per unique
 //! subject+scope, while preserving correctness for the rare case
-//! where expression-level narrowing matters.
+//! where expression-level narrowing matters.  The re-resolution runs
+//! only where a diagnostic would otherwise be reported, so a file
+//! with nothing wrong in it never pays for it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,6 +88,7 @@ use super::helpers::{
     FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
     find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
+use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::subject_cache::SubjectCacheKey;
 
 /// Diagnostic code used for unknown-member diagnostics so that code
@@ -175,6 +178,9 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         let file_use_map = &ctx.file.use_map;
         let file_namespace = &ctx.file.namespace;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -265,7 +271,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
             let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────
@@ -304,6 +310,15 @@ impl Backend {
 
             let current_class = find_innermost_enclosing_class(local_classes, span.start);
 
+            // `$this`, `self`, and `static` name whatever class the code
+            // is bound to, which is normally the one it sits in — but a
+            // closure can be bound elsewhere, and then the class it binds
+            // to is the scope PHP checks visibility against.  Only the
+            // bare keywords qualify: in a chain like `$this->rel()->x`
+            // the receiver is whatever the chain returned, not the
+            // binding.
+            let subject_binds_scope = matches!(subject_text, "$this" | "self" | "static");
+
             // ── Suppress inside traits for self-referencing subjects ────
             // Traits are incomplete: they expect host classes to provide
             // members accessed via $this/self/static/parent.  Flagging
@@ -323,14 +338,12 @@ impl Backend {
                 continue;
             }
 
-            // Whether this subject is a bare variable that could
-            // benefit from expression-level narrowing re-resolution.
-            // $this and $this->prop chains are excluded because their
-            // type is already fully determined by block-level
-            // narrowing (if/else) and assert narrowing.
-            let is_narrowable_variable = subject_text.starts_with('$')
-                && subject_text != "$this"
-                && !subject_text.starts_with("$this->");
+            // Whether this subject could benefit from expression-level
+            // narrowing re-resolution.  Every subject rooted at a
+            // variable can: `$this->pair[0] instanceof Sub && !$this->pair[0]->flag()`
+            // refines the second occurrence with no block to key it on,
+            // and so does `$this instanceof Sub && $this->only()`.
+            let is_narrowable_subject = subject_text.starts_with('$');
 
             // ── Look up or populate the subject cache ───────────────────
             let cache_key = SubjectCacheKey::build(
@@ -444,12 +457,12 @@ impl Backend {
                     ));
                 }
 
-                SubjectOutcome::Untyped => {
+                SubjectOutcome::Mixed | SubjectOutcome::Untyped => {
                     // When the opt-in `unresolved-member-access` diagnostic
-                    // is enabled, report every member access where the
-                    // subject type could not be resolved — regardless of
-                    // whether the subject is a bare variable, a chain, an
-                    // array access, or a function call result.
+                    // is enabled, report every member access the subject
+                    // type cannot answer for — regardless of whether the
+                    // subject is a bare variable, a chain, an array access,
+                    // or a function call result.
                     if self.config().diagnostics.unresolved_member_access_enabled() {
                         let range = match self.offset_range_to_lsp_range(
                             uri,
@@ -462,10 +475,22 @@ impl Backend {
                         };
                         let subject_display = subject_text.trim();
                         let kind_label = if is_method_call { "method" } else { "property" };
-                        let message = format!(
-                            "Cannot verify {} '{}' — type of '{}' could not be resolved",
-                            kind_label, member_name, subject_display,
-                        );
+                        // A `mixed` subject is not a resolution failure:
+                        // the type engine answered, and the answer was the
+                        // type that admits every value. Saying so points at
+                        // the annotation that is missing from the codebase
+                        // instead of implying a gap in the type engine.
+                        let message = if matches!(outcome, SubjectOutcome::Mixed) {
+                            format!(
+                                "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                                kind_label, member_name, subject_display,
+                            )
+                        } else {
+                            format!(
+                                "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                                kind_label, member_name, subject_display,
+                            )
+                        };
                         out.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::HINT,
@@ -489,6 +514,8 @@ impl Backend {
                         is_static,
                         is_method_call,
                         is_docblock_ref,
+                        current_class,
+                        subject_binds_scope,
                         &class_loader,
                         resolved_cache,
                         content,
@@ -506,7 +533,7 @@ impl Backend {
                     // This is the rare path — most accesses find the
                     // member on the coarse type and never reach here.
                     let (result, diags) =
-                        if result != MemberCheckResult::Ok && is_narrowable_variable {
+                        if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
                                 current_class,
                                 all_classes: local_classes,
@@ -531,6 +558,8 @@ impl Backend {
                                     is_static,
                                     is_method_call,
                                     is_docblock_ref,
+                                    current_class,
+                                    subject_binds_scope,
                                     &class_loader,
                                     resolved_cache,
                                     content,
@@ -566,6 +595,61 @@ impl Backend {
         }
     }
 
+    /// Emit an access diagnostic when the member exists but the calling
+    /// scope may not reach it.  Returns whether one was emitted.
+    ///
+    /// Called wherever the member check has settled what the classes
+    /// hold: at the two points that declare the member found, and once
+    /// more before reporting it missing, since a parent's private member
+    /// is unreachable rather than absent.
+    ///
+    /// A docblock reference is exempt — `@see Foo::$secret` documents a
+    /// member, it does not read one.
+    #[allow(clippy::too_many_arguments)]
+    fn push_inaccessible_member(
+        &self,
+        uri: &str,
+        classes: &[Arc<ClassInfo>],
+        member_name: &str,
+        is_static: bool,
+        is_method_call: bool,
+        is_docblock_ref: bool,
+        current_class: Option<&ClassInfo>,
+        subject_binds_scope: bool,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        content: &str,
+        start: u32,
+        end: u32,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> bool {
+        if is_docblock_ref {
+            return false;
+        }
+        let Some(message) = inaccessible_member_message(
+            classes,
+            member_name,
+            is_static,
+            is_method_call,
+            current_class,
+            subject_binds_scope,
+            class_loader,
+        ) else {
+            return false;
+        };
+        let Some(range) =
+            self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+        else {
+            return false;
+        };
+        diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            INVALID_MEMBER_ACCESS_CODE,
+            message,
+        ));
+        true
+    }
+
     /// Check whether a member exists on the resolved classes and emit
     /// a diagnostic if it does not.
     ///
@@ -581,6 +665,8 @@ impl Backend {
         is_static: bool,
         is_method_call: bool,
         is_docblock_ref: bool,
+        current_class: Option<&ClassInfo>,
+        subject_binds_scope: bool,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: &crate::virtual_members::ResolvedClassCache,
         content: &str,
@@ -616,8 +702,14 @@ impl Backend {
         if base_classes.iter().any(|c| c.name == "stdClass") {
             return (MemberCheckResult::Ok, diagnostics);
         }
+        // This shortcut may be looking at a class that has not been
+        // merged yet, which is enough to confirm a member is reachable
+        // but not enough to judge one that is not: a magic handler or
+        // the declaration's real owner can both live further up.  So it
+        // settles only the public case and lets everything else fall
+        // through to the merged classes below.
         if base_classes.iter().any(|c| {
-            member_exists(c, member_name, is_static, is_method_call)
+            member_is_public(c, member_name, is_static, is_method_call)
                 || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
@@ -658,6 +750,21 @@ impl Backend {
             member_exists(c, member_name, is_static, is_method_call)
                 || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
         }) {
+            self.push_inaccessible_member(
+                uri,
+                &resolved_classes,
+                member_name,
+                is_static,
+                is_method_call,
+                is_docblock_ref,
+                current_class,
+                subject_binds_scope,
+                class_loader,
+                content,
+                start,
+                end,
+                &mut diagnostics,
+            );
             return (MemberCheckResult::Ok, diagnostics);
         }
 
@@ -682,6 +789,29 @@ impl Backend {
                     .any(|c| has_magic_method_for_access(c, is_static, true, report_magic)));
         if has_magic_call {
             return (MemberCheckResult::MagicFallback, diagnostics);
+        }
+
+        // ── A parent's private member is unreachable, not missing ──
+        // The inheritance merge drops it, so without this the access
+        // would be reported as an unknown member and the real reason
+        // — that PHP does not inherit private members — would be lost.
+        if self.push_inaccessible_member(
+            uri,
+            &resolved_classes,
+            member_name,
+            is_static,
+            is_method_call,
+            is_docblock_ref,
+            current_class,
+            subject_binds_scope,
+            class_loader,
+            content,
+            start,
+            end,
+            &mut diagnostics,
+        ) {
+            // The member is real, so its type still carries the chain.
+            return (MemberCheckResult::Ok, diagnostics);
         }
 
         // ── Member is unresolved on ALL branches — emit diagnostic ──
@@ -825,6 +955,56 @@ fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: 
     }
     // Check constants.
     class.constants.iter().any(|c| c.name == member_name)
+}
+
+/// Check whether a member exists on the class *and* is public.
+///
+/// Used by the shortcut that runs before the inheritance merge, where a
+/// non-public member cannot be judged: the class in hand may be missing
+/// the magic handler that would answer for it and the ancestor that
+/// really declares it.  Confirming a public member is safe there, since
+/// nothing further up can make a public member unreachable.
+fn member_is_public(
+    class: &ClassInfo,
+    member_name: &str,
+    is_static: bool,
+    is_method_call: bool,
+) -> bool {
+    use crate::types::Visibility;
+
+    if is_method_call {
+        return class.methods.iter().any(|m| {
+            m.name.eq_ignore_ascii_case(member_name) && m.visibility == Visibility::Public
+        });
+    }
+
+    if is_static {
+        if class
+            .constants
+            .iter()
+            .any(|c| c.name == member_name && c.visibility == Visibility::Public)
+        {
+            return true;
+        }
+        return class.properties.iter().any(|p| {
+            p.is_static
+                && (p.name == member_name || format!("${}", p.name) == member_name)
+                && p.visibility == Visibility::Public
+        });
+    }
+
+    if class
+        .properties
+        .iter()
+        .any(|p| p.name == member_name && p.visibility == Visibility::Public)
+    {
+        return true;
+    }
+
+    // An Eloquent relation reached as a property is synthesized rather
+    // than declared, so it carries no visibility of its own and is
+    // always public in practice.
+    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
 }
 
 /// Check whether a member exists on the fully-resolved class.

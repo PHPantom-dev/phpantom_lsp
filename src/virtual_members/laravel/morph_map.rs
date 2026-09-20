@@ -31,6 +31,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
+use super::helpers::string_literal_at;
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
 
@@ -196,7 +197,7 @@ fn collect_map_argument(
                 let Some(target_fqn) = class_constant_fqn(kv.value, resolved, content) else {
                     continue;
                 };
-                let Some((alias, alias_offset)) = string_literal_content(kv.key, content) else {
+                let Some((alias, alias_offset)) = string_literal_at(kv.key, content) else {
                     continue;
                 };
                 scan.entries.push(MorphMapEntry {
@@ -251,27 +252,13 @@ fn class_constant_fqn(
                 .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()))
         }
         Expression::Literal(Literal::String(_)) => {
-            let (raw, _) = string_literal_content(expr, content)?;
+            let (raw, _) = string_literal_at(expr, content)?;
             let fqn = raw.replace("\\\\", "\\");
             let fqn = fqn.trim_start_matches('\\');
             (!fqn.is_empty()).then(|| fqn.to_string())
         }
         _ => None,
     }
-}
-
-/// The content of a non-interpolated string literal plus the byte offset of
-/// that content (just inside the opening quote).
-fn string_literal_content<'c>(expr: &Expression<'_>, content: &'c str) -> Option<(&'c str, u32)> {
-    let Expression::Literal(Literal::String(s)) = expr else {
-        return None;
-    };
-    let start = s.span.start.offset + 1;
-    let end = s.span.end.offset - 1;
-    if start >= end || end as usize > content.len() {
-        return None;
-    }
-    Some((&content[start as usize..end as usize], start))
 }
 
 /// Where a morph alias was registered, and what it maps to.

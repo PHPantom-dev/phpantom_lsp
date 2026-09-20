@@ -920,6 +920,37 @@ class MyProvider {
         );
     }
 
+    #[test]
+    fn no_false_positive_for_int_mask_members() {
+        // `int-mask<A|B>` / `int-mask-of<A>` name the int constants that make
+        // up a bitmask, not classes.
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = concat!(
+            "<?php\n",
+            "\n",
+            "class Matcher {\n",
+            "    public const UNMATCHED_AS_NULL = 512;\n",
+            "\n",
+            "    /** @var int-mask<PREG_OFFSET_CAPTURE | PREG_PATTERN_ORDER | self::UNMATCHED_AS_NULL> */\n",
+            "    private int $flags = 0;\n",
+            "\n",
+            "    /**\n",
+            "     * @param int-mask<PREG_OFFSET_CAPTURE, PREG_PATTERN_ORDER> \\$flags\n",
+            "     * @return int-mask-of<self::UNMATCHED_AS_NULL>\n",
+            "     */\n",
+            "    public function match(int $flags): int { return $flags; }\n",
+            "}\n",
+        );
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "int-mask members are int constants, not classes, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // ── No-namespace file tests ─────────────────────────────────────────
 
     #[test]
@@ -1265,6 +1296,73 @@ class Widget
         assert!(
             diags.is_empty(),
             "a @see naming suggestion must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// A global function written the explicit way carries a backslash
+    /// between the `!` and the name. The negated-guard scan has to step
+    /// over it, or an early-return guard reads as an un-negated one and
+    /// protects the `return;` instead of everything after it.
+    #[test]
+    fn a_negated_fully_qualified_class_exists_guard_protects_the_code_after_it() {
+        let backend = Backend::new_test();
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Consumer
+{
+    public function run(): void
+    {
+        if (!\class_exists('Vendor\\Optional\\GeneratedConfig')) {
+            return;
+        }
+
+        echo \Vendor\Optional\GeneratedConfig::$configDir;
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "the guarded use must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// The guard's reach is found by scanning for the `}` that closes the
+    /// enclosing scope. A `}` written inside a comment is not that brace,
+    /// so the guard has to keep reaching past it.
+    #[test]
+    fn a_brace_in_a_comment_does_not_cut_a_guard_short() {
+        let backend = Backend::new_test();
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Consumer
+{
+    public function run(): void
+    {
+        if (!\class_exists('Vendor\\Optional\\GeneratedConfig')) {
+            return;
+        }
+
+        // A closing brace } in a line comment.
+        /* and one } in a block comment. */
+        echo \Vendor\Optional\GeneratedConfig::$configDir;
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "the guarded use must not be flagged, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }

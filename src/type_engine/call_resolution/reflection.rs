@@ -7,12 +7,14 @@
 //! depends on the *value* of the name handed to `getProperty()`, which is
 //! not something a type expression can name.
 //!
-//! The two rules here close that gap for the case where the name is a
-//! literal and the reflected class is known. `getProperty('shell')` on a
+//! The rules here close that gap for the case where the name is a literal
+//! and the reflected class is known. `getProperty('shell')` on a
 //! `ReflectionClass<Configuration>` yields
 //! `ReflectionProperty<Configuration, 'shell'>`, carrying the class and
 //! the name on the value so they survive an assignment, and `getValue()`
 //! on that reads the declared type of `Configuration::$shell`.
+//! `new ReflectionProperty(Configuration::class, 'shell')` is the same
+//! value written another way, so it yields the same type.
 //!
 //! `ReflectionProperty` declares no `@template` of its own -- the pair of
 //! type arguments is ours, produced only here and read only here. Every
@@ -21,7 +23,10 @@
 
 use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::type_engine::resolver::ResolutionCtx;
-use crate::types::ResolvedType;
+use crate::types::{ClassInfo, ResolvedType};
+
+/// The class the rules here reflect over, spelled as its FQN carries it.
+const REFLECTION_PROPERTY: &str = "ReflectionProperty";
 
 /// Whether a method name is one the rules below can say anything about.
 ///
@@ -30,6 +35,16 @@ use crate::types::ResolvedType;
 /// costs one string comparison.
 pub(crate) fn is_reflected_property_call(method_name: &str) -> bool {
     matches!(method_name, "getProperty" | "getValue")
+}
+
+/// Whether an instantiated class is one the `new`-expression rule below
+/// can say anything about.
+///
+/// Both `new`-expression resolution paths check this before pulling the
+/// constructor's arguments out of the source, so an unrelated `new` costs
+/// one string comparison.
+pub(crate) fn is_reflected_property_class(class_fqn: &str) -> bool {
+    class_fqn == REFLECTION_PROPERTY
 }
 
 /// The class a reflection value reflects, when it is a resolvable class.
@@ -87,18 +102,69 @@ fn reflect_property(
         .iter()
         .find_map(|rt| reflected_class_arg(&rt.type_string))?;
     let arg = crate::call_args::text_arg_value(arg_texts.first()?);
-    // The name is usually written out, but a variable holding it says
-    // just as much once it resolves to a single literal — which is what
-    // an accessor that forwards its own `string $property` parameter
-    // gives, read from the call site that decided it.
-    let name = match crate::text_scan::unquote_php_string(arg) {
-        Some(name) => name.to_string(),
-        None => literal_string_value(&crate::Backend::resolve_arg_text_to_type(arg, ctx)?)?,
-    };
-    Some(PhpType::generic(
-        "ReflectionProperty",
-        vec![subject.clone(), PhpType::literal_string_value(&name)],
-    ))
+    let name = reflected_property_name(arg, ctx)?;
+    Some(reflected_property(subject.clone(), &name))
+}
+
+/// Resolve `new ReflectionProperty(C::class, 'name')` to
+/// `ReflectionProperty<C, 'name'>` — the value
+/// `ReflectionClass::getProperty('name')` builds, written the other way.
+///
+/// The binding cannot come from the constructor's own docblock:
+/// `class-string|object $class` would name the class through the ordinary
+/// `@template` machinery, but `$property` is a string literal, and a
+/// literal only binds to a `@template` whose bound is a type operator.
+///
+/// `class` is the `ReflectionProperty` [`ClassInfo`] the `new` resolved
+/// to; the arguments are bound to its constructor's parameters by PHP's
+/// rules so a named argument reaches the parameter it targets. Callers
+/// guard on [`is_reflected_property_class`] first, so this does not
+/// re-check what was instantiated.
+pub(crate) fn resolve_reflected_property_at_new(
+    class: &ClassInfo,
+    arg_texts: &[&str],
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let ctor = class.get_method("__construct")?;
+    let bound = crate::call_args::bind_text_args_to_params(&ctor.parameters, arg_texts);
+    let subject = reflected_class_of_arg(bound.first()?.as_deref()?, ctx)?;
+    let name = reflected_property_name(bound.get(1)?.as_deref()?, ctx)?;
+    Some(reflected_property(subject, &name))
+}
+
+/// The pair of type arguments the two rules above agree on.
+fn reflected_property(subject: PhpType, name: &str) -> PhpType {
+    PhpType::generic(
+        REFLECTION_PROPERTY,
+        vec![subject, PhpType::literal_string_value(name)],
+    )
+}
+
+/// The class a constructor's `class-string|object $class` argument names,
+/// when it names exactly one.
+///
+/// A quoted class name says as much as `Foo::class` does, which is why the
+/// shared `class-string<T>` binding does the reading rather than the
+/// argument's resolved type alone.
+fn reflected_class_of_arg(arg: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let bound = crate::type_engine::variable::rhs_resolution::class_string_inner_binding(arg, ctx)?;
+    // A union of classes, or a scalar that names no class, leaves nothing
+    // to look a property up on.
+    matches!(bound.kind(), TypeKind::Named(name) if !is_builtin_non_class_type(name))
+        .then_some(bound)
+}
+
+/// The property name an argument fixes, when it fixes exactly one.
+///
+/// The name is usually written out, but a variable holding it says just as
+/// much once it resolves to a single literal — which is what an accessor
+/// that forwards its own `string $property` parameter gives, read from the
+/// call site that decided it.
+fn reflected_property_name(arg: &str, ctx: &ResolutionCtx<'_>) -> Option<String> {
+    match crate::text_scan::unquote_php_string(arg) {
+        Some(name) => Some(name.to_string()),
+        None => literal_string_value(&crate::Backend::resolve_arg_text_to_type(arg, ctx)?),
+    }
 }
 
 /// The one string a type stands for, when it stands for exactly one.

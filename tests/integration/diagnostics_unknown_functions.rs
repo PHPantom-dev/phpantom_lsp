@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::common::collect_diagnostics_with;
     use std::collections::HashMap;
 
     use phpantom_lsp::Backend;
@@ -8,12 +9,11 @@ mod tests {
     /// Helper: create a test backend, open a file, and collect
     /// unknown-function diagnostics.
     fn collect(php: &str) -> Vec<Diagnostic> {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_unknown_function_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(
+            &Backend::new_test(),
+            php,
+            Backend::collect_unknown_function_diagnostics,
+        )
     }
 
     /// Helper that includes a minimal stub function index so that
@@ -31,11 +31,7 @@ mod tests {
         ]);
         let backend =
             Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index, HashMap::new());
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_unknown_function_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(&backend, php, Backend::collect_unknown_function_diagnostics)
     }
 
     #[test]

@@ -68,6 +68,33 @@ pub(crate) struct MethodReturnCtx<'a> {
     pub call_args: CallSiteArgResolver<'a>,
 }
 
+impl<'a> MethodReturnCtx<'a> {
+    /// The context a chain-link or static call resolves a method return
+    /// through, built from the surrounding resolution context.
+    ///
+    /// `call_args` is left `None`: a link is reached from resolved
+    /// receiver types rather than from the call AST, so there is no
+    /// argument list here to resolve.
+    pub(crate) fn for_call(
+        ctx: &'a ResolutionCtx<'a>,
+        template_subs: &'a HashMap<String, PhpType>,
+        var_resolver: &'a dyn Fn(&str) -> Vec<String>,
+        is_static: bool,
+    ) -> Self {
+        Self {
+            all_classes: ctx.all_classes,
+            class_loader: ctx.class_loader,
+            backend: ctx.backend,
+            template_subs,
+            var_resolver: Some(var_resolver),
+            cache: ctx.resolved_class_cache,
+            calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
+            is_static,
+            call_args: None,
+        }
+    }
+}
+
 /// See [`MethodReturnCtx::call_args`].
 pub(crate) type CallSiteArgResolver<'a> = Option<&'a dyn Fn() -> Vec<PhpType>>;
 
@@ -191,7 +218,7 @@ fn resolve_request_accessor_at_call(
     // receiver is usually an app's own `FormRequest` subclass that never
     // redeclares it, so its parameters have to be found by walking the
     // parent chain rather than reading `receiver`'s own members.
-    let method = crate::type_engine::types::narrowing::find_method_in_chain_where(
+    let (method, _) = crate::type_engine::types::narrowing::find_method_in_chain_where(
         receiver,
         method_name,
         ctx.class_loader,
@@ -322,6 +349,59 @@ fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option
         }
         _ => None,
     }
+}
+
+/// Resolve a method's PHPStan-style conditional return type (if any)
+/// against call-site arguments and template substitutions, returning the
+/// winning branch with template substitutions already applied.
+///
+/// Returns `None` when the method has no conditional return type, or when
+/// the condition cannot be decided from the arguments — callers fall back
+/// to the method's plain `return_type` in that case.  Shared by
+/// [`Backend::resolve_method_return_types_with_args`] (which needs the
+/// winning branch's classes) and the call-chain hint capture in
+/// `resolve_call_return_types_on_receiver_inner` (which needs the winning
+/// branch's full type, e.g. to preserve an intersection) so the two agree
+/// on what a conditional return type resolves to.
+fn resolve_conditional_return_hint(
+    method: &MethodInfo,
+    text_args: &str,
+    var_resolver: VarClassStringResolver<'_>,
+    template_subs: &HashMap<String, PhpType>,
+    calling_class_name: Option<&str>,
+    declaring_fqn: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let cond = method.conditional_return.as_ref()?;
+    let class_values =
+        crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+    let tpl = TemplateContext {
+        defaults: Some(class_values.as_ref()),
+        params: &method.template_params,
+        bindings: &method.template_bindings,
+        arg_type_resolver: None,
+    };
+    let resolved = if !text_args.is_empty() {
+        resolve_conditional_with_text_args_and_defaults(
+            cond,
+            &method.parameters,
+            text_args,
+            var_resolver,
+            crate::type_engine::conditional_resolution::ConditionalClassContext {
+                calling: calling_class_name,
+                declaring: Some(declaring_fqn),
+            },
+            class_loader,
+            &tpl,
+        )
+    } else {
+        resolve_conditional_without_args_and_defaults(cond, &method.parameters, tpl.defaults)
+    }?;
+    Some(if !template_subs.is_empty() {
+        resolved.substitute(template_subs)
+    } else {
+        resolved
+    })
 }
 
 impl Backend {
@@ -610,12 +690,36 @@ impl Backend {
                             ctx.resolved_class_cache,
                         );
                         if let Some(m) = merged.get_method_ci(method_name) {
-                            if let Some(ref ret) = m.return_type {
-                                let substituted = if !template_subs.is_empty() {
-                                    ret.substitute(&template_subs)
-                                } else {
-                                    ret.clone()
-                                };
+                            // Try the conditional return type first, exactly
+                            // as `resolve_method_return_types_with_args`
+                            // does for the classes below — a conditional
+                            // return type (e.g. `mock()`'s `(TInstance
+                            // is class-string<T> ? T&MockInterface :
+                            // MockInterface)`) often carries no plain
+                            // `return_type` at all, so reading only
+                            // `return_type` here would leave the hint
+                            // empty even though the classes resolve fine,
+                            // silently dropping the winning branch's shape
+                            // (e.g. an intersection) from the hint.
+                            let substituted = resolve_conditional_return_hint(
+                                m,
+                                text_args,
+                                Some(&var_resolver),
+                                &template_subs,
+                                ctx.current_class.map(|c| c.name.as_str()),
+                                merged.fqn().as_str(),
+                                ctx.class_loader,
+                            )
+                            .or_else(|| {
+                                m.return_type.as_ref().map(|ret| {
+                                    if !template_subs.is_empty() {
+                                        ret.substitute(&template_subs)
+                                    } else {
+                                        ret.clone()
+                                    }
+                                })
+                            });
+                            if let Some(substituted) = substituted {
                                 // Collapse any conditional nested inside the
                                 // return type (e.g. `Collection<($k is
                                 // array|string ? array-key : TGroupKey), …>`)
@@ -656,47 +760,23 @@ impl Backend {
                                 // (e.g. Builder<User>) so fluent chains like
                                 // where()->lockForUpdate()->firstOrFail()
                                 // keep TModel.
-                                let resolved_hint = if substituted.is_parent_ref() {
-                                    owner
-                                        .parent_class
-                                        .as_ref()
-                                        .map(|p| PhpType::named(atom(p.as_ref())))
-                                        .unwrap_or(substituted)
-                                } else if substituted.contains_self_ref() {
-                                    match &rt.type_string.kind() {
+                                **hint_out = Some(resolve_hint_keywords(
+                                    substituted,
+                                    &owner,
+                                    ctx.class_loader,
+                                    |s| match &rt.type_string.kind() {
                                         TypeKind::Generic(_) => {
-                                            substituted.replace_self_with_type(&rt.type_string)
+                                            s.replace_self_with_type(&rt.type_string)
                                         }
-                                        _ => substituted.replace_self(&owner.fqn()),
-                                    }
-                                } else {
-                                    substituted
-                                };
-                                **hint_out = Some(
-                                    crate::virtual_members::laravel::replace_eloquent_collections_in_type(
-                                        &resolved_hint,
-                                        ctx.class_loader,
-                                    )
-                                    .unwrap_or(resolved_hint),
-                                );
+                                        _ => s.replace_self(&owner.fqn()),
+                                    },
+                                ));
                             }
                             hint_captured = true;
                         }
                     }
-                    let mr_ctx = MethodReturnCtx {
-                        all_classes: ctx.all_classes,
-                        class_loader: ctx.class_loader,
-                        backend: ctx.backend,
-                        template_subs: &template_subs,
-                        var_resolver: Some(&var_resolver),
-                        cache: ctx.resolved_class_cache,
-                        calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
-                        is_static: false,
-                        // A chain link is reached from resolved receiver
-                        // types, not from the call AST, so there is no
-                        // argument list here to resolve.
-                        call_args: None,
-                    };
+                    let mr_ctx =
+                        MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, false);
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
                     {
@@ -752,17 +832,8 @@ impl Backend {
                                 ctx,
                             );
                             let var_resolver = build_var_resolver(ctx);
-                            let mr_ctx = MethodReturnCtx {
-                                all_classes: ctx.all_classes,
-                                class_loader: ctx.class_loader,
-                                backend: ctx.backend,
-                                template_subs: &template_subs,
-                                var_resolver: Some(&var_resolver),
-                                cache: ctx.resolved_class_cache,
-                                calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
-                                is_static: true,
-                                call_args: None,
-                            };
+                            let mr_ctx =
+                                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, true);
                             ClassInfo::extend_unique_arc(
                                 &mut union_results,
                                 Self::resolve_method_return_types_with_args(
@@ -828,44 +899,23 @@ impl Backend {
                         } else {
                             ret.substitute(&template_subs)
                         };
-                        // Resolve self/static/parent keywords to
-                        // concrete class names (mirrors instance path).
-                        let resolved_hint = if substituted.is_parent_ref() {
-                            merged
-                                .parent_class
-                                .as_ref()
-                                .map(|p| PhpType::named(atom(p.as_ref())))
-                                .unwrap_or(substituted)
-                        } else if substituted.contains_self_ref() {
-                            // Replace only the `static`/`self` name so that
-                            // `static<array-key, string>` keeps its bound
-                            // arguments instead of collapsing to a bare
-                            // class name.
-                            substituted.replace_self(&merged.fqn())
-                        } else {
-                            substituted
-                        };
-                        **hint_out = Some(
-                            crate::virtual_members::laravel::replace_eloquent_collections_in_type(
-                                &resolved_hint,
-                                ctx.class_loader,
-                            )
-                            .unwrap_or(resolved_hint),
-                        );
+                        // Resolve self/static/parent keywords to concrete
+                        // class names (mirrors instance path). Only the
+                        // `static`/`self` name is replaced, so
+                        // `static<array-key, string>` keeps its bound
+                        // arguments instead of collapsing to a bare class
+                        // name.
+                        **hint_out = Some(resolve_hint_keywords(
+                            substituted,
+                            &merged,
+                            ctx.class_loader,
+                            |s| s.replace_self(&merged.fqn()),
+                        ));
                     }
 
                     let var_resolver = build_var_resolver(ctx);
-                    let mr_ctx = MethodReturnCtx {
-                        all_classes: ctx.all_classes,
-                        class_loader: ctx.class_loader,
-                        backend: ctx.backend,
-                        template_subs: &template_subs,
-                        var_resolver: Some(&var_resolver),
-                        cache: ctx.resolved_class_cache,
-                        calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
-                        is_static: true,
-                        call_args: None,
-                    };
+                    let mr_ctx =
+                        MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, true);
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
                     {
@@ -914,8 +964,8 @@ impl Backend {
                 // when the class is loadable (i.e. inside a Laravel project).
                 //
                 // Not strictly sound (the declared type is the interface),
-                // but it mirrors Larastan's `NowAndTodayExtension`, which the
-                // ecosystem is written against.  See the matching note in
+                // but it is what the Laravel PHPStan extensions infer too, and
+                // the ecosystem is written against it.  See the matching note in
                 // `rhs_resolution.rs`.
                 if matches!(
                     normalized_func,
@@ -948,6 +998,24 @@ impl Backend {
                 if !text_args.is_empty() {
                     let owner_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
                     let fn_args = TextArrayFuncArgs::new(text_args, ctx);
+
+                    // String builtins over literal arguments: the stub
+                    // declares the widest string the function can return,
+                    // but a call whose arguments are all literals has one
+                    // answer.  It names no class, so it travels purely as
+                    // the hint.
+                    if crate::type_engine::variable::string_func_rules::is_foldable_string_func(
+                        func_name,
+                    ) && let Some(folded) =
+                        crate::type_engine::variable::string_func_rules::string_func_literal_type(
+                            func_name, &fn_args,
+                        )
+                    {
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(folded);
+                        }
+                        return Vec::new();
+                    }
 
                     // Element-extracting functions (`array_pop`, `current`,
                     // …): the call's type *is* the element type.
@@ -1061,6 +1129,7 @@ impl Backend {
                                     .into_iter()
                                     .map(str::to_string)
                                     .collect::<Vec<String>>(),
+                                None,
                                 ctx,
                             );
                             let classes: Vec<Arc<ClassInfo>> =
@@ -1110,6 +1179,7 @@ impl Backend {
                         let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                             &func_info,
                             &split_args,
+                            None,
                             ctx,
                         );
 
@@ -1264,6 +1334,22 @@ impl Backend {
                     None => return vec![],
                 };
 
+                // `new ReflectionProperty(C::class, 'name')` is the value
+                // `ReflectionClass::getProperty('name')` builds, written
+                // the other way, so it carries the same class and name.
+                if super::is_reflected_property_class(cls_arc.fqn().as_str())
+                    && let Some(ty) = super::resolve_reflected_property_at_new(
+                        &cls_arc,
+                        &split_text_args(text_args),
+                        ctx,
+                    )
+                {
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
+                    }
+                    return vec![cls_arc];
+                }
+
                 // Fast path: no template params, no inference needed.
                 if cls_arc.template_params.is_empty() || text_args.is_empty() {
                     return vec![cls_arc];
@@ -1312,118 +1398,14 @@ impl Backend {
                     let arg_texts =
                         crate::type_engine::conditional_resolution::split_text_args(text_args);
                     if !arg_texts.is_empty() {
-                        let bound_args = crate::call_args::bind_text_args_to_params(
-                            &ctor.parameters,
-                            &arg_texts,
-                        );
-                        let mut subs = std::collections::HashMap::new();
-                        for (tpl_name, param_name) in &ctor.template_bindings {
-                            let param_idx = match ctor
-                                .parameters
-                                .iter()
-                                .position(|p| p.name == param_name.as_str())
-                            {
-                                Some(idx) => idx,
-                                None => continue,
-                            };
-                            let arg_text =
-                                match bound_args.get(param_idx).and_then(Option::as_deref) {
-                                    Some(text) => text,
-                                    None => continue,
-                                };
-                            let param_hint = ctor
-                                .parameters
-                                .get(param_idx)
-                                .and_then(|p| p.type_hint.as_ref());
-                            let binding_mode =
-                                crate::type_engine::variable::rhs_resolution::classify_template_binding(
-                                    tpl_name, param_hint,
-                                );
-                            use crate::type_engine::variable::rhs_resolution::TemplateBindingMode;
-                            match binding_mode {
-                                TemplateBindingMode::Direct => {
-                                    if let Some(resolved_type) =
-                                        Backend::resolve_arg_text_to_type(arg_text, ctx)
-                                    {
-                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
-                                    }
-                                }
-                                TemplateBindingMode::ClassStringInner => {
-                                    if let Some(resolved_type) =
-                                        Backend::resolve_arg_text_to_type(arg_text, ctx)
-                                    {
-                                        let unwrapped = match resolved_type.kind() {
-                                            TypeKind::ClassString(Some(inner)) => inner.clone(),
-                                            _ => resolved_type.clone(),
-                                        };
-                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), unwrapped);
-                                    }
-                                }
-                                TemplateBindingMode::ArrayElement => {
-                                    if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                                        let inner = arg_text[1..arg_text.len() - 1].trim();
-                                        if !inner.is_empty() {
-                                            let elems =
-                                                crate::type_engine::conditional_resolution::split_text_args(inner);
-                                            if let Some(elem) = elems.first()
-                                                && let Some(resolved_type) =
-                                                    Backend::resolve_arg_text_to_type(
-                                                        elem.trim(),
-                                                        ctx,
-                                                    )
-                                            {
-                                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                                    &mut subs,
-                                                    tpl_name.to_string(),
-                                                    resolved_type,
-                                                );
-                                            }
-                                        }
-                                    } else if let Some(resolved_type) =
-                                        Backend::resolve_arg_text_to_type(arg_text, ctx)
-                                    {
-                                        // Extract the element type from array-like types
-                                        // so we bind T to the element, not the whole array.
-                                        if let Some(elem_type) =
-                                            resolved_type.extract_value_type(false)
-                                        {
-                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                                        } else {
-                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
-                                        }
-                                    }
-                                }
-                                TemplateBindingMode::CallableReturnType => {
-                                    if let Some(bound) = super::bind_callable_return_template(
-                                        arg_text, param_hint, tpl_name, ctx,
-                                    ) {
-                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), bound);
-                                    }
-                                }
-                                TemplateBindingMode::CallableReturnArrayPosition(position) => {
-                                    // `@param callable(...): array<TKey, TValue> $cb` —
-                                    // bind from the key/value of the callback's
-                                    // array-shaped return, not the whole return type.
-                                    if let Some(extracted) = Backend::infer_closure_return_type(arg_text, ctx)
-                                        .and_then(|ret_type| crate::type_engine::variable::rhs_resolution::extract_array_position(&ret_type, position))
-                                    {
-                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), extracted);
-                                    }
-                                }
-                                TemplateBindingMode::CallableParamType(position) => {
-                                    if let Some(param_type) =
-                                        super::bind_callable_param_template(arg_text, position, ctx)
-                                    {
-                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), param_type);
-                                    }
-                                }
-                                TemplateBindingMode::GenericWrapper(_, _) => {
-                                    // GenericWrapper requires VarResolutionCtx which
-                                    // is not available here.  Skip for now — this is
-                                    // a rare edge case in chained instantiation.
-                                }
-                            }
-                        }
+                        // The finishing half of `build_method_template_subs`
+                        // (filling a param nothing bound) is skipped here: it
+                        // would fall back to the *constructor's* own
+                        // `@template … of …` bound, which a constructor
+                        // essentially never repeats — the bound lives on the
+                        // class. `cls_arc.template_param_bounds` is used for
+                        // that below instead.
+                        let subs = Backend::bind_method_template_args(ctor, &arg_texts, ctx);
 
                         // Remap inherited constructor subs to the child's
                         // template param names via the @extends chain.
@@ -1488,13 +1470,62 @@ impl Backend {
             //    ClassName that SubjectExpr::parse couldn't distinguish
             //    from a function name) ───────────────────────────────
             _ => {
-                let callee_classes = ResolvedType::into_arced_classes(
-                    crate::type_engine::resolver::resolve_target_classes_expr(
-                        callee,
-                        AccessKind::Arrow,
-                        ctx,
-                    ),
+                let callee_resolved = crate::type_engine::resolver::resolve_target_classes_expr(
+                    callee,
+                    AccessKind::Arrow,
+                    ctx,
                 );
+
+                // A callable-typed callee carries its return type in the
+                // type string rather than on a class, which is how a
+                // property annotated `@var callable(): Scope` arrives
+                // here.  Read it the same way the `$fn(…)` path does.
+                // Subject resolution keeps only class-typed results, so a
+                // property whose type is a bare `callable(…): T` comes back
+                // empty and its declared hint has to be read directly.
+                let mut callable_types: Vec<PhpType> = callee_resolved
+                    .iter()
+                    .map(|rt| rt.type_string.clone())
+                    .collect();
+                if callable_types.is_empty()
+                    && let SubjectExpr::PropertyChain { base, property } = callee
+                {
+                    let owners = ResolvedType::into_arced_classes(
+                        crate::type_engine::resolver::resolve_target_classes_expr(
+                            base,
+                            AccessKind::Arrow,
+                            ctx,
+                        ),
+                    );
+                    for owner in &owners {
+                        if let Some(hint) = crate::inheritance::resolve_property_type_hint(
+                            owner,
+                            property,
+                            ctx.class_loader,
+                        ) {
+                            callable_types.push(hint);
+                        }
+                    }
+                }
+                for ty in &callable_types {
+                    if let Some(ret_type) = ty.callable_return_type() {
+                        let classes: Vec<Arc<ClassInfo>> =
+                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                                ret_type,
+                                "",
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                        if !classes.is_empty() {
+                            if let Some(ref mut hint_out) = return_type_hint_out {
+                                **hint_out = Some(ret_type.clone());
+                            }
+                            return classes;
+                        }
+                    }
+                }
+
+                let callee_classes = ResolvedType::into_arced_classes(callee_resolved);
 
                 // When the callee resolves to an object with __invoke(),
                 // the call returns __invoke()'s return type, not the
@@ -1545,56 +1576,24 @@ impl Backend {
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
             // Try conditional return type first (PHPStan syntax)
-            if let Some(ref cond) = method.conditional_return {
-                let class_values = crate::inheritance::class_scoped_template_values(
-                    template_subs,
-                    &method.template_params,
-                );
-                let tpl = TemplateContext {
-                    defaults: Some(class_values.as_ref()),
-                    params: &method.template_params,
-                    bindings: &method.template_bindings,
-                    arg_type_resolver: None,
-                };
-                let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args_and_defaults(
-                        cond,
-                        &method.parameters,
-                        text_args,
-                        var_resolver,
-                        crate::type_engine::conditional_resolution::ConditionalClassContext {
-                            calling: mr_ctx.calling_class_name,
-                            declaring: Some(class_info.fqn().as_str()),
-                        },
-                        mr_ctx.class_loader,
-                        &tpl,
-                    )
-                } else {
-                    resolve_conditional_without_args_and_defaults(
-                        cond,
-                        &method.parameters,
-                        tpl.defaults,
-                    )
-                };
-                if let Some(ref parsed) = resolved_type {
-                    // Apply method-level template substitutions to the
-                    // resolved conditional type (e.g. `TModel` → concrete
-                    // class when TModel is a method-level @template param).
-                    let effective = if !template_subs.is_empty() {
-                        parsed.substitute(template_subs)
-                    } else {
-                        parsed.clone()
-                    };
-                    let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                            &effective,
-                            &class_info.fqn(),
-                            all_classes,
-                            class_loader,
-                        );
-                    if !classes.is_empty() {
-                        return classes;
-                    }
+            if let Some(effective) = resolve_conditional_return_hint(
+                method,
+                text_args,
+                var_resolver,
+                template_subs,
+                mr_ctx.calling_class_name,
+                class_info.fqn().as_str(),
+                mr_ctx.class_loader,
+            ) {
+                let classes: Vec<Arc<ClassInfo>> =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &effective,
+                        &class_info.fqn(),
+                        all_classes,
+                        class_loader,
+                    );
+                if !classes.is_empty() {
+                    return classes;
                 }
             }
 
@@ -2272,6 +2271,37 @@ fn qualify_class_keyword<'t>(text: &'t str, class: &ClassInfo) -> std::borrow::C
     std::borrow::Cow::Owned(format!("{qualifier}::{rest}"))
 }
 
+/// Resolve `self`/`static`/`parent` in a return-type hint to concrete
+/// class names, so downstream consumers see real FQNs rather than
+/// keywords, then apply the Eloquent-collection patch every hint gets.
+///
+/// `parent` always resolves to `owner`'s parent (or is left as-is when it
+/// has none). `self`/`static` is what genuinely differs between the
+/// instance and static call paths, so `replace_self` decides that part:
+/// the instance path prefers the receiver's own generic type
+/// (`Builder<User>`) so a fluent chain keeps its bound template argument,
+/// while a static call replaces only the bare name.
+fn resolve_hint_keywords(
+    hint: PhpType,
+    owner: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    replace_self: impl FnOnce(PhpType) -> PhpType,
+) -> PhpType {
+    let resolved = if hint.is_parent_ref() {
+        owner
+            .parent_class
+            .as_ref()
+            .map(|p| PhpType::named(atom(p.as_ref())))
+            .unwrap_or(hint)
+    } else if hint.contains_self_ref() {
+        replace_self(hint)
+    } else {
+        hint
+    };
+    crate::virtual_members::laravel::replace_eloquent_collections_in_type(&resolved, class_loader)
+        .unwrap_or(resolved)
+}
+
 /// The type a cast expression produces, or `None` when the text is not a
 /// cast.
 ///
@@ -2347,36 +2377,52 @@ pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Opti
             }
         });
         let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
-        return match (left_ty, right_ty) {
-            (Some(l), Some(r)) if l == r => Some(l),
-            (Some(l), Some(r)) => Some(PhpType::union(vec![l, r])),
-            (Some(l), None) => Some(l),
-            (None, Some(r)) => Some(r),
-            (None, None) => None,
-        };
+        return join_operand_types(left_ty, right_ty);
     }
 
     if let Some((left, right)) = split_top_level_elvis(text) {
         let left_ty = Backend::resolve_arg_text_to_type(left, ctx);
         let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
-        return match (left_ty, right_ty) {
-            (Some(l), Some(r)) if l == r => Some(l),
-            (Some(l), Some(r)) => Some(PhpType::union(vec![l, r])),
-            (Some(l), None) => Some(l),
-            (None, Some(r)) => Some(r),
-            (None, None) => None,
-        };
+        return join_operand_types(left_ty, right_ty);
     }
     None
 }
 
-/// Whether `text` contains a concatenation (`.`) outside quotes, parens,
-/// brackets, and `->`/`?->` chain links.
+/// The type a `??`/`?:` result carries given what each side resolved to.
 ///
-/// A pure numeric literal (`3.14`) is already answered by
-/// [`resolve_literal_type`] before this runs, so any `.` reaching this scan
-/// belongs to a genuine concatenation rather than a decimal point.
-fn contains_top_level_concat(text: &str) -> bool {
+/// Whichever side resolved when only one did is the answer, since the
+/// other operand contributed nothing to know about; when both did and
+/// they differ, the result could be either, so the answer is their union.
+fn join_operand_types(left: Option<PhpType>, right: Option<PhpType>) -> Option<PhpType> {
+    match (left, right) {
+        (Some(l), Some(r)) if l == r => Some(l),
+        (Some(l), Some(r)) => Some(PhpType::union(vec![l, r])),
+        (Some(l), None) => Some(l),
+        (None, Some(r)) => Some(r),
+        (None, None) => None,
+    }
+}
+
+/// What a top-level scan makes of the byte it is looking at.
+enum ScanStep {
+    /// Step over this many bytes without interpreting them further.
+    Skip(usize),
+    /// Stop and report this offset.
+    Stop,
+    /// Stop and report nothing: what was found rules the whole scan out.
+    Abort,
+}
+
+/// Walk `text`'s top level, calling `at_depth_zero` on every byte that is
+/// not inside a quote or a bracket.
+///
+/// Quoting (`'…'` and `"…"`, with backslash escapes) and nesting (`(`,
+/// `[`, `{`) are handled here, so a scanner only has to say what it makes
+/// of the operators it is looking for.
+///
+/// Returns the offset the visitor stopped at, or `None` when it aborted or
+/// the scan ran to the end.
+fn scan_top_level(text: &str, at_depth_zero: impl Fn(&[u8], usize) -> ScanStep) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth: u32 = 0;
     let mut quote: Option<u8> = None;
@@ -2398,135 +2444,86 @@ fn contains_top_level_concat(text: &str) -> bool {
             b'\'' | b'"' => {
                 quote = Some(b);
                 i += 1;
+                continue;
             }
             b'(' | b'[' | b'{' => {
                 depth += 1;
                 i += 1;
+                continue;
             }
             b')' | b']' | b'}' => {
                 depth = depth.saturating_sub(1);
                 i += 1;
+                continue;
             }
-            b'?' if bytes[i..].starts_with(b"?->") => i += 3,
-            b'-' if bytes[i..].starts_with(b"->") => i += 2,
-            b'.' if depth == 0 => {
-                // `...` (spread/variadic) is not concatenation.
-                if bytes[i..].starts_with(b"...") {
-                    i += 3;
-                } else {
-                    return true;
-                }
-            }
-            _ => i += 1,
+            _ => {}
+        }
+        if depth > 0 {
+            i += 1;
+            continue;
+        }
+        match at_depth_zero(bytes, i) {
+            ScanStep::Skip(n) => i += n.max(1),
+            ScanStep::Stop => return Some(i),
+            ScanStep::Abort => return None,
         }
     }
-    false
+    None
 }
 
-/// Split `text` at the first top-level null-coalescing operator (`??`),
-/// respecting quotes, parens/brackets, and the `?->` and `?:` operators
-/// (neither of which is this).
+/// Whether `text` joins its parts with a top-level `.` concatenation.
+fn contains_top_level_concat(text: &str) -> bool {
+    scan_top_level(text, |bytes, i| match bytes[i] {
+        b'?' if bytes[i..].starts_with(b"?->") => ScanStep::Skip(3),
+        b'-' if bytes[i..].starts_with(b"->") => ScanStep::Skip(2),
+        // `...` (spread/variadic) is not concatenation.
+        b'.' if bytes[i..].starts_with(b"...") => ScanStep::Skip(3),
+        b'.' => ScanStep::Stop,
+        _ => ScanStep::Skip(1),
+    })
+    .is_some()
+}
+
+/// Split `text` at the first top-level null-coalescing operator (`??`).
 ///
 /// `??` is right-associative, so splitting at the *first* one leaves the
 /// rest of a `$a ?? $b ?? $c` chain in the right operand for the caller to
 /// resolve the same way. The assignment form `??=` is not an expression
 /// operator and is left alone.
 fn split_top_level_coalesce(text: &str) -> Option<(&str, &str)> {
-    let bytes = text.as_bytes();
-    let mut depth: u32 = 0;
-    let mut quote: Option<u8> = None;
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = quote {
-            if b == b'\\' {
-                i += 2;
-                continue;
-            }
-            if b == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
+    let at = scan_top_level(text, |bytes, i| {
+        if !bytes[i..].starts_with(b"??") {
+            ScanStep::Skip(1)
+        } else if bytes[i..].starts_with(b"??=") {
+            ScanStep::Abort
+        } else {
+            ScanStep::Stop
         }
-        match b {
-            b'\'' | b'"' => {
-                quote = Some(b);
-                i += 1;
-            }
-            b'(' | b'[' | b'{' => {
-                depth += 1;
-                i += 1;
-            }
-            b')' | b']' | b'}' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            b'?' if depth == 0 && bytes[i..].starts_with(b"??") => {
-                if bytes[i..].starts_with(b"??=") {
-                    return None;
-                }
-                let left = text[..i].trim();
-                let right = text[i + 2..].trim();
-                if left.is_empty() || right.is_empty() {
-                    return None;
-                }
-                return Some((left, right));
-            }
-            _ => i += 1,
-        }
-    }
-    None
+    })?;
+    let left = text[..at].trim();
+    let right = text[at + 2..].trim();
+    (!left.is_empty() && !right.is_empty()).then_some((left, right))
 }
 
-/// Split `text` at a top-level elvis operator (`?:`), respecting quotes,
-/// parens/brackets, and the nullsafe `?->` operator (which is not this).
+/// Split `text` at a top-level elvis operator (`?:`), stepping over the
+/// nullsafe `?->` (which is not this).
 ///
 /// Returns the trimmed left and right operand texts, or `None` when no
 /// top-level `?:` is found — including a full ternary (`$a ? $b : $c`),
 /// which is left to the caller's other paths.
 fn split_top_level_elvis(text: &str) -> Option<(&str, &str)> {
-    let bytes = text.as_bytes();
-    let mut depth: u32 = 0;
-    let mut quote: Option<u8> = None;
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = quote {
-            if b == b'\\' {
-                i += 2;
-                continue;
-            }
-            if b == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
+    let at = scan_top_level(text, |bytes, i| {
+        if bytes[i] == b'?'
+            && !bytes[i..].starts_with(b"?->")
+            && text[i + 1..].trim_start().starts_with(':')
+        {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        match b {
-            b'\'' | b'"' => {
-                quote = Some(b);
-                i += 1;
-            }
-            b'(' | b'[' | b'{' => {
-                depth += 1;
-                i += 1;
-            }
-            b')' | b']' | b'}' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            b'?' if depth == 0 && !bytes[i..].starts_with(b"?->") => {
-                let after = text[i + 1..].trim_start();
-                if let Some(rest) = after.strip_prefix(':') {
-                    return Some((text[..i].trim_end(), rest.trim_start()));
-                }
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
-    None
+    })?;
+    let rest = text[at + 1..].trim_start().strip_prefix(':')?;
+    Some((text[..at].trim_end(), rest.trim_start()))
 }
 
 /// Whether `operand` is one expression rather than several joined by an
@@ -2540,50 +2537,17 @@ fn operand_is_single(operand: &str) -> bool {
     if operand.is_empty() {
         return false;
     }
-    let bytes = operand.as_bytes();
-    let mut depth: u32 = 0;
-    let mut quote: Option<u8> = None;
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = quote {
-            if b == b'\\' {
-                i += 2;
-                continue;
-            }
-            if b == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
-        }
-        match b {
-            b'\'' | b'"' => quote = Some(b),
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-            // `->` and `?->` continue the chain, so they are stepped over
-            // whole; a bare `-` or `?` is subtraction or a ternary.
-            b'-' | b'?' if depth == 0 => {
-                if bytes[i..].starts_with(b"->") {
-                    i += 2;
-                } else if bytes[i..].starts_with(b"?->") {
-                    i += 3;
-                } else {
-                    return false;
-                }
-                continue;
-            }
-            b'.' | b'+' | b'*' | b'/' | b'%' | b'<' | b'>' | b'=' | b'!' | b'&' | b'|' | b'^'
-            | b',' | b' ' | b'\t' | b'\n'
-                if depth == 0 =>
-            {
-                return false;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    true
+    scan_top_level(operand, |bytes, i| match bytes[i] {
+        // `->` and `?->` continue the chain, so they are stepped over
+        // whole; a bare `-` or `?` is subtraction or a ternary.
+        b'-' if bytes[i..].starts_with(b"->") => ScanStep::Skip(2),
+        b'?' if bytes[i..].starts_with(b"?->") => ScanStep::Skip(3),
+        b'-' | b'?' => ScanStep::Stop,
+        b'.' | b'+' | b'*' | b'/' | b'%' | b'<' | b'>' | b'=' | b'!' | b'&' | b'|' | b'^'
+        | b',' | b' ' | b'\t' | b'\n' => ScanStep::Stop,
+        _ => ScanStep::Skip(1),
+    })
+    .is_none()
 }
 
 /// Resolve a literal expression to its PHP type.

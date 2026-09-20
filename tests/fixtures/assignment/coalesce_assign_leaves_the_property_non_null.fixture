@@ -1,0 +1,20 @@
+// test: ??= leaves the nullable property it wrote non-null
+// feature: hover
+// expect_hover: $pattern => string
+// expect_absent: null
+---
+<?php
+
+class Lexer
+{
+    private ?string $regexp = null;
+
+    private function generateRegexp(): string { return ''; }
+
+    public function lex(): void
+    {
+        $this->regexp ??= $this->generateRegexp();
+        $pattern = $this->regexp;
+        echo $pat<>tern;
+    }
+}

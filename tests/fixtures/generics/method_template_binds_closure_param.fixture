@@ -1,0 +1,30 @@
+// test: method-level @template bound at the call site types the closure's own parameter
+// feature: completion
+// expect: isReadOnly(
+// expect_absent: getLine(
+---
+<?php
+
+class NodeBase {
+    public function getLine(): int { return 0; }
+}
+
+class PropertyNode {
+    public function isReadOnly(): bool { return true; }
+}
+
+class Fixer {
+    /**
+     * @template TNode
+     * @param TNode $node
+     * @param callable(TNode): void $cb
+     */
+    public function fixNode($node, callable $cb): void {}
+
+    public function run(PropertyNode $property): void
+    {
+        $this->fixNode($property, function ($node) {
+            $node-><>
+        });
+    }
+}

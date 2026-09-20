@@ -19,10 +19,10 @@
 //! # Command/path for phpstan. When unset, auto-detected: Composer's
 //! # bin-dir (default vendor/bin) if the workspace root has a PHPStan
 //! # config file, or composer.json depends directly on phpstan/phpstan or
-//! # a package ending in /larastan (larastan/larastan or a fork), then
-//! # $PATH regardless of composer.json. A Laravel application that has
-//! # installed neither Larastan nor a config file gets no PHPStan at all,
-//! # since plain PHPStan misreads the framework.
+//! # on a PHPStan extension that understands Laravel, then $PATH
+//! # regardless of composer.json. A Laravel application that has
+//! # installed neither such an extension nor a config file gets no
+//! # PHPStan at all, since plain PHPStan misreads the framework.
 //! # Set to "" to disable.
 //! # command = "vendor/bin/phpstan"
 //!
@@ -50,7 +50,7 @@ use tempfile::NamedTempFile;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::config::PhpStanConfig;
-use crate::process::paths_match;
+use crate::process::{auto_detect_binary, paths_match};
 
 /// Default PHPStan timeout in milliseconds (60 seconds).
 const DEFAULT_TIMEOUT_MS: u64 = 60_000;
@@ -83,8 +83,9 @@ const CONFIG_FILES: [&str; 3] = ["phpstan.neon", "phpstan.neon.dist", "phpstan.d
 ///   installed PHPStan, e.g. a `.phar` outside the Composer bin dir, is
 ///   wired up).
 /// - Config value `None` → auto-detect:
-///   - nothing at all on a Laravel application that has not installed
-///     Larastan and hand-authored no config. Plain PHPStan does not
+///   - nothing at all on a Laravel application that has installed no
+///     Laravel-aware PHPStan extension and hand-authored no config. Plain
+///     PHPStan does not
 ///     understand Eloquent magic, facades, or container bindings, so such a
 ///     project is left alone rather than run through an analyser that would
 ///     misread its own framework and report false positives, the same
@@ -99,11 +100,11 @@ const CONFIG_FILES: [&str; 3] = ["phpstan.neon", "phpstan.neon.dist", "phpstan.d
 ///       hand-authors a PHPStan config wants PHPStan run, independent of
 ///       what `composer.json` declares.
 ///     - otherwise, the project depends directly (`require` or
-///       `require-dev`) on `phpstan/phpstan`, or on a package ending in
-///       `/larastan` (`larastan/larastan` or a fork such as
-///       `calebdw/larastan`). This avoids proxying to a stale
-///       `vendor/bin/phpstan` left behind by a project that no longer
-///       depends on either.
+///       `require-dev`) on `phpstan/phpstan`, or on one of the PHPStan
+///       extensions that understand Laravel
+///       ([`crate::composer::has_laravel_aware_phpstan`]). This avoids
+///       proxying to a stale `vendor/bin/phpstan` left behind by a project
+///       that no longer depends on either.
 ///   - otherwise `$PATH` — a `phpstan` the user installed globally was a
 ///     deliberate choice, not leftover state, so the
 ///     `composer.json`/config-file evidence does not apply to it.
@@ -124,35 +125,33 @@ pub(crate) fn resolve_phpstan(
         // Auto-detect.
         None => {
             let has_phpstan_config = workspace_root.is_some_and(has_project_config);
-            let has_larastan = composer_json.is_some_and(crate::composer::has_larastan_dependency);
+            let has_laravel_extension =
+                composer_json.is_some_and(crate::composer::has_laravel_aware_phpstan);
 
-            // A Laravel application without Larastan is refused PHPStan
-            // outright: a global binary would misread the framework exactly
-            // the way the vendored one would, and additionally lacks the
-            // project's own extensions.
+            // A Laravel application with no Laravel-aware extension is
+            // refused PHPStan outright: a global binary would misread the
+            // framework exactly the way the vendored one would, and
+            // additionally lacks the project's own extensions.
             if !has_phpstan_config
-                && !has_larastan
+                && !has_laravel_extension
                 && composer_json.is_some_and(crate::composer::is_laravel_application)
             {
                 return None;
             }
 
             let depends_on_phpstan = has_phpstan_config
-                || has_larastan
+                || has_laravel_extension
                 || composer_json
                     .is_some_and(|pkg| crate::composer::has_dependency(pkg, "phpstan/phpstan"));
 
-            if depends_on_phpstan && let Some(root) = workspace_root {
-                let bin = bin_dir.unwrap_or("vendor/bin");
-                let candidate = root.join(bin).join("phpstan");
-                if candidate.is_file() {
-                    return Some(ResolvedPhpStan { path: candidate });
-                }
-            }
-
-            crate::process::which("phpstan")
-                .ok()
-                .map(|path| ResolvedPhpStan { path })
+            // Only a project that depends on PHPStan has a vendored copy
+            // to prefer over the one on `$PATH`.
+            auto_detect_binary(
+                workspace_root.filter(|_| depends_on_phpstan),
+                bin_dir,
+                "phpstan",
+            )
+            .map(|path| ResolvedPhpStan { path })
         }
     }
 }
@@ -197,7 +196,7 @@ pub(crate) fn run_phpstan(
     // buffer differs from what is on disk. When they are byte-identical
     // we analyse the real file directly, so PHPStan sees it at its real
     // path. This matters for rules that inspect `$scope->getFile()`
-    // (e.g. Larastan's env-outside-config rule): in editor mode PHPStan
+    // (e.g. the Laravel extensions' env-outside-config rule): in editor mode PHPStan
     // analyses the temp file under the temp file's OWN path and only
     // swaps the path back to the real file when formatting errors, so a
     // temp file outside the real file's directory makes such rules
@@ -257,9 +256,6 @@ pub(crate) fn run_phpstan(
 
 /// Project-wide runs multiply the per-file timeout by this factor:
 /// analysing a whole codebase legitimately takes far longer than the
-/// single-file editor-mode run the base timeout is calibrated for.
-const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
-
 /// Whether the project has its own PHPStan configuration file.
 ///
 /// A project-wide run is only attempted when one exists: without it,
@@ -280,7 +276,7 @@ pub(crate) fn has_project_config(workspace_root: &Path) -> bool {
 /// No path argument is passed, so PHPStan analyses the `paths`
 /// configured in its own configuration file (the caller checks
 /// [`has_project_config`] first).  Runs with an extended timeout
-/// ([`WORKSPACE_TIMEOUT_FACTOR`] × the per-file timeout).
+/// ([`crate::process::WORKSPACE_TIMEOUT_FACTOR`] × the per-file timeout).
 pub(crate) fn run_phpstan_workspace(
     resolved: &ResolvedPhpStan,
     workspace_root: &Path,
@@ -290,7 +286,7 @@ pub(crate) fn run_phpstan_workspace(
     let timeout_ms = config
         .timeout
         .unwrap_or(DEFAULT_TIMEOUT_MS)
-        .saturating_mul(WORKSPACE_TIMEOUT_FACTOR);
+        .saturating_mul(crate::process::WORKSPACE_TIMEOUT_FACTOR);
     let timeout = Duration::from_millis(timeout_ms);
     let memory_limit = config.memory_limit.as_deref().unwrap_or("1G");
 
@@ -310,18 +306,9 @@ pub(crate) fn run_phpstan_workspace(
         None,
     )?;
 
-    match output.code {
-        0 => Ok(std::collections::HashMap::new()),
-        1 => parse_phpstan_json_workspace(&output.stdout, workspace_root),
-        _ => match parse_phpstan_json_workspace(&output.stdout, workspace_root) {
-            Ok(map) if !map.is_empty() => Ok(map),
-            _ => Err(format!(
-                "PHPStan exited with code {} (stderr: {})",
-                output.code,
-                output.stderr.trim()
-            )),
-        },
-    }
+    crate::process::workspace_run_result(&output, "PHPStan", &[1], false, |stdout| {
+        parse_phpstan_json_workspace(stdout, workspace_root)
+    })
 }
 
 /// Parse PHPStan's JSON output into diagnostics grouped by file path.
@@ -493,16 +480,7 @@ fn parse_phpstan_message(msg: &serde_json::Value) -> Option<Diagnostic> {
     let data = Some(serde_json::json!({ "ignorable": ignorable }));
 
     Some(Diagnostic {
-        range: Range {
-            start: Position {
-                line: lsp_line,
-                character: 0,
-            },
-            end: Position {
-                line: lsp_line,
-                character: u32::MAX,
-            },
-        },
+        range: crate::process::full_line_range(lsp_line),
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(identifier.to_string())),
         code_description: None,
@@ -1040,73 +1018,49 @@ mod tests {
         assert_ne!(result.map(|r| r.path), Some(phpstan));
     }
 
+    /// A Laravel project may install any of the PHPStan extensions that
+    /// understand the framework, or a fork of one, and each pulls
+    /// `phpstan/phpstan` in transitively rather than declaring it — so each
+    /// has to certify `vendor/bin/phpstan` on its own.
     #[test]
-    fn resolve_auto_detect_larastan_on_laravel_project() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_path = dir.path().join("vendor").join("bin");
-        std::fs::create_dir_all(&bin_path).unwrap();
-        let phpstan = bin_path.join("phpstan");
-        std::fs::write(&phpstan, "#!/bin/sh\n").unwrap();
+    fn resolve_auto_detect_laravel_extension_on_laravel_project() {
+        for extension in [
+            "larastan/larastan",
+            "calebdw/larastan",
+            "calebdw/phpstan-laravel",
+            "acme/phpstan-laravel",
+        ] {
+            let (dir, phpstan) = workspace_with_vendor_phpstan();
+            let package: crate::composer::ComposerPackage = format!(
+                r#"{{"require": {{
+                    "laravel/framework": "^11.0",
+                    "{extension}": "*"
+                }}}}"#
+            )
+            .parse()
+            .unwrap();
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&phpstan, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let result = resolve_phpstan(
+                Some(dir.path()),
+                &PhpStanConfig::default(),
+                None,
+                Some(&package),
+            );
+            assert_eq!(result.unwrap().path, phpstan, "for `{extension}`");
         }
-
-        let config = PhpStanConfig::default();
-        // Laravel project that only requires larastan/larastan directly;
-        // phpstan/phpstan is pulled in transitively, so `vendor/bin/phpstan`
-        // must still be picked up.
-        let package: crate::composer::ComposerPackage = r#"{"require": {
-            "laravel/framework": "^11.0",
-            "larastan/larastan": "^2.9"
-        }}"#
-        .parse()
-        .unwrap();
-        let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
-        assert_eq!(result.unwrap().path, phpstan);
     }
 
     #[test]
-    fn resolve_auto_detect_larastan_fork_on_laravel_project() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_path = dir.path().join("vendor").join("bin");
-        std::fs::create_dir_all(&bin_path).unwrap();
-        let phpstan = bin_path.join("phpstan");
-        std::fs::write(&phpstan, "#!/bin/sh\n").unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&phpstan, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-
-        let config = PhpStanConfig::default();
-        // larastan/larastan is slow to update, so users sometimes depend on
-        // a fork (e.g. calebdw/larastan) instead. It must certify Larastan
-        // the same way the upstream package does.
-        let package: crate::composer::ComposerPackage = r#"{"require": {
-            "laravel/framework": "^11.0",
-            "calebdw/larastan": "^2.9"
-        }}"#
-        .parse()
-        .unwrap();
-        let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
-        assert_eq!(result.unwrap().path, phpstan);
-    }
-
-    #[test]
-    fn resolve_auto_detect_skipped_on_laravel_project_without_larastan() {
+    fn resolve_auto_detect_skipped_on_laravel_project_without_laravel_extension() {
         let (dir, _phpstan) = workspace_with_vendor_phpstan();
 
         let config = PhpStanConfig::default();
         // A Laravel project that depends directly on phpstan/phpstan but
-        // has not installed Larastan must not auto-run plain PHPStan: it
-        // does not understand Eloquent magic, facades, or container
-        // bindings, and would report false positives against them.  The
-        // refusal covers `$PATH` too, so nothing resolves at all: a global
-        // binary would misread the framework the same way.
+        // has installed no Laravel-aware extension must not auto-run plain
+        // PHPStan: it does not understand Eloquent magic, facades, or
+        // container bindings, and would report false positives against
+        // them.  The refusal covers `$PATH` too, so nothing resolves at
+        // all: a global binary would misread the framework the same way.
         let package: crate::composer::ComposerPackage = r#"{"require": {
             "laravel/framework": "^11.0",
             "phpstan/phpstan": "^2.1"
@@ -1178,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auto_detect_via_phpstan_neon_dist_on_laravel_project_without_larastan() {
+    fn resolve_auto_detect_via_phpstan_neon_dist_on_laravel_project_without_extension() {
         let dir = tempfile::tempdir().unwrap();
         let bin_path = dir.path().join("vendor").join("bin");
         std::fs::create_dir_all(&bin_path).unwrap();
@@ -1193,9 +1147,9 @@ mod tests {
         }
 
         let config = PhpStanConfig::default();
-        // Same Laravel-without-Larastan project as the test above, but this
+        // Same extensionless Laravel project as the test above, but this
         // one hand-authors a phpstan.neon.dist: the config file overrides
-        // the Larastan gate rather than being blocked by it.
+        // the extension gate rather than being blocked by it.
         let package: crate::composer::ComposerPackage = r#"{"require": {
             "laravel/framework": "^11.0",
             "phpstan/phpstan": "^2.1"

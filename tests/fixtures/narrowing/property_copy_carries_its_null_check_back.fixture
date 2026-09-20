@@ -1,0 +1,20 @@
+// test: narrowing a variable copied out of a property narrows the property
+// feature: hover
+// expect_hover: $fromProperty => string
+// expect_absent: null
+---
+<?php
+
+class Cache
+{
+    private ?string $cacheKey = null;
+
+    public function read(): void
+    {
+        $cacheKey = $this->cacheKey;
+        if ($cacheKey !== null) {
+            $fromProperty = $this->cacheKey;
+            echo $fromPro<>perty;
+        }
+    }
+}

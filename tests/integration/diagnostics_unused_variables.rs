@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::common::collect_diagnostics_with;
     use phpantom_lsp::Backend;
     use phpantom_lsp::types::PhpVersion;
     use tower_lsp::lsp_types::*;
@@ -7,23 +8,18 @@ mod tests {
     /// Helper: create a test backend, open a file, and collect
     /// unused-variable diagnostics.
     fn collect(php: &str) -> Vec<Diagnostic> {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_unused_variable_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(
+            &Backend::new_test(),
+            php,
+            Backend::collect_unused_variable_diagnostics,
+        )
     }
 
     /// Helper: same as `collect` but with a specific PHP version.
     fn collect_with_version(php: &str, version: PhpVersion) -> Vec<Diagnostic> {
         let backend = Backend::new_test();
         backend.set_php_version(version);
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_unused_variable_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(&backend, php, Backend::collect_unused_variable_diagnostics)
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -936,5 +932,52 @@ function foo() {
 "#,
         );
         assert_eq!(diags.len(), 0);
+    }
+    #[test]
+    fn require_in_closure_suppresses_unused_use_capture() {
+        // The required file's code runs in the closure's own scope, so it
+        // can read `$container` by name even though the body never does.
+        let diags = collect(
+            r#"<?php
+class Ctrl {
+    public function boot(string $file, $container) {
+        (static function (string $file) use ($container): void {
+            require_once $file;
+        })($file);
+    }
+}
+"#,
+        );
+        assert_eq!(diags.len(), 0, "got: {diags:?}");
+    }
+
+    #[test]
+    fn require_suppresses_unused_variables_in_the_same_function() {
+        let diags = collect(
+            r#"<?php
+function boot(string $file) {
+    $config = ['a' => 1];
+    include $file;
+}
+"#,
+        );
+        assert_eq!(diags.len(), 0, "got: {diags:?}");
+    }
+
+    #[test]
+    fn require_in_nested_closure_does_not_suppress_outer_unused_variables() {
+        let diags = collect(
+            r#"<?php
+function boot(string $file) {
+    $outer = 1;
+    $fn = function () use ($file) {
+        require $file;
+    };
+    $fn();
+}
+"#,
+        );
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("$outer"));
     }
 }

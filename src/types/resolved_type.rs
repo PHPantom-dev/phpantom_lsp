@@ -489,21 +489,12 @@ impl ResolvedType {
             }
         }
 
-        fn contains_mixed(ty: &PhpType) -> bool {
-            if ty.is_mixed() {
-                return true;
-            }
-            match ty.kind() {
-                TypeKind::Union(members) => members.iter().any(contains_mixed),
-                TypeKind::Nullable(inner) => contains_mixed(inner),
-                _ => false,
-            }
-        }
-
         fn mixed_hides_alternatives(ty: &PhpType) -> bool {
             match ty.kind() {
-                TypeKind::Union(members) => members.len() > 1 && members.iter().any(contains_mixed),
-                TypeKind::Nullable(inner) => contains_mixed(inner),
+                TypeKind::Union(members) => {
+                    members.len() > 1 && members.iter().any(PhpType::contains_mixed)
+                }
+                TypeKind::Nullable(inner) => inner.contains_mixed(),
                 _ => false,
             }
         }
@@ -513,24 +504,31 @@ impl ResolvedType {
             .filter(|result| result.class_info.is_none())
             .map(|result| result.type_string.clone())
             .collect();
-        // A benevolent union carries its marker above the members, and the
-        // join below rebuilds the union from those members alone. Losing
-        // the marker would put a builtin's failure branch (`tempnam()`'s
-        // `false`, and the rest of `benevolent_builtins`) back in force on
-        // code that has always been written without checking it.
         if non_class_types.is_empty()
-            || non_class_types.iter().any(PhpType::is_benevolent)
             || !non_class_types.iter().any(contains_scalar_literal)
             || non_class_types.iter().any(mixed_hides_alternatives)
         {
             return results;
         }
 
+        // Splitting a union apart to normalize it loses the benevolence
+        // marker sitting above it, and a `false` branch is exactly what
+        // brings a lenient union through here in the first place. A scope
+        // that merely rejoined must not make it enforceable again, so the
+        // marker is carried across — but only while every contributing
+        // type had it, since one the code did spell out makes the whole
+        // union worth enforcing.
+        let all_lenient = non_class_types.iter().all(PhpType::is_benevolent);
         let original = match non_class_types.len() {
             1 => non_class_types[0].clone(),
             _ => PhpType::union(non_class_types.clone()),
         };
-        let normalized = PhpType::join_runtime_value_types(non_class_types);
+        let mut normalized = PhpType::join_runtime_value_types(non_class_types);
+        if all_lenient {
+            normalized = PhpType::benevolent(normalized);
+        }
+        // Without the marker carried across, this comparison would see two
+        // types differing by nothing else and rebuild the entry anyway.
         if normalized == original {
             return results;
         }
@@ -546,6 +544,58 @@ impl ResolvedType {
             }
         }
         collapsed
+    }
+
+    /// Remove entries whose type is a subset of another entry's, e.g.
+    /// `string|null` ⊆ `int|string|null` drops the former.
+    ///
+    /// Shared by every merge point that produces a `Vec<ResolvedType>` for
+    /// one variable/expression from more than one branch: real `if`/`else`
+    /// scope joins ([`ScopeState::merge_branch`](crate::type_engine::variable::forward_walk::scope_state::ScopeState::merge_branch))
+    /// and single-expression branch merges (ternaries, match arms) alike.
+    /// A narrowed type from a branch that does not exit leaks into the
+    /// post-merge scope and pollutes subsequent narrowing unless the
+    /// broader sibling that already covers it wins here.
+    ///
+    /// `mixed_absorbs_siblings` controls whether a bare `mixed` entry may
+    /// cover (and so drop) any narrower sibling. A real scope join needs
+    /// this: `if ($mixed instanceof Foo) { … }` with no `else` must not
+    /// leave `Foo` sitting beside `mixed` once the branch's proof no
+    /// longer applies (`ScopeState::merge_branch` passes `true`). A
+    /// ternary/match-arm value merge must not (pass `false`): the
+    /// narrower arm's value is one this expression can actually produce,
+    /// not a proof that stopped holding.
+    pub(crate) fn drop_subsumed_entries(
+        entries: &mut Vec<ResolvedType>,
+        mixed_absorbs_siblings: bool,
+    ) {
+        if entries.len() <= 1 {
+            return;
+        }
+        let types: Vec<PhpType> = entries.iter().map(|rt| rt.type_string.clone()).collect();
+        let mut keep = vec![true; types.len()];
+        for i in 0..types.len() {
+            if !keep[i] {
+                continue;
+            }
+            for j in 0..types.len() {
+                if i == j || !keep[j] {
+                    continue;
+                }
+                if types[i].is_mixed() && !types[j].is_mixed() && !mixed_absorbs_siblings {
+                    continue;
+                }
+                // If j is a strict subset of i, drop j.
+                if types[j] != types[i]
+                    && (types[j].is_subset_of(&types[i])
+                        || array_snapshot_covered_by(&types[j], &types[i])
+                        || intersection_covered_by(&types[j], &types[i]))
+                {
+                    keep[j] = false;
+                }
+            }
+        }
+        crate::util::retain_by_mask(entries, &keep);
     }
 
     /// Combine the type strings of all entries into a single [`PhpType`].
@@ -644,23 +694,7 @@ fn restrict_union_to_classes(ty: &PhpType, survives: &impl Fn(&str) -> bool) -> 
             .collect();
         return restricted.then(|| PhpType::intersection(narrowed));
     }
-    let TypeKind::Union(members) = ty.kind() else {
-        return None;
-    };
-    let kept: Vec<PhpType> = members
-        .iter()
-        .filter(|m| union_member_names_class(m, survives))
-        .cloned()
-        .collect();
-    if kept.is_empty() || kept.len() == members.len() {
-        return None;
-    }
-    // `PhpType::union` does not normalise, so a lone survivor has to be
-    // unwrapped here rather than left as a one-member union.
-    match kept.len() {
-        1 => kept.into_iter().next(),
-        _ => Some(PhpType::union(kept)),
-    }
+    filter_union_members(ty, |m| union_member_names_class(m, survives))
 }
 
 /// Drop the `type_string` union alternatives that name a class an
@@ -681,22 +715,26 @@ fn subtract_classes_from_union(ty: &PhpType, ruled_out: &impl Fn(&str) -> bool) 
             None => None,
         };
     }
+    // Nothing left, or the ruled-out class was never named here and the
+    // union says nothing about what narrowing concluded.  Either way
+    // `filter_union_members` reports `None` and the caller drops the
+    // entry, as it did before this refinement.
+    filter_union_members(ty, |m| !union_member_names_class(m, ruled_out))
+}
+
+/// Keep the union members `keep` accepts, or `None` when that changes
+/// nothing: either every member survives, or none does.
+///
+/// `PhpType::union` does not normalise, so a lone survivor is unwrapped
+/// rather than left as a one-member union.
+fn filter_union_members(ty: &PhpType, keep: impl Fn(&PhpType) -> bool) -> Option<PhpType> {
     let TypeKind::Union(members) = ty.kind() else {
         return None;
     };
-    let kept: Vec<PhpType> = members
-        .iter()
-        .filter(|m| !union_member_names_class(m, ruled_out))
-        .cloned()
-        .collect();
-    // Nothing left, or the ruled-out class was never named here and the
-    // union says nothing about what narrowing concluded.  Either way the
-    // caller drops the entry, as it did before this refinement.
+    let kept: Vec<PhpType> = members.iter().filter(|m| keep(m)).cloned().collect();
     if kept.is_empty() || kept.len() == members.len() {
         return None;
     }
-    // `PhpType::union` does not normalise, so a lone survivor has to be
-    // unwrapped here rather than left as a one-member union.
     match kept.len() {
         1 => kept.into_iter().next(),
         _ => Some(PhpType::union(kept)),
@@ -711,4 +749,50 @@ fn union_member_names_class(member: &PhpType, survives: &impl Fn(&str) -> bool) 
         return parts.iter().any(|p| union_member_names_class(p, survives));
     }
     member.base_name().is_some_and(survives)
+}
+
+/// Whether an array-like `covered` is already covered by a parameterised
+/// array-like `cover`.
+///
+/// Two branches producing different array snapshots of the same variable
+/// (a loop appending an element, an early-return leaving an empty array)
+/// and keeping them all produces self-overlapping unions like
+/// `array{}|array<int, A>|array<int, A|B>`.  Dropping every snapshot a
+/// sibling already covers leaves the single widest one.
+///
+/// A bare `array` never covers a parameterised sibling: it carries no
+/// element information, so collapsing onto it would trade the only useful
+/// snapshot for the least useful one.  Two arrays that describe genuinely
+/// different values (`array<int, int>` and `array<int, string>` from
+/// separate assignments) cover neither way and both survive.
+fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
+    covered.is_array_like()
+        && cover.is_array_like()
+        && !matches!(cover.kind(), TypeKind::Named(_))
+        && covered.is_subtype_of(cover)
+}
+
+/// Whether an intersection produced by one branch is already covered by
+/// a sibling alternative.
+///
+/// `if ($r instanceof Verbose) { … }` narrows `$r` to `Base&Verbose` for
+/// the length of the branch.  The path that skipped the branch still has
+/// a plain `Base`, and every `Base&Verbose` is a `Base`, so the join is
+/// `Base` — keeping both would report `Base|Base&Verbose` and leave the
+/// branch-local proof visible after the branch it belongs to.
+///
+/// The covering type may name the part as one alternative among several
+/// rather than on its own: the path that skipped the branch above often
+/// carries `?Base`, and `Base&Verbose` is still one of the values that
+/// describes.
+///
+/// Only a part named verbatim by the covering type counts.  Widening a
+/// part to its parent would need the class loader, and the case that
+/// matters (a branch narrowing the very type the sibling path carries)
+/// names it exactly.
+fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
+    let TypeKind::Intersection(parts) = covered.kind() else {
+        return false;
+    };
+    parts.iter().any(|part| part.is_subset_of(cover))
 }

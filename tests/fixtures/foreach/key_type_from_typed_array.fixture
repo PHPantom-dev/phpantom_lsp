@@ -1,7 +1,6 @@
-// test: foreach key over a `T[]` annotation is int
+// test: foreach key over a `T[]` annotation keeps the full array-key domain
 // feature: hover
-// expect: $k = int
-// expect_absent: int|string
+// expect: $k = int|string
 ---
 <?php
 

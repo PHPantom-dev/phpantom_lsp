@@ -4,44 +4,8 @@
 //! (populated by the workspace scanner for non-Composer projects) feed
 //! into completion, go-to-definition, and hover correctly.
 
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{complete_at, create_test_backend};
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a file and request completion at the given line/character.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => vec![],
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Function completion from autoload index
@@ -349,7 +313,7 @@ async fn namespaced_function_completion_from_autoload_index() {
 
 #[test]
 fn scan_workspace_fallback_full_discovers_all_symbol_types() {
-    use phpantom_lsp::classmap_scanner::scan_workspace_fallback_full;
+    use phpantom_lsp::classmap_scanner::{IndexFilters, scan_workspace_fallback_full};
 
     let dir = tempfile::tempdir().unwrap();
 
@@ -375,7 +339,7 @@ fn scan_workspace_fallback_full_discovers_all_symbol_types() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, false);
 
     // Classes
     assert!(
@@ -411,7 +375,7 @@ fn scan_workspace_fallback_full_discovers_all_symbol_types() {
 
 #[test]
 fn scan_workspace_fallback_full_excludes_class_methods_and_constants() {
-    use phpantom_lsp::classmap_scanner::scan_workspace_fallback_full;
+    use phpantom_lsp::classmap_scanner::{IndexFilters, scan_workspace_fallback_full};
 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -421,7 +385,7 @@ fn scan_workspace_fallback_full_excludes_class_methods_and_constants() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, false);
 
     assert!(
         result.classmap.contains_key("Service"),

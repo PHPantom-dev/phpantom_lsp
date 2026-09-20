@@ -14,6 +14,7 @@ use super::implement_methods::{detect_class_indent, shorten_single_type};
 use super::make_code_action_data;
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::find_class_at_offset;
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 
@@ -29,6 +30,15 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
+        // The action creates a file, which only a client that accepts the
+        // `create` resource operation can apply.
+        if !self
+            .supports_file_create
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return;
+        }
+
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Only offer on concrete class declarations.
@@ -49,19 +59,7 @@ impl Backend {
 
         // Look up the ClassInfo for the class the cursor is in.
         let file_ctx = self.file_context(uri);
-        let current_class = match file_ctx
-            .classes
-            .iter()
-            .filter(|c| {
-                let effective_start = if c.keyword_offset > 0 {
-                    c.keyword_offset
-                } else {
-                    c.start_offset
-                };
-                cursor_offset >= effective_start && cursor_offset <= c.end_offset
-            })
-            .min_by_key(|c| c.end_offset - c.start_offset)
-        {
+        let current_class = match find_class_at_offset(&file_ctx.classes, cursor_offset) {
             Some(c) => c,
             None => return,
         };
@@ -110,18 +108,7 @@ impl Backend {
 
         let file_ctx = self.file_context(uri);
 
-        let current_class = file_ctx
-            .classes
-            .iter()
-            .filter(|c| {
-                let effective_start = if c.keyword_offset > 0 {
-                    c.keyword_offset
-                } else {
-                    c.start_offset
-                };
-                cursor_offset >= effective_start && cursor_offset <= c.end_offset
-            })
-            .min_by_key(|c| c.end_offset - c.start_offset)?;
+        let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset)?;
 
         if current_class.kind != ClassLikeKind::Class {
             return None;
@@ -172,46 +159,11 @@ impl Backend {
 
         let implements_edit = build_implements_edit(content, current_class, &interface_name)?;
 
-        // Build document_changes with CreateFile + edits.
-        let ops: Vec<DocumentChangeOperation> = vec![
-            // 1. Create the new interface file.
-            DocumentChangeOperation::Op(ResourceOp::Create(CreateFile {
-                uri: new_file_uri.clone(),
-                options: Some(CreateFileOptions {
-                    overwrite: Some(false),
-                    ignore_if_exists: Some(true),
-                }),
-                annotation_id: None,
-            })),
-            // 2. Write content to the new file.
-            DocumentChangeOperation::Edit(TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier {
-                    uri: new_file_uri,
-                    version: None,
-                },
-                edits: vec![OneOf::Left(TextEdit {
-                    range: Range {
-                        start: Position::new(0, 0),
-                        end: Position::new(0, 0),
-                    },
-                    new_text: interface_source,
-                })],
-            }),
-            // 3. Edit the original file to add `implements`.
-            DocumentChangeOperation::Edit(TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier {
-                    uri: doc_url,
-                    version: None,
-                },
-                edits: vec![OneOf::Left(implements_edit)],
-            }),
-        ];
-
-        Some(WorkspaceEdit {
-            changes: None,
-            document_changes: Some(DocumentChanges::Operations(ops)),
-            change_annotations: None,
-        })
+        Some(super::create_file_edit(
+            new_file_uri,
+            interface_source,
+            vec![(doc_url, vec![implements_edit])],
+        ))
     }
 }
 
@@ -530,6 +482,7 @@ mod tests {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         })
     }
 

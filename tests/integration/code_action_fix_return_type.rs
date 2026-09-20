@@ -986,7 +986,7 @@ fn missing_return_type_falls_back_to_mixed() {
     let content = r#"<?php
 class Foo {
     public function getResult() {
-        return strtoupper('hello');
+        return unknownHelper();
     }
 }
 "#;

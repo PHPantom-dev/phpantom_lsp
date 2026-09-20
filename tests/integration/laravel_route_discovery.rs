@@ -7,14 +7,9 @@
 //! or every `route('…')` call naming one of those routes is reported as
 //! unknown.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const PROVIDERS_PHP: &str =
     "<?php\nreturn [\n    App\\Providers\\RouteServiceProvider::class,\n];\n";
@@ -75,7 +70,7 @@ class Service {
 
 fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
     create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (
@@ -89,26 +84,13 @@ fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
     )
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
 #[tokio::test]
 async fn routes_outside_the_routes_directory_are_not_reported_as_unknown() {
     let (backend, dir) = workspace();
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, CONSUMER).await;
+    open_php(&backend, &uri, CONSUMER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
@@ -157,7 +139,7 @@ async fn a_package_with_no_route_files_does_not_flag_route_calls() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Widget.php")).unwrap();
-    open(&backend, &uri, PACKAGE_CONSUMER).await;
+    open_php(&backend, &uri, PACKAGE_CONSUMER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), PACKAGE_CONSUMER, &mut diags);
@@ -182,7 +164,7 @@ async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open(&backend, &uri, CONSUMER).await;
+    open_php(&backend, &uri, CONSUMER).await;
 
     // Cursor inside 'kiosk.register' on line 4.
     let result = backend
@@ -250,7 +232,7 @@ class Nav {
 #[tokio::test]
 async fn routes_under_a_dynamic_group_prefix_are_not_flagged() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("routes/web.php", DYNAMIC_ROUTES),
             ("src/Nav.php", CONSUMER_DYNAMIC),
@@ -259,7 +241,7 @@ async fn routes_under_a_dynamic_group_prefix_are_not_flagged() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
-    open(&backend, &uri, CONSUMER_DYNAMIC).await;
+    open_php(&backend, &uri, CONSUMER_DYNAMIC).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_DYNAMIC, &mut diags);
@@ -315,7 +297,7 @@ class Nav {
 #[tokio::test]
 async fn routes_under_a_wholly_unknown_group_name_are_not_flagged() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("routes/web.php", BARE_DYNAMIC_ROUTES),
             ("src/Nav.php", CONSUMER_BARE_DYNAMIC),
@@ -324,7 +306,7 @@ async fn routes_under_a_wholly_unknown_group_name_are_not_flagged() {
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
-    open(&backend, &uri, CONSUMER_BARE_DYNAMIC).await;
+    open_php(&backend, &uri, CONSUMER_BARE_DYNAMIC).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_BARE_DYNAMIC, &mut diags);

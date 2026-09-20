@@ -68,12 +68,24 @@ pub(crate) use arithmetic::{
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
 pub(crate) use calls::{
     build_function_template_subs, infer_closure_literal_type, is_array_like_wrapper,
-    resolve_arg_variable_raw_type, substitute_function_templates,
+    resolve_arg_variable_raw_type, substitute_function_templates, walker_arg_types,
 };
 pub(crate) use instantiation::{
-    TemplateBindingMode, classify_template_binding, extract_array_position,
-    remap_inherited_ctor_subs, type_contains_name,
+    TemplateBindingMode, array_element_binding, classify_template_binding, extract_array_position,
+    extract_generic_arg_from_ancestor, remap_inherited_ctor_subs, type_contains_name,
 };
+
+/// The type of a member access whose name PHP only works out at runtime.
+///
+/// `$obj->{$name}()`, `Cls::{$expr}()`, `$obj->{$name}`, `Cls::${$name}`
+/// and `Cls::{$name}` all name a member no static lookup can find, so the
+/// only honest answer is `mixed` — the type that admits every value.
+/// Answering with nothing instead would say the type engine's resolution
+/// fell short, sending whoever reads the diagnostic looking for a gap in
+/// the engine rather than at code PHP itself leaves open.
+pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
+    vec![ResolvedType::from_type_string(PhpType::mixed())]
+}
 
 /// Apply unary `+` or `-` to an already-resolved numeric type.
 ///
@@ -139,7 +151,12 @@ fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
 /// Collapse only semantically redundant alternatives after joining control-flow
 /// expression branches. Exact literal-only unions remain untouched.
 fn simplify_branch_results(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
-    ResolvedType::collapse_redundant_runtime_literals(results)
+    let mut results = ResolvedType::collapse_redundant_runtime_literals(results);
+    // `mixed_absorbs_siblings: false` — a ternary/match arm that only
+    // resolves to `mixed` (an unresolved call) must not erase a sibling
+    // arm's real, narrower answer; see `drop_subsumed_entries`.
+    ResolvedType::drop_subsumed_entries(&mut results, false);
+    results
 }
 
 /// PHP's runtime truthiness for a ternary condition, when it is a literal
@@ -382,15 +399,26 @@ fn resolved_type_with_lookup(
 /// The narrowed type recorded for `key` at this expression's position,
 /// if any.
 ///
-/// The completion/hover paths carry a `scope_var_resolver`; the
-/// diagnostic path instead reads the forward walker's snapshot cache, so
-/// both are consulted — otherwise diagnostics get a different answer
+/// An enclosing ternary arm or `match` arm comes first: it proved
+/// something the surrounding statement's scope does not know, because the
+/// check is part of the expression rather than a statement above it.  That
+/// is what carries `getDocComment() !== false ? getDocComment() : null`
+/// over to the repeated call in the true arm.
+///
+/// Failing that, the completion/hover paths carry a `scope_var_resolver`;
+/// the diagnostic path instead reads the forward walker's snapshot cache,
+/// so both are consulted — otherwise diagnostics get a different answer
 /// than hover for the identical expression.
 fn narrowed_subject_from_scope(
     key: &str,
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
+    if let Some(from_arm) = ctx.arm_narrowed(key)
+        && !from_arm.is_empty()
+    {
+        return Some(from_arm.clone());
+    }
     let from_scope = match ctx.scope_var_resolver {
         Some(resolver) => resolver(key),
         None if super::forward_walk::is_diagnostic_scope_active()
@@ -654,9 +682,32 @@ fn truthy_alternatives(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
 /// `false`, `0`, `''`, …) makes one branch unreachable, and the dead
 /// branch must not widen the result into a union.  PHPStan prunes the
 /// same way.
+///
+/// A condition that rules out every value one of its subjects holds prunes
+/// the same way even though its truthiness is not a constant:
+/// `$acc === null ? seed() : $acc->merge()` cannot take its else arm while
+/// `$acc` is still exactly `null`, so folding that arm's unresolvable
+/// receiver into the union would erase the seed the then arm produces.
 fn resolve_conditional_chain<'b>(
     conditional: &'b Conditional<'b>,
     ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let mut skipped_impossible = false;
+    let results = resolve_conditional_arms(conditional, ctx, true, &mut skipped_impossible);
+    // Pruning must never be the reason the whole ternary has no type: when
+    // every arm that was left looked impossible, the narrowing that said so
+    // was the less trustworthy of the two answers.
+    if results.is_empty() && skipped_impossible {
+        return resolve_conditional_arms(conditional, ctx, false, &mut false);
+    }
+    results
+}
+
+fn resolve_conditional_arms<'b>(
+    conditional: &'b Conditional<'b>,
+    ctx: &VarResolutionCtx<'_>,
+    prune_impossible: bool,
+    skipped_impossible: &mut bool,
 ) -> Vec<ResolvedType> {
     let mut combined: Vec<ResolvedType> = Vec::new();
     let mut current = conditional;
@@ -674,18 +725,23 @@ fn resolve_conditional_chain<'b>(
             // The then arm only runs when the condition held, so it sees the
             // condition's positive narrowing — the same specification an
             // `if` body gets.
-            let then_ctx = with_arm_narrowing(&then_ctx, &carried, current.condition, true);
-            let then_results = resolve_rhs_expression(then_expr, &then_ctx);
-            let then_results = widen_unresolved_branch(then_expr, then_results);
-            // The short form yields the condition's value, and reaching it
-            // means the condition was truthy, so its falsy members are not
-            // part of the result.
-            let then_results = if is_short {
-                truthy_alternatives(then_results)
+            let (then_ctx, impossible) =
+                with_arm_narrowing(&then_ctx, &carried, current.condition, true);
+            if impossible && prune_impossible {
+                *skipped_impossible = true;
             } else {
-                then_results
-            };
-            ResolvedType::extend_unique(&mut combined, then_results);
+                let then_results = resolve_rhs_expression(then_expr, &then_ctx);
+                let then_results = widen_unresolved_branch(then_expr, then_results);
+                // The short form yields the condition's value, and reaching it
+                // means the condition was truthy, so its falsy members are not
+                // part of the result.
+                let then_results = if is_short {
+                    truthy_alternatives(then_results)
+                } else {
+                    then_results
+                };
+                ResolvedType::extend_unique(&mut combined, then_results);
+            }
         }
         if truthiness == Some(true) {
             return simplify_branch_results(combined);
@@ -699,12 +755,17 @@ fn resolve_conditional_chain<'b>(
                 let else_ctx = ctx.with_cursor_offset(current.r#else.span().start.offset);
                 // Reaching the else arm proves the condition was false, so it
                 // sees the inverse narrowing.
-                let else_ctx = with_arm_narrowing(&else_ctx, &carried, current.condition, false);
-                let else_results = resolve_rhs_expression(current.r#else, &else_ctx);
-                ResolvedType::extend_unique(
-                    &mut combined,
-                    widen_unresolved_branch(current.r#else, else_results),
-                );
+                let (else_ctx, impossible) =
+                    with_arm_narrowing(&else_ctx, &carried, current.condition, false);
+                if impossible && prune_impossible {
+                    *skipped_impossible = true;
+                } else {
+                    let else_results = resolve_rhs_expression(current.r#else, &else_ctx);
+                    ResolvedType::extend_unique(
+                        &mut combined,
+                        widen_unresolved_branch(current.r#else, else_results),
+                    );
+                }
                 return simplify_branch_results(combined);
             }
         }
@@ -712,7 +773,8 @@ fn resolve_conditional_chain<'b>(
 }
 
 /// Derive a context whose variable lookups see `condition`'s narrowing for
-/// the given polarity, layered on top of `carried`.
+/// the given polarity, layered on top of `carried`, and say whether the
+/// polarity is possible at all.
 ///
 /// The condition's own specification wins over `carried`: it is evaluated
 /// against the same declared types and is the more specific of the two.
@@ -721,10 +783,12 @@ fn with_arm_narrowing<'a>(
     carried: &HashMap<String, Vec<ResolvedType>>,
     condition: &Expression<'_>,
     truthy: bool,
-) -> VarResolutionCtx<'a> {
+) -> (VarResolutionCtx<'a>, bool) {
     let mut overrides = carried.clone();
-    merge_arm_narrowing(&mut overrides, condition, truthy, ctx);
-    ctx.with_match_arm_narrowing(overrides)
+    let (own, impossible) =
+        crate::type_engine::variable::forward_walk::condition_arm_narrowing(condition, truthy, ctx);
+    overrides.extend(own);
+    (ctx.with_match_arm_narrowing(overrides), impossible)
 }
 
 /// Fold `condition`'s narrowing for one polarity into an override map.

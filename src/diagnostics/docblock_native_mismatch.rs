@@ -1,27 +1,34 @@
 //! Diagnostics for a docblock type that contradicts its native type hint.
 //!
 //! A `@param` or `@return` annotation is there to *refine* the native
-//! declaration, not to disagree with it.  When the native hint admits `null`
-//! and the annotation does not, the two describe different sets of values:
+//! declaration, not to widen it.  When the annotation admits `null` and the
+//! native hint rules it out, the two describe different sets of values:
 //!
 //! ```php
-//! /** @param string $name */
-//! function greet(?string $name): void {}
+//! /** @param ?string $name */
+//! function greet(string $name): void {}
 //! ```
 //!
-//! A caller reading the signature may legally pass `null`, and the callee has
-//! been promised it never receives one.  Whichever of the two is wrong, they
-//! cannot both be right, so the declaration is flagged.
+//! The engine cannot honour the annotation without contradicting the
+//! signature, and a caller that passes `null` is stopped by the runtime
+//! whatever the docblock claims, so the declaration is flagged.
 //!
-//! Only annotations whose nullability the type expression itself settles are
-//! checked.  A bare class-like name is not one of them: `@param T $x` may be a
-//! `@template` parameter and `@param UserId $x` may be an imported
-//! `@psalm-type` alias, either of which can resolve to a nullable type.
+//! The opposite pairing is not a contradiction.  A nullable native hint
+//! carries its `null` over to the documented type on its own, exactly as
+//! PHPStan's `TypehintHelper::decideType` does, so leaving `|null` out of the
+//! docblock of a `?string` parameter is idiomatic rather than wrong:
+//!
+//! ```php
+//! /** @param non-empty-string $name */
+//! function greet(?string $name): void {}   // reads as `non-empty-string|null`
+//! ```
 
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::declare::DeclareBody;
-use mago_syntax::cst::function_like::parameter::FunctionLikeParameterList;
+use mago_syntax::cst::function_like::parameter::{
+    FunctionLikeParameterDefaultValue, FunctionLikeParameterList,
+};
 use mago_syntax::cst::function_like::r#return::FunctionLikeReturnTypeHint;
 use mago_syntax::cst::sequence::Sequence;
 use mago_syntax::cst::statement::Statement;
@@ -36,7 +43,7 @@ use crate::docblock::{
     get_docblock_info_for_node,
 };
 use crate::parser::{extract_hint_type, with_parsed_program};
-use crate::php_type::{PhpType, TypeKind, is_keyword_type};
+use crate::php_type::{PhpType, TypeKind};
 
 use super::helpers::make_diagnostic;
 
@@ -164,24 +171,42 @@ fn check_declaration(
             continue;
         };
         let name = bytes_to_str(param.variable.name);
-        let native = extract_hint_type(hint);
+        let mut native = extract_hint_type(hint);
+        // `string $name = null` is PHP's pre-8.4 implicit-nullable form: the
+        // signature accepts null without spelling it, so a `?string` docblock
+        // agrees with it.
+        if param
+            .default_value
+            .as_ref()
+            .is_some_and(|default| default_is_null(default, ctx.content))
+        {
+            native = native.or_null();
+        }
         let Some(documented) = extract_param_raw_type_from_info(&info, name) else {
             continue;
         };
-        if !denies_null_the_native_hint_admits(&documented, &native) {
+        if !admits_null_the_native_hint_denies(&documented, &native) {
             continue;
         }
         out.push(Finding {
             start: hint.span().start.offset as usize,
             end: param.variable.span.end.offset as usize,
             message: format!(
-                "Documented type '{}' for {} does not accept null, but the native type hint '{}' does",
+                "Documented type '{}' for {} accepts null, but the native type hint '{}' does not",
                 documented, name, native
             ),
         });
     }
 
     check_return(&info, return_type_hint, out);
+}
+
+/// Whether a parameter's default value is the literal `null`.
+fn default_is_null(default: &FunctionLikeParameterDefaultValue<'_>, content: &str) -> bool {
+    let span = default.value.span();
+    content
+        .get(span.start.offset as usize..span.end.offset as usize)
+        .is_some_and(|text| text.trim().eq_ignore_ascii_case("null"))
 }
 
 fn check_return(
@@ -196,7 +221,7 @@ fn check_return(
     let Some(documented) = extract_return_type_from_info(info) else {
         return;
     };
-    if !denies_null_the_native_hint_admits(&documented, &native) {
+    if !admits_null_the_native_hint_denies(&documented, &native) {
         return;
     }
     let span = hint.hint.span();
@@ -204,47 +229,38 @@ fn check_return(
         start: span.start.offset as usize,
         end: span.end.offset as usize,
         message: format!(
-            "Documented return type '{}' does not accept null, but the native type hint '{}' does",
+            "Documented return type '{}' accepts null, but the native type hint '{}' does not",
             documented, native
         ),
     });
 }
 
-/// Whether `documented` rules out a `null` that `native` allows.
-fn denies_null_the_native_hint_admits(documented: &PhpType, native: &PhpType) -> bool {
-    // `mixed` admits null without ever spelling it, so narrowing it through a
-    // docblock is the annotation doing its job rather than a contradiction.
-    // This mirrors the effective-type merge in `resolve_effective_type_typed`.
-    if !native.accepts_null() || native.is_mixed() || native.non_null_type().is_none() {
+/// Whether `documented` admits a `null` that `native` rules out.
+fn admits_null_the_native_hint_denies(documented: &PhpType, native: &PhpType) -> bool {
+    // A nullable native hint hands its `null` to the documented type, so the
+    // annotation can never be the wider of the two.  This mirrors the
+    // effective-type merge in `resolve_effective_type_typed`.
+    if native.accepts_null() {
         return false;
     }
 
-    !documented.accepts_null() && nullability_is_decidable(documented)
+    spells_null(documented)
 }
 
-/// Whether the type expression itself settles the question "does this admit
-/// null?".
+/// Whether the type expression itself puts `null` in the set of values it
+/// describes.
 ///
-/// A bare class-like name does not: it may be a `@template` parameter or a
-/// `@psalm-type` alias standing in for a nullable type.  Everything the
-/// keyword vocabulary spells (`string`, `list<int>`, `array{...}`, literals,
-/// `static`, …) does, and so does every parameterised or structural form,
-/// none of which can be null whatever its arguments resolve to.
-fn nullability_is_decidable(ty: &PhpType) -> bool {
+/// Only the spellings that name `null` outright count.  `mixed` admits null
+/// too, but a docblock that widens a native hint all the way to `mixed` is a
+/// different mistake than one that contradicts its nullability, and a bare
+/// class-like name settles nothing: `@param T $x` may be a `@template`
+/// parameter and `@param UserId $x` an imported `@psalm-type` alias, either of
+/// which can resolve to a nullable type.
+fn spells_null(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::Named(name) => is_keyword_type(name),
-        TypeKind::Nullable(inner) => nullability_is_decidable(inner),
-        TypeKind::Union(members) | TypeKind::Intersection(members) => {
-            members.iter().all(nullability_is_decidable)
-        }
-        // A type expression that was never evaluated (its operand was a
-        // template that went unsubstituted, or a constant we could not read)
-        // names no set of values, so it cannot be asked about null either.
-        TypeKind::Raw(_)
-        | TypeKind::Conditional(_)
-        | TypeKind::KeyOf(_)
-        | TypeKind::ValueOf(_)
-        | TypeKind::IndexAccess(..) => false,
-        _ => true,
+        TypeKind::Nullable(_) => true,
+        TypeKind::Named(name) => name.eq_ignore_ascii_case("null"),
+        TypeKind::Union(members) => members.iter().any(spells_null),
+        _ => false,
     }
 }

@@ -1,0 +1,24 @@
+// test: ??= used as a value resolves to what the target now holds
+// feature: completion
+// expect: decide(
+---
+<?php
+
+class Verdict
+{
+    public function decide(): bool { return true; }
+}
+
+class Guard
+{
+    /** @var array<string, Verdict> */
+    private array $cache = [];
+
+    private function compute(): Verdict { return new Verdict(); }
+
+    public function check(string $key): void
+    {
+        $verdict = $this->cache[$key] ??= $this->compute();
+        $verdict-><>
+    }
+}

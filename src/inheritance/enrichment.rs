@@ -129,6 +129,13 @@ fn method_enrichment_would_change(existing: &MethodInfo, ancestor: &MethodInfo) 
         return true;
     }
 
+    // Deprecation (an override with no docblock of its own inherits the
+    // ancestor's `@deprecated` tag, matching PHPStan's phpDoc-inheritance
+    // resolver).
+    if existing.deprecation_message.is_none() && ancestor.deprecation_message.is_some() {
+        return true;
+    }
+
     // Descriptions.
     (existing.description.is_none() && ancestor.description.is_some())
         || (existing.return_description.is_none() && ancestor.return_description.is_some())
@@ -271,6 +278,12 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
         }
     } else if positional_parameters_would_change(&existing.parameters, &ancestor.parameters) {
         enrich_parameters_from_ancestor(existing.parameters.make_mut(), &ancestor.parameters);
+    }
+
+    // ── Deprecation ─────────────────────────────────────────────
+    if existing.deprecation_message.is_none() && ancestor.deprecation_message.is_some() {
+        existing.deprecation_message = ancestor.deprecation_message.clone();
+        existing.deprecated_replacement = ancestor.deprecated_replacement.clone();
     }
 
     // ── Descriptions ────────────────────────────────────────────

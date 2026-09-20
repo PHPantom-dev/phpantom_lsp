@@ -1,0 +1,16 @@
+// test: a failed strict in_array drops every alternative its elements cover
+// feature: hover
+// expect_hover: $definite => string
+// expect_absent: null
+---
+<?php
+
+function read(?string $doc): void
+{
+    if (in_array($doc, [null, ''], true)) {
+        return;
+    }
+
+    $definite = $doc;
+    echo $defi<>nite;
+}

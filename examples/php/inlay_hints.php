@@ -57,11 +57,11 @@ class InlayHintsDemo
         // return type shows after the closing parenthesis.
 
         // Arrow function: "User " before $u, ": string" after parens.
-        $names = $this->mapUsers(fn($u) => $u->name);
+        $names = $this->mapUsers(fn($u) => $u->getName());
 
         // Long-form closure gets the same treatment:
         $upper = $this->mapUsers(function ($u) {
-            return strtoupper($u->name);
+            return strtoupper($u->getName());
         });
 
         // Partial typing: only the untyped $b gets a hint.

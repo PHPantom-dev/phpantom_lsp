@@ -3,10 +3,9 @@
 //! Tests that `#[PhpStormStubsElementAvailable]` attributes on functions,
 //! methods, and parameters are respected when a target PHP version is set.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, hover_at, hover_text};
 use phpantom_lsp::Backend;
 use phpantom_lsp::types::PhpVersion;
-use tower_lsp::lsp_types::{HoverContents, Position};
 
 // ─── PhpVersion parsing ─────────────────────────────────────────────────────
 
@@ -175,27 +174,6 @@ fn detect_version_no_php_constraint() {
     .unwrap();
     let v = phpantom_lsp::composer::detect_php_version(dir.path());
     assert!(v.is_none());
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Register file content in the backend and return hover result.
-fn hover_at(
-    backend: &Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Option<tower_lsp::lsp_types::Hover> {
-    backend.update_ast(uri, content);
-    backend.handle_hover(uri, content, Position { line, character })
-}
-
-fn hover_text(hover: &tower_lsp::lsp_types::Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
 }
 
 // ─── Function-level version filtering ───────────────────────────────────────

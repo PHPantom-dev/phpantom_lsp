@@ -1,0 +1,21 @@
+// test: ??= with a callable-property invocation on the RHS
+// feature: completion
+// expect: getType(
+---
+<?php
+
+class MutatingScope {
+    public function getType(): string { return ''; }
+}
+
+class Holder {
+    /** @var callable(): MutatingScope */
+    private $leftTruthyScope;
+
+    public function run(): void
+    {
+        $scope = null;
+        $scope ??= ($this->leftTruthyScope)();
+        $scope-><>
+    }
+}

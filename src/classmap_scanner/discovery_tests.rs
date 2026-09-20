@@ -383,7 +383,7 @@ fn scan_workspace_fallback_full_finds_all_symbol_types() {
     std::fs::write(dir.path().join("Model.php"), "<?php\nclass User {}").unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None, false);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, false);
     assert!(result.classmap.contains_key("User"));
     assert!(
         result.function_index.contains_key("myHelper"),
@@ -420,7 +420,7 @@ fn scan_workspace_fallback_full_skips_vendor() {
 
     let mut skip = std::collections::HashSet::new();
     skip.insert(vendor.clone());
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None, false);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, false);
     assert!(result.function_index.contains_key("appFunc"));
     assert!(
         !result.function_index.contains_key("vendorFunc"),
@@ -445,7 +445,7 @@ fn scan_workspace_fallback_full_skips_hidden_dirs() {
     .unwrap();
 
     let skip = std::collections::HashSet::new();
-    let result = scan_workspace_fallback_full(dir.path(), &skip, None, false);
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, false);
     assert!(result.function_index.contains_key("publicFunc"));
     assert!(
         !result.function_index.contains_key("secretFunc"),
@@ -539,7 +539,7 @@ fn scan_drupal_directories_finds_php_and_module_files() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, None);
+    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     assert!(
         result
             .classmap
@@ -560,9 +560,19 @@ fn scan_drupal_directories_finds_php_and_module_files() {
 }
 
 #[test]
-fn scan_drupal_directories_skips_test_dirs() {
+fn scan_drupal_directories_indexes_test_dirs_by_default() {
     let dir = tempfile::tempdir().unwrap();
     let web_root = dir.path();
+
+    // Module tests extend base classes living under core/tests/, so
+    // test directories must be indexed for those tests to resolve.
+    let base_dir = web_root.join("core/tests/Drupal/Tests");
+    std::fs::create_dir_all(&base_dir).unwrap();
+    std::fs::write(
+        base_dir.join("UnitTestCase.php"),
+        "<?php\nnamespace Drupal\\Tests;\nclass UnitTestCase {}",
+    )
+    .unwrap();
 
     let test_dir = web_root.join("modules/contrib/token/tests/src");
     std::fs::create_dir_all(&test_dir).unwrap();
@@ -572,25 +582,30 @@ fn scan_drupal_directories_skips_test_dirs() {
     )
     .unwrap();
 
-    // Also test the "Tests" casing
-    let test_dir2 = web_root.join("core/Tests");
-    std::fs::create_dir_all(&test_dir2).unwrap();
-    std::fs::write(
-        test_dir2.join("CoreTest.php"),
-        "<?php\nnamespace Drupal\\Tests;\nclass CoreTest {}",
-    )
-    .unwrap();
+    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    assert!(
+        result.classmap.contains_key("Drupal\\Tests\\UnitTestCase"),
+        "core test base classes must be indexed"
+    );
+    assert!(
+        result
+            .classmap
+            .contains_key("Drupal\\Tests\\token\\TokenTest"),
+        "module tests are indexed by default"
+    );
 
-    let result = scan_drupal_directories(web_root, None);
+    // Projects that want the old behaviour opt in via the exclude list.
+    let filters = test_filters(dir.path(), &["tests/", "Tests/"], &[]);
+    let result = scan_drupal_directories(web_root, &filters, None);
     assert!(
         !result
             .classmap
             .contains_key("Drupal\\Tests\\token\\TokenTest"),
-        "should skip tests/ directories"
+        "exclude patterns trim test directories on demand"
     );
     assert!(
-        !result.classmap.contains_key("Drupal\\Tests\\CoreTest"),
-        "should skip Tests/ directories"
+        !result.classmap.contains_key("Drupal\\Tests\\UnitTestCase"),
+        "exclude patterns apply to core tests too"
     );
 }
 
@@ -598,7 +613,7 @@ fn scan_drupal_directories_skips_test_dirs() {
 fn scan_drupal_directories_skips_nonexistent_dirs() {
     let dir = tempfile::tempdir().unwrap();
     // Empty web root — none of the expected subdirectories exist
-    let result = scan_drupal_directories(dir.path(), None);
+    let result = scan_drupal_directories(dir.path(), &IndexFilters::empty(), None);
     assert!(result.classmap.is_empty());
     assert!(result.function_index.is_empty());
     assert!(result.constant_index.is_empty());
@@ -619,7 +634,7 @@ fn scan_drupal_directories_ignores_non_php_files() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, None);
+    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     // Only the .php file should be indexed
     assert!(
         result.function_index.contains_key("install_begin"),
@@ -718,6 +733,7 @@ fn scan_directories_follows_a_symlinked_root() {
     assert!(classmap.contains_key("Linked"));
 }
 
+
 // ── follow-links: interior symlink walking (issue #383) ────────────
 //
 // The workspace walker's `follow_links` switch decides whether a
@@ -744,7 +760,7 @@ fn walk_roots_does_not_follow_interior_symlink_by_default() {
     std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
     let empty = HashSet::new();
-    let opts = WalkOptions::new(Vec::new(), &empty, false);
+    let opts = WalkOptions::new(Vec::new(), &empty, IndexFilters::empty(), false);
     let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
     assert!(
         !files.iter().any(|p| p.ends_with("Hidden.php")),
@@ -768,7 +784,7 @@ fn walk_roots_follows_interior_symlink_when_enabled() {
     std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
     let empty = HashSet::new();
-    let opts = WalkOptions::new(Vec::new(), &empty, true);
+    let opts = WalkOptions::new(Vec::new(), &empty, IndexFilters::empty(), true);
     let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
     let linked = files
         .iter()
@@ -809,7 +825,7 @@ fn walk_roots_follows_nested_symlinks() {
     std::os::windows::fs::symlink_dir(&ext2, &soa).unwrap();
 
     let empty = HashSet::new();
-    let opts = WalkOptions::new(Vec::new(), &empty, true);
+    let opts = WalkOptions::new(Vec::new(), &empty, IndexFilters::empty(), true);
     let files: Vec<PathBuf> = walk_roots(&[root.clone()], &opts).into_iter().flatten().collect();
     let linked = files
         .iter()
@@ -842,7 +858,7 @@ fn walk_roots_follows_symlink_cycle_safely() {
     std::os::windows::fs::symlink_dir(&root, &link).unwrap();
 
     let empty = HashSet::new();
-    let opts = WalkOptions::new(Vec::new(), &empty, true);
+    let opts = WalkOptions::new(Vec::new(), &empty, IndexFilters::empty(), true);
     let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
     assert!(
         files.iter().any(|p| p.ends_with("App.php")),
@@ -874,10 +890,97 @@ fn walk_roots_skip_dirs_match_literal_walk_spelling() {
 
     let skip_dirs = vec![real_vendor];
     let empty = HashSet::new();
-    let opts = WalkOptions::new(skip_dirs, &empty, true);
+    let opts = WalkOptions::new(skip_dirs, &empty, IndexFilters::empty(), true);
     let files: Vec<PathBuf> = walk_roots(&[root], &opts).into_iter().flatten().collect();
     assert!(
         files.iter().any(|p| p.ends_with("Pkg.php")),
         "skip_dirs matches literal walk paths; the target spelling must not prune the link spelling: {files:?}"
+    );
+}
+
+// ── [indexing] exclude / extensions filters ──────────────────────
+
+/// Compile filters rooted at the test workspace.
+fn test_filters(
+    root: &std::path::Path,
+    exclude: &[&str],
+    extensions: &[&str],
+) -> std::sync::Arc<IndexFilters> {
+    std::sync::Arc::new(IndexFilters::compile(
+        Some(root),
+        &exclude.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        &extensions.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+    ))
+}
+
+#[test]
+fn workspace_scan_honors_exclude_globs() {
+    let dir = tempfile::tempdir().unwrap();
+    let generated = dir.path().join("generated");
+    let nested = dir.path().join("src").join("fixtures");
+    std::fs::create_dir_all(&generated).unwrap();
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(dir.path().join("Keep.php"), "<?php\nclass Keep {}").unwrap();
+    std::fs::write(generated.join("Skipped.php"), "<?php\nclass Skipped {}").unwrap();
+    std::fs::write(nested.join("Fixture.php"), "<?php\nclass Fixture {}").unwrap();
+
+    let filters = test_filters(dir.path(), &["generated", "fixtures/"], &[]);
+    let skip = std::collections::HashSet::new();
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &filters, None, false);
+
+    assert!(result.classmap.contains_key("Keep"));
+    assert!(
+        !result.classmap.contains_key("Skipped"),
+        "anchored exclude should prune the directory"
+    );
+    assert!(
+        !result.classmap.contains_key("Fixture"),
+        "bare-name exclude should match at any depth"
+    );
+}
+
+#[test]
+fn workspace_scan_honors_extra_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("hooks.module"),
+        "<?php\nfunction hooks_help() {}\nclass HooksHelper {}",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "<?php\nclass NotPhp {}").unwrap();
+
+    let filters = test_filters(dir.path(), &[], &["module"]);
+    let skip = std::collections::HashSet::new();
+    let result = scan_workspace_fallback_full(dir.path(), &skip, &filters, None, false);
+
+    assert!(result.classmap.contains_key("HooksHelper"));
+    assert!(result.function_index.contains_key("hooks_help"));
+    assert!(
+        !result.classmap.contains_key("NotPhp"),
+        "unlisted extensions must stay invisible"
+    );
+}
+
+#[test]
+fn drupal_scan_honors_exclude_globs() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    let custom = web_root.join("modules").join("custom").join("mymod");
+    let fixtures = custom.join("fixtures");
+    std::fs::create_dir_all(&fixtures).unwrap();
+    std::fs::write(custom.join("Mymod.php"), "<?php\nclass Mymod {}").unwrap();
+    std::fs::write(
+        fixtures.join("FixtureClass.php"),
+        "<?php\nclass FixtureClass {}",
+    )
+    .unwrap();
+
+    let filters = test_filters(dir.path(), &["fixtures"], &[]);
+    let result = scan_drupal_directories(web_root, &filters, None);
+
+    assert!(result.classmap.contains_key("Mymod"));
+    assert!(
+        !result.classmap.contains_key("FixtureClass"),
+        "exclude globs should apply to the Drupal scanner too"
     );
 }

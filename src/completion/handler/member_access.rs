@@ -242,15 +242,7 @@ impl Backend {
     fn member_completion_prefix(content: &str, position: Position) -> String {
         let cursor_offset = position_to_offset(content, position) as usize;
         let bytes = content.as_bytes();
-        let mut start = cursor_offset.min(bytes.len());
-        while start > 0 {
-            let b = bytes[start - 1];
-            if b.is_ascii_alphanumeric() || b == b'_' {
-                start -= 1;
-            } else {
-                break;
-            }
-        }
+        let start = crate::text_scan::scan_ident_backward(bytes, cursor_offset);
 
         let has_member_operator = (start >= 2
             && ((bytes[start - 2] == b'-' && bytes[start - 1] == b'>')
@@ -571,6 +563,11 @@ impl Backend {
     ) -> Option<CompletionTarget> {
         let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
+        // The map's offsets describe the text it was extracted from; a
+        // buffer edited since then is a different file as far as they are
+        // concerned, and the caller's text-based extraction is the right
+        // answer for it.
+        let source = map.source(content)?;
         let cursor_offset = position_to_offset(content, position);
 
         // The cursor may be at the end of a partially-typed member name
@@ -579,13 +576,7 @@ impl Backend {
         // the cursor to find where the member name starts, then look up
         // the span that starts at or contains the access operator.
         let bytes = content.as_bytes();
-        let mut search_offset = cursor_offset as usize;
-        while search_offset > 0 && {
-            let b = bytes[search_offset - 1];
-            b.is_ascii_alphanumeric() || b == b'_'
-        } {
-            search_offset -= 1;
-        }
+        let search_offset = crate::text_scan::scan_ident_backward(bytes, cursor_offset as usize);
 
         // Check for `->` or `?->` before the member name start
         let has_arrow = search_offset >= 2
@@ -627,7 +618,7 @@ impl Backend {
             };
             return Some(CompletionTarget {
                 access_kind,
-                subject: subject_text.as_str(content).to_string(),
+                subject: subject_text.as_str(source).to_string(),
             });
         }
 

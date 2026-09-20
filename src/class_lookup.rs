@@ -146,6 +146,31 @@ pub(crate) fn find_class_by_name<'a>(
     }
 }
 
+/// The class a class-position expression names, as written.
+///
+/// Covers the four spellings a `Foo::bar()`, `new Foo`, `Foo::CONST`, or
+/// `Foo::$prop` can put on the left: a name, `self`, `static`, and
+/// `parent`. `self` and `static` answer with the current class (late
+/// static binding is settled by the caller, which knows whether the call
+/// forwards it), and `parent` with its parent, or `None` when it has
+/// none.
+///
+/// Every other expression kind (a variable holding a class-string, a call)
+/// needs resolution this cannot do and yields `None`; a caller that
+/// handles one matches it before reaching here.
+pub(crate) fn class_expression_name(
+    expr: &mago_syntax::cst::Expression<'_>,
+    current_class: &ClassInfo,
+) -> Option<String> {
+    use mago_syntax::cst::Expression;
+    match expr {
+        Expression::Identifier(ident) => Some(crate::atom::bytes_to_str(ident.value()).to_string()),
+        Expression::Self_(_) | Expression::Static(_) => Some(current_class.name.to_string()),
+        Expression::Parent(_) => current_class.parent_class.map(|a| a.to_string()),
+        _ => None,
+    }
+}
+
 /// Returns `true` if `s` is one of the PHP keywords that refer to the
 /// *current* class (not the parent): `self`, `static`, or `$this`.
 ///
@@ -179,16 +204,57 @@ pub(crate) fn is_class_keyword(s: &str) -> bool {
 ///
 /// This centralises the keyword → class-name mapping that was
 /// previously duplicated across 10+ call sites.
+///
+/// The name returned is fully qualified.  `parent` already is, and `self`
+/// has to be: a namespaced class whose short name collides with a global
+/// one (`PHPStan\Analyser\Error` against the built-in `\Error`) would
+/// otherwise have every `new self(…)` and `self::` resolve to whichever
+/// class the loader finds first, which is the global one.
 pub(crate) fn resolve_class_keyword(
     keyword: &str,
     current_class: Option<&ClassInfo>,
 ) -> Option<String> {
     if is_self_or_static(keyword) {
-        current_class.map(|cc| cc.name.to_string())
+        current_class.map(|cc| cc.fqn().to_string())
     } else if keyword.eq_ignore_ascii_case("parent") {
         current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
     } else {
         None
+    }
+}
+
+/// Load a class's ancestor by the name stored on it, refusing an answer
+/// that is the class itself.
+///
+/// `parent_class`, `interfaces`, and `used_traits` hold canonical FQNs, so
+/// a backslash-free entry names a root-namespace class.  The class loader
+/// applies the *consuming* file's `use` imports to bare names, which is
+/// right for a name a user typed and wrong here: resolving
+/// `Nette\Neon\Exception extends \Exception` while answering a question
+/// asked from a file that says `use Nette\Neon\Exception;` turns the stored
+/// `Exception` back into the subclass.  The re-entry guard then cuts the
+/// chain and every member the real `\Exception` provides goes missing.
+///
+/// PHP has no self-inheritance, so an answer naming the class we started
+/// from is proof that an import won a lookup it had no business in, and the
+/// name is retried as the explicit global reference it stood for.  A stored
+/// name that is already qualified and still resolves to the class itself is
+/// a genuine cycle and yields nothing.
+pub(crate) fn load_ancestor(
+    class_fqn: &str,
+    ancestor_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Arc<ClassInfo>> {
+    let loaded = class_loader(ancestor_name);
+    let is_self = |cls: &ClassInfo| cls.fqn().eq_ignore_ascii_case(class_fqn);
+    match loaded {
+        Some(cls) if is_self(&cls) => {
+            if ancestor_name.contains('\\') {
+                return None;
+            }
+            class_loader(&format!("\\{ancestor_name}")).filter(|c| !is_self(c))
+        }
+        other => other,
     }
 }
 
@@ -614,7 +680,7 @@ pub(crate) fn is_subtype_of_typed(
     }
 
     // ── String literal <: model-property<Model> ────────────────
-    // Larastan's `model-property<Model>` is a string subtype
+    // The Laravel PHPStan extensions' `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  A
     // string literal is a subtype only if it names a known
     // property.  When the model class cannot be loaded, stay

@@ -59,6 +59,12 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
+//!    **`usort`** / **`uasort`** / **`uksort`** are the same deficiency in
+//!    the comparison-callback family: both parameters of
+//!    `usort($errors, fn ($a, $b) => …)` are untyped until the array binds
+//!    them. We add the `@template TKey`/`TValue` pair and retype the
+//!    callback `callable(T, T): int` over whichever of the two it compares.
+//!
 //! 6. **`spl_autoload_register`** -- the callback is typed bare
 //!    `?callable`, so the closure an autoloader is normally written as
 //!    leaves its parameter untyped. We retype it
@@ -74,12 +80,19 @@
 //!    `define('X', fopen(…))` stop being reported.
 //!
 //! 8. **Argument-decided builtins** -- `pathinfo`, `print_r`, `hrtime`,
-//!    `microtime`, `getenv`, `mb_convert_encoding` and `abs` each return one
-//!    of several shapes depending on an argument, but the stubs can only
-//!    declare the union of all of them. Each gets a conditional return type
-//!    keyed on the deciding parameter, so a call that provably takes one
-//!    branch stops carrying the others. An argument whose value cannot be
-//!    pinned down keeps the union, which is all the call can promise.
+//!    `microtime`, `getenv`, `mb_convert_encoding`, `abs`, `var_export`,
+//!    `mb_internal_encoding`, `version_compare`, `sscanf`/`fscanf`,
+//!    `array_reduce`, `pow` and `ini_get` each return one of several shapes
+//!    depending on an argument, but the stubs can only declare the union of
+//!    all of them. Each gets a conditional return type keyed on the deciding
+//!    parameter, so a call that provably takes one branch stops carrying the
+//!    others. An argument whose value cannot be pinned down keeps the union,
+//!    which is all the call can promise.
+//!
+//!    Three of them are keyed on something other than a value: the `scanf`
+//!    family on whether its variadic out-parameters were passed at all,
+//!    `pow` on whether either operand can be an object, and `ini_get` on
+//!    whether the directive is one of the core ones PHP always defines.
 //!
 //! 9. **Key/value array builtins** -- `array_keys`, `array_values`,
 //!    `array_search`, `array_key_first`/`array_key_last` and `key` all
@@ -90,10 +103,16 @@
 //!    array argument. `array_flip` is the counter-example that shows why
 //!    these belong here: it already ships the annotations and already
 //!    resolves. The value-inspecting rules that cannot be written this way
-//!    (`array_filter`'s falsy strip, `array_sum`'s element check) stay in
+//!    (`array_filter`'s falsy strip, `array_sum`'s element check, `range`'s
+//!    all-bounds-at-once rule) stay in
 //!    `type_engine::variable::array_func_rules`.
 //!
-//! 10. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//! 10. **`get_class`** -- declared bare `string`, so the one thing the call
+//!     establishes (the result names *this* object's class) is lost at the
+//!     assignment. Gets `@template T of object` / `@param T $object` /
+//!     `@return class-string<T>`, matching PHPStan's stub.
+//!
+//! 11. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
 //!     `mktime` and the rest of [`crate::benevolent_builtins`] declare a
 //!     failure branch that idiomatic PHP never checks. Their return type is
 //!     tagged so the diagnostics stop enforcing that branch. Unlike the
@@ -141,7 +160,9 @@
 //!    `@return T|null` where `newInstance()` is `@return T`, so the same
 //!    instantiation carries a null branch depending on which one built
 //!    it. The method throws instead of returning null, so we drop the
-//!    branch and the two stay in sync.
+//!    branch and the two stay in sync. `getInterfaceNames()` is declared
+//!    bare `array`, losing the fact that reflection only reports interfaces
+//!    that exist; it becomes `list<class-string>`, as in PHPStan's stub.
 //!
 //! 9. **`ReflectionObject`** -- the instance-only specialisation of
 //!    `ReflectionClass`, but without its `@template T of object` or an
@@ -149,7 +170,7 @@
 //!    PHPStan's stubs declare both, plus the constructor binding
 //!    `T → $object`.
 //!
-//! 10. **Benevolent methods** -- the class-level half of function patch 10,
+//! 10. **Benevolent methods** -- the class-level half of function patch 11,
 //!     covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!     `DateTime::modify` and `Closure::bind`.
 //!
@@ -181,6 +202,9 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
+        "usort" | "uasort" => patch_user_sort(func, SortComparand::Value),
+        "uksort" => patch_user_sort(func, SortComparand::Key),
+        "array_fill_keys" => patch_array_fill_keys(func),
         "array_keys" => patch_array_key_value_generics(func, "$array", "list<TKey>"),
         "array_values" => patch_array_key_value_generics(func, "$array", "list<TValue>"),
         "array_search" => patch_array_key_value_generics(func, "$haystack", "TKey|false"),
@@ -195,6 +219,15 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "getenv" => patch_getenv(func),
         "mb_convert_encoding" => patch_mb_convert_encoding(func),
         "abs" => patch_abs(func),
+        "var_export" => patch_var_export(func),
+        "mb_internal_encoding" => patch_mb_internal_encoding(func),
+        "version_compare" => patch_version_compare(func),
+        "sscanf" => patch_scanf_family(func, "int", "array|null"),
+        "fscanf" => patch_scanf_family(func, "int|false", "array|false|null"),
+        "array_reduce" => patch_array_reduce(func),
+        "pow" => patch_pow(func),
+        "ini_get" => patch_ini_get(func),
+        "get_class" => patch_get_class(func),
         "preg_replace"
         | "preg_replace_callback"
         | "preg_replace_callback_array"
@@ -312,6 +345,66 @@ fn patch_array_filter(func: &mut FunctionInfo) {
     link_callback_to_array_element(func, callback_name, array_name, "mixed");
 }
 
+/// Which half of the array a user-comparison sort hands its callback.
+#[derive(Copy, Clone)]
+enum SortComparand {
+    /// `usort`/`uasort` compare values.
+    Value,
+    /// `uksort` compares keys.
+    Key,
+}
+
+/// Spell out the comparison callback of `usort`, `uasort` and `uksort`.
+///
+/// phpstorm-stubs declare all three as
+/// `usort(array &$array, callable $callback)`, so the comparison closure
+/// idiom `usort($errors, fn ($a, $b) => $a->getLine() <=> $b->getLine())`
+/// leaves both parameters untyped. PHP calls the callback with two
+/// elements of the array it is sorting: two values for `usort`/`uasort`,
+/// two keys for `uksort`. We add the `@template` pair, retype the array as
+/// `array<TKey, TValue>` and the callback as `callable(T, T): int` over
+/// whichever of the two it compares, then bind both from the array
+/// argument. Mirrors PHPStan's own `stubs/arrayFunctions.stub`.
+fn patch_user_sort(func: &mut FunctionInfo, comparand: SortComparand) {
+    const TKEY: &str = "TKey";
+    const TVALUE: &str = "TValue";
+
+    // Expected stub shape: `usort(array &$array, callable $callback)`.
+    let array_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$array" => p.name,
+        _ => return,
+    };
+    let callback_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$callback" => p.name,
+        _ => return,
+    };
+
+    let compared = match comparand {
+        SortComparand::Value => TVALUE,
+        SortComparand::Key => TKEY,
+    };
+    let array_hint = PhpType::parse(&format!("array<{TKEY}, {TVALUE}>"));
+    let callback_hint = PhpType::parse(&format!("callable({compared}, {compared}): int"));
+
+    for param in func.parameters.make_mut() {
+        if param.name == array_name {
+            param.type_hint = Some(array_hint.clone());
+        } else if param.name == callback_name {
+            param.type_hint = Some(callback_hint.clone());
+        }
+    }
+
+    func.template_params = vec![atom(TKEY), atom(TVALUE)];
+    // A bare `array` argument binds neither param, and `array-key` is
+    // PHP's own answer for a key that nothing narrowed.
+    func.template_param_bounds = [(atom(TKEY), PhpType::parse("array-key"))]
+        .into_iter()
+        .collect();
+    // Only the array argument can bind them: the callback is the very
+    // thing whose parameters these templates are there to type.
+    func.template_bindings = vec![(atom(TKEY), array_name), (atom(TVALUE), array_name)];
+}
+
 /// Shared helper: give `func` a single `TValue` template bound from the
 /// array parameter, and retype the callback as
 /// `callable(TValue): <callback_return>` so a closure argument's first
@@ -387,12 +480,62 @@ fn patch_array_key_value_generics(func: &mut FunctionInfo, array_param: &str, re
     func.template_bindings = vec![(atom(TKEY), array_name), (atom(TVALUE), array_name)];
 }
 
+/// Give `array_fill_keys()` the generics that turn its two arguments into
+/// the result's key and value types.
+///
+/// The stub is `array_fill_keys(array $keys, mixed $value): array`, so a
+/// caller loses the one thing the call establishes: the keys of the result
+/// are exactly the *values* of `$keys`. That matters downstream, because
+/// `array_keys(array_fill_keys($names, true))` should hand back the
+/// `$names` it started from rather than a bare `array-key`.
+///
+/// Unlike [`patch_array_key_value_generics`], `TKey` binds from the array
+/// parameter's *element* type, not its key type.
+fn patch_array_fill_keys(func: &mut FunctionInfo) {
+    const TKEY: &str = "TKey";
+    const TVALUE: &str = "TValue";
+
+    let keys_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$keys" => p.name,
+        _ => return,
+    };
+    let value_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$value" => p.name,
+        _ => return,
+    };
+
+    let keys_hint = PhpType::parse(&format!("array<{TKEY}>"));
+    let value_hint = PhpType::parse(TVALUE);
+    for param in func.parameters.make_mut() {
+        if param.name == keys_name {
+            param.type_hint = Some(keys_hint.clone());
+        } else if param.name == value_name {
+            param.type_hint = Some(value_hint.clone());
+        }
+    }
+
+    func.return_type = Some(PhpType::parse(&format!("array<{TKEY}, {TVALUE}>")));
+    func.template_params = vec![atom(TKEY), atom(TVALUE)];
+    // `$keys` whose element type is unknown leaves `TKey` on PHP's own
+    // answer — whatever a `foreach` writes into an array is an `array-key`.
+    func.template_param_bounds = [(atom(TKEY), PhpType::parse("array-key"))]
+        .into_iter()
+        .collect();
+    func.template_bindings = vec![(atom(TKEY), keys_name), (atom(TVALUE), value_name)];
+}
+
 /// Patch `range()` to have a conditional return type.
 ///
 /// phpstorm-stubs declare `range()` as returning bare `array`.
 /// PHPStan infers `list<int>`, `list<float>`, or `list<string>` depending
 /// on the argument types.  We approximate this with:
 /// `($start is string ? list<string> : list<int|float>)`.
+///
+/// Splitting the numeric branch needs every bound at once — a single
+/// fractional one makes the whole range fractional — which a conditional
+/// keyed on one parameter cannot ask. That half lives in
+/// `type_engine::variable::array_func_rules` and answers first; this
+/// conditional is what a range it cannot pin down falls back to.
 fn patch_range(func: &mut FunctionInfo) {
     func.conditional_return = Some(PhpType::conditional(
         "$start",
@@ -400,6 +543,121 @@ fn patch_range(func: &mut FunctionInfo) {
         PhpType::named(atom("string")),
         PhpType::list(PhpType::string()),
         PhpType::list(PhpType::union(vec![PhpType::int(), PhpType::float()])),
+    ));
+}
+
+/// Patch `array_reduce()` to have a conditional return type keyed on
+/// `$initial`.
+///
+/// The stub's `@return TCarry|null` covers the one case that really can
+/// produce `null`: an empty array with no initial value. Handing the call an
+/// initial value makes that the result instead, so the `null` branch cannot
+/// happen and every reduction over a seeded accumulator carries a nullable it
+/// never is.
+fn patch_array_reduce(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$initial",
+        PhpType::null(),
+        PhpType::union(vec![PhpType::named(atom("TCarry")), PhpType::null()]),
+        PhpType::named(atom("TCarry")),
+    );
+}
+
+/// Give `get_class()` the generic that ties its result to the object it was
+/// asked about.
+///
+/// The stub returns bare `string`, so the one thing the call establishes — the
+/// result names *this* object's class — is lost the moment it is assigned.
+/// PHPStan's stub declares `@template T of object` / `@param T $object` /
+/// `@return class-string<T>`, which keeps `new ($className)` and
+/// `$className::create()` resolvable and lets the result satisfy a
+/// `class-string` parameter.
+fn patch_get_class(func: &mut FunctionInfo) {
+    const T: &str = "T";
+    let Some(object) = func.parameters.first().map(|p| p.name) else {
+        return;
+    };
+    for param in func.parameters.make_mut() {
+        if param.name == object {
+            param.type_hint = Some(PhpType::named(atom(T)));
+        }
+    }
+    func.return_type = Some(PhpType::parse("class-string<T>"));
+    func.template_params = vec![atom(T)];
+    // The no-argument form (deprecated, and removed in 8.4) asks about the
+    // enclosing class, which the binding cannot see. `object` keeps that call
+    // on `class-string<object>` — still a class-string, just not a specific
+    // one.
+    func.template_param_bounds = [(atom(T), PhpType::named(atom("object")))]
+        .into_iter()
+        .collect();
+    func.template_bindings = vec![(atom(T), object)];
+}
+
+/// Patch `ini_get()` to have a conditional return type keyed on `$option`.
+///
+/// `false` means "no such directive", so an option PHP always defines cannot
+/// produce it. The stubs declare `string|false` for every call, which puts a
+/// failure branch on the `ini_get('memory_limit')` idiom that no amount of
+/// checking can reach.
+///
+/// The list is PHPStan's (`IniGetReturnTypeExtension`): the core directives it
+/// is willing to promise are always set. Anything outside it keeps the
+/// declared union, since a directive an extension registers really can be
+/// missing.
+fn patch_ini_get(func: &mut FunctionInfo) {
+    const ALWAYS_SET: [&str; 7] = [
+        "date.timezone",
+        "memory_limit",
+        "max_memory_limit",
+        "max_execution_time",
+        "max_input_time",
+        "default_socket_timeout",
+        "precision",
+    ];
+    let Some(option) = func.parameters.first().map(|p| p.name) else {
+        return;
+    };
+    conditional_on(
+        func,
+        option.as_str(),
+        PhpType::union(
+            ALWAYS_SET
+                .iter()
+                .map(PhpType::literal_string_value)
+                .collect(),
+        ),
+        PhpType::string(),
+        PhpType::union(vec![PhpType::string(), PhpType::named(atom("false"))]),
+    );
+}
+
+/// Patch `pow()` to have a conditional return type keyed on its operands.
+///
+/// The `object` branch only exists for the operator-overloading extensions
+/// (GMP, BCMath): raising two numbers to a power can only produce a number.
+/// The stubs declare `object|int|float` for every call, so arithmetic on the
+/// result of an ordinary `pow(2, $n)` is checked against a class.
+/// An operand nobody typed decides nothing, and the union of both
+/// branches would put `object` back into every such call — so both
+/// conditionals here take the numeric branch unless an operand is
+/// provably an object.
+fn patch_pow(func: &mut FunctionInfo) {
+    let numeric = PhpType::union(vec![PhpType::int(), PhpType::float()]);
+    let object = PhpType::named(atom("object"));
+    func.conditional_return = Some(PhpType::conditional_defaulting_to_else(
+        "$num",
+        false,
+        object.clone(),
+        object.clone(),
+        PhpType::conditional_defaulting_to_else(
+            "$exponent",
+            false,
+            object.clone(),
+            object,
+            numeric,
+        ),
     ));
 }
 
@@ -588,6 +846,86 @@ fn patch_abs(func: &mut FunctionInfo) {
     );
 }
 
+/// Patch `var_export()` to have a conditional return type keyed on
+/// `$return`.
+///
+/// The stubs declare `?string` for both forms, so the rendered string a
+/// `var_export($v, true)` is written for carries a `null` it cannot be, and
+/// the printing form promises a string it never hands back.
+fn patch_var_export(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$return",
+        PhpType::parse("true"),
+        PhpType::string(),
+        PhpType::null(),
+    );
+}
+
+/// Patch `mb_internal_encoding()` to have a conditional return type keyed on
+/// `$encoding`.
+///
+/// The one function is both the getter and the setter: without an argument it
+/// reports the current internal encoding, and with one it reports whether the
+/// change took. The stubs declare `string|bool` for both.
+fn patch_mb_internal_encoding(func: &mut FunctionInfo) {
+    let Some(encoding) = func.parameters.first().map(|p| p.name) else {
+        return;
+    };
+    conditional_on(
+        func,
+        encoding.as_str(),
+        PhpType::null(),
+        PhpType::string(),
+        PhpType::bool(),
+    );
+}
+
+/// Patch `version_compare()` to have a conditional return type keyed on
+/// `$operator`.
+///
+/// Naming an operator asks a yes/no question and gets a `bool`; leaving it out
+/// asks for the ordering and gets `-1`, `0` or `1`. The stubs declare the
+/// union of both.
+fn patch_version_compare(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$operator",
+        PhpType::null(),
+        PhpType::int(),
+        PhpType::bool(),
+    );
+}
+
+/// Patch a member of the `scanf` family to have a conditional return type
+/// keyed on its variadic out-parameters.
+///
+/// `sscanf($s, $format)` collects the parsed values into an array and returns
+/// it; passing by-reference targets instead writes into them and returns how
+/// many were assigned. The stubs carry exactly this on the variadic
+/// (`#[TypeContract(exists: …, notExists: …)]`) but the attribute is not read,
+/// leaving the flat union both forms share.
+///
+/// `assigned` is the count branch (`fscanf` adds a `false` for a read
+/// failure); `collected` is the array branch.
+fn patch_scanf_family(func: &mut FunctionInfo, assigned: &str, collected: &str) {
+    let Some(vars) = func
+        .parameters
+        .last()
+        .filter(|p| p.is_variadic)
+        .map(|p| p.name)
+    else {
+        return;
+    };
+    conditional_on(
+        func,
+        vars.as_str(),
+        PhpType::null(),
+        PhpType::parse(collected),
+        PhpType::parse(assigned),
+    );
+}
+
 /// Patch a member of the replace family to have a conditional return type
 /// keyed on its subject argument.
 ///
@@ -683,6 +1021,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
     match class.name.as_str() {
         "WeakMap" => patch_weak_map(class),
         "IteratorIterator" => patch_iterator_iterator(class),
+        "RecursiveIteratorIterator" => patch_recursive_iterator_iterator(class),
         "FilterIterator" => patch_filter_iterator(class),
         "NoRewindIterator" => patch_no_rewind_iterator(class),
         "CachingIterator" => patch_caching_iterator(class),
@@ -852,6 +1191,59 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     }
 }
 
+/// Add `@template T of RecursiveIterator|IteratorAggregate` and
+/// `@mixin T`, bound from the constructor's `$iterator` argument.
+///
+/// `RecursiveIteratorIterator` does not extend `IteratorIterator`, so it
+/// gets its own patch rather than
+/// [`patch_iterator_iterator_subclass`]. phpstorm-stubs type the
+/// constructor `Traversable $iterator` and every accessor `mixed`, so the
+/// directory-walk idiom
+/// `foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file)`
+/// leaves `$file` with nothing behind it. Binding `T` to the wrapped
+/// iterator and mixing it in is what gives the traversal its element type.
+///
+/// PHPStan ref: `stubs/iterable.stub`
+fn patch_recursive_iterator_iterator(class: &mut ClassInfo) {
+    if !class.template_params.is_empty() {
+        return;
+    }
+    let t = atom("T");
+    class.template_params.push(t);
+    class.template_param_bounds.entry(t).or_insert_with(|| {
+        PhpType::union(vec![
+            PhpType::named(atom("RecursiveIterator")),
+            PhpType::named(atom("IteratorAggregate")),
+        ])
+    });
+    if !class.mixins.contains(&t) {
+        class.mixins.push(t);
+    }
+
+    if let Some(ctor_idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == "__construct")
+    {
+        let mut ctor = (*class.methods[ctor_idx]).clone();
+        let binding = (t, atom("$iterator"));
+        if !ctor.template_bindings.iter().any(|(n, _)| *n == t) {
+            ctor.template_bindings.push(binding);
+        }
+        // A `T` hint (rather than the stub's `Traversable`) is what makes
+        // `classify_template_binding` read the argument as a direct bind.
+        if let Some(param) = ctor
+            .parameters
+            .make_mut()
+            .iter_mut()
+            .find(|p| p.name == "$iterator")
+        {
+            param.type_hint = Some(PhpType::named(t));
+        }
+        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
+    }
+}
+
 /// Add `@template TKey`, `@template TValue`,
 /// `@template TIterator of Traversable<TKey, TValue>`,
 /// `@extends IteratorIterator<TKey, TValue, TIterator>`.
@@ -995,15 +1387,31 @@ fn patch_simple_xml_element(class: &mut ClassInfo) {
     }
 }
 
-/// Drop the dead `null` branch from `ReflectionClass::newInstanceArgs()`.
+/// Fix two `ReflectionClass` return types phpstorm-stubs understate.
 ///
-/// phpstorm-stubs declare it `@return T|null` (mirroring php-src's
+/// `newInstanceArgs()` is declared `@return T|null` (mirroring php-src's
 /// vestigial `?object` hint), but the method has thrown a
 /// `ReflectionException` instead of returning null since PHP 5.  The
 /// null branch only makes the result differ from `newInstance()`'s `T`
 /// for no reason, which forces callers to null-check a value that is
 /// never null.  PHPStan's own stub types both as `T`.
+///
+/// `getInterfaceNames()` is declared bare `array`, so the names it hands back
+/// — every one of them a class-string, since reflection only reports
+/// interfaces that exist — arrive as plain strings and cannot be passed on to
+/// anything that asks for a `class-string`. PHPStan's stub says
+/// `list<class-string>`.
 fn patch_reflection_class(class: &mut ClassInfo) {
+    if let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == "getInterfaceNames")
+    {
+        let mut method = (*class.methods[idx]).clone();
+        method.return_type = Some(PhpType::parse("list<class-string>"));
+        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    }
+
     let Some(idx) = class
         .methods
         .iter()
@@ -1646,6 +2054,55 @@ mod tests {
         assert_eq!(
             func.parameters[0].type_hint,
             Some(PhpType::parse("?callable"))
+        );
+    }
+
+    #[test]
+    fn the_user_sort_family_types_its_comparison_callback() {
+        for (name, compared) in [
+            ("usort", "TValue"),
+            ("uasort", "TValue"),
+            ("uksort", "TKey"),
+        ] {
+            let mut func = empty_function(name);
+            func.parameters = vec![param("$array", "array"), param("$callback", "callable")].into();
+
+            apply_function_stub_patches(&mut func);
+
+            assert_eq!(
+                func.parameters[0].type_hint,
+                Some(PhpType::parse("array<TKey, TValue>")),
+                "{name} array parameter"
+            );
+            assert_eq!(
+                func.parameters[1].type_hint,
+                Some(PhpType::parse(&format!(
+                    "callable({compared}, {compared}): int"
+                ))),
+                "{name} callback parameter"
+            );
+            assert_eq!(
+                func.template_bindings,
+                vec![
+                    (atom("TKey"), atom("$array")),
+                    (atom("TValue"), atom("$array")),
+                ],
+                "{name} bindings"
+            );
+        }
+    }
+
+    #[test]
+    fn a_differently_shaped_sort_stub_is_not_patched() {
+        let mut func = empty_function("usort");
+        func.parameters = vec![param("$callback", "callable"), param("$array", "array")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert!(func.template_params.is_empty());
+        assert_eq!(
+            func.parameters[0].type_hint,
+            Some(PhpType::parse("callable"))
         );
     }
 

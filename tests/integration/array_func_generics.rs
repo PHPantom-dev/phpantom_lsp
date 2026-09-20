@@ -10,44 +10,10 @@
 //! The last test covers the binding machinery the rest of them rest on: which
 //! alternative of a union `@param` a `@template` binds from.
 
-use crate::common::create_test_backend_with_full_stubs;
-use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
-
-/// The resolved type of the variable assigned on `line` (0-based), read off
-/// the hover response.
-fn assigned_type(backend: &Backend, uri: &str, content: &str, line: u32) -> String {
-    backend.update_ast(uri, content);
-    let hover = backend
-        .handle_hover(uri, content, Position { line, character: 6 })
-        .unwrap_or_else(|| panic!("no hover on line {line}"));
-    let HoverContents::Markup(markup) = &hover.contents else {
-        panic!("Expected MarkupContent");
-    };
-    markup
-        .value
-        .lines()
-        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
-        .unwrap_or_else(|| panic!("no assignment in hover on line {line}: {}", markup.value))
-}
+use crate::common::{assert_assigned_types, create_test_backend_with_full_stubs, type_at_marker};
 
 /// Assert the type of each assignment in `content`, keyed by the variable it
 /// assigns to. Line numbers are found by scanning for `$name = `.
-fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
-    let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///array_func_generics.php";
-    for (var, want) in expected {
-        let needle = format!("{var} = ");
-        let line = content
-            .lines()
-            .position(|l| l.trim_start().starts_with(&needle))
-            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
-            as u32;
-        let got = assigned_type(&backend, uri, content, line);
-        assert_eq!(&got, want, "{var}");
-    }
-}
-
 /// The key-reading builtins report the input's *key* type. The stubs spell
 /// these out as `int[]|string[]` and `string|int|null`, which then fails
 /// against a declared `array<string>` on the wrong branch.
@@ -673,8 +639,8 @@ function probe(string $contents, int $start): void {
         content,
         &[
             ("$offsets", "array<int, string>"),
-            ("$doubled", "array<int, string>"),
-            ("$counted", "array<int, string>"),
+            ("$doubled", "non-empty-array<int, string>"),
+            ("$counted", "non-empty-array<int, string>"),
         ],
     );
 }
@@ -792,6 +758,136 @@ function probe(array $rows, array $byName, array $lines): void {
             ("$keyed", "array<string, int>"),
             ("$sequential", "list<int>"),
             ("$zipped", "list<string>"),
+        ],
+    );
+}
+
+/// A callback parameter is bound from one element of the array it is handed,
+/// including when the argument is a union of array shapes: a `@template`
+/// that cannot read an element out of a container binds nothing rather than
+/// binding the container itself.
+#[test]
+fn a_callback_parameter_binds_an_element_of_a_shape_union() {
+    let content = r#"<?php
+class Lexer {
+    public function getLabel(int $token): string { return ''; }
+}
+class RichParser {
+    private const TOKEN_A = 3;
+    private const TOKEN_B = 2;
+    private Lexer $lexer;
+
+    /** @param array<string, Lexer> $opaque */
+    public function probe(bool $cond, array $opaque): void
+    {
+        $expected = $cond ? [self::TOKEN_A] : [self::TOKEN_A, self::TOKEN_B];
+        array_map(fn ($token) => $this->lexer->getLabel(/*TOKEN*/$token), $expected);
+        array_map(fn ($lexer) => /*OPAQUE*/$lexer, $opaque);
+    }
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///array_func_generics_shape_union.php";
+    backend.update_ast(uri, content);
+    // Both arms are literal, so the element type is the values themselves
+    // rather than the `int` they widen to.
+    assert_eq!(type_at_marker(&backend, uri, content, "TOKEN"), "3|2");
+    assert_eq!(type_at_marker(&backend, uri, content, "OPAQUE"), "Lexer");
+}
+
+/// `array_merge` concatenates its arguments rather than rearranging one of
+/// them, so every argument contributes to the element type. Reading only the
+/// first is what left the accumulator idiom (`$out = []; … $out =
+/// array_merge($out, $more);`) permanently typed as the empty array it
+/// started as, which cost every read off it — `$out[$i]->m()` included — its
+/// type.
+#[test]
+fn array_merge_unions_every_argument() {
+    let content = r#"<?php
+class User {}
+class Order {}
+/**
+ * @param list<User> $users
+ * @param list<Order> $orders
+ * @param array<string, User> $byName
+ */
+function probe(array $users, array $orders, array $byName): void {
+    $seeded = array_merge([], $users);
+    $both = array_merge($users, $orders);
+    $three = array_merge($users, $orders, $byName);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$seeded", "list<User>"),
+            ("$both", "list<User|Order>"),
+            ("$three", "array<int|string, User|Order>"),
+        ],
+    );
+}
+
+/// The keys follow PHP's own two rules: an integer key is renumbered as the
+/// entry is appended, a string key is carried over. So an all-integer merge
+/// is a `list`, an all-string one keeps its `string` keys, and a mix carries
+/// both.
+///
+/// An argument that names only its value type (`array<T>`, `T[]`) promises
+/// nothing about its keys, and the result says just as little.
+#[test]
+fn array_merge_keys_follow_php_renumbering() {
+    let content = r#"<?php
+class User {}
+class Order {}
+/**
+ * @param list<User> $users
+ * @param array<string, User> $byName
+ * @param array<string, Order> $ordersByName
+ * @param array<User> $loose
+ * @param User[] $shorthand
+ */
+function probe(array $users, array $byName, array $ordersByName, array $loose, array $shorthand): void {
+    $strings = array_merge($byName, $ordersByName);
+    $mixed = array_merge($users, $byName);
+    $open = array_merge($loose, $users);
+    $shorthandOpen = array_merge($shorthand, $byName);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$strings", "array<string, User|Order>"),
+            ("$mixed", "array<int|string, User>"),
+            ("$open", "array<User>"),
+            ("$shorthandOpen", "array<User>"),
+        ],
+    );
+}
+
+/// An argument the rule cannot read could contribute anything, so it declines
+/// and leaves the stub's bare `array` standing rather than claim a union that
+/// is missing a member. A bare `array` names no element type, and a spread
+/// holds the arrays to merge rather than one of them.
+#[test]
+fn array_merge_declines_on_arguments_it_cannot_read() {
+    let content = r#"<?php
+class User {}
+/**
+ * @param list<User> $users
+ * @param list<list<User>> $groups
+ */
+function probe(array $users, array $groups, array $bare): void {
+    $withBare = array_merge($users, $bare);
+    $spread = array_merge(...$groups);
+    $empty = array_merge([], []);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$withBare", "array"),
+            ("$spread", "array"),
+            ("$empty", "array"),
         ],
     );
 }

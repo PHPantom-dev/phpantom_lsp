@@ -19,7 +19,8 @@
 //!
 //! 2. **`Conditionable::when()` / `unless()` return type.**
 //!    The trait declares `@return $this|TWhenReturnType` (or a conditional
-//!    form in Larastan stubs).  The unresolved `TWhenReturnType` template
+//!    form in the Laravel PHPStan extensions' stubs).  The unresolved
+//!    `TWhenReturnType` template
 //!    parameter breaks `is_self_like` checks, degrading Builder chains.
 //!    The patch replaces the return type with `$this` so that chained
 //!    `when()` / `unless()` calls preserve the receiver type.
@@ -167,8 +168,8 @@ const HIGHER_ORDER_MESSAGE_FQN: &str = "Mockery\\HigherOrderMessage";
 /// Returning the concrete FQN here lets [`resolve_class_fully_inner`] inject
 /// it as a `@mixin` on the contract before virtual member providers run, so
 /// the concrete's members (including `__call`) merge into the contract.  This
-/// mirrors how Larastan resolves `Illuminate\Contracts\*` interfaces through
-/// the booted container, without executing any user code.
+/// mirrors how the Laravel PHPStan extensions resolve `Illuminate\Contracts\*`
+/// interfaces through the booted container, without executing any user code.
 ///
 /// The map is seeded with the bindings triage has surfaced; add entries as
 /// more contracts prove to need them.
@@ -261,7 +262,7 @@ fn patch_eloquent_builder_call_return_type(class: &mut ClassInfo) {
 /// Patch `when()` and `unless()` return types to `$this`.
 ///
 /// The `Conditionable` trait declares these methods with return types
-/// like `$this|TWhenReturnType` or the Larastan conditional form
+/// like `$this|TWhenReturnType` or the stubbed conditional form
 /// `(TWhenReturnType is void|null ? $this : TWhenReturnType)`.  In
 /// either case the unresolved method-level template parameter
 /// `TWhenReturnType` / `TUnlessReturnType` prevents `is_self_like`
@@ -531,7 +532,8 @@ fn patch_storage_fake_return_types(class: &mut ClassInfo) {
 /// produces false-positive argument-type mismatches and breaks member
 /// resolution on the mocked class.
 ///
-/// The patch rewrites the signature to the generic form Larastan uses:
+/// The patch rewrites the signature to the generic form the Laravel PHPStan
+/// extensions stub it with:
 /// ```text
 /// @template TMock of object
 /// @param class-string<TMock>|TMock $abstract

@@ -1,46 +1,8 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    complete_at_opened, create_psr4_workspace, create_test_backend, method_names, property_names,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    match backend.completion(params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        _ => vec![],
-    }
-}
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
-
-fn property_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
 
 // ─── Basic Spread: single spread variable ───────────────────────────────────
 
@@ -72,7 +34,7 @@ async fn test_spread_single_list_variable() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 8, 10).await;
+    let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for $all[0]-> from spread list<User>"
@@ -129,7 +91,7 @@ async fn test_spread_multiple_variables_union() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 15, 10).await;
+    let items = complete_at_opened(&backend, &uri, 15, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for union spread"
@@ -178,7 +140,7 @@ async fn test_spread_array_generic_annotation() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 8, 10).await;
+    let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread array<int, Product>"
@@ -228,7 +190,7 @@ async fn test_spread_type_array_shorthand() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 8, 12).await;
+    let items = complete_at_opened(&backend, &uri, 8, 12).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread User[]"
@@ -277,7 +239,7 @@ async fn test_spread_with_keyed_entries() {
     backend.did_open(open_params).await;
 
     // Key completion — 'admin' should be available from the keyed entry.
-    let items = complete_at(&backend, &uri, 10, 9).await;
+    let items = complete_at_opened(&backend, &uri, 10, 9).await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"admin"),
@@ -326,7 +288,7 @@ async fn test_spread_inside_class_method() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 16, 18).await;
+    let items = complete_at_opened(&backend, &uri, 16, 18).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread inside class method"
@@ -386,7 +348,7 @@ async fn test_spread_with_foreach_annotated() {
     backend.did_open(open_params).await;
 
     // Verify element access still works (the core spread feature).
-    let items = complete_at(&backend, &uri, 15, 10).await;
+    let items = complete_at_opened(&backend, &uri, 15, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for $all[0]-> from spread-merged array"
@@ -440,7 +402,7 @@ async fn test_spread_combined_with_push() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 13, 10).await;
+    let items = complete_at_opened(&backend, &uri, 13, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread + push"
@@ -489,7 +451,7 @@ async fn test_spread_array_function_syntax() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 8, 10).await;
+    let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread with array() syntax"
@@ -571,7 +533,7 @@ async fn test_spread_cross_file_psr4() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 11, 18).await;
+    let items = complete_at_opened(&backend, &uri, 11, 18).await;
     assert!(
         !items.is_empty(),
         "Should return completions for cross-file spread"
@@ -625,7 +587,7 @@ async fn test_spread_param_annotation() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 11, 18).await;
+    let items = complete_at_opened(&backend, &uri, 11, 18).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread from @param"
@@ -667,7 +629,7 @@ async fn test_spread_empty_array() {
     backend.did_open(open_params).await;
 
     // Should not crash, just no completions.
-    let items = complete_at(&backend, &uri, 5, 10).await;
+    let items = complete_at_opened(&backend, &uri, 5, 10).await;
     // Either empty or no class members — this is the "no-op" case.
     let _ = items;
 }
@@ -704,7 +666,7 @@ async fn test_spread_deduplicates_same_type() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 10, 10).await;
+    let items = complete_at_opened(&backend, &uri, 10, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for spread with duplicate types"
@@ -764,7 +726,7 @@ async fn test_spread_three_variables() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 17, 10).await;
+    let items = complete_at_opened(&backend, &uri, 17, 10).await;
     assert!(
         !items.is_empty(),
         "Should return completions for three spread variables"
@@ -819,7 +781,7 @@ async fn test_spread_source_from_push_assignments() {
     };
     backend.did_open(open_params).await;
 
-    let items = complete_at(&backend, &uri, 8, 10).await;
+    let items = complete_at_opened(&backend, &uri, 8, 10).await;
     // This may or may not work depending on whether the resolver can
     // transitively resolve push-style assignments through spread.
     // The primary goal is no crash.  If it resolves, great.

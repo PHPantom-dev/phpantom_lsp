@@ -1,0 +1,22 @@
+// test: a call that returns nothing drops the check recorded through it
+// feature: hover
+// A method with nothing to hand back was called for its effect, so it is
+// read as changing state behind the receiver even with no `@impure` tag.
+// expect: $row = array<string, string>|false
+---
+<?php
+
+class Stmt {
+    /** @return array<string, string>|false */
+    public function fetch(string $key) { return false; }
+
+    public function rewind(): void {}
+}
+
+function run(Stmt $stmt): void {
+    if ($stmt->fetch('id') !== false) {
+        $stmt->rewind();
+        $row = $stmt->fetch('id');
+        echo $r<>ow;
+    }
+}

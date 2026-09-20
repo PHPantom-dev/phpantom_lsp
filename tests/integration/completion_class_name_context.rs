@@ -1,4 +1,7 @@
-use crate::common::{create_test_backend, create_test_backend_with_stubs};
+use crate::common::{
+    class_items, complete_at, create_test_backend, create_test_backend_with_stubs, labels,
+    open_php_str,
+};
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
@@ -8,58 +11,6 @@ use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Open a file in the backend and request completion at the given position.
-async fn complete_at(
-    backend: &Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
-
-/// Filter completion items to only those with kind == CLASS.
-fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
-        .collect()
-}
-
-/// Extract labels from a list of completion items.
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
 
 /// Find a completion item by its FQN (stored in the `detail` field).
 fn find_by_fqn<'a>(items: &'a [&CompletionItem], fqn: &str) -> Option<&'a CompletionItem> {
@@ -77,29 +28,23 @@ fn fqn_labels<'a>(items: &'a [&'a CompletionItem]) -> Vec<&'a str> {
 /// Load scaffolding classes into the backend's ast_map so the context
 /// filter can inspect their `ClassLikeKind` / `is_final` / `is_abstract`.
 async fn load_scaffolding(backend: &Backend) {
-    let scaffolding_uri = Url::parse("file:///scaffolding.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace Scaffold;\n",
-                    "class ConcreteClass {}\n",
-                    "final class FinalClass {}\n",
-                    "abstract class AbstractClass {}\n",
-                    "interface SomeInterface {}\n",
-                    "interface AnotherInterface {}\n",
-                    "trait SomeTrait {}\n",
-                    "trait AnotherTrait {}\n",
-                    "enum SomeEnum {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php_str(
+        backend,
+        "file:///scaffolding.php",
+        concat!(
+            "<?php\n",
+            "namespace Scaffold;\n",
+            "class ConcreteClass {}\n",
+            "final class FinalClass {}\n",
+            "abstract class AbstractClass {}\n",
+            "interface SomeInterface {}\n",
+            "interface AnotherInterface {}\n",
+            "trait SomeTrait {}\n",
+            "trait AnotherTrait {}\n",
+            "enum SomeEnum {}\n",
+        ),
+    )
+    .await;
 }
 
 // ─── extends (class) ────────────────────────────────────────────────────────

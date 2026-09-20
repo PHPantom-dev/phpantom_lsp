@@ -1,28 +1,10 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+    unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Open a file, run full slow diagnostics (which activates the diagnostic
-/// scope cache and the forward walker), then filter to unknown_member
-/// diagnostics only.
-fn unknown_member_diagnostics_with_scope_cache(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Closure with unresolvable param type still resolves $this
@@ -817,5 +799,225 @@ function handle(): void {
     assert!(
         diags.iter().any(|d| d.message.contains("Writer")),
         "the superseded type must not still answer for the variable, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference `use` captures reached through a wrapper object
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A `use (&$x)` closure handed to a constructor still writes back to `$x`:
+/// the object invokes it later, so the captured type is unioned into the
+/// outer variable and the `!== null` guard can narrow it.
+#[test]
+fn by_ref_capture_inside_new_argument_writes_back() {
+    let backend = create_test_backend();
+    let uri = "file:///ByRefNew.php";
+    let text = r#"<?php
+class Node {
+    public function getStatementResult(): string { return ''; }
+}
+class GatheringNodeCallback {
+    /** @param callable(Node): void $inner */
+    public function __construct(private $inner) {}
+    public function invoke(Node $node): void { ($this->inner)($node); }
+}
+class Resolver {
+    public function processStmtNode(GatheringNodeCallback $cb): void {}
+}
+class Handler {
+    public function run(Resolver $resolver): void {
+        $constructorResult = null;
+        $resolver->processStmtNode(new GatheringNodeCallback(
+            static function (Node $node) use (&$constructorResult): void {
+                $constructorResult = $node;
+            },
+        ));
+        if ($constructorResult !== null) {
+            $constructorResult->getStatementResult();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Same for a closure stored in an array literal — the array may be handed
+/// to anything, so the capture has to be seen.
+#[test]
+fn by_ref_capture_inside_array_literal_writes_back() {
+    let backend = create_test_backend();
+    let uri = "file:///ByRefArray.php";
+    let text = r#"<?php
+class Node {
+    public function getStatementResult(): string { return ''; }
+}
+class Handler {
+    /** @param array<callable> $callbacks */
+    public function register(array $callbacks): void {}
+
+    public function run(): void {
+        $result = null;
+        $this->register([
+            static function (Node $node) use (&$result): void {
+                $result = $node;
+            },
+        ]);
+        if ($result !== null) {
+            $result->getStatementResult();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure parameter typed by a method-level @template bound at the call site
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `@param callable(TNode): void` hands the closure whatever `TNode` was
+/// bound to at the call site, so a member of that type is not unknown.
+#[test]
+fn closure_param_from_method_template_resolves_members() {
+    let backend = create_test_backend();
+    let uri = "file:///TemplateClosureParam.php";
+    let text = r#"<?php
+class PropertyNode {
+    public function isReadOnly(): bool { return true; }
+}
+class Fixer {
+    /**
+     * @template TNode
+     * @param TNode $node
+     * @param callable(TNode): void $cb
+     */
+    public function fixNode($node, callable $cb): void {}
+
+    public function run(PropertyNode $property): void
+    {
+        $this->fixNode($property, function ($node) {
+            $node->isReadOnly();
+        });
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference captures written on a path that returns out of the closure
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The gather-into-an-array idiom: a callback narrows its parameter with
+/// `instanceof`, pushes it onto a `use (&$…)` array and returns.  The
+/// branch merge drops a returning branch, but the caller still sees what
+/// the capture was given, so the enclosing `foreach` knows its element
+/// type.
+#[test]
+fn by_ref_capture_pushed_on_a_returning_path_types_the_foreach() {
+    let backend = create_test_backend();
+    let uri = "file:///GatherExecutionEnds.php";
+    let text = r#"<?php
+class Node {}
+class StatementResult
+{
+    public function isAlwaysTerminating(): bool { return true; }
+}
+class ExecutionEndNode extends Node
+{
+    public function getStatementResult(): StatementResult { return new StatementResult(); }
+}
+class ReturnNode extends Node {}
+
+class NodeScopeResolver
+{
+    public function processStmtNodes(array $stmts, callable $cb): void {}
+
+    public function run(array $stmts): void
+    {
+        $gatheredReturnStatements = [];
+        $executionEnds = [];
+        $this->processStmtNodes($stmts, static function (Node $node) use (&$gatheredReturnStatements, &$executionEnds): void {
+            if ($node instanceof ExecutionEndNode) {
+                $executionEnds[] = $node;
+                return;
+            }
+            if (!$node instanceof ReturnNode) {
+                return;
+            }
+            $gatheredReturnStatements[] = $node;
+        });
+
+        foreach ($executionEnds as $executionEnd) {
+            $executionEnd->getStatementResult()->isAlwaysTerminating();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// A nested closure's `return` carries its own locals out of *itself*.
+/// Attributing it to the closure outside would hand the outer capture a
+/// type it never holds, so the probe below has to see `Alpha` alone.
+#[test]
+fn nested_closure_return_does_not_widen_the_outer_by_ref_capture() {
+    let backend = create_test_backend();
+    let uri = "file:///NestedClosureReturn.php";
+    let text = r#"<?php
+class Alpha {}
+class Beta {}
+
+class Runner
+{
+    public function run(callable $cb): void {}
+
+    public function go(): void
+    {
+        $node = new Alpha();
+        $this->run(function () use (&$node): void {
+            $inner = function (): void {
+                // A fresh local of *this* closure, not the capture one
+                // scope out.
+                $node = new Beta();
+                return;
+            };
+            $inner();
+        });
+        $node->probe();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    assert_eq!(messages.len(), 1, "got: {messages:?}");
+    assert!(
+        !messages[0].contains("Beta"),
+        "`$node` must stay Alpha, got: {messages:?}"
     );
 }

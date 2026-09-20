@@ -146,6 +146,24 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // resources/views/components/widgets/badge.blade.php.
         Blade::anonymousComponentNamespace('components/widgets', 'widgets');
 
+        // `Blade::directive()` declares a directive Blade itself knows
+        // nothing about, so this provider is the only record that `@priceTag`
+        // exists at all.  PHPantom reads the registration: the name completes
+        // after an `@` in a template, and the expression the directive is
+        // handed stays real PHP that is type-checked rather than being masked
+        // as markup.  See resources/views/welcome.blade.php.
+        Blade::directive('priceTag', function (string $expression): string {
+            return "<?php echo number_format({$expression}, 2); ?>";
+        });
+
+        // `Blade::if()` is four directives rather than one: Blade synthesizes
+        // `@bakeryOpen`, `@unlessbakeryOpen`, `@elsebakeryOpen` and
+        // `@endbakeryOpen` from this single name, and PHPantom expands the
+        // family the same way.
+        Blade::if('bakeryOpen', function (Bakery $bakery): bool {
+            return $bakery->baguettes() !== null;
+        });
+
         // A custom disk driver is bound here rather than in the framework, so
         // the type it builds is only knowable from this closure.  PHPantom
         // reads it and folds the 'pantry' disk in config/filesystems.php into

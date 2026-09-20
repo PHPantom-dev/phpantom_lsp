@@ -342,21 +342,27 @@ fn infer_element_type<'b>(
             if let Some(t) = scope_type {
                 return Some(t);
             }
-            // Iterable docblock (e.g. `@var list<User> $items`) for a
-            // variable the scope has nothing for.
-            if let Some(t) =
+            // A `@var`/`@param` annotation read straight out of the source
+            // (e.g. `@var list<User> $items`), for a variable nothing above
+            // could type.
+            let annotated = || {
                 docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-            {
-                return Some(crate::util::resolve_php_type_names(&t, ctx.class_loader));
-            }
+                    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+            };
+            // Inside the forward walker the scope above was the only
+            // narrowing-aware answer on offer: running the full pipeline
+            // here would walk the enclosing body all over again.  The
+            // annotation is what is left.
             if ctx.scope_var_resolver.is_some() {
-                return None;
+                return annotated();
             }
-            // Fall back to the full variable type resolution pipeline
-            // (parameter type hints, @param docblocks, assignments,
-            // foreach bindings, etc.).  This handles cases like
-            // `string $trackingUserId` where the variable is a scalar
-            // parameter, not an iterable.
+            // Outside the walker the full pipeline (parameter type hints,
+            // `@param`/`@var` docblocks, assignments, foreach bindings)
+            // answers this, and it goes first because it reads the same
+            // annotations *and* the narrowing that holds where the literal
+            // is written.  A `[$n]` under `if (is_int($n))` builds
+            // `array{int}`, not the `int|float` the annotation states for
+            // the assignment above it.
             let current_class = ctx
                 .all_classes
                 .iter()
@@ -372,6 +378,7 @@ fn infer_element_type<'b>(
                 ctx.backend,
                 ctx.loaders,
             )
+            .or_else(annotated)
         }
         // ── Parenthesized ──
         Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),
@@ -407,16 +414,28 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         super::resolution::nth_arg_expr(self.args, index).is_some()
     }
 
+    fn is_spread(&self, index: usize) -> bool {
+        matches!(
+            self.args.arguments.iter().nth(index),
+            Some(Argument::Positional(pos)) if pos.ellipsis.is_some()
+        )
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
+        // A written `: ReturnType` carries the file's own spelling of the
+        // class (`Support\Pen` behind a `use App\Support;`), and it is
+        // compared against types that arrived fully qualified, so the
+        // spelling is canonicalised on the way out.
+        let qualify = |ty: PhpType| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader);
         match super::resolution::nth_arg_expr(self.args, index)? {
             Expression::Closure(closure) => closure
                 .return_type_hint
                 .as_ref()
-                .map(|rth| extract_hint_type(&rth.hint)),
+                .map(|rth| qualify(extract_hint_type(&rth.hint))),
             Expression::ArrowFunction(arrow) => arrow
                 .return_type_hint
                 .as_ref()
-                .map(|rth| extract_hint_type(&rth.hint)),
+                .map(|rth| qualify(extract_hint_type(&rth.hint))),
             // `array_map('intval', $xs)` names its callback instead of
             // spelling it out; the named function's own return type is what
             // the call produces.
@@ -458,6 +477,10 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             Some(&self.ctx.class_loader),
         )
     }
+
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+    }
 }
 
 /// For known array-producing functions, resolve the **raw output type**
@@ -486,6 +509,21 @@ pub(in crate::type_engine) fn resolve_array_func_element_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     array_func_element_type(func_name, &AstArrayFuncArgs { args, ctx })
+}
+
+/// Constant-fold a string builtin whose arguments are all literals.
+///
+/// See [`super::string_func_rules`] for which functions fold and why the
+/// literal answer matters.
+pub(in crate::type_engine) fn resolve_string_func_literal_type(
+    func_name: &str,
+    args: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    if !super::string_func_rules::is_foldable_string_func(func_name) {
+        return None;
+    }
+    super::string_func_rules::string_func_literal_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
 /// Extract per-argument source text from a parsed `ArgumentList`.
@@ -566,14 +604,21 @@ fn infer_callback_return_type(
     // Build a scope resolver that maps the callback parameter to the
     // input element type.  Include ClassInfo when available so that
     // property access resolution can find the class members.
-    let resolved_param = if let Some(class_name) = param_type.base_name() {
-        if let Some(cls) = (ctx.class_loader)(class_name) {
-            vec![ResolvedType::from_both(param_type.clone(), (*cls).clone())]
-        } else {
-            vec![ResolvedType::from_type_string(param_type.clone())]
+    //
+    // A union element type seeds one entry per alternative rather than one
+    // entry holding the whole union: two instantiations of the same class
+    // (`Builder<A>|Builder<B>`) resolve to one class, and a single entry
+    // could only carry the union as its type string, leaving a `@return T`
+    // on that class with no instantiation to substitute from.
+    let seed_member = |ty: &PhpType| -> ResolvedType {
+        match ty.base_name().and_then(|name| (ctx.class_loader)(name)) {
+            Some(cls) => ResolvedType::from_both(ty.clone(), (*cls).clone()),
+            None => ResolvedType::from_type_string(ty.clone()),
         }
-    } else {
-        vec![ResolvedType::from_type_string(param_type.clone())]
+    };
+    let resolved_param: Vec<ResolvedType> = match param_type.kind() {
+        crate::php_type::TypeKind::Union(members) => members.iter().map(seed_member).collect(),
+        _ => vec![seed_member(param_type)],
     };
     let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
         if var == param_name {
@@ -600,6 +645,7 @@ fn infer_callback_return_type(
         branch_aware: false,
         match_arm_narrowing: std::collections::HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
+        scope_proofs: None,
     };
 
     super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)

@@ -21,6 +21,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::LaravelStringKind;
 use crate::text_position::position_to_offset;
+use crate::virtual_members::laravel::{is_storage_facade_name, storage_facade_local_names};
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -36,10 +37,185 @@ struct LaravelStringKeyContext {
     config_sub_prefix: Option<&'static str>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StringArgumentShape {
+    Scalar,
+    ArrayValue,
+}
+
+struct StringArgumentContext<'a> {
+    callable: &'a str,
+    named_argument: Option<&'a str>,
+    shape: StringArgumentShape,
+}
+
+#[inline]
+fn is_unescaped(bytes: &[u8], index: usize) -> bool {
+    let mut before = index;
+    while before > 0 && bytes[before - 1] == b'\\' {
+        before -= 1;
+    }
+    (index - before).is_multiple_of(2)
+}
+
+/// Find the unmatched call parenthesis enclosing a named argument.
+fn enclosing_call_open_paren(content: &str) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut parens = 0usize;
+    let mut brackets = 0usize;
+    let mut braces = 0usize;
+    let mut quote = None;
+    let mut index = bytes.len();
+
+    while index > 0 {
+        index -= 1;
+        let byte = bytes[index];
+        if let Some(active_quote) = quote {
+            if byte == active_quote && is_unescaped(bytes, index) {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b')' => parens += 1,
+            b'(' if parens > 0 => parens -= 1,
+            b'(' if brackets == 0 && braces == 0 => return Some(index),
+            b']' => brackets += 1,
+            b'[' if brackets > 0 => brackets -= 1,
+            b'}' => braces += 1,
+            b'{' if braces > 0 => braces -= 1,
+            b';' if parens == 0 && brackets == 0 && braces == 0 => return None,
+            _ => {}
+        }
+    }
+
+    None
+}
+
+/// Return the callable before a scalar first argument or a named argument.
+fn callable_before_scalar_argument(before_value: &str) -> Option<(&str, Option<&str>)> {
+    let before_value = before_value.trim_end();
+    if let Some(callable) = before_value.strip_suffix('(') {
+        return Some((callable.trim_end(), None));
+    }
+
+    let colon = before_value.rfind(':')?;
+    if !before_value[colon + 1..].trim().is_empty() {
+        return None;
+    }
+    let before_label = before_value[..colon].trim_end();
+    let label_start = before_label
+        .rfind(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .map_or(0, |index| index + 1);
+    if label_start == before_label.len() {
+        return None;
+    }
+    let argument = &before_label[label_start..];
+    let before_argument = before_label[..label_start].trim_end();
+    let open_paren = enclosing_call_open_paren(before_argument)?;
+    Some((before_argument[..open_paren].trim_end(), Some(argument)))
+}
+
+/// Return the callable owning an array that directly contains this literal.
+fn callable_before_array_argument(before_quote: &str) -> Option<(&str, Option<&str>)> {
+    let bytes = before_quote.as_bytes();
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut string_quote = None;
+    let mut index = bytes.len();
+
+    while index > 0 {
+        index -= 1;
+        let byte = bytes[index];
+        if let Some(quote) = string_quote {
+            if byte == quote && is_unescaped(bytes, index) {
+                string_quote = None;
+            }
+            continue;
+        }
+
+        match byte {
+            b'\'' | b'"' => string_quote = Some(byte),
+            b']' if paren_depth == 0 && brace_depth == 0 => bracket_depth += 1,
+            b'[' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                return callable_before_scalar_argument(before_quote[..index].trim_end());
+            }
+            b'[' if paren_depth == 0 && brace_depth == 0 => bracket_depth -= 1,
+            b')' => paren_depth += 1,
+            b'(' if paren_depth > 0 => paren_depth -= 1,
+            b'(' if bracket_depth == 0 && brace_depth == 0 => {
+                let before_open = before_quote[..index].trim_end();
+                let mut token_start = before_open.len();
+                let token_bytes = before_open.as_bytes();
+                while token_start > 0
+                    && (token_bytes[token_start - 1].is_ascii_alphanumeric()
+                        || token_bytes[token_start - 1] == b'_')
+                {
+                    token_start -= 1;
+                }
+                if before_open[token_start..].eq_ignore_ascii_case("array") {
+                    return callable_before_scalar_argument(before_open[..token_start].trim_end());
+                }
+                return None;
+            }
+            b'}' => brace_depth += 1,
+            b'{' if brace_depth > 0 => brace_depth -= 1,
+            b'{' if bracket_depth == 0 && paren_depth == 0 => return None,
+            b';' if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => return None,
+            _ => {}
+        }
+    }
+
+    None
+}
+
+/// Resource arrays name values; an associative key is bookkeeping, not a disk.
+fn string_literal_is_array_key(content: &str, cursor: usize, quote: u8) -> bool {
+    let bytes = content.as_bytes();
+    let mut index = cursor;
+    while index < bytes.len() {
+        if bytes[index] == quote && is_unescaped(bytes, index) {
+            return content[index + 1..].trim_start().starts_with("=>");
+        }
+        if bytes[index] == b'\n' {
+            return false;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn string_argument_context<'a>(
+    content: &'a str,
+    before_quote: &'a str,
+    cursor: usize,
+    quote: u8,
+) -> Option<StringArgumentContext<'a>> {
+    if let Some((callable, named_argument)) = callable_before_array_argument(before_quote) {
+        if string_literal_is_array_key(content, cursor, quote) {
+            return None;
+        }
+        return Some(StringArgumentContext {
+            callable,
+            named_argument,
+            shape: StringArgumentShape::ArrayValue,
+        });
+    }
+
+    let (callable, named_argument) = callable_before_scalar_argument(before_quote)?;
+    Some(StringArgumentContext {
+        callable,
+        named_argument,
+        shape: StringArgumentShape::Scalar,
+    })
+}
+
 // ─── Detection ──────────────────────────────────────────────────────────────
 
-/// Detect if the cursor is inside the first string argument of a Laravel
-/// helper function.  Returns the key kind and the prefix typed so far.
+/// Detect if the cursor is inside a supported string argument of a Laravel
+/// helper or facade call. Returns the key kind and the prefix typed so far.
 fn detect_laravel_string_key_context(
     content: &str,
     position: Position,
@@ -57,17 +233,9 @@ fn detect_laravel_string_key_context(
     while i > 0 {
         i -= 1;
         let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            let mut bs = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                bs += 1;
-                j -= 1;
-            }
-            if bs % 2 == 0 {
-                quote_pos = Some(i);
-                break;
-            }
+        if (ch == b'\'' || ch == b'"') && is_unescaped(bytes, i) {
+            quote_pos = Some(i);
+            break;
         }
         if ch == b'\n' {
             return None;
@@ -76,18 +244,10 @@ fn detect_laravel_string_key_context(
     let quote_pos = quote_pos?;
     let prefix = content[quote_pos + 1..cursor_offset].to_string();
 
-    // ── Before the quote, expect `(` (first argument) ───────────────
+    // ── Locate the call argument that owns this string ─────────────
     let before_quote = content[..quote_pos].trim_end();
-    // The calls that take a list of keys rather than one — `getMany([…])`,
-    // `Route::is([…])`, `View::first([…])` — spell their first entry behind
-    // an opening bracket, so it counts as the start of the argument too.
-    let before_quote = before_quote
-        .strip_suffix('[')
-        .map_or(before_quote, str::trim_end);
-    if !before_quote.ends_with('(') {
-        return None;
-    }
-    let before_paren = before_quote[..before_quote.len() - 1].trim_end();
+    let argument = string_argument_context(content, before_quote, cursor_offset, bytes[quote_pos])?;
+    let before_paren = argument.callable;
 
     // ── Extract the function/method name ────────────────────────────
     let bp_bytes = before_paren.as_bytes();
@@ -113,25 +273,20 @@ fn detect_laravel_string_key_context(
 
     // Check for PHP attribute syntax: #[Config('key')] or
     // #[\Illuminate\Container\Attributes\Config('key')].
-    // Strip trailing `\Identifier` segments to handle FQN attributes,
-    // then check for `#[`.  Never search the entire file prefix —
-    // an unrelated attribute (e.g. `#[Override]`) would false-positive.
-    let is_attribute = {
-        let mut s = trimmed_before;
-        loop {
-            let stripped = s.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
-            if stripped.len() < s.len() && stripped.ends_with('\\') {
-                s = &stripped[..stripped.len() - 1];
-            } else {
-                s = stripped;
-                break;
-            }
-        }
-        s.ends_with("#[") || s.ends_with("#")
-    };
+    // Everything between the nearest `#[` and this final class-name segment
+    // must itself be a class-name prefix. This recognizes FQN attributes
+    // without letting an unrelated attribute earlier in the file match.
+    let is_attribute = trimmed_before.rfind("#[").is_some_and(|start| {
+        trimmed_before[start + 2..]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'\\')
+    });
 
     // ── Map container attributes to config sub-prefixes ────────────
     let (kind, config_sub_prefix) = if is_attribute {
+        if argument.shape != StringArgumentShape::Scalar {
+            return None;
+        }
         // Resolve the attribute to its Laravel FQN.  When the name is
         // fully qualified (contains `\`), match the FQN directly.
         // When it's a short name, verify the file imports it from
@@ -176,6 +331,30 @@ fn detect_laravel_string_key_context(
             }
         };
         let fqn_matches = |expected_short: &str| attr_matches(ATTR_NS, expected_short);
+        // `#[Storage]` turns any argument into a `filesystems.disks.*` key,
+        // so an application's own same-named attribute would invent one.
+        // The short spelling therefore has to be imported by that exact
+        // name, matching what the symbol map records.
+        let storage_attr_matches = || {
+            if is_fqn {
+                attr_class == format!("{ATTR_NS}Storage")
+            } else {
+                short == "Storage"
+                    && crate::text_scan::imports_class_as(
+                        content,
+                        &format!("{ATTR_NS}Storage"),
+                        "Storage",
+                    )
+            }
+        };
+
+        // `#[Storage(disk: '…')]` is the one container attribute whose
+        // argument is recognised by name.
+        if let Some(name) = argument.named_argument
+            && !(storage_attr_matches() && name.eq_ignore_ascii_case("disk"))
+        {
+            return None;
+        }
 
         if fqn_matches("Config") {
             (Some(LaravelStringKind::Config), None)
@@ -188,7 +367,7 @@ fn detect_laravel_string_key_context(
             (Some(LaravelStringKind::Config), Some("cache.stores."))
         } else if fqn_matches("Log") {
             (Some(LaravelStringKind::Config), Some("logging.channels."))
-        } else if fqn_matches("Storage") {
+        } else if storage_attr_matches() {
             (Some(LaravelStringKind::Config), Some("filesystems.disks."))
         } else if fqn_matches("Auth") || fqn_matches("Authenticated") {
             (Some(LaravelStringKind::Config), Some("auth.guards."))
@@ -210,50 +389,89 @@ fn detect_laravel_string_key_context(
         }
         let class_name = &before_colons[cls_start..];
         let short = class_name.rsplit('\\').next().unwrap_or(class_name);
-        let fn_lower = func_name.to_ascii_lowercase();
 
-        match (short.to_ascii_lowercase().as_str(), fn_lower.as_str()) {
-            (
-                "config",
-                "get" | "getmany" | "set" | "has" | "boolean" | "array" | "collection" | "prepend"
-                | "push",
-            ) => (Some(LaravelStringKind::Config), None),
-            ("view", "make" | "exists") => (Some(LaravelStringKind::View), None),
-            ("lang", "get" | "has" | "hasforlocale" | "choice") => {
-                (Some(LaravelStringKind::Trans), None)
+        let fn_lower = func_name.to_ascii_lowercase();
+        let short_lower = short.to_ascii_lowercase();
+
+        // The `Storage` facade's disk-name arguments: the parameter the disk
+        // goes in, and whether that parameter also accepts a list.  The
+        // facade is only resolved through the file's imports once a method
+        // name has matched — `disk()`, `fake()` and `forgetDisk()` are common
+        // names on unrelated facades, and resolving scans the whole buffer.
+        let storage_argument = match fn_lower.as_str() {
+            "disk" => Some(("name", false)),
+            "fake" | "persistentfake" => Some(("disk", false)),
+            "forgetdisk" => Some(("disk", true)),
+            _ => None,
+        }
+        .filter(|_| is_storage_facade_name(class_name, &storage_facade_local_names(content)));
+        let accepts_array = matches!(
+            (short_lower.as_str(), fn_lower.as_str()),
+            ("config", "getmany") | ("route", "is" | "currentroutenamed")
+        );
+
+        if let Some((expected_name, accepts_array)) = storage_argument {
+            if argument
+                .named_argument
+                .is_some_and(|name| !name.eq_ignore_ascii_case(expected_name))
+                || (argument.shape == StringArgumentShape::ArrayValue && !accepts_array)
+            {
+                return None;
             }
-            // Route names reached through the URL-building facades, and the
-            // "is the current route named …?" predicates.
-            (
-                "url" | "redirect" | "response",
-                "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute",
-            ) => (Some(LaravelStringKind::Route), None),
-            ("route", "is" | "currentroutenamed") => (Some(LaravelStringKind::Route), None),
-            ("env", "get" | "getorfail") => (Some(LaravelStringKind::Env), None),
-            // Facade methods that accept config sub-keys:
-            ("auth", "guard") => (Some(LaravelStringKind::Config), Some("auth.guards.")),
-            ("db", "connection") => (
-                Some(LaravelStringKind::Config),
-                Some("database.connections."),
-            ),
-            ("cache", "store") => (Some(LaravelStringKind::Config), Some("cache.stores.")),
-            ("log", "channel") => (Some(LaravelStringKind::Config), Some("logging.channels.")),
-            ("storage", "disk") => (Some(LaravelStringKind::Config), Some("filesystems.disks.")),
-            // Artisan command names.
-            ("artisan", "call" | "queue") => (Some(LaravelStringKind::Command), None),
-            ("schedule", "command") => (Some(LaravelStringKind::Command), None),
-            // Eloquent morph aliases.
-            ("relation", "getmorphedmodel") => (Some(LaravelStringKind::MorphAlias), None),
-            ("model", "getactualclassnameformorph") => (Some(LaravelStringKind::MorphAlias), None),
-            // Authorization abilities checked through the Gate facade.
-            (
-                "gate",
-                "allows" | "denies" | "check" | "any" | "none" | "authorize" | "inspect" | "has"
-                | "define",
-            ) => (Some(LaravelStringKind::GateAbility), None),
-            _ => (None, None),
+            (Some(LaravelStringKind::Config), Some("filesystems.disks."))
+        } else if argument.named_argument.is_some()
+            || (argument.shape != StringArgumentShape::Scalar
+                && (!accepts_array || !before_quote.trim_end().ends_with('[')))
+        {
+            (None, None)
+        } else {
+            match (short_lower.as_str(), fn_lower.as_str()) {
+                (
+                    "config",
+                    "get" | "getmany" | "set" | "has" | "boolean" | "array" | "collection"
+                    | "prepend" | "push",
+                ) => (Some(LaravelStringKind::Config), None),
+                ("view", "make" | "exists") => (Some(LaravelStringKind::View), None),
+                ("lang", "get" | "has" | "hasforlocale" | "choice") => {
+                    (Some(LaravelStringKind::Trans), None)
+                }
+                // Route names reached through the URL-building facades, and the
+                // "is the current route named …?" predicates.
+                (
+                    "url" | "redirect" | "response",
+                    "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute",
+                ) => (Some(LaravelStringKind::Route), None),
+                ("route", "is" | "currentroutenamed") => (Some(LaravelStringKind::Route), None),
+                ("env", "get" | "getorfail") => (Some(LaravelStringKind::Env), None),
+                // Facade methods that accept config sub-keys:
+                ("auth", "guard") => (Some(LaravelStringKind::Config), Some("auth.guards.")),
+                ("db", "connection") => (
+                    Some(LaravelStringKind::Config),
+                    Some("database.connections."),
+                ),
+                ("cache", "store") => (Some(LaravelStringKind::Config), Some("cache.stores.")),
+                ("log", "channel") => (Some(LaravelStringKind::Config), Some("logging.channels.")),
+                // Artisan command names.
+                ("artisan", "call" | "queue") => (Some(LaravelStringKind::Command), None),
+                ("schedule", "command") => (Some(LaravelStringKind::Command), None),
+                // Eloquent morph aliases.
+                ("relation", "getmorphedmodel") => (Some(LaravelStringKind::MorphAlias), None),
+                ("model", "getactualclassnameformorph") => {
+                    (Some(LaravelStringKind::MorphAlias), None)
+                }
+                // Authorization abilities checked through the Gate facade.
+                (
+                    "gate",
+                    "allows" | "denies" | "check" | "any" | "none" | "authorize" | "inspect"
+                    | "has" | "define",
+                ) => (Some(LaravelStringKind::GateAbility), None),
+                _ => (None, None),
+            }
         }
     } else if is_instance_method {
+        if argument.named_argument.is_some() || argument.shape != StringArgumentShape::Scalar {
+            return None;
+        }
         // Whether the receiver is `$this` (used to scope command-running
         // methods, whose names are too generic to match on any object).
         let receiver_is_this = {
@@ -316,7 +534,21 @@ fn detect_laravel_string_key_context(
         };
         (k, None)
     } else {
-        match func_name.to_ascii_lowercase().as_str() {
+        let fn_lower = func_name.to_ascii_lowercase();
+        // The Blade preprocessor lowers `@includeFirst`/`@componentFirst`/
+        // `@extendsFirst` and `@canany` to markers that name their candidates
+        // inside an array literal rather than as a plain first argument.
+        let accepts_array = matches!(
+            fn_lower.as_str(),
+            "blade_view_directive" | "blade_can_directive"
+        );
+        if argument.named_argument.is_some()
+            || (argument.shape != StringArgumentShape::Scalar
+                && (!accepts_array || !before_quote.trim_end().ends_with('[')))
+        {
+            return None;
+        }
+        match fn_lower.as_str() {
             "route" | "to_route" => (Some(LaravelStringKind::Route), None),
             "config" => (Some(LaravelStringKind::Config), None),
             "view" | "blade_view_directive" | "blade_each_directive" => {
@@ -346,20 +578,6 @@ fn detect_laravel_string_key_context(
 // ─── Enumeration ────────────────────────────────────────────────────────────
 
 impl Backend {
-    /// The configured Blade view root directories.
-    ///
-    /// Reads the `paths` array from `config/view.php` (falling back to
-    /// the conventional `resources/views`) so that projects with custom
-    /// view directories resolve `view()` names correctly. Only existing
-    /// directories are returned. Read from disk, so unsaved edits to
-    /// `config/view.php` are not reflected until saved.
-    pub(crate) fn laravel_view_roots(&self) -> Vec<std::path::PathBuf> {
-        match self.workspace.workspace_root.read().clone() {
-            Some(root) => crate::blade::discover_view_paths(&root),
-            None => Vec::new(),
-        }
-    }
-
     /// Enumerate all config keys by scanning `config/` files and
     /// package config files discovered from service providers.
     fn enumerate_all_config_keys(&self) -> Vec<String> {
@@ -831,6 +1049,10 @@ impl Backend {
     fn string_key_candidates(&self, kind: &LaravelStringKind) -> Vec<String> {
         match kind {
             LaravelStringKind::Route => self.cached_route_names(),
+            // Only the keys `config/` declares: a key written at runtime is
+            // extracted from the same literal the cursor is inside, so the
+            // half-typed name of a `Storage::fake('…')` under the cursor
+            // would be offered back as a completion for itself.
             LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
@@ -850,8 +1072,8 @@ impl Backend {
 
     /// Try Laravel string key completion.
     ///
-    /// Detects the cursor inside the first string argument of `route()`,
-    /// `config()`, `view()`, `__()`, etc. and offers matching key names.
+    /// Detects the cursor inside a supported string argument of `route()`,
+    /// `config()`, `Storage::forgetDisk()`, etc. and offers matching names.
     pub(crate) fn try_laravel_string_key_completion(
         &self,
         content: &str,
@@ -933,6 +1155,25 @@ impl Backend {
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::Position;
+
+    fn detect_at_end(content: &str, value: &str) -> Option<LaravelStringKeyContext> {
+        let cursor = content.rfind(value)? + value.len();
+        detect_laravel_string_key_context(
+            content,
+            crate::text_position::offset_to_position(content, cursor),
+        )
+    }
+
+    fn storage_source(expression: &str) -> String {
+        format!("<?php\nuse Illuminate\\Support\\Facades\\Storage;\n{expression};\n")
+    }
+
+    fn completion_response_items(response: CompletionResponse) -> Vec<CompletionItem> {
+        match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        }
+    }
 
     /// Three kinds are recorded as spans but completed from somewhere else,
     /// or not at all, so they must offer nothing here rather than an empty
@@ -1077,6 +1318,28 @@ mod tests {
             let ctx = ctx.unwrap_or_else(|| panic!("should detect {marker} context"));
             assert!(matches!(ctx.kind, LaravelStringKind::View));
             assert_eq!(ctx.prefix, "partials.");
+        }
+    }
+
+    /// `@includeFirst`, `@componentFirst`, `@extendsFirst` and `@canany`
+    /// name their candidates inside an array literal, so the marker calls
+    /// they compile to have to complete there and not only for a plain
+    /// first argument.
+    #[test]
+    fn detects_the_blade_markers_that_list_their_names_in_an_array() {
+        for (marker, value, kind) in [
+            ("blade_view_directive", "partials.", LaravelStringKind::View),
+            ("blade_can_directive", "upd", LaravelStringKind::GateAbility),
+        ] {
+            let content = format!("<?php\n{marker}(['{value}']);\n");
+            let cursor = content.find(value).unwrap() + value.len();
+            let ctx = detect_laravel_string_key_context(
+                &content,
+                crate::text_position::offset_to_position(&content, cursor),
+            )
+            .unwrap_or_else(|| panic!("should detect {marker} array context"));
+            assert_eq!(ctx.kind, kind);
+            assert_eq!(ctx.prefix, value);
         }
     }
 
@@ -1226,6 +1489,272 @@ mod tests {
         let ctx = ctx.expect("should detect Config::get() context");
         assert!(matches!(ctx.kind, LaravelStringKind::Config));
         assert_eq!(ctx.prefix, "app.");
+    }
+
+    #[test]
+    fn detects_static_config_mutators_and_translation_queries() {
+        for method in ["prepend", "push"] {
+            let content = format!("<?php\nConfig::{method}('app.providers');\n");
+            let ctx = detect_at_end(&content, "app.providers")
+                .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Config);
+        }
+
+        for method in ["get", "has", "hasForLocale", "choice"] {
+            let content = format!("<?php\nLang::{method}('messages.saved');\n");
+            let ctx = detect_at_end(&content, "messages.saved")
+                .unwrap_or_else(|| panic!("should detect Lang::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Trans);
+        }
+    }
+
+    #[test]
+    fn storage_argument_scanning_preserves_existing_static_contexts() {
+        for (expression, expected_kind, expected_prefix) in [
+            (
+                "DB::connection('primary')",
+                LaravelStringKind::Config,
+                Some("database.connections."),
+            ),
+            (
+                "Model::getActualClassNameForMorph('post')",
+                LaravelStringKind::MorphAlias,
+                None,
+            ),
+        ] {
+            let content = format!("<?php\n{expression};\n");
+            let value = if expected_prefix.is_some() {
+                "primary"
+            } else {
+                "post"
+            };
+            let ctx = detect_at_end(&content, value)
+                .unwrap_or_else(|| panic!("should preserve `{expression}` completion"));
+            assert_eq!(ctx.kind, expected_kind);
+            assert_eq!(ctx.config_sub_prefix, expected_prefix);
+        }
+    }
+
+    #[test]
+    fn detects_storage_disk_scalar_methods_and_named_arguments() {
+        for expression in [
+            "Storage::disk('arch')",
+            "Storage::disk(name: 'arch')",
+            "Storage::fake('arch')",
+            "Storage::fake(disk: 'arch')",
+            "Storage::persistentFake('arch')",
+            "Storage::persistentFake(disk: 'arch')",
+            "Storage::forgetDisk('arch')",
+            "Storage::forgetDisk(disk: 'arch')",
+        ] {
+            let content = storage_source(expression);
+            let ctx = detect_at_end(&content, "arch")
+                .unwrap_or_else(|| panic!("should detect `{expression}` as a disk context"));
+            assert!(matches!(ctx.kind, LaravelStringKind::Config));
+            assert_eq!(ctx.prefix, "arch", "prefix for `{expression}`");
+            assert_eq!(
+                ctx.config_sub_prefix,
+                Some("filesystems.disks."),
+                "config subtree for `{expression}`"
+            );
+        }
+
+        for expression in [
+            "\\Illuminate\\Support\\Facades\\Storage::disk(name: 'arch')",
+            "#[\\Illuminate\\Container\\Attributes\\Storage(disk: 'arch')] class Consumer {}",
+        ] {
+            let content = format!("<?php\n{expression};\n");
+            let ctx = detect_at_end(&content, "arch")
+                .unwrap_or_else(|| panic!("should detect `{expression}` as a disk context"));
+            assert!(matches!(ctx.kind, LaravelStringKind::Config));
+            assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
+        }
+    }
+
+    #[test]
+    fn storage_facade_resolution_accepts_imports_and_rejects_homonyms() {
+        for content in [
+            "<?php\nStorage::disk('arch');\n",
+            "<?php\nuse Illuminate\\Support\\Facades\\Storage as Disks;\nDisks::disk('arch');\n",
+            "<?php\nuse Illuminate\\Support\\Facades\\{Storage as Disks, Cache};\nDisks::disk('arch');\n",
+            "<?php\nuse Vendor\\Package\\{Cache};\nuse Illuminate\\Support\\Facades\\Storage as Disks;\nDisks::disk('arch');\n",
+        ] {
+            assert!(
+                detect_at_end(content, "arch").is_some(),
+                "source: {content}"
+            );
+        }
+
+        for content in [
+            "<?php\nVendor\\Storage::disk('arch');\n",
+            "<?php\nuse Vendor\\Storage;\nStorage::disk('arch');\n",
+            "<?php\nnamespace App;\nuse Vendor\\{Storage as Disks};\nDisks::disk('arch');\n",
+            "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\{Storage;\nStorage::disk('arch');\n",
+            "<?php\nnamespace App;\nclass Storage {}\nStorage::disk('arch');\n",
+        ] {
+            assert!(
+                detect_at_end(content, "arch").is_none(),
+                "source: {content}"
+            );
+        }
+
+        // A malformed import binds nothing, so the short name is left to the
+        // global-alias rule rather than treated as an import of the facade.
+        for content in [
+            "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\Storage nope;\nStorage::disk('arch');\n",
+            "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\Storage as Disks trailing;\nDisks::disk('arch');\n",
+        ] {
+            assert!(
+                detect_at_end(content, "arch").is_none(),
+                "source: {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_every_forget_disk_array_value_and_spelling() {
+        for expression in [
+            "Storage::forgetDisk(['archive', 'backup'])",
+            "Storage::forgetDisk(array('archive', 'backup'))",
+            "Storage::forgetDisk(disk: ['archive', 'backup'])",
+            "Storage::forgetDisk(disk: array('archive', 'backup'))",
+        ] {
+            let content = storage_source(expression);
+            for value in ["archive", "backup"] {
+                let cursor = content.find(value).unwrap() + value.len();
+                let ctx = detect_laravel_string_key_context(
+                    &content,
+                    crate::text_position::offset_to_position(&content, cursor),
+                )
+                .unwrap_or_else(|| panic!("should detect `{value}` in `{expression}`"));
+                assert!(matches!(ctx.kind, LaravelStringKind::Config));
+                assert_eq!(ctx.prefix, value);
+                assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
+            }
+        }
+    }
+
+    #[test]
+    fn forget_disk_array_completion_filters_and_edits_the_current_value() {
+        let backend = crate::Backend::new_test();
+        backend.laravel_string_key_cache.write().config_keys = Some(vec![
+            "cache.stores.archive".to_string(),
+            "filesystems.disks.archive".to_string(),
+            "filesystems.disks.archive.driver".to_string(),
+            "filesystems.disks.backup".to_string(),
+        ]);
+
+        let content = "<?php\nuse Illuminate\\Support\\Facades\\Storage;\nStorage::forgetDisk(['backup', 'ar']);\n";
+        let cursor = content.rfind("ar").unwrap() + 2;
+        let position = crate::text_position::offset_to_position(content, cursor);
+        let response = backend
+            .try_laravel_string_key_completion(content, position)
+            .expect("the array value should offer disk names");
+        let items = completion_response_items(response);
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["archive"]
+        );
+        assert_eq!(
+            items[0].text_edit,
+            Some(CompletionTextEdit::Edit(TextEdit {
+                range: Range::new(
+                    crate::text_position::offset_to_position(content, cursor - 2),
+                    position,
+                ),
+                new_text: "archive".to_string(),
+            }))
+        );
+    }
+
+    #[test]
+    fn completion_response_item_helper_accepts_list_responses() {
+        let items = completion_response_items(CompletionResponse::List(CompletionList {
+            is_incomplete: false,
+            items: vec![CompletionItem::default()],
+        }));
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn forget_disk_arrays_complete_values_but_not_associative_keys() {
+        let content = "<?php\nuse Illuminate\\Support\\Facades\\Storage;\nStorage::forgetDisk(['alias' => 'archive']);\n";
+        let key_cursor = content.find("alias").unwrap() + "alias".len();
+        assert!(
+            detect_laravel_string_key_context(
+                content,
+                crate::text_position::offset_to_position(content, key_cursor),
+            )
+            .is_none(),
+            "an associative key is not a disk name"
+        );
+
+        let value = detect_at_end(content, "archive").expect("the array value is a disk name");
+        assert!(matches!(value.kind, LaravelStringKind::Config));
+        assert_eq!(value.prefix, "archive");
+    }
+
+    #[test]
+    fn rejects_invalid_storage_argument_names_and_shapes() {
+        for expression in [
+            "Storage::disk(['archive'])",
+            "Storage::fake(['archive'])",
+            "Storage::persistentFake(['archive'])",
+            "Storage::forgetDisk([['archive']])",
+            "Storage::disk(disk: 'archive')",
+            "Storage::fake(name: 'archive')",
+            "Storage::persistentFake(name: 'archive')",
+            "Storage::forgetDisk(name: 'archive')",
+            "#[\\Illuminate\\Container\\Attributes\\Storage(name: 'archive')] class C {}",
+            "#[\\Illuminate\\Container\\Attributes\\Storage(disk: ['archive'])] class C {}",
+            "Storage::extend('archive', fn () => null)",
+            "Config::get(['archive'])",
+            "route(name: 'archive')",
+        ] {
+            let content = storage_source(expression);
+            assert!(
+                detect_at_end(&content, "archive").is_none(),
+                "`{expression}` must not offer disk completion"
+            );
+        }
+    }
+
+    #[test]
+    fn storage_argument_scanners_handle_nested_and_malformed_php() {
+        let before_named = r#"Storage::fake(config: ['message' => 'it\'s', 'factory' => wrap(fn () => new class {})], disk:"#;
+        assert_eq!(
+            callable_before_scalar_argument(before_named),
+            Some(("Storage::fake", Some("disk")))
+        );
+
+        let nested = r#"<?php
+use Illuminate\Support\Facades\Storage;
+Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive']);"#;
+        let ctx = detect_at_end(nested, "archive")
+            .expect("balanced nested expressions must not hide the outer array");
+        assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
+
+        assert!(callable_before_scalar_argument("Storage::disk(:").is_none());
+        assert!(callable_before_scalar_argument("Storage::disk(name: value").is_none());
+        assert!(callable_before_scalar_argument("orphan name:").is_none());
+        assert!(enclosing_call_open_paren("completed(); orphan").is_none());
+        assert!(enclosing_call_open_paren("orphan").is_none());
+        assert!(callable_before_array_argument("factory('archive").is_none());
+        assert!(callable_before_array_argument("{ 'archive").is_none());
+        assert!(callable_before_array_argument("broken; 'archive").is_none());
+        assert!(callable_before_array_argument("orphan").is_none());
+
+        let escaped_key = r#"'key\'part' => 'archive'"#;
+        assert!(string_literal_is_array_key(
+            escaped_key,
+            "'key".len(),
+            b'\''
+        ));
+        assert!(!string_literal_is_array_key("'key\n", "'key".len(), b'\''));
+        assert!(!string_literal_is_array_key("'key", "'key".len(), b'\''));
     }
 
     #[test]

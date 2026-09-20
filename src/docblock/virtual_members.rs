@@ -206,6 +206,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         });
 
         if is_vendor_tag {

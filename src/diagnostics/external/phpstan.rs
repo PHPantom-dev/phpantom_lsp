@@ -110,19 +110,18 @@ impl Backend {
 
             // ── Step 4: run PHPStan (the slow part) ─────────────────
             // Move the blocking PHPStan execution onto a dedicated
-            // OS thread via `spawn_blocking`. This is critical:
-            // `run_phpstan` contains a poll loop that blocks the
-            // thread. If we ran it inline, the tokio runtime could
-            // schedule other futures (including a second iteration
-            // of this very worker) on other threads, breaking the
-            // "at most one PHPStan process" guarantee. By awaiting
-            // the `spawn_blocking` handle, this task is suspended
-            // (not occupying a runtime thread) and no re-entry can
-            // happen until the handle resolves.
+            // OS thread. This is critical: `run_phpstan` contains a
+            // poll loop that blocks the thread. If we ran it inline,
+            // the tokio runtime could schedule other futures
+            // (including a second iteration of this very worker) on
+            // other threads, breaking the "at most one PHPStan
+            // process" guarantee. By awaiting the offloaded call,
+            // this task is suspended (not occupying a runtime
+            // thread) and no re-entry can happen until it resolves.
             let phpstan_config = config.phpstan.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let phpstan_diags = {
-                let result = tokio::task::spawn_blocking(move || {
+                let result = crate::server::run_blocking_cancel_safe("phpstan", move || {
                     phpstan::run_phpstan(
                         &resolved,
                         &content,
@@ -135,18 +134,12 @@ impl Backend {
                 .await;
 
                 match result {
-                    Ok(Ok(diags)) => diags,
-                    Ok(Err(_e)) => {
-                        // PHPStan failures are silently ignored to
-                        // avoid flooding the editor with errors when
-                        // PHPStan is misconfigured or the project
-                        // doesn't use it.
-                        continue;
-                    }
-                    Err(_join_err) => {
-                        // The blocking task panicked or was cancelled.
-                        continue;
-                    }
+                    Some(Ok(diags)) => diags,
+                    // PHPStan failures are silently ignored to avoid
+                    // flooding the editor with errors when PHPStan is
+                    // misconfigured or the project doesn't use it.
+                    // (A panic is logged by the helper itself.)
+                    _ => continue,
                 }
             };
 

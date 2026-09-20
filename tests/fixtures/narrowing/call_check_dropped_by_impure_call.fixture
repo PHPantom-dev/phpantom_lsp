@@ -1,8 +1,9 @@
-// test: an impure call on the receiver drops the check recorded through it
+// test: a call declared @phpstan-impure drops the check recorded through it
 // feature: hover
 // Proving `$stmt->fetch('id') !== false` says something about the row the
-// statement is on.  `$stmt->execute()` moves to another one, so the same
-// call can hand back the sentinel again and the recorded proof is stale.
+// statement is on.  `execute()` hands back a value, so nothing about its
+// signature says it moves to another row — the tag is what does, and with
+// it the recorded proof is stale again.
 // expect: $row = array<string, string>|false
 ---
 <?php
@@ -11,6 +12,7 @@ class Stmt {
     /** @return array<string, string>|false */
     public function fetch(string $key) { return false; }
 
+    /** @phpstan-impure */
     public function execute(): bool { return true; }
 }
 

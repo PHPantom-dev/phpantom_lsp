@@ -1,7 +1,10 @@
-// test: or instanceof with unrelated boolean operands still narrows type
+// test: an instanceof beside an unrelated operand in an || proves nothing about the subject
 // feature: completion
-// Adapted from phpactor if-statement/if_or.test
-// expect: fooMethod(
+// Adapted from phpactor if-statement/if_or.test, which narrows here.  Entering
+// the branch says one of the operands held, and `true` on its own gets in
+// without the instanceof ever being evaluated, so the subject is whatever it
+// was on the way in.
+// expect_absent: fooMethod(
 ---
 <?php
 

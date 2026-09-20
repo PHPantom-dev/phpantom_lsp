@@ -9,25 +9,10 @@
 //! an array element records the element that was checked, not the whole
 //! array's value type.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, hover_at, hover_text, slow_diagnostic_messages};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-fn hover_at(backend: &Backend, uri: &str, content: &str, line: u32, character: u32) -> Hover {
-    backend.update_ast(uri, content);
-    backend
-        .handle_hover(uri, content, Position { line, character })
-        .expect("expected hover")
-}
-
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
 
 /// Hover on the variable that the marker line `// <-- here` points at.
 ///
@@ -40,7 +25,7 @@ fn hover_marked(backend: &Backend, uri: &str, content: &str) -> String {
         .expect("fixture should carry a `// <-- here` marker") as u32;
     let text = content.lines().nth(line as usize).unwrap();
     let column = text.find('$').expect("marked line should name a variable") as u32 + 1;
-    hover_text(&hover_at(backend, uri, content, line, column)).to_string()
+    hover_text(&hover_at(backend, uri, content, line, column).expect("expected hover")).to_string()
 }
 
 const SCAFFOLD: &str = r#"
@@ -198,6 +183,122 @@ function f(): void {{
     assert!(
         text.contains("?Image") || text.contains("null"),
         "a failing check leaves null in play, got: {text}"
+    );
+}
+
+// ─── Variables a branch writes together share one null ─────────────────────
+
+const REGISTRY: &str = r#"
+class Reflection {}
+class Acceptor {}
+class Registry {
+    public function find(string $name): ?Reflection { return null; }
+    public function select(Reflection $r): Acceptor { return new Acceptor(); }
+}
+"#;
+
+/// `$acceptor` is written on exactly the path that leaves `$reflection`
+/// holding a value, so the two are null together or not at all.  Testing
+/// one of them therefore settles the other, even though the branch that
+/// correlated them is long over and the test never names `$acceptor`.
+#[test]
+fn variables_written_on_the_same_path_share_their_null() {
+    let backend = create_test_backend();
+    let uri = "file:///correlated_null.php";
+    let content = format!(
+        r#"<?php
+{REGISTRY}
+function f(Registry $registry, string $name): void {{
+    $acceptor = null;
+    $reflection = null;
+    if ($name !== '') {{
+        $reflection = $registry->find($name);
+        if ($reflection !== null) {{
+            $acceptor = $registry->select($reflection);
+        }}
+    }}
+
+    if ($reflection !== null) {{
+        $acceptor; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Acceptor"), "expected Acceptor, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the check on $reflection rules out $acceptor's null too, got: {text}"
+    );
+}
+
+/// Two variables written under conditions of their own are not
+/// correlated, however alike the two branches look.  Proving one is not
+/// null says nothing about whether the other's branch ran.
+#[test]
+fn variables_written_in_separate_branches_stay_independent() {
+    let backend = create_test_backend();
+    let uri = "file:///independent_null.php";
+    let content = format!(
+        r#"<?php
+{REGISTRY}
+function f(bool $a, bool $b): void {{
+    $acceptor = null;
+    $reflection = null;
+    if ($a) {{
+        $reflection = new Reflection();
+    }}
+    if ($b) {{
+        $acceptor = new Acceptor();
+    }}
+
+    if ($reflection !== null) {{
+        $acceptor; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("null"),
+        "$acceptor's branch may not have run, got: {text}"
+    );
+}
+
+/// Writing to one of the pair on a path that leaves the other alone
+/// breaks the correlation: past that branch, a value in `$reflection` no
+/// longer means the branch that filled `$acceptor` is the one that ran.
+#[test]
+fn a_later_write_breaks_the_correlation() {
+    let backend = create_test_backend();
+    let uri = "file:///broken_correlation.php";
+    let content = format!(
+        r#"<?php
+{REGISTRY}
+function f(bool $a, bool $b): void {{
+    $acceptor = null;
+    $reflection = null;
+    if ($a) {{
+        $reflection = new Reflection();
+        $acceptor = new Acceptor();
+    }}
+    if ($b) {{
+        $reflection = new Reflection();
+    }}
+
+    if ($reflection !== null) {{
+        $acceptor; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("null"),
+        "the second branch fills only $reflection, got: {text}"
     );
 }
 
@@ -432,7 +533,7 @@ function f(array $frame): void {
         "the key may be absent, and reading a missing offset is null: {text}"
     );
 
-    let required = hover_at(&backend, uri, content, 3, 5);
+    let required = hover_at(&backend, uri, content, 3, 5).expect("expected hover");
     let required = hover_text(&required);
     assert!(
         !required.contains("null"),
@@ -460,6 +561,85 @@ function f(array $frame): void {
     assert!(
         !text.contains("null"),
         "the check rules out both the missing key and a falsy value: {text}"
+    );
+}
+
+/// `array_key_exists()` proves the key is there, so the read is no
+/// longer the `null` a missing offset yields.
+#[test]
+fn array_key_exists_on_an_optional_shape_key_proves_it_is_there() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_shape_key.php";
+    let content = r#"<?php
+/** @param array{file: string, type?: string} $frame */
+function f(array $frame): void {
+    if (array_key_exists('type', $frame)) {
+        $type = $frame['type'];
+        $type; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the key is known to be present: {text}"
+    );
+}
+
+/// The subject may be a property rather than a local, and the guard may
+/// be written as an early return.
+#[test]
+fn array_key_exists_guard_clause_proves_a_property_shape_key() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_property.php";
+    let content = r#"<?php
+class Excluder {
+    /** @var array{analyse?: list<string>} */
+    private array $paths = [];
+
+    public function f(): void {
+        if (!array_key_exists('analyse', $this->paths)) {
+            return;
+        }
+        $analyse = $this->paths['analyse'];
+        $analyse; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("list<string>"),
+        "expected list<string>, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "the guard's fall-through proves the key is present: {text}"
+    );
+}
+
+/// Presence is all `array_key_exists()` proves: a key declared nullable
+/// keeps its `null`, which is where it differs from `isset()`.
+#[test]
+fn array_key_exists_does_not_rule_out_a_null_value() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_nullable_value.php";
+    let content = r#"<?php
+/** @param array{type?: string|null} $frame */
+function f(array $frame): void {
+    if (array_key_exists('type', $frame)) {
+        $type = $frame['type'];
+        $type; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("null") || text.contains("?string"),
+        "the value itself may still be null: {text}"
     );
 }
 
@@ -720,17 +900,7 @@ function accept(Agreement $agreement): void {}
 /// Run the slow diagnostic pipeline and keep the argument-type errors a
 /// lost narrowing produces.
 fn argument_type_errors(backend: &Backend, uri: &str, php: &str) -> Vec<String> {
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(backend, uri, php, "type_mismatch_argument")
 }
 
 /// The guard names only the chain's *result*, but a null `$agreement`
@@ -1183,4 +1353,1804 @@ namespace App {{
         text.contains("?User"),
         "a different function proves nothing, got: {text}"
     );
+}
+
+// ─── An identity comparison carries the comparand's proof ───────────────────
+
+/// `$a === $b` holding means both sides carried the same value, so a
+/// nullable subject compared identical to a value that cannot be null
+/// holds no null in that branch.
+#[test]
+fn identity_against_a_non_null_operand_strips_null() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_non_null.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+}
+function f(Ctx $ctx, string $wanted): void {
+    $name = $ctx->name();
+    if ($name === $wanted) {
+        $name; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the identity rules out the null, got: {text}"
+    );
+}
+
+/// Operand order does not change what the identity proves.
+#[test]
+fn identity_narrows_with_the_subject_on_the_right() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_reversed.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+}
+function f(Ctx $ctx, string $wanted): void {
+    $name = $ctx->name();
+    if ($wanted === $name) {
+        $name; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the identity rules out the null, got: {text}"
+    );
+}
+
+/// `$a !== $b` returning false is the same proof, so the fall-through of
+/// a `!==` guard clause narrows too.
+#[test]
+fn a_not_identical_guard_clause_strips_null_on_fall_through() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_guard.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+}
+function f(Ctx $ctx, string $wanted): void {
+    $name = $ctx->name();
+    if ($name !== $wanted) {
+        return;
+    }
+    $name; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the guard's fall-through proves the identity held, got: {text}"
+    );
+}
+
+/// A comparand that is itself nullable proves nothing: both sides could
+/// have been null.
+#[test]
+fn identity_against_a_nullable_operand_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_nullable_operand.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+    public function other(): ?string { return null; }
+}
+function f(Ctx $ctx): void {
+    $name = $ctx->name();
+    if ($name === $ctx->other()) {
+        $name; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("?string"),
+        "both sides could have been null, got: {text}"
+    );
+}
+
+/// A loose comparison proves nothing: `null == 0` and `null == false`
+/// are both true.
+#[test]
+fn a_loose_comparison_does_not_strip_null() {
+    let backend = create_test_backend();
+    let uri = "file:///loose_comparison.php";
+    let content = r#"<?php
+class Ctx {
+    public function count(): ?int { return null; }
+}
+function f(Ctx $ctx, int $wanted): void {
+    $count = $ctx->count();
+    if ($count == $wanted) {
+        $count; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("?int"),
+        "`null == 0` holds, so the loose check proves nothing, got: {text}"
+    );
+}
+
+// ─── A type guard's negative branch strips the member it checked ────────────
+
+/// `is_float()` failing rules out `float`, so the else branch of the check
+/// (and a reassignment merged back from the taken branch) leaves plain
+/// `int` to flow into an array literal.
+#[test]
+fn is_float_negative_branch_strips_float_from_a_declared_union() {
+    let backend = create_test_backend();
+    let uri = "file:///is_float_else.php";
+    let content = r#"<?php
+function f(int $offsetValue, int $max): void {
+    /** @var int|float $newAutoIndex */
+    $newAutoIndex = $offsetValue + 1;
+    if (is_float($newAutoIndex)) {
+        $newAutoIndex = $max;
+    }
+    $indexes = [$newAutoIndex];
+    $indexes; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{int}"),
+        "both paths leave an int, got: {text}"
+    );
+}
+
+/// The mirror case: `is_int()` failing leaves `float`.
+#[test]
+fn is_int_negative_branch_strips_int_from_a_declared_union() {
+    let backend = create_test_backend();
+    let uri = "file:///is_int_else.php";
+    let content = r#"<?php
+/** @param int|float $value */
+function f($value): void {
+    if (is_int($value)) {
+        return;
+    }
+    $value; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("float"), "expected float, got: {text}");
+    assert!(!text.contains("int"), "the int is ruled out, got: {text}");
+}
+
+// ─── `instanceof` against a value holding the class name ────────────────────
+
+const DYNAMIC_SCAFFOLD: &str = r#"
+class Stmt {}
+class Continue_ extends Stmt { public ?int $num = null; }
+class Break_ extends Stmt { public ?int $num = null; }
+"#;
+
+/// `$x instanceof $class` resolves against whatever `$class` holds, so a
+/// `class-string<T>` narrows the subject to `T`.
+#[test]
+fn instanceof_a_class_string_variable_narrows_the_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+/**
+ * @param class-string<Continue_> $stmtClass
+ */
+function f(Stmt $statement, string $stmtClass): void {{
+    if ($statement instanceof $stmtClass) {{
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Continue_"),
+        "expected Continue_, got: {text}"
+    );
+}
+
+/// A union of `class-string`s narrows to the union of the classes they
+/// name, and the guard-clause form proves the same thing.
+#[test]
+fn a_negated_dynamic_instanceof_guard_narrows_past_it() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_guard.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+/**
+ * @param list<Stmt> $stmts
+ * @param class-string<Continue_>|class-string<Break_> $stmtClass
+ */
+function f(array $stmts, string $stmtClass): void {{
+    foreach ($stmts as $statement) {{
+        if (!$statement instanceof $stmtClass) {{
+            continue;
+        }}
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Continue_") || text.contains("Break_"),
+        "expected one of the checked classes, got: {text}"
+    );
+    assert!(
+        !text.contains("$statement = Stmt\n"),
+        "the check filtered the union, got: {text}"
+    );
+}
+
+/// An object-typed right-hand side stands for its own class, which is
+/// what `$a instanceof $b` checks at runtime.
+#[test]
+fn instanceof_an_object_valued_operand_narrows_the_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_object.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+function f(Stmt $statement, Break_ $other): void {{
+    if ($statement instanceof $other) {{
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Break_"), "expected Break_, got: {text}");
+}
+
+/// An unsubstituted `@template T` names no loadable class, so the check
+/// proves nothing.  Narrowing to it would leave the subject unresolvable
+/// and report every later member access on it.
+#[test]
+fn instanceof_an_unsubstituted_template_operand_leaves_the_subject_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_template.php";
+    let content = r#"<?php
+class Node {
+    public function name(): string { return 'n'; }
+}
+interface Finder {
+    /**
+     * @template T of Node
+     * @param class-string<T> $targetType
+     * @return T[]
+     */
+    public function findChildren($targetType): array;
+}
+class Artifact implements Finder {
+    /** @return list<Node> */
+    public function children(): array { return []; }
+
+    public function findChildren($targetType): array
+    {
+        foreach ($this->children() as $node) {
+            if ($node instanceof $targetType) {
+                echo 'match';
+            }
+            $found = $node;
+            $found; // <-- here
+        }
+        return [];
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("Node"),
+        "the subject keeps its declared type, got: {text}"
+    );
+}
+
+/// A plain `string` names no class, so the check proves nothing and the
+/// subject keeps its declared type rather than being narrowed to noise.
+#[test]
+fn instanceof_an_unspecific_string_operand_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_plain.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+function f(Stmt $statement, string $stmtClass): void {{
+    if ($statement instanceof $stmtClass) {{
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Stmt"), "expected Stmt, got: {text}");
+}
+
+// ─── An `elseif`'s own condition narrows its later operands ─────────────────
+
+const ELSEIF_SCAFFOLD: &str = r#"
+class Ty {}
+class ShapeTy extends Ty {
+    public function propName(): string { return 'x'; }
+}
+"#;
+
+/// The right-hand operand of an `&&` sees what the left one proved,
+/// whether the condition belongs to the leading `if` or to an `elseif`.
+#[test]
+fn an_elseif_condition_narrows_its_own_and_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_and_chain.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+function f(Ty $t, bool $flag): void {{
+    if ($flag) {{
+        echo 'flag';
+    }} elseif ($t instanceof ShapeTy && $t->propName() !== '') {{
+        $t; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+/// The same for a property subject, which is the shape the check is
+/// usually written on.
+#[test]
+fn an_elseif_condition_narrows_a_property_subject_for_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_property.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+class Holder {{
+    private Ty $type;
+
+    public function __construct(Ty $type) {{ $this->type = $type; }}
+
+    public function f(bool $flag): void {{
+        if ($flag) {{
+            echo 'flag';
+        }} elseif ($this->type instanceof ShapeTy && $this->type->propName() !== '') {{
+            $narrowed = $this->type;
+            $narrowed; // <-- here
+        }}
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+// ─── An array element addressed by a variable is one subject ───────────────
+
+/// `$types[$i]` written twice is the same read, so a guard on the first
+/// narrows the second — the same way a constant offset already did.
+#[test]
+fn instanceof_narrows_an_array_element_addressed_by_a_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///array_variable_index.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types): void {{
+    for ($i = 0; $i < count($types); $i++) {{
+        if ($types[$i] instanceof ShapeTy && $types[$i]->propName() !== '') {{
+            $element = $types[$i];
+            $element; // <-- here
+        }}
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+/// An offset computed from a variable (`$stmts[$count - 2]`) addresses one
+/// element just as a bare variable index does, so the guard carries.
+#[test]
+fn instanceof_narrows_an_array_element_addressed_by_a_computed_index() {
+    let backend = create_test_backend();
+    let uri = "file:///array_computed_index.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types, int $count): void {{
+    if (!$types[$count - 2] instanceof ShapeTy) {{
+        return;
+    }}
+    $element = $types[$count - 2];
+    $element; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+/// Writing to a variable the offset reads makes the element key stale, so
+/// the guard stops describing it.
+#[test]
+fn writing_to_an_index_operand_drops_the_computed_element_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///array_computed_index_write.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types, int $count): void {{
+    if (!$types[$count - 2] instanceof ShapeTy) {{
+        return;
+    }}
+    $count = 0;
+    $element = $types[$count - 2];
+    $element; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        !text.contains("ShapeTy"),
+        "a moved offset proves nothing, got: {text}"
+    );
+}
+
+/// A different index is a different subject, so the guard proves nothing
+/// about it.
+#[test]
+fn a_guard_on_one_index_does_not_narrow_another() {
+    let backend = create_test_backend();
+    let uri = "file:///array_other_index.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types, int $i, int $j): void {{
+    if ($types[$i] instanceof ShapeTy) {{
+        $other = $types[$j];
+        $other; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        !text.contains("ShapeTy"),
+        "a different index proves nothing, got: {text}"
+    );
+}
+
+// ─── A check no value can pass leaves no state behind ────────────────────────
+
+const ACCUMULATOR_SCAFFOLD: &str = r#"
+class Scope {
+    public function mergeWith(?Scope $other): Scope { return $this; }
+}
+class BranchEnd {
+    public function getScope(): Scope { return new Scope(); }
+}
+"#;
+
+/// The loop-fold accumulator: seed on the run where the variable is still
+/// `null`, merge on every run after it.  On the first pass the merge arm
+/// cannot be entered at all — `$acc` is exactly `null` there — so the
+/// unresolvable `null->mergeWith()` it would perform must not join back
+/// and erase the seed the other arm produced.
+#[test]
+fn a_loop_fold_accumulator_keeps_the_type_its_seed_branch_established() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_guard.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+/** @param BranchEnd[] $ends */
+function f(array $ends): void {{
+    $acc = null;
+    foreach ($ends as $end) {{
+        if ($acc === null) {{
+            $acc = $end->getScope();
+            continue;
+        }}
+        $acc = $acc->mergeWith($end->getScope());
+    }}
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+/// The same fold written as an `if`/`else` rather than a guard clause.
+#[test]
+fn a_loop_fold_accumulator_written_as_if_else_keeps_its_seed_type() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_if_else.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+/** @param BranchEnd[] $ends */
+function f(array $ends): void {{
+    $acc = null;
+    foreach ($ends as $end) {{
+        if ($acc === null) {{
+            $acc = $end->getScope();
+        }} else {{
+            $acc = $acc->mergeWith($end->getScope());
+        }}
+    }}
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+/// And as a ternary, where the dead arm is pruned by the expression
+/// resolver rather than by the statement walker.
+#[test]
+fn a_ternary_fold_accumulator_drops_the_arm_its_condition_rules_out() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_ternary.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+/** @param BranchEnd[] $ends */
+function f(array $ends): void {{
+    $acc = null;
+    foreach ($ends as $end) {{
+        $acc = $acc === null ? $end->getScope() : $acc->mergeWith($end->getScope());
+    }}
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+/// The pruning is a statement about the *path*, not about the variable: a
+/// guard whose subject really can be non-null still leaves the rest of the
+/// body reachable.
+#[test]
+fn a_guard_that_rules_out_null_leaves_the_rest_of_the_body_reachable() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_live_guard.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+function f(?Scope $acc, BranchEnd $end): void {{
+    if ($acc === null) {{
+        return;
+    }}
+    $acc = $acc->mergeWith($end->getScope());
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+// ─── get_class() identity narrows whatever instanceof would ─────────────────
+
+/// A global function is as often written `\get_class(…)` as `get_class(…)`,
+/// and the two spellings name the same function.
+#[test]
+fn a_fully_qualified_get_class_narrows_too() {
+    let backend = create_test_backend();
+    let uri = "file:///get_class_fqn.php";
+    let content = r#"<?php
+namespace App;
+
+class Base {}
+class Sub extends Base {}
+
+function f(Base $x): void {
+    if (\get_class($x) === Sub::class) {
+        $x; // <-- here
+    }
+}
+"#;
+
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("Sub"),
+        "a leading backslash does not make it a different function, got: {hover}"
+    );
+}
+
+// ─── `instanceof self` inside a trait ───────────────────────────────────────
+
+/// A trait is never instantiated, so `self` inside one of its methods is
+/// whichever class used it. Narrowing to the trait would leave only the
+/// members the trait happens to declare itself, and a trait need not
+/// declare what its own methods reach for: here `$value` is a private
+/// property of each using class.
+#[test]
+fn instanceof_self_in_a_trait_narrows_to_the_classes_that_use_it() {
+    let backend = create_test_backend();
+    let uri = "file:///trait_instanceof_self.php";
+    let content = r#"<?php
+namespace App;
+
+interface ValueType {}
+
+trait ScalarValueTrait
+{
+    public function equals(ValueType $other): bool
+    {
+        if ($other instanceof self) {
+            $other; // <-- here
+            return $this->value === $other->value;
+        }
+        return false;
+    }
+}
+
+class IntValue implements ValueType
+{
+    use ScalarValueTrait;
+    public function __construct(private int $value) {}
+}
+
+class StringValue implements ValueType
+{
+    use ScalarValueTrait;
+    public function __construct(private string $value) {}
+}
+"#;
+
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("IntValue") && hover.contains("StringValue"),
+        "the branch proves `$other` is one of the using classes, got: {hover}"
+    );
+    assert!(
+        !hover.contains("ScalarValueTrait"),
+        "the trait itself is not a type any value has, got: {hover}"
+    );
+}
+
+/// With no class in the project using the trait there is nothing to
+/// answer with, so the trait itself stands in as it did before — a
+/// partial answer would rule out members some unread user declares.
+#[test]
+fn instanceof_self_in_an_unused_trait_keeps_the_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///trait_instanceof_self_unused.php";
+    let content = r#"<?php
+namespace App;
+
+interface ValueType {}
+
+trait LonelyTrait
+{
+    public function equals(ValueType $other): bool
+    {
+        if ($other instanceof self) {
+            $other; // <-- here
+            return true;
+        }
+        return false;
+    }
+}
+"#;
+
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("LonelyTrait"),
+        "with no using class the trait is still the best answer, got: {hover}"
+    );
+}
+
+// ─── The proof reaches a test on the variable the branch filled ─────────────
+
+const BRANCH_SCAFFOLD: &str = r#"
+class Expr {}
+class Variable extends Expr {
+    public string $name = '';
+}
+class Holder {
+    public Expr $value;
+}
+class Marker {}
+function acceptVariable(Variable $v): void {}
+"#;
+
+/// The `!== null` guard names the variable the branch filled, not the
+/// subject the branch narrowed — but reaching it proves the branch ran,
+/// so the narrowing holds again.
+#[test]
+fn a_variable_filled_under_a_guard_stands_for_that_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_proof_variable.php";
+    let content = format!(
+        r#"<?php
+{BRANCH_SCAFFOLD}
+function process(Expr $expr): void {{
+    $marker = null;
+    if ($expr instanceof Variable) {{
+        $marker = new Marker();
+    }}
+    echo 'gap';
+    if ($marker !== null) {{
+        acceptVariable($expr);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "reaching the `!== null` guard proves the branch ran, got: {errors:?}"
+    );
+}
+
+/// The same for a subject reached through a property path, which the
+/// implicit else never records a narrowing for at all.
+#[test]
+fn a_variable_filled_under_a_guard_stands_for_a_property_path_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_proof_property.php";
+    let content = format!(
+        r#"<?php
+{BRANCH_SCAFFOLD}
+function process(Holder $holder): void {{
+    $marker = null;
+    if ($holder->value instanceof Variable && is_string($holder->value->name)) {{
+        $marker = new Marker();
+    }}
+    echo 'gap';
+    if ($marker !== null) {{
+        acceptVariable($holder->value);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the property path the branch narrowed is narrowed again past the \
+         guard, got: {errors:?}"
+    );
+}
+
+/// A guard closer to the read has already proven more, and the recorded
+/// branch proof must not widen it back.
+#[test]
+fn a_branch_proof_never_widens_a_closer_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_proof_no_widening.php";
+    let content = format!(
+        r#"<?php
+{BRANCH_SCAFFOLD}
+function process(Holder $holder, Expr $other): void {{
+    $marker = null;
+    if ($other instanceof Variable) {{
+        $marker = new Marker();
+    }}
+    if ($marker !== null && $holder->value instanceof Variable) {{
+        acceptVariable($holder->value);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the `&&` operand proves more than the branch did, got: {errors:?}"
+    );
+}
+
+// ─── `count()` and element writes prove an array has entries ────────────────
+
+/// `count($xs) > 0` is the ordinary way to ask whether an array has
+/// entries, so the branch it guards has to carry that proof — which is
+/// what a `foreach` inside it reads to know its body runs.
+#[test]
+fn a_positive_count_proves_the_array_has_entries() {
+    let backend = create_test_backend();
+    let uri = "file:///count_positive.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (count($xs) > 0) {
+        echo $xs; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = non-empty-array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// The same proof read off the other side of the comparison, and off the
+/// fall-through of a guard clause that ruled the empty case out.
+#[test]
+fn a_zero_count_guard_leaves_the_array_non_empty_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///count_zero_guard.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (count($xs) === 0) {
+        throw new RuntimeException('empty');
+    }
+    echo $xs; // <-- here
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = non-empty-array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+
+    let uri = "file:///count_zero_flipped.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (0 < count($xs)) {
+        echo $xs; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = non-empty-array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// A bound `count()` cannot fall below says nothing: `count($xs) < 5` is
+/// true of the empty array too.
+#[test]
+fn a_count_bound_that_proves_nothing_leaves_the_array_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///count_weak_bound.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (count($xs) < 5) {
+        echo $xs; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// A loop the caller proved runs cannot leave the `null` a sentinel was
+/// seeded with: every iteration assigns it, and there is at least one.
+#[test]
+fn a_loop_over_a_counted_array_clears_the_null_sentinel() {
+    let backend = create_test_backend();
+    let uri = "file:///counted_loop_sentinel.php";
+    let content = r#"<?php
+class Pen {}
+/** @param string[] $xs */
+function probe(array $xs): void {
+    $last = null;
+    if (count($xs) > 0) {
+        foreach ($xs as $x) {
+            $last = new Pen();
+        }
+        echo $last; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$last = Pen"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// An element write puts an entry there, so the array it wrote into has
+/// one — and a `foreach` over it afterwards runs.
+#[test]
+fn an_element_write_proves_the_array_has_entries() {
+    let backend = create_test_backend();
+    let uri = "file:///write_non_empty.php";
+    let content = r#"<?php
+class Pen {}
+function probe(string $key): void {
+    $items = [];
+    $items[] = $key;
+    $last = null;
+    foreach ($items as $item) {
+        $last = new Pen();
+    }
+    echo $last; // <-- here
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$last = Pen"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// A write on only one path gives the promise back at the join, so the
+/// sentinel survives a loop over what it produced.
+#[test]
+fn a_conditional_element_write_leaves_the_array_possibly_empty() {
+    let backend = create_test_backend();
+    let uri = "file:///conditional_write_empty.php";
+    let content = r#"<?php
+class Pen {}
+function probe(string $key, bool $flag): void {
+    $items = [];
+    if ($flag) {
+        $items[] = $key;
+    }
+    $last = null;
+    foreach ($items as $item) {
+        $last = new Pen();
+    }
+    echo $last; // <-- here
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$last = null|Pen"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+// ─── A disjunction inside a condition keeps each leg's own proof ────────────
+
+const DISJUNCTION_SCAFFOLD: &str = r#"
+class Expr {}
+class Variable extends Expr {
+    /** @var string|Expr */
+    public $name;
+}
+class ForeachNode {
+    public Expr $valueVar;
+    public ?Expr $keyVar = null;
+}
+function acceptString(string $s): void {}
+"#;
+
+/// Entering the branch proves the whole disjunction, so a check further
+/// down that rules out the `=== null` leg leaves the other one, and with
+/// it the `is_string` the other leg carried.
+#[test]
+fn ruling_out_one_leg_of_a_guard_leaves_the_other_legs_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_leg.php";
+    let content = format!(
+        r#"<?php
+{DISJUNCTION_SCAFFOLD}
+function process(ForeachNode $stmt): void {{
+    if (
+        ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+        && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+    ) {{
+        if ($stmt->keyVar instanceof Variable) {{
+            acceptString($stmt->keyVar->name);
+        }}
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the surviving leg proves the name is a string, got: {errors:?}"
+    );
+}
+
+/// The same read through the ternary the source actually writes it with.
+#[test]
+fn a_ternary_reads_back_what_the_surviving_leg_proved() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_ternary.php";
+    let content = format!(
+        r#"<?php
+{DISJUNCTION_SCAFFOLD}
+function process(ForeachNode $stmt): void {{
+    if (
+        ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+        && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+    ) {{
+        $keyVarName = $stmt->keyVar instanceof Variable ? $stmt->keyVar->name : null;
+        acceptString($keyVarName ?? '');
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the ternary's own check picks the leg that proved a string, got: {errors:?}"
+    );
+}
+
+/// A leg proves nothing on its own: with no check to rule the other leg
+/// out, the read still sees everything the disjunction allows. The
+/// `is_string` one leg carries must not escape it, and neither must the
+/// member path only that leg could read at all.
+#[test]
+fn a_disjunction_alone_proves_only_the_union_of_its_legs() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_union.php";
+    let content = format!(
+        r#"<?php
+{DISJUNCTION_SCAFFOLD}
+function process(ForeachNode $stmt): void {{
+    if (
+        ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+        && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+    ) {{
+        acceptString($stmt->keyVar->name);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the null leg is still live, so the read is unproven, got: {errors:?}"
+    );
+}
+
+// ─── Re-testing a condition re-applies what it proved ───────────────────────
+
+const RETEST_SCAFFOLD: &str = r#"
+class Acceptor {}
+class Reflection {}
+function selectAcceptor(array $args): Acceptor { return new Acceptor(); }
+function acceptAcceptor(Acceptor $a): void {}
+"#;
+
+/// The second `count($args) > 0` re-establishes exactly what the first
+/// one did, and the branch it guarded is the only thing that filled
+/// `$acceptor` — so reaching the second test proves the fill happened.
+#[test]
+fn re_testing_a_count_guard_re_applies_what_the_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_count.php";
+    let content = format!(
+        r#"<?php
+{RETEST_SCAFFOLD}
+function process(array $args): void {{
+    $acceptor = null;
+    if (count($args) > 0) {{
+        $acceptor = selectAcceptor($args);
+    }}
+    echo 'gap';
+    if (count($args) > 0) {{
+        acceptAcceptor($acceptor);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "re-testing the guard proves the branch ran, got: {errors:?}"
+    );
+}
+
+const RETEST_CALL_SCAFFOLD: &str = r#"
+class Node {}
+class Identifier {
+    public function isClass(): bool { return true; }
+    public function isFunction(): bool { return true; }
+}
+function acceptNode(Node $node): void {}
+"#;
+
+/// The second `$identifier->isClass()` re-selects the branch the first one
+/// guarded, so `$files` is the non-empty literal again and the `foreach`
+/// over it provably runs — leaving `$node` a `Node`, not `Node|null`.
+#[test]
+fn re_testing_a_call_re_applies_what_the_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_call.php";
+    let content = format!(
+        r#"<?php
+{RETEST_CALL_SCAFFOLD}
+class Locator {{
+    /** @return list<string> */
+    private function findFilesByFunction(): array {{ return []; }}
+    private function fetch(string $file): Node {{ return new Node(); }}
+
+    public function locate(Identifier $identifier): void {{
+        if ($identifier->isClass()) {{
+            $files = ['a.php'];
+        }} elseif ($identifier->isFunction()) {{
+            $files = $this->findFilesByFunction();
+        }} else {{
+            return;
+        }}
+
+        if ($identifier->isClass()) {{
+            $node = null;
+            foreach ($files as $file) {{
+                $node = $this->fetch($file);
+            }}
+            acceptNode($node);
+        }}
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "re-testing the call proves the literal branch ran, got: {errors:?}"
+    );
+}
+
+/// A property path is tested exactly as a call is, so re-reading it
+/// re-selects the branch it guarded.
+#[test]
+fn re_testing_a_property_path_re_applies_what_the_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_property.php";
+    let content = format!(
+        r#"<?php
+{RETEST_CALL_SCAFFOLD}
+class Row {{
+    public bool $active = true;
+}}
+function makeNode(): Node {{ return new Node(); }}
+function process(Row $row): void {{
+    $node = null;
+    if ($row->active) {{
+        $node = makeNode();
+    }}
+    echo 'gap';
+    if ($row->active) {{
+        acceptNode($node);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "re-testing the path proves the branch ran, got: {errors:?}"
+    );
+}
+
+/// Writing to the receiver between the two tests makes the second one a
+/// question about a different object, so it recovers nothing.
+#[test]
+fn a_write_to_the_receiver_breaks_a_re_tested_call() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_call_rewritten.php";
+    let content = format!(
+        r#"<?php
+{RETEST_CALL_SCAFFOLD}
+function makeNode(): Node {{ return new Node(); }}
+function process(Identifier $identifier, Identifier $other): void {{
+    $node = null;
+    if ($identifier->isClass()) {{
+        $node = makeNode();
+    }}
+    $identifier = $other;
+    if ($identifier->isClass()) {{
+        acceptNode($node);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the second test asks about a different object, got: {errors:?}"
+    );
+}
+
+/// A different condition proves nothing about the branch that filled the
+/// variable, so the sentinel is still live.
+#[test]
+fn an_unrelated_guard_does_not_re_apply_the_branchs_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_unrelated.php";
+    let content = format!(
+        r#"<?php
+{RETEST_SCAFFOLD}
+function process(array $args, bool $flag): void {{
+    $acceptor = null;
+    if (count($args) > 0) {{
+        $acceptor = selectAcceptor($args);
+    }}
+    echo 'gap';
+    if ($flag) {{
+        acceptAcceptor($acceptor);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "nothing rules the sentinel out here, got: {errors:?}"
+    );
+}
+
+/// A bound further out than "has entries" splits nothing: falling past
+/// `count($x) > 1` leaves one entry exactly as possible as none, so the
+/// fall-through must not be read as an empty array.
+#[test]
+fn a_count_bound_above_one_proves_nothing_on_the_way_past() {
+    let backend = create_test_backend();
+    let uri = "file:///count_bound_two.php";
+    let content = r#"<?php
+function acceptString(string $s): void {}
+/** @param string[] $names */
+function process(array $names): void {
+    if (count($names) > 1) {
+        return;
+    }
+    if ($names === []) {
+        return;
+    }
+    acceptString($names[0]);
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "one entry survives `count($names) > 1`, got: {errors:?}"
+    );
+}
+
+/// An `elseif` branch inherits an `is_float()` guard's negative narrowing
+/// from the preceding `if`, so a declared `int|float` subject reads as
+/// plain `int` inside it, not the pre-guard union.
+#[test]
+fn is_float_negative_narrowing_carries_into_a_trailing_elseif() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_elseif.php";
+    let content = r#"<?php
+class C {
+    /** @var array<int, int> */
+    private array $nextAutoIndexes = [];
+    function f(int $offsetValue, bool $optional): void {
+        /** @var int|float $newAutoIndex */
+        $newAutoIndex = $offsetValue + 1;
+        if (is_float($newAutoIndex)) {
+            $newAutoIndex = (int) $newAutoIndex;
+        } elseif (!$optional) {
+            $this->nextAutoIndexes = [$newAutoIndex];
+            $newAutoIndex; // <-- here
+        }
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$newAutoIndex = int\n```");
+}
+
+/// An `int|float` subject computed through a swap-guarded, `min()`-merged
+/// branch and then an `is_float()` guard survives as plain `int|null`,
+/// not a union with `int` or `float` duplicated.
+///
+/// Two independent gaps produced the duplication: `int` widens into
+/// `float` for compatibility checks (PHP's silent int→float coercion),
+/// which let scalar-refinement absorption collapse `int|float` down to
+/// bare `float`; and a ternary/`if`-without-`else` branch merge only
+/// deduplicated entries by exact equality, so an entry that was merely a
+/// *subset* of a sibling (a bare `float` beside a `Benevolent(int|float)`
+/// division result) survived as a separate, undeduplicated alternative.
+#[test]
+fn int_float_subject_survives_a_swap_and_guard_chain_without_duplicating() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_swap.php";
+    let content = r#"<?php
+function f(?int $rangeMin, ?int $rangeMax, int $c, bool $isConst): void {
+    if ($isConst) {
+        $min = $rangeMin !== null ? $rangeMin / $c : null;
+    } else {
+        $rangeMinSign = ($rangeMin ?? -INF) <=> 0;
+        $rangeMaxSign = ($rangeMax ?? INF) <=> 0;
+
+        $min1 = $c !== 0 ? $rangeMin / $c : $rangeMinSign * -0.1;
+        $max1 = $c !== 0 ? $rangeMax / $c : $rangeMaxSign * -0.1;
+
+        $min = min($min1, $max1);
+    }
+
+    if (is_float($min)) {
+        $min = (int) ceil($min);
+    }
+
+    $min; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$min = int|null\n```");
+}
+
+// ─── What the branch a truthy test skips is left with ──────────────────────
+
+/// The branch a truthy test skips knows the flag was `false`, exactly as
+/// the branch it enters knows the flag was `true`. Leaving it `bool` makes
+/// the check unfalsifiable: every proof keyed against the flag is one the
+/// two paths agree about, so nothing below can tell them apart.
+#[test]
+fn the_else_branch_of_a_boolean_test_leaves_false() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_else.php";
+    let content = r#"<?php
+function f(bool $isI): void {
+    if ($isI) {
+        return;
+    }
+    $isI; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$isI = false\n```");
+}
+
+/// Only the boolean half is refined. A falsy `string` is falsy without
+/// being `false`, and PHP has no narrower spelling for it than `string`,
+/// so the rest of the union survives untouched.
+#[test]
+fn a_falsy_branch_keeps_the_members_it_cannot_refine() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_union_else.php";
+    let content = r#"<?php
+/** @param bool|string $v */
+function f($v): void {
+    if ($v) {
+        return;
+    }
+    $v; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$v = false|string\n```");
+}
+
+/// A `while` runs until its subject is falsy, so a boolean loop condition
+/// leaves `false` behind it.
+#[test]
+fn a_boolean_while_condition_leaves_false_below_the_loop() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_while.php";
+    let content = r#"<?php
+function f(bool $more): void {
+    while ($more) {
+        $more = (bool) rand(0, 1);
+    }
+    $more; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$more = false\n```");
+}
+
+/// What the flag's two halves buy: the branch it guards fills `$a`, and
+/// re-testing the flag below the join is testing whether that branch ran.
+/// Without a `false` on the path that skipped it the two paths look alike,
+/// the join records nothing, and `$a` stays nullable where the source
+/// proved it is not.
+#[test]
+fn re_testing_a_boolean_flag_recovers_what_its_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_flag_proof.php";
+    let content = r#"<?php
+class A {}
+function makeA(): A { return new A(); }
+function f(bool $isI): void {
+    $a = null;
+    if ($isI) {
+        $a = makeA();
+    }
+    if ($isI) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = A\n```");
+}
+
+/// The flag has to be the same one. A branch guarded by a *different*
+/// boolean says nothing about what this one's branch wrote, however alike
+/// the two reads look.
+#[test]
+fn a_different_boolean_flag_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_flag_other.php";
+    let content = r#"<?php
+class A {}
+function makeA(): A { return new A(); }
+function f(bool $isI, bool $isJ): void {
+    $a = null;
+    if ($isI) {
+        $a = makeA();
+    }
+    if ($isJ) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// A nullable boolean keeps both halves of what a falsy test leaves: the
+/// `null` the declaration allows and the `false` the flag can be.
+#[test]
+fn a_nullable_boolean_keeps_both_falsy_halves() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_bool_else.php";
+    let content = r#"<?php
+function f(?bool $v): void {
+    if ($v) {
+        return;
+    }
+    $v; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$v = false|null\n```");
+}
+
+/// An object is truthy whatever it holds, so it is the one member a falsy
+/// branch can drop outright.
+#[test]
+fn a_falsy_branch_drops_the_members_that_are_always_truthy() {
+    let backend = create_test_backend();
+    let uri = "file:///object_union_else.php";
+    let content = r#"<?php
+class Pen {}
+/** @param Pen|string $v */
+function f($v): void {
+    if ($v) {
+        return;
+    }
+    $v; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$v = string\n```");
+}
+
+// ─── Ruling one leg of a disjunction out leaves the other ──────────────────
+
+const FLAG_PAIR_SCAFFOLD: &str = r#"
+class Ty {}
+class ConstantArrayType extends Ty {}
+function takesConstant(ConstantArrayType $c): void {}
+"#;
+
+/// Past `if (!$isI && !$isJ) { return; }` at least one of the two flags
+/// held, so the arm that knows `$isI` is `false` knows `$isJ` is not —
+/// and with it everything the check `$isJ` stands for proved. The path
+/// that proved `$isJ` left `$isI` exactly as it found it, so recognising
+/// it by its own value is not available: what identifies it is the value
+/// it rules *out*.
+#[test]
+fn ruling_out_one_flag_of_a_guard_leaves_what_the_other_proved() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    if (!$isI && !$isJ) {{
+        return;
+    }}
+    takesConstant($isI ? $t1 : $t2);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the else arm ran because $isJ held, got: {errors:?}"
+    );
+}
+
+/// The same proof read through an `if`/`else` rather than a ternary.
+#[test]
+fn ruling_out_one_flag_narrows_an_else_body() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard_else.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    if (!$isI && !$isJ) {{
+        return;
+    }}
+    if ($isI) {{
+        takesConstant($t1);
+    }} else {{
+        takesConstant($t2);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "each arm knows which flag held, got: {errors:?}"
+    );
+}
+
+/// Three flags leave nothing to pin down: `!$isI` still allows either of
+/// the other two, so it says nothing about which one held.
+#[test]
+fn ruling_out_one_of_three_flags_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard_three.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2, Ty $t3): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    $isK = $t3 instanceof ConstantArrayType;
+    if (!$isI && !$isJ && !$isK) {{
+        return;
+    }}
+    takesConstant($isI ? $t1 : $t2);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "$isK could be the one that held, got: {errors:?}"
+    );
+}
+
+/// Writing to the other flag between the guard and the read drops the
+/// proof: what the guard established is about the value it tested.
+#[test]
+fn writing_the_other_flag_drops_the_disjunction_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard_reassigned.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2, bool $other): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    if (!$isI && !$isJ) {{
+        return;
+    }}
+    $isJ = $other;
+    takesConstant($isI ? $t1 : $t2);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the reassigned flag is not what the guard proved, got: {errors:?}"
+    );
+}
+
+// ─── What the branch an `instanceof` skips is left with ────────────────────
+
+/// Re-testing an `instanceof` recovers what the first test's branch
+/// filled. The branch that skipped it left the subject spanning the
+/// checked class, so nothing in the *type* tells the two paths apart —
+/// what does is the exclusion the failing check proves, which the skipped
+/// path has to carry for the join to read.
+#[test]
+fn re_testing_an_instanceof_recovers_what_its_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function f(A $id): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    if ($id instanceof B) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = A\n```");
+}
+
+/// The proof reaches an expression position too: a ternary re-testing the
+/// condition narrows its then-arm the same way a second `if` does.
+#[test]
+fn re_testing_an_instanceof_in_a_ternary_recovers_what_its_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_ternary.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function takesA(A $a): string { return ''; }
+function f(A $id): string {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    return $id instanceof B ? takesA($a) : '';
+}
+"#;
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "the re-test proves the branch that filled $a ran, got: {errors:?}"
+    );
+}
+
+/// A *different* class recovers nothing. `$id instanceof C` can hold on
+/// the path that skipped the `B` branch, so it does not say which one ran.
+#[test]
+fn re_testing_a_different_class_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_other.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+class C extends A {}
+function makeA(): A { return new A(); }
+function f(A $id): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    if ($id instanceof C) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// Testing a *supertype* of the checked class recovers nothing either: an
+/// `A` that is not a `B` is still an `A`, so the test holds on both paths.
+#[test]
+fn re_testing_a_supertype_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_supertype.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function f(A $id): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    if ($id instanceof A) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// Writing to the subject between the two tests drops the proof: the
+/// second check is about a different value than the first one was.
+#[test]
+fn writing_the_instanceof_subject_drops_the_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_reassigned.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function f(A $id, A $other): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    $id = $other;
+    if ($id instanceof B) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// The branch a truthy test skips is left with `null`, and the class the
+/// value could have been is not still hanging off it: an entry that says
+/// `null` while pointing at a resolved class reads as an object to
+/// everything that consults the class, and the join with the branch's own
+/// value then keeps only one of the two.
+#[test]
+fn a_skipped_object_branch_rejoins_as_the_nullable_it_started_as() {
+    let backend = create_test_backend();
+    let uri = "file:///object_falsy_join.php";
+    let content = r#"<?php
+class Customer {}
+function takes(Customer $c): void {}
+function f(?Customer $customer): void {
+    if ($customer) {
+        takes($customer);
+    }
+    $customer; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$customer = null|Customer\n```");
 }

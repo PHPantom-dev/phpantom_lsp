@@ -108,7 +108,7 @@ impl Backend {
             let phpcs_config = config.phpcs.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let phpcs_diags = {
-                let result = tokio::task::spawn_blocking(move || {
+                let result = crate::server::run_blocking_cancel_safe("phpcs", move || {
                     phpcs::run_phpcs(
                         &resolved,
                         &content,
@@ -121,18 +121,12 @@ impl Backend {
                 .await;
 
                 match result {
-                    Ok(Ok(diags)) => diags,
-                    Ok(Err(_e)) => {
-                        // PHPCS failures are silently ignored to
-                        // avoid flooding the editor with errors when
-                        // PHPCS is misconfigured or the project
-                        // doesn't use it.
-                        continue;
-                    }
-                    Err(_join_err) => {
-                        // The blocking task panicked or was cancelled.
-                        continue;
-                    }
+                    Some(Ok(diags)) => diags,
+                    // PHPCS failures are silently ignored to avoid
+                    // flooding the editor with errors when PHPCS is
+                    // misconfigured or the project doesn't use it.
+                    // (A panic is logged by the helper itself.)
+                    _ => continue,
                 }
             };
 

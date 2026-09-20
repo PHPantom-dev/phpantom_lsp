@@ -22,23 +22,6 @@ use mago_syntax::walker::Walker;
 use crate::atom::bytes_to_str;
 use crate::scope_collector::ScopeBody;
 
-/// Emit [`Walker`] overrides that stop traversal at nested variable
-/// scopes (closures, arrow functions, named function declarations) while
-/// still walking an anonymous class's constructor arguments, which belong
-/// to the enclosing scope.
-macro_rules! stop_at_inner_scopes {
-    ($ctx:ty) => {
-        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
-        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
-        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
-        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
-            if let Some(argument_list) = &node.argument_list {
-                self.walk_partial_argument_list(argument_list, context);
-            }
-        }
-    };
-}
-
 // ─── @var annotation collection ─────────────────────────────────────────────
 
 /// Scan the source text for `/** @var Type $varName */` inline
@@ -296,6 +279,109 @@ fn unwrap_negation<'e>(expr: &'e Expression<'e>) -> (&'e Expression<'e>, bool) {
         }
         _ => (expr, false),
     }
+}
+
+// ─── isset()-guarded branch regions ────────────────────────────────────────
+
+/// A source region in which a positive `isset()` check has proven a set
+/// of variables to exist.
+pub(super) struct IssetGuardedRegion {
+    /// Byte offset of the start of the guarded region.
+    pub start: u32,
+    /// Byte offset of the end of the guarded region.
+    pub end: u32,
+    /// Variable names (including the `$` sigil) the check proves exist.
+    pub names: Vec<String>,
+}
+
+/// Collect the branch bodies that a positive `isset()` check guards.
+///
+/// `if (isset($x) && …) { … }` proves `$x` exists for the whole truthy
+/// branch, not just for the rest of the condition.  The
+/// undefined-variable pass compares reads against writes in source
+/// order, so without this it reports a read in the branch whenever the
+/// only write to `$x` sits later in the source — which is exactly the
+/// shape a loop back-edge produces:
+///
+/// ```php
+/// foreach ($tokens as $token) {
+///     if (isset($type) && $type !== T_WHITESPACE) { use($type); }
+///     $type = $token;
+/// }
+/// ```
+pub(super) fn collect_isset_guarded_regions(body: ScopeBody<'_, '_>) -> Vec<IssetGuardedRegion> {
+    let mut regions = Vec::new();
+    body.walk_with(&IssetRegionWalker, &mut regions);
+    regions
+}
+
+struct IssetRegionWalker;
+
+impl IssetRegionWalker {
+    /// Record a region spanning `start..end` for every variable a
+    /// positive `isset()` conjunct of `condition` proves to exist.
+    fn record(
+        condition: &Expression<'_>,
+        start: u32,
+        end: u32,
+        regions: &mut Vec<IssetGuardedRegion>,
+    ) {
+        let mut operands = Vec::new();
+        collect_chain_operands(condition, false, &mut operands);
+
+        let mut names = Vec::new();
+        for operand in &operands {
+            names.extend(isset_guard_names(operand, false));
+        }
+        if !names.is_empty() {
+            regions.push(IssetGuardedRegion { start, end, names });
+        }
+    }
+}
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<IssetGuardedRegion>> for IssetRegionWalker {
+    fn walk_in_if(&self, node: &'ast If<'arena>, context: &mut Vec<IssetGuardedRegion>) {
+        match &node.body {
+            IfBody::Statement(body) => {
+                let span = body.statement.span();
+                Self::record(node.condition, span.start.offset, span.end.offset, context);
+                for clause in body.else_if_clauses.iter() {
+                    let span = clause.statement.span();
+                    Self::record(
+                        clause.condition,
+                        span.start.offset,
+                        span.end.offset,
+                        context,
+                    );
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                let span = body.span();
+                Self::record(
+                    node.condition,
+                    body.colon.end.offset,
+                    span.end.offset,
+                    context,
+                );
+                for clause in body.else_if_clauses.iter() {
+                    let span = clause.span();
+                    Self::record(
+                        clause.condition,
+                        clause.colon.end.offset,
+                        span.end.offset,
+                        context,
+                    );
+                }
+            }
+        }
+    }
+
+    fn walk_in_while(&self, node: &'ast While<'arena>, context: &mut Vec<IssetGuardedRegion>) {
+        let span = node.body.span();
+        Self::record(node.condition, span.start.offset, span.end.offset, context);
+    }
+
+    stop_at_inner_scopes!(Vec<IssetGuardedRegion>);
 }
 
 /// If `expr` (after unwrapping parens/`!`) is an `isset()` call whose

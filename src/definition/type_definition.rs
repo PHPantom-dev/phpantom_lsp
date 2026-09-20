@@ -104,9 +104,10 @@ impl Backend {
                     preserve_static: false,
                 };
 
+                let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         access_kind,
                         &rctx,
                     ),
@@ -328,75 +329,4 @@ fn resolve_variable_type_names(
     // Only return types that contain at least one class name (scalars
     // are not useful for go-to-type-definition).
     resolved.filter(|t| !t.top_level_class_names().is_empty())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_simple_class() {
-        let names = PhpType::parse("User").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_fqn_class() {
-        let names = PhpType::parse("\\App\\Models\\User").top_level_class_names();
-        assert_eq!(names, vec!["\\App\\Models\\User"]);
-    }
-
-    #[test]
-    fn test_extract_nullable() {
-        let names = PhpType::parse("?User").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_union_with_null() {
-        let names = PhpType::parse("User|null").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_union_multiple_classes() {
-        let names = PhpType::parse("User|Admin").top_level_class_names();
-        assert_eq!(names, vec!["User", "Admin"]);
-    }
-
-    #[test]
-    fn test_extract_generic_stripped() {
-        let names = PhpType::parse("Collection<int, User>").top_level_class_names();
-        assert_eq!(names, vec!["Collection"]);
-    }
-
-    #[test]
-    fn test_extract_scalar_excluded() {
-        let names = PhpType::parse("string").top_level_class_names();
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn test_extract_mixed_union() {
-        let names = PhpType::parse("string|User|int|Admin|null").top_level_class_names();
-        assert_eq!(names, vec!["User", "Admin"]);
-    }
-
-    #[test]
-    fn test_extract_void() {
-        let names = PhpType::parse("void").top_level_class_names();
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn test_extract_array_of_class() {
-        let names = PhpType::parse("User[]").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_array_shape_excluded() {
-        let names = PhpType::parse("array{name: string}").top_level_class_names();
-        assert!(names.is_empty());
-    }
 }

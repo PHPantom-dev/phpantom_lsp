@@ -251,7 +251,7 @@ impl Backend {
         // Add any Laravel macros registered on this class.  Gated on a cheap
         // atomic so the hot loader path is untouched when no macros exist.
         loaded = self.inject_laravel_macros(loaded);
-        // Add the `$pivot` attribute when this class is a many-to-many target.
+        // Add pivot accessors when this class is a many-to-many target.
         loaded = self.inject_laravel_pivot(loaded);
         Some(loaded)
     }
@@ -272,8 +272,8 @@ impl Backend {
         crate::virtual_members::laravel::inject_macros(&index, class)
     }
 
-    /// Add the Eloquent `$pivot` attribute to `class` when it is the target of
-    /// a many-to-many relationship somewhere in the project.
+    /// Add Eloquent pivot accessors to `class` when it is the target of a
+    /// many-to-many relationship somewhere in the project.
     ///
     /// The reverse index is rebuilt lazily when a pivot-bearing file has
     /// changed (`laravel_pivots_dirty`), then a cheap atomic gates the lock so
@@ -1552,6 +1552,41 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
         self.constant_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Bundle the four cross-file resolvers a diagnostic collector hands
+    /// the type engine: function and constant lookup for `ctx`, plus the
+    /// Laravel config and translation resolvers.
+    ///
+    /// Bind the result to a local and call
+    /// [`LendsLoaders::loaders`](crate::type_engine::resolver::LendsLoaders::loaders)
+    /// for the [`Loaders`](crate::type_engine::resolver::Loaders) itself,
+    /// which borrows from it.
+    pub(crate) fn diagnostic_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> impl crate::type_engine::resolver::LendsLoaders + 'a {
+        self.diagnostic_loaders_over(self.function_loader(ctx), self.constant_loader(ctx))
+    }
+
+    /// [`diagnostic_loaders`](Self::diagnostic_loaders), for a caller
+    /// that already holds the function and constant loaders and only
+    /// needs the two Laravel resolvers added.
+    pub(crate) fn diagnostic_loaders_over<'a, F, C>(
+        &'a self,
+        function_loader: F,
+        constant_loader: C,
+    ) -> impl crate::type_engine::resolver::LendsLoaders + 'a
+    where
+        F: Fn(&str, u32) -> Option<crate::types::FunctionInfo> + 'a,
+        C: Fn(&str, u32) -> Option<Option<String>> + 'a,
+    {
+        crate::type_engine::resolver::OwnedLoaders::new(
+            function_loader,
+            constant_loader,
+            move |key: &str| self.resolve_config_type(key),
+            move |key: &str| self.resolve_trans_type(key),
+        )
     }
 
     /// Return a constant-value-loader closure from individual file-context

@@ -128,23 +128,65 @@ pub enum BracketSegment {
     /// decimal string form so it can address positional shape entries
     /// (`array{Foo, Bar}`) as well as explicit numeric keys.
     IntKey(String),
-    /// A variable or otherwise non-literal index access, e.g. `[$i]` or `[]`.
+    /// An index computed from at least one variable, e.g. `[$i]` or
+    /// `[$count - 2]`.
+    ///
+    /// Carries the index in its spaceless written form.  Which entry it
+    /// addresses is unknown, so it yields the same element type
+    /// [`ElementAccess`](BracketSegment::ElementAccess) does; the text is
+    /// kept because two reads written the same way are the same subject,
+    /// which is what lets a guard on `$types[$i]` narrow a later read of
+    /// it.
+    ComputedIndex(String),
+    /// An otherwise non-literal index access, e.g. `[strlen($s)]` or `[]`.
     ElementAccess,
 }
 
 /// Classify the text inside a `[…]` bracket into a [`BracketSegment`].
 ///
 /// Quoted strings become [`BracketSegment::StringKey`]; bare integer
-/// literals become [`BracketSegment::IntKey`]; everything else (variables,
-/// expressions, empty `[]`) becomes [`BracketSegment::ElementAccess`].
+/// literals become [`BracketSegment::IntKey`]; an arithmetic offset built
+/// from variables becomes [`BracketSegment::ComputedIndex`]; everything
+/// else (empty `[]`, a call, a nested literal key) becomes
+/// [`BracketSegment::ElementAccess`].
 fn classify_bracket_inner(inner: &str) -> BracketSegment {
     if let Some(key) = crate::text_scan::unquote_php_string(inner) {
         BracketSegment::StringKey(key.to_string())
     } else if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) {
         BracketSegment::IntKey(inner.to_string())
+    } else if let Some(text) = computed_index_text(inner) {
+        BracketSegment::ComputedIndex(text)
     } else {
         BracketSegment::ElementAccess
     }
+}
+
+/// The spaceless form of an index that reads a variable (`$i`,
+/// `$count - 2`), or `None` when the text is anything else.
+///
+/// Written text reaches this from the source (`$a[$count - 2]`) and from a
+/// stored subject that was already normalised, so the spaces come out and
+/// both spellings land on the key the AST side builds. The accepted
+/// alphabet is deliberately narrow: an index that calls, concatenates, or
+/// reads a nested literal key is left as a plain element access rather
+/// than risk two different reads normalising to one string.
+fn computed_index_text(inner: &str) -> Option<String> {
+    if !inner.contains('$') {
+        return None;
+    }
+    if !inner.bytes().all(|b| {
+        b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'_' | b'$' | b'+' | b'-' | b'*' | b'/' | b'%' | b'(' | b')'
+            )
+            || b.is_ascii_whitespace()
+            || b >= 0x80
+    }) {
+        return None;
+    }
+    let text: String = inner.chars().filter(|c| !c.is_whitespace()).collect();
+    (!text.is_empty()).then_some(text)
 }
 
 impl SubjectExpr {
@@ -227,12 +269,18 @@ impl SubjectExpr {
 
         // ── Enum case / static access: `ClassName::Member` ─────────
         // Only match when there is no `->` after `::` (that would be a
-        // chain like `ClassName::make()->prop`).
+        // chain like `ClassName::make()->prop`), and no bracket access
+        // after it either: `self::$map['k']` is an element *of* the
+        // static property, so it belongs to the array-access branch
+        // below, which parses `self::$map` as its base.  Keeping it here
+        // would look for a static member literally named `$map['k']`,
+        // find nothing, and answer with the class itself.
         if !subject.starts_with('$')
             && subject.contains("::")
             && !subject.ends_with(')')
             && let Some((class_part, member)) = subject.split_once("::")
             && !member.contains("->")
+            && !(member.contains('[') && subject.ends_with(']'))
         {
             return SubjectExpr::StaticAccess {
                 class: class_part.to_string(),
@@ -313,6 +361,11 @@ impl SubjectExpr {
                             BracketSegment::IntKey(n) => {
                                 out.push('[');
                                 out.push_str(n);
+                                out.push(']');
+                            }
+                            BracketSegment::ComputedIndex(index) => {
+                                out.push('[');
+                                out.push_str(index);
                                 out.push(']');
                             }
                             BracketSegment::ElementAccess => out.push_str("[]"),
@@ -399,6 +452,57 @@ impl SubjectExpr {
             }
         }
         out
+    }
+
+    /// The link below this one when the expression is rendered as a
+    /// forward-walker scope key, or `None` when this node is the base of
+    /// the key.
+    ///
+    /// Property and array-access links are always descended.  So is an
+    /// *argument-less* method call: the AST side keys `$h->get()->name()`
+    /// under its own written form, so everything below it has to render
+    /// in the same format or the two never meet.  A call that carries
+    /// arguments stops the walk, because its key spells the arguments in
+    /// a canonical form that only the AST side can produce.
+    pub fn scope_key_base(&self) -> Option<&SubjectExpr> {
+        match self {
+            SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => {
+                Some(base.as_ref())
+            }
+            SubjectExpr::CallExpr { callee, args_text } if args_text.trim().is_empty() => {
+                match callee.as_ref() {
+                    SubjectExpr::MethodCall { base, .. } => Some(base.as_ref()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether the base of a scope key path is a variable, `$this`, or one
+    /// of the class keywords — the roots the forward walker tracks.
+    ///
+    /// Walks the same links [`Self::scope_key_base`] does, so a receiver
+    /// reached through calls and element accesses (`$e->getExpr()`,
+    /// `$rows[0]->getExpr()`) counts as rooted just like a direct one.
+    pub fn scope_key_roots_in_variable(&self) -> bool {
+        let mut node = self;
+        loop {
+            if matches!(
+                node,
+                SubjectExpr::This
+                    | SubjectExpr::SelfKw
+                    | SubjectExpr::StaticKw
+                    | SubjectExpr::Parent
+                    | SubjectExpr::Variable(_)
+            ) {
+                return true;
+            }
+            match node.scope_key_base() {
+                Some(base) => node = base,
+                None => return false,
+            }
+        }
     }
 
     /// Returns `true` if this expression is one of the "current class"
@@ -691,7 +795,7 @@ fn split_last_arrow_raw(subject: &str) -> Option<(&str, &str)> {
 ///
 /// Returns `(call_body, args_text)` where `call_body` is the expression
 /// before `(` and `args_text` is the trimmed content between `(` and `)`.
-fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
     let inner = subject.strip_suffix(')')?;
     let bytes = inner.as_bytes();
     let mut depth: u32 = 0;
@@ -741,7 +845,7 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // (e.g. `new C("foo")` should become `CallExpr { callee: NewExpr, args_text }`).
     if let Some(paren_start) = rest[end..].find('(') {
         let after_class = &rest[end + paren_start..];
-        if let Some(close) = find_matching_paren(after_class) {
+        if let Some(close) = crate::text_scan::find_matching_forward(after_class, 0, b'(', b')') {
             let remainder = after_class[close + 1..].trim_start();
             if remainder.starts_with("->") {
                 return None;
@@ -771,39 +875,6 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
         return None;
     }
     Some(class_name.to_string())
-}
-
-/// Find the index of the closing `)` that matches the opening `(` at the
-/// start of `s`.  Returns `None` if `s` doesn't start with `(` or the
-/// parens are unbalanced.
-fn find_matching_paren(s: &str) -> Option<usize> {
-    if !s.starts_with('(') {
-        return None;
-    }
-    let mut depth = 0u32;
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut prev_backslash = false;
-    for (i, ch) in s.char_indices() {
-        if prev_backslash {
-            prev_backslash = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_single || in_double => prev_backslash = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '(' if !in_single && !in_double => depth += 1,
-            ')' if !in_single && !in_double => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Parse a variable with bracket access like `$var['key'][0]`.

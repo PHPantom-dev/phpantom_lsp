@@ -75,6 +75,7 @@ pub(in crate::type_engine) fn resolve_class_string_targets(
                 branch_aware: false,
                 match_arm_narrowing: Default::default(),
                 scope_var_resolver: None,
+                scope_proofs: None,
             };
             resolve_class_string_in_statements(program.statements.iter(), &ctx)
         },

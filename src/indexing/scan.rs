@@ -106,6 +106,7 @@ impl Backend {
                 &vendor_dir,
                 &HashSet::new(),
                 &explicit_deps,
+                &self.index_filters(),
                 None,
                 self.config().indexing.follow_links(),
             );
@@ -310,7 +311,16 @@ impl Backend {
         let visited: Vec<PathBuf> = visited.into_iter().collect();
         {
             let mut paths = self.symbols.autoload_file_paths.write();
-            paths.extend(visited.iter().cloned());
+            // A rediscovery pass walks the same autoload chain again, so
+            // record only what is new; the fallback lookups that read
+            // this list would otherwise re-check the same file per pass.
+            let known: HashSet<&PathBuf> = paths.iter().collect();
+            let mut fresh: Vec<PathBuf> = visited
+                .iter()
+                .filter(|path| !known.contains(path))
+                .cloned()
+                .collect();
+            paths.append(&mut fresh);
         }
         if let Some(p) = progress {
             p.begin_phase(0.4, 1.0, "Parsing autoload helpers");
@@ -515,6 +525,7 @@ impl Backend {
                         return classmap_scanner::scan_workspace_fallback_full(
                             project_root,
                             &skip_dirs,
+                            &self.index_filters(),
                             progress,
                             self.config().indexing.follow_links(),
                         );
@@ -543,12 +554,14 @@ impl Backend {
         if let Some(p) = progress {
             p.begin_phase(0.0, 0.2, "Scanning project files");
         }
+        let filters = self.index_filters();
         let vendor_dir_paths = vec![project_root.join(vendor_dir)];
         let classmap = classmap_scanner::scan_psr4_directories_with_skip(
             &psr4_dirs,
             &classmap_dirs,
             &vendor_dir_paths,
             skip_paths,
+            &filters,
             progress,
             self.config().indexing.follow_links(),
         );
@@ -563,6 +576,7 @@ impl Backend {
             vendor_dir,
             skip_paths,
             &explicit_deps,
+            &filters,
             progress,
             self.config().indexing.follow_links(),
         );

@@ -13,8 +13,9 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
-use crate::type_engine::conditional_resolution::{split_call_subject, split_text_args};
+use crate::type_engine::conditional_resolution::split_text_args;
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::subject_expr::split_call_subject_raw;
 use crate::type_engine::variable::array_func_rules::ArrayFuncArgs;
 
 thread_local! {
@@ -100,10 +101,20 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
         self.arg_text(index).is_some_and(|arg| !arg.is_empty())
     }
 
+    fn is_spread(&self, index: usize) -> bool {
+        self.arg_text(index)
+            .is_some_and(|arg| arg.trim_start().starts_with("..."))
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
-        crate::completion::source::helpers::extract_closure_return_type_from_text(text).or_else(
-            || {
+        crate::completion::source::helpers::extract_closure_return_type_from_text(text)
+            // A `: ReturnType` annotation is read as written, so it still
+            // carries the file's own spelling of the class (`Support\Pen`
+            // behind a `use App\Support;`).  It is compared against types
+            // that arrived fully qualified, so canonicalise it here.
+            .map(|ty| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader))
+            .or_else(|| {
                 // See the AST counterpart: a callable string names a
                 // function whose declared return the call hands back.
                 let name =
@@ -111,8 +122,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
                         text,
                     )?;
                 (self.ctx.function_loader?)(name, 0)?.return_type
-            },
-        )
+            })
     }
 
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
@@ -140,38 +150,22 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             Some(&self.ctx.class_loader),
         )
     }
+
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+    }
 }
 
 impl Backend {
-    /// Extract the first argument from a comma-separated argument text,
-    /// respecting nested parentheses, brackets, and braces.
+    /// Extract the first argument from a comma-separated argument text.
+    ///
+    /// [`split_text_args`] does the splitting: it respects nested
+    /// brackets and, unlike the hand-rolled scan this replaced, string
+    /// literals too, so a comma inside `'a, b'` no longer ends the first
+    /// argument.
     pub(super) fn extract_first_arg_text(args_text: &str) -> Option<String> {
-        let trimmed = args_text.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let mut depth = 0i32;
-        for (i, ch) in trimmed.char_indices() {
-            match ch {
-                '(' | '[' | '{' => depth += 1,
-                ')' | ']' | '}' => depth -= 1,
-                ',' if depth == 0 => {
-                    let arg = trimmed[..i].trim();
-                    if !arg.is_empty() {
-                        return Some(crate::call_args::text_arg_value(arg).to_string());
-                    }
-                    return None;
-                }
-                _ => {}
-            }
-        }
-        // No top-level comma: the whole text is a single argument.
-        let arg = trimmed.trim();
-        if !arg.is_empty() {
-            Some(crate::call_args::text_arg_value(arg).to_string())
-        } else {
-            None
-        }
+        let first = split_text_args(args_text).into_iter().next()?.trim();
+        (!first.is_empty()).then(|| crate::call_args::text_arg_value(first).to_string())
     }
 
     /// Resolve the raw return type of an inline argument expression.
@@ -286,7 +280,7 @@ impl Backend {
 
         // ── Call expression ending with `)` ─────────────────────────────
         if arg_text.ends_with(')')
-            && let Some((call_body, call_args)) = split_call_subject(arg_text)
+            && let Some((call_body, call_args)) = split_call_subject_raw(arg_text)
         {
             match &SubjectExpr::parse_callee(call_body) {
                 // A nested function call (e.g. `array_map($cb,

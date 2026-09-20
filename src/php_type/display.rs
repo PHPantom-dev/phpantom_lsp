@@ -106,6 +106,9 @@ impl fmt::Display for PhpType {
                     condition,
                     then_type,
                     else_type,
+                    // A modelling detail of how an undecided condition is
+                    // answered, not part of the type's spelling.
+                    else_when_undecided: _,
                 } = &**c;
                 if *negated {
                     write!(f, "{param} is not {condition} ? {then_type} : {else_type}")
@@ -169,8 +172,15 @@ impl fmt::Display for ShapeEntry {
 /// Keys that are simple identifiers (alphanumeric + underscore, not starting
 /// with a digit) or plain integers are emitted bare.  Keys that contain
 /// special characters (spaces, newlines, backslashes, colons, braces, quotes,
-/// etc.) are wrapped in single quotes with `\` and `\n` / `\r` / `\t`
-/// escaped so the type string remains a single readable line.
+/// etc.) are quoted.
+///
+/// The quoting has to be one PHP itself would decode back to the same key,
+/// because a displayed type is re-parsed (through hover text, a `@var`
+/// written into a file, a cached type string) and its keys are read as the
+/// runtime values they name. Single quotes carry everything but the
+/// control characters, which have no single-quoted spelling at all, so a
+/// key holding one is emitted double-quoted instead of being written as an
+/// escape PHP would read back as a literal backslash.
 fn format_shape_key(key: &str) -> String {
     // Simple identifier-like keys: emit bare.
     let is_simple = !key.is_empty()
@@ -185,16 +195,30 @@ fn format_shape_key(key: &str) -> String {
     if key.parse::<i64>().is_ok() {
         return key.to_string();
     }
-    // Quote and escape.
+
     let mut out = String::with_capacity(key.len() + 2);
+    if key.contains(['\n', '\r', '\t']) {
+        out.push('"');
+        for ch in key.chars() {
+            match ch {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '$' => out.push_str("\\$"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                _ => out.push(ch),
+            }
+        }
+        out.push('"');
+        return out;
+    }
+
     out.push('\'');
     for ch in key.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
             '\'' => out.push_str("\\'"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
             _ => out.push(ch),
         }
     }

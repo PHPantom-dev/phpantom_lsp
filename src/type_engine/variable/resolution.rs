@@ -26,6 +26,7 @@ use crate::php_type::{
 use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
 use crate::Backend;
+use crate::type_engine::call_resolution::OutParamCallee;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 
 // ─── Re-entry guards ───────────────────────────────────────────────────────
@@ -55,10 +56,85 @@ thread_local! {
         RefCell::new(HashSet::new());
 
     /// Variable resolution queries currently in progress on this
-    /// thread.  Keyed by `(content_ptr, name_hash, cursor_offset,
-    /// class_name)` so that only the exact same query is suppressed.
-    static RESOLVING_VARS: RefCell<HashSet<(usize, u64, u32, Atom)>> =
+    /// thread.  Keyed by [`VarQueryKey`] so that only the exact same
+    /// query is suppressed.
+    static RESOLVING_VARS: RefCell<HashSet<VarQueryKey>> =
         RefCell::new(HashSet::new());
+
+    /// When `Some`, memoises what [`resolve_variable_types`] computed
+    /// the hard way, keyed by [`VarQueryKey`].  Activated with the rest
+    /// of the request-scoped type-engine memos, so it lives exactly as
+    /// long as one request / one file's diagnostic pass.
+    ///
+    /// Without it, a body is walked from its first statement once per
+    /// *ask*, not once per question: deciding whether a guard branch
+    /// exits resolves the receiver of every call it holds, and each of
+    /// those receivers sends the walker over the whole body again.  On a
+    /// long method whose branches each hold a chained call — the shape
+    /// `phpstan-src`'s `AnalyseCommand::execute` has — the same handful
+    /// of `(variable, offset)` questions get asked hundreds of times.
+    static VAR_TYPE_MEMO: RefCell<Option<HashMap<VarQueryKey, Vec<ResolvedType>>>> =
+        const { RefCell::new(None) };
+
+    #[cfg(test)]
+    static TEST_SCOPE_CACHE_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_scope_cache_hits() {
+    TEST_SCOPE_CACHE_HITS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_scope_cache_hits() -> usize {
+    TEST_SCOPE_CACHE_HITS.with(std::cell::Cell::get)
+}
+
+/// What identifies one "what is the type of `$var` here?" question: the
+/// source it is asked of, the hash of the un-prefixed variable name, the
+/// offset, and the class the question is asked in.
+///
+/// The source is `(pointer, length)` rather than the pointer alone: the
+/// memo outlives any single query, so a freed buffer whose address is
+/// handed straight back to a different one would otherwise read as the
+/// same source.
+type VarQueryKey = ((usize, usize), u64, u32, Atom);
+
+/// Build the key identifying one variable query.
+///
+/// Callers spell the same variable both with and without the `$`
+/// prefix, so the name is normalised before hashing.  It is hashed
+/// rather than interned: this runs on every variable resolution, and
+/// `atom` would take the global interner lock and allocate for the
+/// unprefixed spelling.
+fn var_query_key(
+    content: &str,
+    var_name: &str,
+    cursor_offset: u32,
+    class_name: Atom,
+) -> VarQueryKey {
+    let mut hasher = DefaultHasher::new();
+    var_name
+        .strip_prefix('$')
+        .unwrap_or(var_name)
+        .hash(&mut hasher);
+    (
+        (content.as_ptr() as usize, content.len()),
+        hasher.finish(),
+        cursor_offset,
+        class_name,
+    )
+}
+
+/// Activate the variable-type memo for the current thread.
+/// The guard [`with_var_type_memo`] hands back. Nested activation is a
+/// no-op, so an inner pass cannot discard the entries an outer one is
+/// still relying on.
+pub(crate) type VarTypeMemoGuard =
+    crate::type_engine::MemoGuard<HashMap<VarQueryKey, Vec<ResolvedType>>>;
+
+pub(crate) fn with_var_type_memo() -> VarTypeMemoGuard {
+    crate::type_engine::activate_memo(&VAR_TYPE_MEMO)
 }
 
 /// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
@@ -89,7 +165,7 @@ fn try_acquire_top_level_guard(content: &str) -> Option<TopLevelScopeGuard> {
 
 /// RAII guard for [`RESOLVING_VARS`].
 struct ResolvingVarGuard {
-    key: (usize, u64, u32, Atom),
+    key: VarQueryKey,
 }
 
 impl Drop for ResolvingVarGuard {
@@ -100,32 +176,12 @@ impl Drop for ResolvingVarGuard {
     }
 }
 
-/// Try to acquire the variable resolution guard.
+/// Try to acquire the variable resolution guard for `key`.
 /// Returns `Some(guard)` on success, `None` on re-entry.
-fn try_acquire_var_guard(
-    content: &str,
-    var_name: &str,
-    cursor_offset: u32,
-    class_name: Atom,
-) -> Option<ResolvingVarGuard> {
-    // Callers spell the same variable both with and without the `$`
-    // prefix, so normalise before keying.  The name is hashed rather
-    // than interned: this runs on every variable resolution, and
-    // `atom` would take the global interner lock and allocate for the
-    // unprefixed spelling.  Only the queries live on the current stack
-    // (a handful) share the set, so a 64-bit hash cannot realistically
-    // collide.
-    let mut hasher = DefaultHasher::new();
-    var_name
-        .strip_prefix('$')
-        .unwrap_or(var_name)
-        .hash(&mut hasher);
-    let key = (
-        content.as_ptr() as usize,
-        hasher.finish(),
-        cursor_offset,
-        class_name,
-    );
+///
+/// Only the queries on the current stack (a handful) share the set, so
+/// the hashed name in the key cannot realistically collide.
+fn try_acquire_var_guard(key: VarQueryKey) -> Option<ResolvingVarGuard> {
     let inserted = RESOLVING_VARS.with(|set| set.borrow_mut().insert(key));
     if inserted {
         Some(ResolvingVarGuard { key })
@@ -248,10 +304,33 @@ pub(crate) fn resolve_variable_types(
         };
         if let Some(types) = super::forward_walk::lookup_diagnostic_scope(&prefixed, cursor_offset)
         {
+            #[cfg(test)]
+            TEST_SCOPE_CACHE_HITS.with(|count| count.set(count.get() + 1));
             return types;
         }
         // Variable not in the forward-walked scope — fall through to
         // the full resolution path.
+    }
+
+    let key = var_query_key(content, var_name, cursor_offset, current_class.name);
+
+    // ── Memo ────────────────────────────────────────────────────
+    // Everything below walks the enclosing body from its first
+    // statement, which reaches the same answer every time within one
+    // pass — except inside a body-return inference, where the walk
+    // seeds the body's parameters with what the *call site* passed.
+    // The same variable at the same offset legitimately answers
+    // differently for each caller then, and what decided it is not in
+    // the key, so that walk neither reads the memo nor writes to it.
+    let memoisable = !crate::type_engine::call_resolution::body_inference_in_progress();
+    if memoisable
+        && let Some(hit) = VAR_TYPE_MEMO.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .and_then(|memo| memo.get(&key).cloned())
+        })
+    {
+        return hit;
     }
 
     // ── Re-entry guard (Guard 2) ────────────────────────────────
@@ -260,13 +339,15 @@ pub(crate) fn resolve_variable_types(
     // bypass scope_var_resolver.  A re-entrant query cannot
     // contribute information while its outer invocation is still
     // incomplete.
-    let _var_guard =
-        match try_acquire_var_guard(content, var_name, cursor_offset, current_class.name) {
-            Some(guard) => guard,
-            None => return vec![],
-        };
+    //
+    // A suppressed query is not memoised: the empty answer describes
+    // the stack it was asked on, not the question.
+    let _var_guard = match try_acquire_var_guard(key) {
+        Some(guard) => guard,
+        None => return vec![],
+    };
 
-    with_parsed_program(content, "resolve_variable_types", |program, _content| {
+    let resolved = with_parsed_program(content, "resolve_variable_types", |program, _content| {
         let active_cache = crate::virtual_members::active_resolved_class_cache();
         let ctx = VarResolutionCtx {
             var_name,
@@ -284,10 +365,21 @@ pub(crate) fn resolve_variable_types(
             match_arm_narrowing: HashMap::new(),
 
             scope_var_resolver: None,
+            scope_proofs: None,
         };
 
         resolve_variable_in_statements(program.statements.iter(), &ctx)
-    })
+    });
+
+    if memoisable {
+        VAR_TYPE_MEMO.with(|cell| {
+            if let Some(memo) = cell.borrow_mut().as_mut() {
+                memo.insert(key, resolved.clone());
+            }
+        });
+    }
+
+    resolved
 }
 
 /// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].
@@ -540,9 +632,10 @@ fn check_param_list(
         let docblock_type =
             docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
                 .or_else(|| {
-                    // Try extracting from docblock text directly.
-                    find_method_docblock_text(content, method_start_offset)
-                        .and_then(|doc| docblock::extract_param_raw_type(&doc, pname))
+                    content
+                        .get(..method_start_offset)
+                        .and_then(extract_preceding_docblock)
+                        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
                 });
 
         let effective =
@@ -554,18 +647,6 @@ fn check_param_list(
         return native_type;
     }
     None
-}
-
-/// Extract the raw docblock text preceding a method/function.
-fn find_method_docblock_text(content: &str, method_start: usize) -> Option<String> {
-    let before = content.get(..method_start)?;
-    let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    let doc_end = trimmed.len();
-    let doc_start = trimmed.rfind("/**")?;
-    Some(trimmed[doc_start..doc_end].to_string())
 }
 
 /// Check if the cursor is on a catch variable binding and return its type.
@@ -723,6 +804,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             branch_aware: ctx.branch_aware,
             match_arm_narrowing: ctx.match_arm_narrowing.clone(),
             scope_var_resolver: ctx.scope_var_resolver,
+            scope_proofs: ctx.scope_proofs,
         };
         &ctx_with_tls
     } else {
@@ -1348,6 +1430,7 @@ fn resolve_variable_in_property_hooks(
             // `resolve_in_method_body` does: this is a transient lookup,
             // not the authoritative scope build.
             let _suspend = super::forward_walk::suspend_snapshot_recording();
+            let _barrier = super::forward_walk::suspend_return_edges();
             super::forward_walk::walk_body_forward(block.statements.iter(), &mut scope, &fw_ctx);
         }
 
@@ -1397,13 +1480,19 @@ fn resolve_abstract_method_param(
             top_level_scope: ctx.top_level_scope.clone(),
         };
 
+        let trait_prototype =
+            super::forward_walk::trait_prototype_method(Some(&method_name_str), &fw_ctx);
+
         return super::forward_walk::resolve_param_type(
             pname,
             native_type.as_ref(),
             is_variadic,
-            method.span().start.offset,
-            Some(&method_name_str),
-            has_scope_attr,
+            &super::forward_walk::EnclosingMethod {
+                span_start: method.span().start.offset,
+                name: Some(&method_name_str),
+                has_scope_attr,
+                trait_prototype: trait_prototype.as_ref(),
+            },
             &fw_ctx,
         );
     }
@@ -1686,7 +1775,14 @@ pub(super) enum ArrayWriteKey {
     Shape(String),
     /// A dynamic (variable / expression / numeric) key tracked as a
     /// generic `array<K, V>` level. Carries the inferred key type.
-    Keyed(PhpType),
+    ///
+    /// `slot` holds the index a written-out integer named, which lets a
+    /// write update that positional slot of a tuple-style shape instead
+    /// of collapsing the shape into the generic pair.
+    Keyed {
+        key_type: PhpType,
+        slot: Option<usize>,
+    },
     /// A trailing `[]` append, as in `$var['a'][] = …`. Only ever the
     /// last segment of a chain.
     Append,
@@ -1715,6 +1811,22 @@ pub(super) fn merge_nested_array_write(
     keys: &[ArrayWriteKey],
     value_type: &PhpType,
 ) -> PhpType {
+    // Every level a write descends through holds at least the entry the
+    // write put there, so the result is non-empty even when the tracked
+    // key/value pair says nothing about which keys those are. That is what
+    // lets a later `foreach` over the array know its body runs, and so
+    // keeps a `null` sentinel assigned ahead of that loop from surviving
+    // it. A write on only some paths gives the promise back at the branch
+    // join, where `array{} | non-empty-array<K, V>` widens to
+    // `array<K, V>`.
+    merge_nested_array_write_inner(base, keys, value_type).non_empty_array_form()
+}
+
+fn merge_nested_array_write_inner(
+    base: &PhpType,
+    keys: &[ArrayWriteKey],
+    value_type: &PhpType,
+) -> PhpType {
     debug_assert!(!keys.is_empty());
     match &keys[0] {
         ArrayWriteKey::Shape(key) => {
@@ -1726,7 +1838,26 @@ pub(super) fn merge_nested_array_write(
                 merge_shape_key(base, key, &inner_merged)
             }
         }
-        ArrayWriteKey::Keyed(key_type) => {
+        ArrayWriteKey::Keyed { key_type, slot } => {
+            // A written-out index into a shape that already has that
+            // positional slot updates it in place, keeping the tuple's
+            // arity and the slots the write did not name. Folding it into
+            // the generic pair instead would union every slot's type
+            // together, so reading any one of them back gives the union.
+            if let Some(slot) = slot
+                && let Some(entries) = base.shape_entries()
+                && let Some(index) = positional_entry_index(entries, *slot)
+            {
+                let inner_merged = if keys.len() == 1 {
+                    value_type.clone()
+                } else {
+                    merge_nested_array_write(&entries[index].value_type, &keys[1..], value_type)
+                };
+                let mut updated: Vec<ShapeEntry> = entries.to_vec();
+                updated[index].value_type = inner_merged.widen_scalar_literals();
+                updated[index].optional = false;
+                return PhpType::array_shape(updated);
+            }
             let inner_merged = if keys.len() == 1 {
                 value_type.clone()
             } else {
@@ -1892,6 +2023,21 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
     }
 }
 
+/// The literal integer an index expression spells out, if it is one.
+///
+/// A write through such an index can update the matching slot of a
+/// tuple-style shape it already has (`$tuple[1] = …`). It deliberately
+/// does not *create* a numeric-keyed shape: `$data[0] = 'x'` on a plain
+/// array leaves the tracked `array<int, string>` pair alone, because a
+/// written-out index is usually one of many an unrolled or generated
+/// write sequence touches, not a promise about the array's arity.
+pub(super) fn extract_array_write_index(index: &Expression<'_>) -> Option<usize> {
+    if let Expression::Literal(Literal::Integer(int_lit)) = index {
+        return int_lit.value.and_then(|v| usize::try_from(v).ok());
+    }
+    None
+}
+
 /// Merge a `(key, value_type)` pair into an existing `PhpType` to
 /// produce an `ArrayShape`.
 ///
@@ -1939,6 +2085,20 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
     PhpType::array_shape(entries)
 }
 
+/// The position in `entries` of the `index`th unkeyed entry.
+fn positional_entry_index(entries: &[ShapeEntry], index: usize) -> Option<usize> {
+    let mut positional = 0usize;
+    for (slot, entry) in entries.iter().enumerate() {
+        if entry.key.is_none() {
+            if positional == index {
+                return Some(slot);
+            }
+            positional += 1;
+        }
+    }
+    None
+}
+
 /// Merge a push element type into an existing `PhpType` to produce
 /// a `Generic("list", …)` type.
 ///
@@ -1963,7 +2123,8 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
     let value_type = value_type.widen_scalar_literals();
 
     // Extract existing element types from the base.
-    if let Some(existing_elem) = base.iterable_element_type() {
+    let existing_elem = base.iterable_element_type();
+    if let Some(existing_elem) = &existing_elem {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
                 elem_types.push(member.clone());
@@ -1982,9 +2143,34 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
         return PhpType::array();
     }
 
-    let elem_type = PhpType::join_runtime_value_types(elem_types);
+    let elem_type = join_element_types(elem_types, &value_type, existing_elem.as_ref());
 
     PhpType::list(elem_type)
+}
+
+/// Join the member types collected for one of a container's positions
+/// (element or key), keeping the benevolence marker the collection dropped.
+///
+/// Splitting a union into its members loses the marker sitting above them,
+/// and a type that was lenient on its own has to stay lenient once it is
+/// inside `list<…>` / `array<…, …>`: the position's comparison is the same
+/// comparison a direct return makes, so a union nobody wrote down would
+/// otherwise be enforced against every declared type the moment it is
+/// collected into a container. That applies just as much to the key an
+/// `Arg[]` hands out as to the value beside it. The marker only survives
+/// while every contributing source carried it — a member the code did
+/// spell out makes the whole position worth enforcing again.
+fn join_element_types(
+    members: Vec<PhpType>,
+    incoming: &PhpType,
+    existing: Option<&PhpType>,
+) -> PhpType {
+    let joined = PhpType::join_runtime_value_types(members);
+    let existing_is_lenient = existing.is_none_or(|ty| ty.is_empty() || ty.is_benevolent());
+    if incoming.is_benevolent() && existing_is_lenient {
+        return PhpType::benevolent(joined);
+    }
+    joined
 }
 
 /// Merge a keyed element type into an existing `PhpType` to produce
@@ -2006,25 +2192,29 @@ pub(super) fn merge_keyed_type(
     key_type: &PhpType,
     value_type: &PhpType,
 ) -> PhpType {
-    let key_type = normalize_array_key_type(key_type)
+    // Normalizing rebuilds a key through `kind()`, which sees straight
+    // through the benevolence marker, so the leniency decision below reads
+    // the types as they arrived rather than as they normalize.
+    let existing_key = base.iterable_key_type();
+    let normalized_key = normalize_array_key_type(key_type)
         .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
     let value_type = value_type.widen_scalar_literals();
 
     // Collect existing key types from the base.
     let mut key_types: Vec<PhpType> = Vec::new();
-    if let Some(existing_key) = base
-        .iterable_key_type()
-        .and_then(|key| normalize_array_key_type(&key))
-        && !existing_key.is_empty()
+    if let Some(normalized_existing) = existing_key
+        .as_ref()
+        .and_then(normalize_array_key_type)
+        .filter(|key| !key.is_empty())
     {
-        for member in existing_key.union_members() {
+        for member in normalized_existing.union_members() {
             if !key_types.iter().any(|e| e.equivalent(member)) {
                 key_types.push(member.clone());
             }
         }
     }
     // Add new key type members.
-    for member in key_type.union_members() {
+    for member in normalized_key.union_members() {
         if !member.is_empty() && !key_types.iter().any(|e| e.equivalent(member)) {
             key_types.push(member.clone());
         }
@@ -2032,7 +2222,8 @@ pub(super) fn merge_keyed_type(
 
     // Collect existing value types from the base.
     let mut elem_types: Vec<PhpType> = Vec::new();
-    if let Some(existing_elem) = base.iterable_element_type() {
+    let existing_elem = base.iterable_element_type();
+    if let Some(existing_elem) = &existing_elem {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
                 elem_types.push(member.clone());
@@ -2050,13 +2241,13 @@ pub(super) fn merge_keyed_type(
         return PhpType::array();
     }
 
-    let val_type = PhpType::join_runtime_value_types(elem_types);
+    let val_type = join_element_types(elem_types, &value_type, existing_elem.as_ref());
 
     if key_types.is_empty() {
         // No key type information — use a single-param generic.
         PhpType::generic_array_val(val_type)
     } else {
-        let k_type = PhpType::join_runtime_value_types(key_types);
+        let k_type = join_element_types(key_types, key_type, existing_key.as_ref());
         PhpType::generic_array(k_type, val_type)
     }
 }
@@ -2401,7 +2592,7 @@ pub(super) fn try_apply_pass_by_reference_type(
     results: &mut Vec<ResolvedType>,
     conditional: bool,
 ) {
-    let (argument_list, parameters) = match expr {
+    let (argument_list, parameters, callee) = match expr {
         Expression::Call(Call::Function(func_call)) => {
             let func_name = match func_call.function {
                 Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
@@ -2418,28 +2609,33 @@ pub(super) fn try_apply_pass_by_reference_type(
             };
             // Borrow the argument list and clone the parameters so we
             // can iterate them together.
-            (&func_call.argument_list, func_info.parameters)
+            let parameters = func_info.parameters.clone();
+            (
+                &func_call.argument_list,
+                parameters,
+                OutParamCallee::Function(Box::new(func_info)),
+            )
         }
         Expression::Call(Call::Method(method_call)) => {
             match try_resolve_method_params(method_call.object, &method_call.method, ctx) {
-                Some((params,)) => (&method_call.argument_list, params),
+                Some((params, callee)) => (&method_call.argument_list, params, callee),
                 None => return,
             }
         }
         Expression::Call(Call::NullSafeMethod(method_call)) => {
             match try_resolve_method_params(method_call.object, &method_call.method, ctx) {
-                Some((params,)) => (&method_call.argument_list, params),
+                Some((params, callee)) => (&method_call.argument_list, params, callee),
                 None => return,
             }
         }
         Expression::Call(Call::StaticMethod(static_call)) => {
             match try_resolve_static_method_params(static_call, ctx) {
-                Some((params, arg_list)) => (arg_list, params),
+                Some((params, arg_list, callee)) => (arg_list, params, callee),
                 None => return,
             }
         }
         Expression::Instantiation(inst) => match try_resolve_constructor_params(inst, ctx) {
-            Some((params, arg_list)) => (arg_list, params),
+            Some((params, arg_list, callee)) => (arg_list, params, callee),
             None => return,
         },
         _ => return,
@@ -2450,7 +2646,7 @@ pub(super) fn try_apply_pass_by_reference_type(
     // their ordinal position in the call.
     let bound = crate::call_args::bind_args_to_params(&parameters, argument_list);
 
-    for (param, arg_expr) in parameters.iter().zip(bound.iter()) {
+    for (param_index, (param, arg_expr)) in parameters.iter().zip(bound.iter()).enumerate() {
         let arg_expr = match arg_expr {
             Some(expr) => *expr,
             None => continue,
@@ -2468,7 +2664,12 @@ pub(super) fn try_apply_pass_by_reference_type(
         // Check if the corresponding parameter is pass-by-reference
         // with a type hint.
         if param.is_reference
-            && let Some(out_hint) = param.out_type()
+            && let Some(out_hint) = crate::type_engine::call_resolution::effective_out_type(
+                param,
+                param_index,
+                &callee,
+                ctx.backend,
+            )
         {
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &out_hint,
@@ -2498,7 +2699,7 @@ fn try_resolve_method_params(
     object: &Expression<'_>,
     method: &ClassLikeMemberSelector<'_>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(crate::types::SharedVec<ParameterInfo>,)> {
+) -> Option<(crate::types::SharedVec<ParameterInfo>, OutParamCallee)> {
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => return None,
@@ -2511,47 +2712,57 @@ fn try_resolve_method_params(
     }
 
     let method_info = ctx.current_class.get_method(method_name)?;
-    Some((method_info.parameters.clone(),))
+    Some((
+        method_info.parameters.clone(),
+        OutParamCallee::Method(Arc::new(ctx.current_class.clone()), atom(method_name)),
+    ))
 }
 
 /// Resolve parameters for a static method call.
 fn try_resolve_static_method_params<'a>(
     static_call: &'a StaticMethodCall<'a>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(crate::types::SharedVec<ParameterInfo>, &'a ArgumentList<'a>)> {
+) -> Option<(
+    crate::types::SharedVec<ParameterInfo>,
+    &'a ArgumentList<'a>,
+    OutParamCallee,
+)> {
     let method_name = match &static_call.method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => return None,
     };
 
-    let class_name = match static_call.class {
-        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-        _ => return None,
-    };
+    let class_name =
+        crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)?;
 
     let cls = (ctx.class_loader)(&class_name)?;
     let method_info = cls.get_method(method_name)?;
-    Some((method_info.parameters.clone(), &static_call.argument_list))
+    Some((
+        method_info.parameters.clone(),
+        &static_call.argument_list,
+        OutParamCallee::Method(cls, atom(method_name)),
+    ))
 }
 
 /// Resolve parameters for a constructor call (`new Cls(...)`).
 fn try_resolve_constructor_params<'a>(
     inst: &'a Instantiation<'a>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(crate::types::SharedVec<ParameterInfo>, &'a ArgumentList<'a>)> {
-    let class_name = match inst.class {
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        _ => return None,
-    };
+) -> Option<(
+    crate::types::SharedVec<ParameterInfo>,
+    &'a ArgumentList<'a>,
+    OutParamCallee,
+)> {
+    let class_name = crate::class_lookup::class_expression_name(inst.class, ctx.current_class)?;
 
     let args = inst.argument_list.as_ref()?;
     let cls = (ctx.class_loader)(&class_name)?;
     let ctor = cls.get_method("__construct")?;
-    Some((ctor.parameters.clone(), args))
+    Some((
+        ctor.parameters.clone(),
+        args,
+        OutParamCallee::Method(cls, atom("__construct")),
+    ))
 }
 
 #[cfg(test)]

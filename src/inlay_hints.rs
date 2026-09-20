@@ -23,6 +23,15 @@ use crate::symbol_map::{CallSite, SymbolKind, SymbolMap, UntypedClosureSite};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, Visibility};
 
+/// Whether `class` declares `method_name` for real, as opposed to only
+/// promising it through a `@method` tag.
+fn declares_real_method(class: &ClassInfo, method_name: &str) -> bool {
+    class
+        .methods
+        .iter()
+        .any(|m| m.name == method_name && !m.is_virtual)
+}
+
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.
     ///
@@ -34,9 +43,17 @@ impl Backend {
     ) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
         let uri = params.text_document.uri.to_string();
         let range = params.range;
-        let result = self.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
-            self.handle_inlay_hints(&uri, content, range)
-        });
+        // Building the hints resolves every callable called in the viewport,
+        // and the editor re-requests them on each scroll and each refresh a
+        // keystroke triggers, so the work runs off the request task.
+        let backend = self.clone_for_blocking();
+        let result = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
+            backend.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
+                backend.handle_inlay_hints(&uri, content, range)
+            })
+        })
+        .await
+        .flatten();
 
         // Declarations whose reference count is missing or stale were
         // queued while the hints were built; they are counted off the
@@ -59,17 +76,9 @@ impl Backend {
         let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
         let ctx = self.file_context(uri);
 
-        // If this is a Blade file, the `range` is in Blade coordinates.
-        // We must translate it to virtual PHP coordinates before comparing
-        // against offsets in the symbol map.
-        let virtual_range = if self.is_blade_file(uri) {
-            Range {
-                start: self.translate_blade_to_php(uri, range.start),
-                end: self.translate_blade_to_php(uri, range.end),
-            }
-        } else {
-            range
-        };
+        // A template's request range arrives in Blade coordinates; the
+        // symbol map's offsets are in the virtual PHP.
+        let virtual_range = self.translate_blade_range_to_php(uri, range);
 
         let range_start = position_to_offset(content, virtual_range.start);
         let range_end = position_to_offset(content, virtual_range.end);
@@ -215,8 +224,12 @@ impl Backend {
                     || prop.is_virtual
                     || prop.visibility == Visibility::Private
                     || !offset_in_range(prop.name_offset, range)
-                    || self.traits_have_property(&class.used_traits, &prop.name, 0)
-                    || self.ancestor_has_property(class, &prop.name)
+                    || self.traits_declare(&class.used_traits, 0, &|c| {
+                        c.properties.iter().any(|p| p.name == prop.name)
+                    })
+                    || self.ancestor_declares(class, &|c| {
+                        c.properties.iter().any(|p| p.name == prop.name)
+                    })
                 {
                     continue;
                 }
@@ -245,8 +258,12 @@ impl Backend {
                 if constant.name_offset == 0
                     || constant.visibility == Visibility::Private
                     || !offset_in_range(constant.name_offset, range)
-                    || self.traits_have_constant(&class.used_traits, &constant.name, 0)
-                    || self.ancestor_has_constant(class, &constant.name)
+                    || self.traits_declare(&class.used_traits, 0, &|c| {
+                        c.constants.iter().any(|k| k.name == constant.name)
+                    })
+                    || self.ancestor_declares(class, &|c| {
+                        c.constants.iter().any(|k| k.name == constant.name)
+                    })
                 {
                     continue;
                 }
@@ -323,42 +340,18 @@ impl Backend {
                 .methods
                 .iter()
                 .any(|m| m.name == method_name && !m.is_virtual)
-                || self.traits_have_method(&parent.used_traits, method_name, 0)
+                || self.traits_declare(&parent.used_traits, 0, &|c| {
+                    declares_real_method(c, method_name)
+                })
             {
                 return true;
             }
             current = parent;
         }
 
-        self.traits_have_method(&class.used_traits, method_name, 0)
-            || self.interfaces_have_method(class, method_name)
-    }
-
-    fn traits_have_method(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        method_name: &str,
-        depth: usize,
-    ) -> bool {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return false;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = self.find_or_load_class(trait_name) else {
-                continue;
-            };
-            if trait_info
-                .methods
-                .iter()
-                .any(|m| m.name == method_name && !m.is_virtual)
-                || self.traits_have_method(&trait_info.used_traits, method_name, depth + 1)
-            {
-                return true;
-            }
-        }
-
-        false
+        self.traits_declare(&class.used_traits, 0, &|c| {
+            declares_real_method(c, method_name)
+        }) || self.interfaces_have_method(class, method_name)
     }
 
     fn interfaces_have_method(&self, class: &ClassInfo, method_name: &str) -> bool {
@@ -397,93 +390,48 @@ impl Backend {
                 .any(|parent| self.interface_has_method(parent, method_name, depth + 1))
     }
 
-    fn ancestor_has_property(&self, class: &ClassInfo, prop_name: &str) -> bool {
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => return false,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => return false,
-            };
-            if parent.properties.iter().any(|p| p.name == prop_name)
-                || self.traits_have_property(&parent.used_traits, prop_name, 0)
-            {
-                return true;
-            }
-            current = parent;
-        }
-        false
-    }
-
-    fn traits_have_property(
+    /// Whether any of `trait_names`, or a trait one of them uses in turn,
+    /// declares a member `declares` recognises.
+    ///
+    /// `depth` bounds the walk so a `use` cycle between two traits cannot
+    /// run forever.
+    fn traits_declare(
         &self,
         trait_names: &[crate::atom::Atom],
-        prop_name: &str,
         depth: usize,
+        declares: &dyn Fn(&ClassInfo) -> bool,
     ) -> bool {
         if depth > MAX_INHERITANCE_DEPTH as usize {
             return false;
         }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = self.find_or_load_class(trait_name) else {
-                continue;
-            };
-            if trait_info.properties.iter().any(|p| p.name == prop_name)
-                || self.traits_have_property(&trait_info.used_traits, prop_name, depth + 1)
-            {
-                return true;
-            }
-        }
-
-        false
+        trait_names.iter().any(|trait_name| {
+            self.find_or_load_class(trait_name)
+                .is_some_and(|trait_info| {
+                    declares(&trait_info)
+                        || self.traits_declare(&trait_info.used_traits, depth + 1, declares)
+                })
+        })
     }
 
-    fn ancestor_has_constant(&self, class: &ClassInfo, constant_name: &str) -> bool {
+    /// Whether any ancestor of `class`, or a trait one of them uses,
+    /// declares a member `declares` recognises.
+    ///
+    /// The class itself is not consulted: every caller is asking whether
+    /// a member it already found there was inherited from somewhere.
+    fn ancestor_declares(&self, class: &ClassInfo, declares: &dyn Fn(&ClassInfo) -> bool) -> bool {
         let mut current = class.clone();
         for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => return false,
+            let Some(parent_name) = current.parent_class else {
+                return false;
             };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => return false,
+            let Some(parent) = self.find_or_load_class(&parent_name) else {
+                return false;
             };
-            if parent.constants.iter().any(|c| c.name == constant_name)
-                || self.traits_have_constant(&parent.used_traits, constant_name, 0)
-            {
+            if declares(&parent) || self.traits_declare(&parent.used_traits, 0, declares) {
                 return true;
             }
-            current = parent;
+            current = ClassInfo::clone(&parent);
         }
-        false
-    }
-
-    fn traits_have_constant(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        constant_name: &str,
-        depth: usize,
-    ) -> bool {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return false;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = self.find_or_load_class(trait_name) else {
-                continue;
-            };
-            if trait_info.constants.iter().any(|c| c.name == constant_name)
-                || self.traits_have_constant(&trait_info.used_traits, constant_name, depth + 1)
-            {
-                return true;
-            }
-        }
-
         false
     }
 

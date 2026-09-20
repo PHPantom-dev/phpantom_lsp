@@ -1,10 +1,13 @@
 //! Unresolved member access diagnostics (opt-in).
 //!
 //! Walk the precomputed [`SymbolMap`] for a file and flag every
-//! `MemberAccess` span where the **subject type** could not be
-//! resolved at all. This is different from the `unknown_members`
-//! diagnostic which fires when the subject resolves but the specific
-//! member is missing.
+//! `MemberAccess` span whose **subject type** cannot answer for the
+//! member: either it is `mixed`, or it could not be worked out at all.
+//! The message distinguishes the two, since a `mixed` subject is an
+//! annotation the codebase never wrote while an unresolved one is a gap
+//! in PHPantom's own inference. This is different from the
+//! `unknown_members` diagnostic, which fires when the subject resolves
+//! to a class but the specific member is missing.
 //!
 //! This diagnostic is **off by default** because most PHP codebases
 //! lack comprehensive type annotations, which means PHPantom cannot

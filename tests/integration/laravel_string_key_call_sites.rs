@@ -7,51 +7,9 @@
 //! `hasForLocale()`, a config key inside `getMany()`, and an environment
 //! variable behind `Env::get()`.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, markup_hover_at, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "app/" } }
-}"#;
-
-async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
-/// The Markdown a hover at `line`/`character` of an already-open `uri` holds.
-async fn hover_text(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> String {
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()
-        .expect("the position should hover");
-    match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
-        other => panic!("expected markup hover, got {other:?}"),
-    }
-}
 
 /// Every location go-to-definition offers at `line`/`character` of `relative`.
 async fn definitions(
@@ -65,7 +23,7 @@ async fn definitions(
     let path = dir.path().join(relative);
     let text = std::fs::read_to_string(&path).unwrap();
     let uri = Url::from_file_path(&path).unwrap();
-    open(backend, &uri, &text).await;
+    open_php(backend, &uri, &text).await;
 
     let response = backend
         .goto_definition(GotoDefinitionParams {
@@ -98,7 +56,7 @@ fn route_workspace(caller: &str) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         Route::get('/orders/{order}', 'show')->name('orders.show');\n\
         Route::get('/admin/users', 'index')->name('admin.users.index');\n";
     create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("routes/web.php", routes), ("app/Demo.php", caller)],
     )
 }
@@ -170,7 +128,7 @@ async fn a_route_pattern_is_judged_by_what_it_matches() {
     let (backend, dir) = route_workspace(caller);
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), caller, &mut diagnostics);
@@ -218,7 +176,7 @@ async fn has_for_locale_reaches_the_translation() {
         \x20   }\n}\n";
     let messages = "<?php\nreturn ['welcome' => 'Welcome'];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("lang/en/messages.php", messages)],
     );
 
@@ -241,7 +199,7 @@ async fn get_many_reaches_each_config_key_it_lists() {
         \x20   }\n}\n";
     let config = "<?php\nreturn ['name' => 'Acme', 'timezone' => 'UTC'];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("config/app.php", config)],
     );
 
@@ -268,7 +226,7 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
         \x20   }\n}\n";
     let config = "<?php\nreturn ['default' => env('MAIL_MAILER', 'smtp')];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             ("config/mail.php", config),
@@ -279,7 +237,7 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
     for relative in ["app/Demo.php", "config/mail.php"] {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        open(&backend, &Url::from_file_path(&path).unwrap(), &text).await;
+        open_php(&backend, &Url::from_file_path(&path).unwrap(), &text).await;
     }
 
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
@@ -321,7 +279,7 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
         \x20       env('MAIL_FROM');\n\
         \x20   }\n}\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (
@@ -332,21 +290,21 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
-    let declared = hover_text(&backend, &uri, 4, 16).await;
+    let declared = markup_hover_at(&backend, &uri, 4, 16).await;
     assert!(
         declared.contains("`log`") && declared.contains("Declared in `.env`"),
         "got {declared}"
     );
 
-    let secret = hover_text(&backend, &uri, 5, 16).await;
+    let secret = markup_hover_at(&backend, &uri, 5, 16).await;
     assert!(
         !secret.contains("sk_test_123") && secret.contains("Value hidden"),
         "got {secret}"
     );
 
-    let empty = hover_text(&backend, &uri, 6, 16).await;
+    let empty = markup_hover_at(&backend, &uri, 6, 16).await;
     assert!(empty.contains("Set to an empty value"), "got {empty}");
 }
 
@@ -359,7 +317,7 @@ async fn the_env_helper_completes_the_projects_variables() {
         \x20       env('');\n\
         \x20   }\n}\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (".env", "APP_NAME=Acme\nMAIL_MAILER=log\n"),
@@ -367,7 +325,7 @@ async fn the_env_helper_completes_the_projects_variables() {
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
     let items = match backend
         .completion(CompletionParams {
@@ -406,21 +364,21 @@ async fn translation_hover_shows_the_translated_line() {
         \x20   'explore' => 'Explore :name',\n\
         \x20   'nested' => ['deep' => 'Deep'],\n];\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("lang/en/boards.php", lang)],
     );
     backend.initialized(InitializedParams {}).await;
     let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open(&backend, &uri, caller).await;
+    open_php(&backend, &uri, caller).await;
 
-    let leaf = hover_text(&backend, &uri, 4, 16).await;
+    let leaf = markup_hover_at(&backend, &uri, 4, 16).await;
     assert!(
         leaf.contains("`Explore :name`") && leaf.contains("Defined in `lang/en/boards.php`"),
         "got {leaf}"
     );
 
     // A group has no single line, so the hover keeps naming only the file.
-    let group = hover_text(&backend, &uri, 5, 16).await;
+    let group = markup_hover_at(&backend, &uri, 5, 16).await;
     assert!(
         group.contains("Defined in `lang/en/boards.php`"),
         "got {group}"
@@ -436,7 +394,7 @@ async fn the_env_class_reaches_the_same_declaration_as_the_helper() {
         \x20       return \\Illuminate\\Support\\Env::get('MAIL_MAILER');\n\
         \x20   }\n}\n";
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (".env", "APP_NAME=Acme\nMAIL_MAILER=log\n"),

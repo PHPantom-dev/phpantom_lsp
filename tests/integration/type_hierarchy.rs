@@ -1,22 +1,9 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-async fn open(backend: &Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 async fn prepare_at(
     backend: &Backend,
@@ -90,7 +77,7 @@ async fn prepare_on_class_declaration() {
         "class MyClass {\n", // 1
         "}\n",               // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 8).await;
     assert_eq!(items.len(), 1);
@@ -107,7 +94,7 @@ async fn prepare_on_interface_declaration() {
         "interface MyInterface {\n", // 1
         "}\n",                       // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 12).await;
     assert_eq!(items.len(), 1);
@@ -125,7 +112,7 @@ async fn prepare_on_enum_declaration() {
         "    case A;\n",   // 2
         "}\n",             // 3
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 7).await;
     assert_eq!(items.len(), 1);
@@ -142,7 +129,7 @@ async fn prepare_on_trait_declaration() {
         "trait MyTrait {\n", // 1
         "}\n",               // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 8).await;
     assert_eq!(items.len(), 1);
@@ -164,7 +151,7 @@ async fn prepare_on_class_reference_in_extends() {
         "class Child extends Base {\n", // 3
         "}\n",                          // 4
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Base" in the extends clause on line 3.
     let items = prepare_at(&backend, &uri, 3, 22).await;
@@ -185,7 +172,7 @@ async fn prepare_on_class_reference_in_implements() {
         "    public function render(): string { return ''; }\n", // 5
         "}\n",                                                   // 6
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Renderable" in implements clause on line 4.
     let items = prepare_at(&backend, &uri, 4, 26).await;
@@ -208,7 +195,7 @@ async fn prepare_on_self_keyword() {
         "    }\n",                              // 4
         "}\n",                                  // 5
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "self" on line 3.
     let items = prepare_at(&backend, &uri, 3, 20).await;
@@ -233,7 +220,7 @@ async fn prepare_on_parent_keyword() {
         "    }\n",                                 // 9
         "}\n",                                     // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "parent" on line 8.
     let items = prepare_at(&backend, &uri, 8, 17).await;
@@ -251,7 +238,7 @@ async fn prepare_on_variable_returns_none() {
         "<?php\n",           // 0
         "$x = new Foo();\n", // 1
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "$x".
     let items = prepare_at(&backend, &uri, 1, 1).await;
@@ -270,7 +257,7 @@ async fn prepare_includes_namespace_in_detail() {
         "class User {\n",           // 2
         "}\n",                      // 3
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 2, 7).await;
     assert_eq!(items.len(), 1);
@@ -291,7 +278,7 @@ async fn prepare_deprecated_class_has_tag() {
         "class OldClass {\n",           // 2
         "}\n",                          // 3
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 2, 8).await;
     assert_eq!(items.len(), 1);
@@ -311,7 +298,7 @@ async fn supertypes_returns_parent_class() {
         "class Child extends Base {\n", // 3
         "}\n",                          // 4
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 3, 7).await;
     assert_eq!(items.len(), 1);
@@ -344,7 +331,7 @@ async fn supertypes_returns_interfaces() {
         "    public function log(): void {}\n",            // 9
         "}\n",                                             // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 7, 7).await;
     assert_eq!(items.len(), 1);
@@ -380,7 +367,7 @@ async fn supertypes_returns_parent_and_interfaces() {
         "    public function serialize(): string { return ''; }\n", // 7
         "}\n",                                                      // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 6, 7).await;
     assert_eq!(items.len(), 1);
@@ -414,7 +401,7 @@ async fn supertypes_interface_extends_interface() {
         "    public function isEmpty(): bool;\n",            // 5
         "}\n",                                               // 6
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 4, 12).await;
     assert_eq!(items.len(), 1);
@@ -439,7 +426,7 @@ async fn supertypes_no_parent_returns_empty() {
         "class Orphan {\n", // 1
         "}\n",              // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 7).await;
     assert_eq!(items.len(), 1);
@@ -469,7 +456,7 @@ async fn subtypes_returns_subclasses() {
         "class Unrelated {\n",          // 7
         "}\n",                          // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 7).await;
     assert_eq!(items.len(), 1);
@@ -511,7 +498,7 @@ async fn subtypes_returns_interface_implementors() {
         "    public function render(): string { return ''; }\n", // 8
         "}\n",                                                   // 9
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 12).await;
     assert_eq!(items.len(), 1);
@@ -547,7 +534,7 @@ async fn subtypes_includes_abstract_subclasses() {
         "    public function area(): float { return 0.0; }\n", // 7
         "}\n",                                                 // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Direct subtypes of Shape: only AbstractShape (implements Shape).
     // Circle extends AbstractShape, NOT Shape directly, so it is NOT
@@ -591,7 +578,7 @@ async fn subtypes_final_class_has_no_subtypes() {
         "final class Sealed {\n", // 1
         "}\n",                    // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 13).await;
     assert_eq!(items.len(), 1);
@@ -623,7 +610,7 @@ async fn full_hierarchy_navigation_up_and_down() {
         "class Admin extends User {\n",                           // 9
         "}\n",                                                    // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Start from User (line 6).
     let items = prepare_at(&backend, &uri, 6, 7).await;
@@ -678,7 +665,7 @@ async fn subtypes_enum_implementing_interface() {
         "    }\n",                                 // 9
         "}\n",                                     // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Subtypes of HasLabel should include Status enum.
     let items = prepare_at(&backend, &uri, 1, 12).await;
@@ -738,7 +725,7 @@ async fn prepare_and_supertypes_cross_file_psr4() {
         "    public function test(UserRepository $repo): void {}\n",
         "}\n",
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Prepare on UserRepository reference on line 3.
     let items = prepare_at(&backend, &uri, 3, 35).await;
@@ -767,7 +754,7 @@ async fn data_field_contains_fqn() {
         "class Controller {\n", // 2
         "}\n",                  // 3
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 2, 7).await;
     assert_eq!(items.len(), 1);
@@ -791,7 +778,7 @@ async fn subtypes_transitive_via_parent_chain() {
         "    public function log(): void {}\n",        // 7
         "}\n",                                         // 8
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Direct subtypes of Loggable: only Base (implements Loggable).
     // Concrete extends Base but does NOT directly implement Loggable,
@@ -843,7 +830,7 @@ async fn supertypes_class_with_multiple_interfaces() {
         "    public function __toString(): string { return ''; }\n",     // 9
         "}\n",                                                           // 10
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 7, 7).await;
     assert_eq!(items.len(), 1);
@@ -876,7 +863,7 @@ async fn supertypes_have_correct_symbol_kinds() {
         "class Child extends Parent1 implements Iface {\n", // 5
         "}\n",                                              // 6
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 5, 7).await;
     assert_eq!(items.len(), 1);
@@ -907,7 +894,7 @@ async fn subtype_items_have_data_for_further_navigation() {
         "class Leaf extends Middle {\n", // 5
         "}\n",                           // 6
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Get subtypes of Base.
     let items = prepare_at(&backend, &uri, 1, 7).await;
@@ -945,7 +932,7 @@ async fn subtypes_returns_only_direct_children() {
         "class Leaf extends Middle {\n", // 5
         "}\n",                           // 6
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 7).await;
     assert_eq!(items.len(), 1);
@@ -983,7 +970,7 @@ async fn prepare_selection_range_covers_class_name() {
         "class MyClass {\n", // 1  (offset 6-21) — "class" at 6, "MyClass" at 12
         "}\n",               // 2
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 8).await;
     assert_eq!(items.len(), 1);
@@ -1012,7 +999,7 @@ async fn subtypes_items_have_nonzero_selection_range() {
         "    public function render(): string { return ''; }\n", // 5
         "}\n",                                                   // 6
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 1, 12).await;
     assert_eq!(items.len(), 1);
@@ -1043,7 +1030,7 @@ async fn supertypes_items_have_nonzero_selection_range() {
         "class Child extends Base {\n", // 3
         "}\n",                          // 4
     );
-    open(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     let items = prepare_at(&backend, &uri, 3, 7).await;
     assert_eq!(items.len(), 1);
@@ -1098,14 +1085,14 @@ async fn subtypes_includes_unopened_children_when_some_are_indexed() {
     // App\Repository in the reverse inheritance index — but
     // AdminRepository stays on disk, discovered only by a wider scan.
     let iface_uri = Url::from_file_path(dir.path().join("src/Repository.php")).unwrap();
-    open(
+    open_php(
         &backend,
         &iface_uri,
         "<?php\nnamespace App;\ninterface Repository {\n}\n",
     )
     .await;
     let user_uri = Url::from_file_path(dir.path().join("src/UserRepository.php")).unwrap();
-    open(
+    open_php(
         &backend,
         &user_uri,
         "<?php\nnamespace App;\nclass UserRepository implements Repository {\n}\n",

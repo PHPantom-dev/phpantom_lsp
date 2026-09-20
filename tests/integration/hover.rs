@@ -3,35 +3,10 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub,
+    create_test_backend_with_stdclass_stub, hover_at, hover_text,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Register file content in the backend (sync) and return the hover result
-/// at the given (0-based) line and character.
-fn hover_at(
-    backend: &Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Option<Hover> {
-    // Parse and populate ast_map, use_map, namespace_map, symbol_maps
-    backend.update_ast(uri, content);
-
-    backend.handle_hover(uri, content, Position { line, character })
-}
-
-/// Extract the Markdown text from a Hover response.
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
 
 // ─── Multi-namespace hover ──────────────────────────────────────────────────
 
@@ -444,7 +419,7 @@ function test(bool $flag): void {
 
     let pushed = hover_at(&backend, uri, content, 7, 42).expect("hover on $pushed");
     assert!(
-        hover_text(&pushed).contains("$pushed = list<string>"),
+        hover_text(&pushed).contains("$pushed = non-empty-list<string>"),
         "a push after construction should widen the stored values: {}",
         hover_text(&pushed)
     );
@@ -469,7 +444,7 @@ function test(array $words): void {
 
     let grouped = hover_at(&backend, uri, content, 9, 10).expect("hover on $grouped");
     assert!(
-        hover_text(&grouped).contains("$grouped = array<int, list<string>>"),
+        hover_text(&grouped).contains("$grouped = array<int, non-empty-list<string>>"),
         "an append below a dynamic key should refine the inner element type: {}",
         hover_text(&grouped)
     );
@@ -477,7 +452,7 @@ function test(array $words): void {
     // The key is optional because a zero-iteration loop never writes it.
     let by_letter = hover_at(&backend, uri, content, 9, 20).expect("hover on $byLetter");
     assert!(
-        hover_text(&by_letter).contains("$byLetter = array{all?: list<string>}"),
+        hover_text(&by_letter).contains("$byLetter = array{all?: non-empty-list<string>}"),
         "an append below a literal key should refine that shape entry: {}",
         hover_text(&by_letter)
     );
@@ -512,7 +487,7 @@ function test(string $key): void {
 
     let groups = hover_at(&backend, uri, content, 12, 16).expect("hover on $groups");
     assert!(
-        hover_text(&groups).contains("$groups = array{pens: list<Pen>}"),
+        hover_text(&groups).contains("$groups = array{pens: non-empty-list<Pen>}"),
         "an append below a key refines what that key holds instead of \
          leaving the literal it was initialised with: {}",
         hover_text(&groups)
@@ -520,7 +495,7 @@ function test(string $key): void {
 
     let slots = hover_at(&backend, uri, content, 12, 26).expect("hover on $slots");
     assert!(
-        hover_text(&slots).contains("$slots = array<string, int>"),
+        hover_text(&slots).contains("$slots = non-empty-array<string, int>"),
         "a dynamic key may land on any entry, so the shape widens: {}",
         hover_text(&slots)
     );
@@ -544,14 +519,14 @@ function test(array $counts, array $words): void {
 
     let counts = hover_at(&backend, uri, content, 8, 10).expect("hover on $counts");
     assert!(
-        hover_text(&counts).contains("$counts = array<string, int>"),
+        hover_text(&counts).contains("$counts = non-empty-array<string, int>"),
         "a write to one key says nothing about the keys already there: {}",
         hover_text(&counts)
     );
 
     let words = hover_at(&backend, uri, content, 8, 20).expect("hover on $words");
     assert!(
-        hover_text(&words).contains("$words = array<string, list<string>>"),
+        hover_text(&words).contains("$words = non-empty-array<string, list<string>>"),
         "an append below a key builds on the value type the array declares: {}",
         hover_text(&words)
     );
@@ -1851,6 +1826,41 @@ class Legacy {
     assert!(
         !text.contains("🪦 **deprecated** "),
         "should not have trailing text after deprecated: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_shows_deprecation_inherited_from_interface_override() {
+    // An override with no docblock of its own inherits the interface
+    // method's `@deprecated` tag, the same way it already inherits a
+    // richer `@return` type from the interface.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface Shape {
+    /** @deprecated Use hasArea() instead. */
+    public function hasProperty(string $name): bool;
+}
+
+class Delegator implements Shape {
+    public function hasProperty(string $name): bool
+    {
+        return true;
+    }
+
+    public function run(): void {
+        $this->hasProperty('x');
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("🪦 **deprecated** Use hasArea() instead."),
+        "override with no own docblock should inherit the interface's \
+         deprecation message: {}",
         text
     );
 }
@@ -10164,10 +10174,56 @@ function run(array $items): void {
 
     let hover = hover_at(&backend, uri, content, 22, 5).expect("expected hover on $rows");
     let text = hover_text(&hover);
-    assert!(
-        text.contains("array<int, array{a: int}|array{b: int}|array{c: int}>"),
+    // One array type holding all three shapes, not one array per write.
+    // The shapes are matched individually rather than as one spelling:
+    // which order they come out in is down to the order the walk settles
+    // them, and it says nothing about whether the writes merged.
+    assert_eq!(
+        text.matches("array<int, ").count(),
+        1,
         "Sibling writes to the same key should merge into one array type, got: {}",
         text
+    );
+    for shape in ["array{a: int}", "array{b: int}", "array{c: int}"] {
+        assert!(
+            text.contains(shape),
+            "expected {shape} among the merged element types, got: {text}"
+        );
+    }
+}
+
+/// `array{…}|null` and `?array{…}` are the same type, so a branch that
+/// writes one spelling folds into the shape the other left behind instead of
+/// standing beside it as another alternative.
+#[test]
+fn hover_nullable_shape_spellings_merge_into_one_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** @return array{a: int}|null */
+function first() { return null; }
+/** @return array{a: int, b: string}|null */
+function second() { return null; }
+
+function run(bool $c): void {
+    $row = first();
+    if ($c) {
+        $row = second();
+    }
+    $row;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 5).expect("expected hover on $row");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("?array{a: int, b?: string}"),
+        "the two nullable spellings should fold into one shape, got: {text}"
+    );
+    assert_eq!(
+        text.matches("array{").count(),
+        1,
+        "the merge should leave one shape behind, not one per branch, got: {text}"
     );
 }
 
@@ -14953,4 +15009,61 @@ $outsideAnyClass = __CLASS__;
             hover_text(&hover)
         );
     }
+}
+
+// ─── `static` locals ────────────────────────────────────────────────────────
+
+/// A `static` local keeps its value between calls, so on the call that
+/// falls through to the second half of `info()` below, `$lastConfig` holds
+/// what the *other* branch stored on an earlier call.  Reading the body top
+/// to bottom sees no assignment at all — the only one sits behind a
+/// `return` — so the declaration is seeded from every assignment the body
+/// makes to the name, wherever it is.
+#[test]
+fn hover_static_local_seeded_from_assignment_in_unreached_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Configuration {}
+
+function info(?Configuration $config = null): void
+{
+    static $lastConfig;
+
+    if ($config !== null) {
+        $lastConfig = $config;
+        return;
+    }
+
+    $held = $lastConfig;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 12, 5).expect("hover on $held");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Configuration"),
+        "a static local should carry the type assigned to it elsewhere in the body, got: {text}"
+    );
+}
+
+/// The seed is the union of every assignment, and an initialiser counts as
+/// one: `static $count = 0;` is an `int` before anything else touches it.
+#[test]
+fn hover_static_local_seeded_from_its_initialiser() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function tick(): void
+{
+    static $count = 0;
+
+    $seen = $count;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 5, 5).expect("hover on $seen");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains('0'),
+        "a static local's initialiser should type it, got: {text}"
+    );
 }

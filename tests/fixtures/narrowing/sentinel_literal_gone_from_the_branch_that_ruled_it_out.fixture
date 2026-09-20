@@ -1,0 +1,22 @@
+// test: a property's sentinel literal does not survive the branch that handled it
+// feature: hover
+// expect_hover: $state => bool|null
+// expect_absent: notLoaded
+---
+<?php
+
+class Resolver
+{
+    /** @var bool|'notLoaded'|null */
+    private $isPure = 'notLoaded';
+
+    public function resolve(): void
+    {
+        if ($this->isPure === 'notLoaded') {
+            $this->isPure = null;
+        }
+
+        $state = $this->isPure;
+        echo $st<>ate;
+    }
+}

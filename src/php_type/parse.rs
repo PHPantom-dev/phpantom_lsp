@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use mago_span::HasSpan;
+
 use super::*;
 
 impl PhpType {
@@ -10,7 +12,7 @@ impl PhpType {
     /// This never fails. If the input cannot be parsed by
     /// `mago_phpdoc_syntax`, returns `PhpType::raw(input)`.
     ///
-    /// PHPStan/Larastan variance annotations (`covariant`, `contravariant`)
+    /// PHPStan variance annotations (`covariant`, `contravariant`)
     /// inside generic parameter positions are parsed and discarded, so
     /// types like `BelongsTo<Category, covariant $this>` become
     /// `Generic("BelongsTo", [Named("Category"), Named("$this")])`.
@@ -47,7 +49,7 @@ fn parse_type_text(input: &str) -> PhpType {
 
     let arena = LocalArena::new();
     match mago_phpdoc_syntax::parse_type(&arena, effective.as_bytes(), span) {
-        Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
+        Ok(ty) => restore_hyphenated_keywords(convert(effective, &ty)),
         Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
     }
 }
@@ -244,8 +246,9 @@ fn restore_hyphenated_keywords(ty: PhpType) -> PhpType {
 ///
 /// Hyphens are not valid PHP identifier characters, so the Mago parser
 /// rejects them.  Known pseudo-types like `class-string` and
-/// `non-empty-string` have dedicated CST nodes, but Larastan additions
-/// like `model-property` do not.  This function acts as a fallback when
+/// `non-empty-string` have dedicated CST nodes, but the ones the Laravel
+/// PHPStan extensions add, like `model-property`, do not.  This function
+/// acts as a fallback when
 /// the Mago parse fails: it splits the input at the first `<` that
 /// follows a hyphenated base name, parses the inner type(s) recursively,
 /// and returns `TypeKind::Generic` if the base name is a recognised
@@ -279,14 +282,31 @@ pub(crate) fn reference_kind_name<'a>(kind: &cst::ReferenceKind<'a>) -> &'a str 
     }
 }
 
+/// The runtime array key a shape field names, decoded from `src`.
+///
+/// A quoted key is written in source spelling, and the parser hands back
+/// only the text between the quotes: `array{'a\b': int}` and
+/// `array{"a\\b": int}` both arrive as `a\b` even though the first keys on
+/// `a\b` and the second on `a\b` for different reasons, and `array{"\x38":
+/// int}` arrives as `\x38` where PHP keys on the integer `8`. Decoding the
+/// literal the way PHP decodes it is what lets a later reader ask whether
+/// the key is an integer one. Every other spelling (a bare identifier, an
+/// integer, a class constant) already is the value it names.
+fn shape_key_text(src: &str, key: &cst::ShapeKey<'_>) -> String {
+    let span = key.span();
+    src.get(span.start.offset as usize..span.end.offset as usize)
+        .and_then(crate::text_scan::decode_php_string_literal)
+        .map_or_else(|| key.to_string(), |decoded| decoded.into_owned())
+}
+
 /// Convert a borrowed mago AST `Type` into an owned `PhpType`.
-pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
+fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
     match ty {
         // -- Composite types --------------------------------------------------
-        cst::Type::Union(_) => PhpType::union(flatten_union(ty)),
-        cst::Type::Intersection(_) => PhpType::intersection(flatten_intersection(ty)),
-        cst::Type::Nullable(n) => PhpType::nullable(convert(n.inner)),
-        cst::Type::Parenthesized(p) => convert(p.inner),
+        cst::Type::Union(_) => PhpType::union(flatten_union(src, ty)),
+        cst::Type::Intersection(_) => PhpType::intersection(flatten_intersection(src, ty)),
+        cst::Type::Nullable(n) => PhpType::nullable(convert(src, n.inner)),
+        cst::Type::Parenthesized(p) => convert(src, p.inner),
 
         // -- Named / Reference types ------------------------------------------
         cst::Type::Reference(r) => {
@@ -301,8 +321,11 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
             }
             match &r.parameters {
                 Some(params) => {
-                    let mut args: Vec<PhpType> =
-                        params.entries.iter().map(|e| convert(&e.inner)).collect();
+                    let mut args: Vec<PhpType> = params
+                        .entries
+                        .iter()
+                        .map(|e| convert(src, &e.inner))
+                        .collect();
                     // PHPStan's `__benevolent<T>` wrapper marks a lenient
                     // union; it is never a class. It reads and resolves as
                     // its inner `T`, with the leniency kept as a marker the
@@ -317,44 +340,43 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- Array-like types with optional generic parameters ----------------
-        cst::Type::Array(a) => {
-            convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
-        }
-        cst::Type::NonEmptyArray(a) => {
-            convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
-        }
-        cst::Type::AssociativeArray(a) => {
-            convert_keyword_with_optional_generics(bytes_to_str(a.keyword.value), &a.parameters)
-        }
-        cst::Type::List(l) => {
-            convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
-        }
-        cst::Type::NonEmptyList(l) => {
-            convert_keyword_with_optional_generics(bytes_to_str(l.keyword.value), &l.parameters)
-        }
-        cst::Type::Iterable(i) => {
-            convert_keyword_with_optional_generics(bytes_to_str(i.keyword.value), &i.parameters)
-        }
+        cst::Type::Array(a) => convert_keyword_with_optional_generics(
+            src,
+            bytes_to_str(a.keyword.value),
+            &a.parameters,
+        ),
+        cst::Type::NonEmptyArray(a) => convert_keyword_with_optional_generics(
+            src,
+            bytes_to_str(a.keyword.value),
+            &a.parameters,
+        ),
+        cst::Type::AssociativeArray(a) => convert_keyword_with_optional_generics(
+            src,
+            bytes_to_str(a.keyword.value),
+            &a.parameters,
+        ),
+        cst::Type::List(l) => convert_keyword_with_optional_generics(
+            src,
+            bytes_to_str(l.keyword.value),
+            &l.parameters,
+        ),
+        cst::Type::NonEmptyList(l) => convert_keyword_with_optional_generics(
+            src,
+            bytes_to_str(l.keyword.value),
+            &l.parameters,
+        ),
+        cst::Type::Iterable(i) => convert_keyword_with_optional_generics(
+            src,
+            bytes_to_str(i.keyword.value),
+            &i.parameters,
+        ),
 
         // -- Slice: T[] -------------------------------------------------------
-        cst::Type::Slice(s) => PhpType::array_of(convert(s.inner)),
+        cst::Type::Slice(s) => PhpType::array_of(convert(src, s.inner)),
 
         // -- Shape types ------------------------------------------------------
         cst::Type::Shape(s) => {
-            let entries: Vec<ShapeEntry> = s
-                .fields
-                .iter()
-                .map(|field| {
-                    let key = field.key.as_ref().map(|k| k.key.to_string());
-                    let optional = field.is_optional();
-                    let value_type = convert(field.value);
-                    ShapeEntry {
-                        key,
-                        value_type,
-                        optional,
-                    }
-                })
-                .collect();
+            let entries = shape_entries(src, s.fields.iter());
 
             match s.kind {
                 cst::ShapeTypeKind::Array
@@ -369,20 +391,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         // -- Object type (with optional shape) --------------------------------
         cst::Type::Object(o) => match &o.properties {
             Some(props) => {
-                let entries: Vec<ShapeEntry> = props
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let key = field.key.as_ref().map(|k| k.key.to_string());
-                        let optional = field.is_optional();
-                        let value_type = convert(field.value);
-                        ShapeEntry {
-                            key,
-                            value_type,
-                            optional,
-                        }
-                    })
-                    .collect();
+                let entries = shape_entries(src, props.fields.iter());
                 PhpType::object_shape(entries)
             }
             None => PhpType::object(),
@@ -402,7 +411,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                         .iter()
                         .map(|p| {
                             let type_hint = match &p.parameter_type {
-                                Some(t) => convert(t),
+                                Some(t) => convert(src, t),
                                 None => PhpType::mixed(),
                             };
                             CallableParam {
@@ -412,7 +421,10 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                             }
                         })
                         .collect();
-                    let return_type = spec.return_type.as_ref().map(|rt| convert(rt.return_type));
+                    let return_type = spec
+                        .return_type
+                        .as_ref()
+                        .map(|rt| convert(src, rt.return_type));
                     PhpType::callable_spec(kind, params, return_type)
                 }
                 None => PhpType::named(atom(kind)),
@@ -423,18 +435,18 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         cst::Type::Conditional(c) => PhpType::conditional(
             c.subject.to_string(),
             c.is_negated(),
-            convert(c.target),
-            convert(c.then),
-            convert(c.r#else),
+            convert(src, c.target),
+            convert(src, c.then),
+            convert(src, c.r#else),
         ),
 
         // -- class-string / interface-string ----------------------------------
         cst::Type::ClassString(c) => {
-            let inner = c.parameter.as_ref().map(|p| convert(&p.entry.inner));
+            let inner = c.parameter.as_ref().map(|p| convert(src, &p.entry.inner));
             PhpType::class_string(inner)
         }
         cst::Type::InterfaceString(i) => {
-            let inner = i.parameter.as_ref().map(|p| convert(&p.entry.inner));
+            let inner = i.parameter.as_ref().map(|p| convert(src, &p.entry.inner));
             PhpType::interface_string(inner)
         }
 
@@ -443,14 +455,16 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         // is the union `'a'`, and only the unevaluated form (a class constant,
         // an unsubstituted template) survives as `KeyOf`/`ValueOf` for a later
         // pass to finish.
-        cst::Type::KeyOf(k) => evaluate_key_of(&convert(&k.parameter.entry.inner)),
-        cst::Type::ValueOf(v) => evaluate_value_of(&convert(&v.parameter.entry.inner)),
+        cst::Type::KeyOf(k) => evaluate_key_of(&convert(src, &k.parameter.entry.inner)),
+        cst::Type::ValueOf(v) => evaluate_value_of(&convert(src, &v.parameter.entry.inner)),
 
         // -- int range --------------------------------------------------------
         cst::Type::IntRange(r) => PhpType::int_range(r.min.to_string(), r.max.to_string()),
 
         // -- Index access: T[K] -----------------------------------------------
-        cst::Type::IndexAccess(i) => PhpType::index_access(convert(i.target), convert(i.index)),
+        cst::Type::IndexAccess(i) => {
+            PhpType::index_access(convert(src, i.target), convert(src, i.index))
+        }
 
         // -- Variable (e.g. $this in conditional types) -----------------------
         cst::Type::Variable(v) | cst::Type::ThisVariable(v) => {
@@ -525,41 +539,73 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
 /// Convert a keyword type that has optional generic parameters (like
 /// `array`, `array<int>`, `list<string>`, `non-empty-array<int, string>`,
 /// `iterable<K, V>`).
-pub(crate) fn convert_keyword_with_optional_generics(
+fn convert_keyword_with_optional_generics(
+    src: &str,
     keyword: &str,
     parameters: &Option<cst::GenericParameters<'_>>,
 ) -> PhpType {
     let canonical = normalize_keyword_casing(keyword);
     match parameters {
         Some(params) => {
-            let args: Vec<PhpType> = params.entries.iter().map(|e| convert(&e.inner)).collect();
+            let args: Vec<PhpType> = params
+                .entries
+                .iter()
+                .map(|e| convert(src, &e.inner))
+                .collect();
             PhpType::generic(&canonical, args)
         }
         None => PhpType::named(atom(&canonical)),
     }
 }
 
+/// Convert the fields of an `array{…}` or `object{…}` shape to
+/// [`ShapeEntry`] values.
+fn shape_entries<'a, 'ast: 'a>(
+    src: &str,
+    fields: impl Iterator<Item = &'a cst::ShapeField<'ast>>,
+) -> Vec<ShapeEntry> {
+    fields
+        .map(|field| ShapeEntry {
+            key: field.key.as_ref().map(|k| shape_key_text(src, &k.key)),
+            optional: field.is_optional(),
+            value_type: convert(src, field.value),
+        })
+        .collect()
+}
+
 /// Recursively flatten a left-leaning binary union tree into a flat `Vec`.
-pub(crate) fn flatten_union(ty: &cst::Type<'_>) -> Vec<PhpType> {
-    match ty {
-        cst::Type::Union(u) => {
-            let mut types = flatten_union(u.left);
-            types.extend(flatten_union(u.right));
-            types
-        }
-        other => vec![convert(other)],
-    }
+fn flatten_union(src: &str, ty: &cst::Type<'_>) -> Vec<PhpType> {
+    flatten_binary(src, ty, |ty| match ty {
+        cst::Type::Union(u) => Some((u.left, u.right)),
+        _ => None,
+    })
 }
 
 /// Recursively flatten a left-leaning binary intersection tree into a flat `Vec`.
-pub(crate) fn flatten_intersection(ty: &cst::Type<'_>) -> Vec<PhpType> {
-    match ty {
-        cst::Type::Intersection(i) => {
-            let mut types = flatten_intersection(i.left);
-            types.extend(flatten_intersection(i.right));
+fn flatten_intersection(src: &str, ty: &cst::Type<'_>) -> Vec<PhpType> {
+    flatten_binary(src, ty, |ty| match ty {
+        cst::Type::Intersection(i) => Some((i.left, i.right)),
+        _ => None,
+    })
+}
+
+/// Flatten a left-leaning binary type tree, with `split` naming the two
+/// sides of the node kind being flattened.
+///
+/// Anything `split` does not recognise is a leaf and is converted as it
+/// stands.
+fn flatten_binary<'ast>(
+    src: &str,
+    ty: &cst::Type<'ast>,
+    split: impl Copy + Fn(&cst::Type<'ast>) -> Option<(&'ast cst::Type<'ast>, &'ast cst::Type<'ast>)>,
+) -> Vec<PhpType> {
+    match split(ty) {
+        Some((left, right)) => {
+            let mut types = flatten_binary(src, left, split);
+            types.extend(flatten_binary(src, right, split));
             types
         }
-        other => vec![convert(other)],
+        None => vec![convert(src, ty)],
     }
 }
 

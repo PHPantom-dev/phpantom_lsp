@@ -1,7 +1,7 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
     create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
-    create_test_backend_with_stubs,
+    create_test_backend_with_stubs, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -12,27 +12,6 @@ use tower_lsp::lsp_types::*;
 static ITERATOR_STUB: &str = "<?php\ninterface Iterator { public function next(): void; }\n";
 
 // ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
-
-/// Open a file, run full slow diagnostics (which activates the diagnostic
-/// scope cache and the forward walker), then filter to unknown_member
-/// diagnostics only.  This exercises the forward walker's diagnostic path
-/// instead of the backward scanner.
-fn unknown_member_diagnostics_with_scope_cache(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    // Keep only unknown_member diagnostics (the code we're testing).
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -2031,8 +2010,9 @@ function test(): void {
 /// `$app['config']->set(...)` where `Application implements ArrayAccess`
 /// without concrete generic annotations should NOT resolve the bracket
 /// access to `Application` itself.  With `unresolved-member-access`
-/// enabled, it should emit a diagnostic saying the type could not be
-/// resolved.
+/// enabled, it should emit a diagnostic naming what the subject is:
+/// `offsetGet()` declares `mixed`, so that is the answer and the
+/// diagnostic says so rather than implying the type engine came up short.
 #[test]
 fn array_access_on_array_access_class_emits_unresolved_diagnostic() {
     let backend = create_test_backend();
@@ -2068,11 +2048,11 @@ function test(Application $app): void {
         !diags.iter().any(|d| d.message.contains("Application")),
         "should not report 'set' as missing on Application, got: {diags:?}",
     );
-    // $app['config']->set() SHOULD flag that the subject type is unresolved.
+    // $app['config']->set() SHOULD flag that the subject is `mixed`.
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("set") && d.message.contains("could not be resolved")),
+            .any(|d| d.message.contains("set") && d.message.contains("is 'mixed'")),
         "expected unresolved-member-access diagnostic for $app['config']->set(), got: {diags:?}",
     );
 }
@@ -13372,5 +13352,930 @@ class Bag
         messages[0].contains("nope"),
         "the diagnostic should name `nope`, got: {:?}",
         messages
+    );
+}
+
+/// `self` in a member's declared type names the class the member was read
+/// off, not the class the reading code sits in.  Resolving it against the
+/// enclosing class made the lookup report a method missing from a class
+/// the code never mentions.
+#[test]
+fn a_self_returning_getter_is_not_attributed_to_the_enclosing_class() {
+    let backend = create_test_backend();
+    let uri = "file:///self_return.php";
+    let diags = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        uri,
+        r#"<?php
+interface Scope
+{
+    public function getParentScope(): ?self;
+
+    public function hasExpressionType(string $expr): bool;
+}
+
+class Reader
+{
+    public function run(Scope $scope): void
+    {
+        if ($scope->getParentScope() !== null) {
+            echo $scope->getParentScope()->hasExpressionType('x') ? 'y' : 'n';
+        }
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "the guarded chain resolves to Scope, not to Reader. Got: {:?}",
+        diags,
+    );
+}
+
+/// An element of a static array property is a subject in its own right:
+/// `self::$map['k']` reads the element, not a static member literally
+/// named `$map['k']`.  Failing to split it made the lookup answer with
+/// the enclosing class and report a method missing from it.
+#[test]
+fn an_element_of_a_static_array_property_resolves_to_the_element_type() {
+    let backend = create_test_backend();
+    let uri = "file:///static_array_element.php";
+    let diags = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        uri,
+        r#"<?php
+class Anon
+{
+    public function getDisplayName(): string { return 'x'; }
+}
+
+class Provider
+{
+    /** @var array<string, Anon> */
+    private static array $anonymousClasses = [];
+
+    public function name(string $className): string
+    {
+        if (isset(self::$anonymousClasses[$className])) {
+            return self::$anonymousClasses[$className]->getDisplayName();
+        }
+        return $className;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "the element is an Anon, not the Provider. Got: {:?}",
+        diags,
+    );
+}
+
+/// A namespaced class named `Exception` that extends the global `\Exception`
+/// still inherits its members.
+///
+/// The parent reference is written `\Exception`, but the leading backslash
+/// is not part of the name that gets stored, so resolving the stored
+/// `Exception` from inside `Nette\Neon` can land back on the class itself.
+/// The cycle-breaker then cuts the chain and every inherited member goes
+/// missing — `Nette\Neon\Exception::getMessage()` reported as unknown.
+#[tokio::test]
+async fn namespaced_exception_subclass_inherits_global_exception_members() {
+    let backend = create_test_backend_with_exception_stubs();
+
+    let parent = r#"<?php
+
+namespace Nette\Neon;
+
+class Exception extends \Exception
+{
+}
+"#;
+    backend.update_ast("file:///vendor/nette/neon/src/Neon/Exception.php", parent);
+
+    let php = r#"<?php
+
+namespace PHPStan\DependencyInjection;
+
+use Nette\Neon\Exception;
+
+class NeonAdapter
+{
+    public function load(Exception $e): string
+    {
+        return $e->getMessage();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, "file:///src/NeonAdapter.php", php);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "getMessage() is inherited from the global \\Exception, got: {msgs:?}"
+    );
+}
+
+/// A guard on an array element addressed by a computed offset describes
+/// every later read written the same way, including the one that reads a
+/// member straight off it.
+#[test]
+fn a_computed_element_read_sees_the_guard_that_narrowed_it() {
+    let backend = create_test_backend();
+
+    let php = r#"<?php
+
+class Stmt {}
+
+class IfStmt extends Stmt
+{
+    /** @var list<Stmt> */
+    public array $elseifs = [];
+}
+
+/** @param list<Stmt> $statements */
+function probe(array $statements, int $count): void
+{
+    if (!$statements[$count - 2] instanceof IfStmt) {
+        return;
+    }
+    $if = $statements[$count - 2];
+    echo count($if->elseifs);
+    echo count($statements[$count - 2]->elseifs);
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, "file:///computed.php", php);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "the guard narrows both reads, got: {msgs:?}"
+    );
+}
+
+/// An assignment replaces whatever the variable held, so a right-hand
+/// side that resolves to nothing leaves it unknown rather than still
+/// carrying the type it was initialised with.
+#[test]
+fn an_unresolvable_assignment_drops_the_variables_previous_type() {
+    let backend = create_test_backend();
+
+    let php = r#"<?php
+
+class Scope
+{
+    public function merge(Scope $other): Scope { return $this; }
+}
+
+function accumulate(array $ends): ?Scope
+{
+    $acc = null;
+    foreach ($ends as $end) {
+        $endScope = $end->getScope();
+        if ($acc === null) {
+            $acc = $endScope;
+            continue;
+        }
+        $acc = $acc->merge($endScope);
+    }
+
+    return $acc;
+}
+"#;
+    backend.update_ast("file:///accumulate.php", php);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics("file:///accumulate.php", php, &mut diags);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "`$acc` no longer holds the initial null, got: {msgs:?}"
+    );
+}
+
+/// The property case of the above: a write through a property path whose
+/// right-hand side resolves to nothing must drop the property's narrowed
+/// key rather than leave the pre-write `instanceof` narrowing in place.
+/// Unlike a plain variable, the correct fallback here is the property's
+/// declared type (`A|C`), so `onlyC()` on the un-narrowed `C` arm must not
+/// be flagged.
+#[test]
+fn an_unresolvable_property_assignment_drops_the_propertys_narrowing() {
+    let backend = create_test_backend();
+
+    let php = r#"<?php
+
+class A {}
+class C
+{
+    public function onlyC(): void {}
+}
+
+class Holder
+{
+    /** @var A|C */
+    public $prop;
+
+    public function f($u): void
+    {
+        if ($this->prop instanceof A) {
+            $this->prop = $u->make();
+            $this->prop->onlyC();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, "file:///holder.php", php);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "the write drops the stale `A` narrowing, got: {msgs:?}"
+    );
+}
+
+/// An array filled through the `array_merge` accumulator idiom keeps the
+/// element type of what was merged into it, so reading one entry back out by
+/// a variable index resolves to that element.
+///
+/// The `[]` the accumulator starts as is the whole difficulty: reading only
+/// `array_merge`'s first argument answered "the empty array" for every
+/// following pass through the loop, which left `$arraysToProcess[$i]` — and
+/// the `foreach` over the array itself — with no type at all.
+#[test]
+fn array_merge_accumulator_types_its_entries_for_a_variable_index() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///merge_accumulator.php";
+    let text = r#"<?php
+
+class ConstantArrayType
+{
+    /** @return list<string> */
+    public function getKeyTypes(): array { return []; }
+}
+
+interface TypeNode
+{
+    /** @return list<ConstantArrayType> */
+    public function getConstantArrays(): array;
+}
+
+class Combinator
+{
+    /**
+     * @param list<TypeNode> $constantArrays
+     * @param array<int, array<int, int>> $eligibleCombinations
+     */
+    public function reduce(array $constantArrays, array $eligibleCombinations): void
+    {
+        $arraysToProcess = [];
+        foreach ($constantArrays as $constantArray) {
+            $arraysToProcess = array_merge($arraysToProcess, $constantArray->getConstantArrays());
+        }
+
+        foreach ($arraysToProcess as $arrayToProcess) {
+            $arrayToProcess->getKeyTypes();
+        }
+
+        foreach ($eligibleCombinations as $i => $other) {
+            if (!array_key_exists($i, $arraysToProcess)) {
+                continue;
+            }
+            foreach ($other as $j => $count) {
+                if (!array_key_exists($j, $arraysToProcess)) {
+                    continue;
+                }
+                $arraysToProcess[$i]->getKeyTypes();
+                $arraysToProcess[$j]->getKeyTypes();
+            }
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "every read off the accumulator is a ConstantArrayType, got: {msgs:?}"
+    );
+}
+
+// ─── get_class() identity checks accept the subjects instanceof does ────────
+
+/// `get_class($x) === C::class` asks the same question `$x instanceof C`
+/// does, only more strictly, so it has to narrow the same subjects: a
+/// property fetch and an array dim, not just a plain variable.
+#[test]
+fn get_class_identity_narrows_a_property_fetch() {
+    let backend = create_test_backend();
+    let uri = "file:///get_class_property.php";
+    let text = r#"<?php
+class Base {}
+class Sub extends Base {
+    public function only(): int { return 1; }
+}
+class Holder {
+    public ?Base $held = null;
+
+    public function f(): int {
+        if (get_class($this->held) === Sub::class) {
+            return $this->held->only();
+        }
+        return 0;
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the identity check pins the property to Sub, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn get_class_identity_narrows_an_array_element() {
+    let backend = create_test_backend();
+    let uri = "file:///get_class_dim.php";
+    let text = r#"<?php
+class Base {}
+class Sub extends Base {
+    public function only(): int { return 1; }
+}
+
+/** @param array<Base> $types */
+function f(array $types): int {
+    if (get_class($types[0]) === Sub::class) {
+        return $types[0]->only();
+    }
+    return 0;
+}
+"#;
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the identity check pins the element to Sub, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A `mixed` subject is an answer, not a resolution failure
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The values PHP leaves open — an undescribed array's elements, a
+/// `@return mixed` accessor's result, a `mixed` parameter — all resolve to
+/// `mixed`, and a member read off one of them is unverifiable because the
+/// codebase never said what it holds. The diagnostic names `mixed` so the
+/// reader knows to reach for an annotation, rather than reading it as the
+/// type engine having come up short.
+#[test]
+fn a_mixed_subject_is_reported_as_mixed_not_as_unresolved() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///mixed_subject.php";
+    let text = r#"<?php
+/** @return mixed */
+function attribute(string $key) { return null; }
+
+function probe(array $types, mixed $declared): void
+{
+    foreach ($types as $type) {
+        echo $type->describe();
+    }
+    echo attribute('key')->describe();
+    echo $declared->describe();
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    assert_eq!(
+        diags.len(),
+        3,
+        "each of the three reads is unverifiable: {messages:?}"
+    );
+    assert!(
+        diags.iter().all(|d| d.message.contains("is 'mixed'")),
+        "every subject here resolved to `mixed`: {messages:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::HINT)),
+        "a gap in the codebase's annotations is a hint, not an error: {diags:?}"
+    );
+}
+
+/// A subject the type engine genuinely could not work out still says so, so
+/// the two stay distinguishable.
+#[test]
+fn a_subject_the_engine_cannot_work_out_still_says_so() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///unresolved_subject.php";
+    let text = r#"<?php
+function probe(): void
+{
+    echo $undeclared->describe();
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "nothing typed `$undeclared` at all: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// `isset(self::$cache[$key])` proves the offset is there, so the member
+/// access it guards resolves against the property's declared element type.
+/// Nothing ever assigns a static property a scope entry, so the key
+/// `self::$cache[$key]` used to come back unresolved and the guarded call
+/// was reported as a member access on an untypeable subject.
+#[test]
+fn isset_on_a_static_property_offset_types_the_read_it_guards() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Reflection {
+    public function getDisplayName(): string { return ''; }
+}
+
+class Provider {
+    /** @var Reflection[] */
+    private static array $anonymousClasses = [];
+
+    /** @var Reflection[] */
+    private array $instanceClasses = [];
+
+    public function viaStatic(string $className): string {
+        if (isset(self::$anonymousClasses[$className])) {
+            return self::$anonymousClasses[$className]->getDisplayName();
+        }
+        return '';
+    }
+
+    public function viaInstance(string $className): string {
+        if (isset($this->instanceClasses[$className])) {
+            return $this->instanceClasses[$className]->getDisplayName();
+        }
+        return '';
+    }
+}
+"#;
+    // The narrowing this depends on is recorded by the forward walk, so
+    // the whole diagnostic pipeline has to run rather than the
+    // unknown-member collector on its own.
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    diags.retain(|d| {
+        d.code.as_ref().is_some_and(
+            |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
+        )
+    });
+    assert!(
+        diags.is_empty(),
+        "both guarded reads resolve to Reflection, got: {diags:?}",
+    );
+}
+
+/// A member whose name PHP only works out at runtime names nothing a
+/// static lookup can find, so the read is `mixed` — the type that admits
+/// every value — and the diagnostic on a member of it says so.  Reporting
+/// it as unresolved instead pointed at a gap in the type engine that was
+/// never there, sending the reader hunting for one.
+#[test]
+fn a_member_named_at_runtime_is_mixed_rather_than_unresolved() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Certainty {
+    public static self $shared;
+    public const KIND = 'yes';
+    public self $inner;
+    public static function createYes(): self { return new self(); }
+    public function describe(): string { return ''; }
+}
+
+function test(Certainty $c, string $name): void {
+    $viaStaticCall = Certainty::{$name}();
+    $viaStaticCall->describe();
+
+    $viaMethodCall = $c->{$name}();
+    $viaMethodCall->describe();
+
+    $viaVariableMethod = $c->$name();
+    $viaVariableMethod->describe();
+
+    $viaProperty = $c->{$name};
+    $viaProperty->describe();
+
+    $viaStaticProperty = Certainty::${$name};
+    $viaStaticProperty->describe();
+
+    $viaClassConstant = Certainty::{$name};
+    $viaClassConstant->describe();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    for subject in [
+        "$viaStaticCall",
+        "$viaMethodCall",
+        "$viaVariableMethod",
+        "$viaProperty",
+        "$viaStaticProperty",
+        "$viaClassConstant",
+    ] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains(subject) && d.message.contains("is 'mixed'")),
+            "expected `{subject}` to be reported as 'mixed', got: {diags:?}",
+        );
+    }
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "no runtime-named member should be reported as unresolved, got: {diags:?}",
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Narrowing a subject that is not a plain variable
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `if ($this instanceof Subclass)` narrows `$this` exactly as an
+/// `instanceof` on a parameter narrows that, so a subclass member is
+/// resolvable inside the branch.  Reading any property of `$this` earlier in
+/// the body must not cost the branch its narrowing: the resolution the read
+/// cached was made outside the branch.
+#[test]
+fn reading_a_property_of_this_keeps_a_later_instanceof_on_this() {
+    let backend = create_test_backend();
+    let uri = "file:///narrow_this.php";
+    let text = r#"<?php
+class BaseType {
+    public string $className = '';
+
+    public function describe(): string
+    {
+        $description = $this->className;
+        if ($this instanceof GenericType) {
+            $description .= implode(', ', $this->getTypes());
+        }
+
+        return $description;
+    }
+}
+
+class GenericType extends BaseType {
+    /** @return list<string> */
+    public function getTypes(): array { return []; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the instanceof branch should resolve the subclass method, got: {diags:?}",
+    );
+}
+
+/// An `&&` chain narrows an array element read through a property
+/// (`$this->unsealed[0]`) for its own later operands, with no block to key
+/// the narrowing on.  A member access that resolved the subject once for the
+/// whole method body never saw it, and the re-resolution that recovers it
+/// was reached only for bare variables.
+#[test]
+fn an_and_chain_narrows_an_element_of_a_property_for_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///narrow_element.php";
+    let text = r#"<?php
+class TypeNode {
+    public function describe(): string { return ''; }
+}
+
+class MixedTypeNode extends TypeNode {
+    public function isExplicitMixed(): bool { return false; }
+}
+
+class ShapeType {
+    /** @var array{TypeNode, TypeNode}|null */
+    private ?array $unsealed = null;
+
+    public function describeKey(): string
+    {
+        if ($this->unsealed === null) {
+            return '';
+        }
+
+        $keyDescription = $this->unsealed[0]->describe();
+        $isMixedKey = $this->unsealed[0] instanceof MixedTypeNode
+            && $keyDescription === 'mixed'
+            && !$this->unsealed[0]->isExplicitMixed();
+
+        return $isMixedKey ? 'mixed' : $keyDescription;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the third operand should see what the first proved, got: {diags:?}",
+    );
+}
+
+/// The same, with a two-hop call chain as the subject.  The resolver built
+/// the scope key for such a chain from its written text, which quotes array
+/// indices differently from the key the walker records and stops at the
+/// first call link, so the narrowed entry was never found.
+#[test]
+fn an_and_chain_narrows_a_call_chain_subject_for_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///narrow_chain.php";
+    let text = r#"<?php
+class ExprNode {}
+
+class VariableNode extends ExprNode {
+    public string $name = '';
+}
+
+class Inner {
+    public function getExpr(): ExprNode { return new ExprNode(); }
+}
+
+class Outer {
+    public function getExpr(): Inner { return new Inner(); }
+}
+
+class Reader {
+    public function read(Outer $expressionType, bool $tracked): string
+    {
+        if (
+            $expressionType->getExpr()->getExpr() instanceof VariableNode
+            && $expressionType->getExpr()->getExpr()->name !== ''
+            && $tracked
+        ) {
+            return $expressionType->getExpr()->getExpr()->name;
+        }
+
+        return '';
+    }
+
+    /** @param list<Inner> $statements */
+    public function readIndexed(array $statements): string
+    {
+        if (
+            $statements[0]->getExpr() instanceof VariableNode
+            && $statements[0]->getExpr()->name !== ''
+        ) {
+            return $statements[0]->getExpr()->name;
+        }
+
+        return '';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the call chain's narrowing should reach every later read, got: {diags:?}",
+    );
+}
+
+/// An accumulator whose merge call names a member the receiver's class does
+/// not declare must report that member, not the receiver.
+///
+/// `$finalScope = $finalScope->mergeWith($endScope);` inside a loop records
+/// the accumulator as unknown, and unknown used to be the top of the join
+/// lattice, so the loop's fixed point fed it back into the next walk. By the
+/// last walk the seed type was gone and the merge line blamed the receiver
+/// instead of naming the method — while every read below it, including ones
+/// the interface does declare, reported an unresolvable receiver of its own.
+#[test]
+fn a_failed_merge_inside_a_loop_names_the_member_it_could_not_find() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///merge_loop.php";
+    let text = r#"<?php
+interface Scope {
+    public function hasExpressionType(): bool;
+}
+
+interface MutatingScope extends Scope {
+    public function mergeWith(?self $other): self;
+}
+
+class StatementResult {
+    public function getScope(): Scope { return new class implements Scope {
+        public function hasExpressionType(): bool { return true; }
+    }; }
+}
+
+class Merger {
+    /** @param list<StatementResult> $ends */
+    public function merge(array $ends): void
+    {
+        $finalScope = null;
+        foreach ($ends as $end) {
+            $endScope = $end->getScope();
+            if ($finalScope === null) {
+                $finalScope = $endScope;
+                continue;
+            }
+
+            $finalScope = $finalScope->mergeWith($endScope);
+        }
+
+        if ($finalScope === null) {
+            return;
+        }
+
+        $finalScope->hasExpressionType();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.iter().any(|d| d.message.contains("mergeWith")
+            && d.message.contains("not found")
+            && d.message.contains("Scope")),
+        "the merge line should name the method the interface lacks, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("$finalScope")),
+        "no read of the accumulator should blame the accumulator itself, got: {diags:?}",
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("hasExpressionType")),
+        "a member the interface does declare must resolve below the loop, got: {diags:?}",
+    );
+}
+
+/// The same loop, with a plain variable on the right-hand side instead of a
+/// call, must leave the accumulator unknown.
+///
+/// `$found = $candidate;` where `$candidate` has no type does not *lose* a
+/// type — it passes on the answer it already had, which is "could be
+/// anything". Standing that aside at the join the way a failed member lookup
+/// is stood aside would leave the accumulator holding its `null` seed, and
+/// every read below the loop would be reported against `null`.
+#[test]
+fn an_untyped_assignment_inside_a_loop_leaves_the_accumulator_unknown() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///untyped_loop.php";
+    let text = r#"<?php
+class Collector {
+    public function collect(array $candidates): void
+    {
+        $found = null;
+        foreach ($candidates as $candidate) {
+            if (! $candidate instanceof UnindexedNode) {
+                continue;
+            }
+
+            $found = $candidate;
+        }
+
+        if ($found === null) {
+            return;
+        }
+
+        $found->getName();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("getName")
+            && (d.message.contains("'null'") || d.message.contains("not found"))),
+        "an untyped assignment must not leave the `null` seed behind, got: {diags:?}",
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Assignments used as values
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// An assignment is an expression, so it can be the receiver of the call
+/// that reads it back: `($x = $map[$key])->truthy()`.  The receiver has
+/// the type the assignment just wrote, whether the target is a variable,
+/// a `??=` variable, or a `??=` array offset, and whether the expression
+/// sits in a condition, a `return`, another assignment's value, or a
+/// short-circuit chain.
+#[test]
+fn an_assignment_used_as_a_call_receiver_has_the_type_it_assigned() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///assignment_receiver.php";
+    let text = r#"<?php
+class Node {
+    public function truthy(): bool { return true; }
+}
+
+class Registry {
+    /** @var array<string, Node> */
+    private array $map = [];
+    /** @var array<string, Node> */
+    private array $cache = [];
+
+    public function plainAssignment(string $key): bool {
+        if (($x = $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function coalesceOnVariable(string $key): bool {
+        $cached = null;
+        if (($cached ??= $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function coalesceOnOffset(string $key): bool {
+        if (($this->cache[$key] ??= $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function throughAVariable(string $key): bool {
+        $r = $this->cache[$key] ??= $this->map[$key];
+        if ($r->truthy()) { return true; }
+        return false;
+    }
+
+    public function coalesceReadInTheBody(string $key): bool {
+        $cached = null;
+        if ($cached ??= $this->map[$key]) { return $cached->truthy(); }
+        return false;
+    }
+
+    public function inAReturn(string $key): bool {
+        return ($x = $this->map[$key])->truthy();
+    }
+
+    public function inAnotherAssignment(string $key): bool {
+        $ok = ($x = $this->map[$key])->truthy();
+        return $ok;
+    }
+
+    public function inAWhileCondition(string $key): bool {
+        while (($x = $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function inAShortCircuitChain(string $key): bool {
+        return $key !== '' && ($x = $this->map[$key])->truthy();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "an assignment used as a call receiver must resolve to what it assigned, got: {diags:?}",
     );
 }

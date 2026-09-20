@@ -64,13 +64,32 @@ use crate::scope_collector::{
 
 use super::helpers::make_diagnostic;
 
+/// Emit [`mago_syntax::walker::Walker`] overrides that stop traversal at
+/// nested variable scopes (closures, arrow functions, named function
+/// declarations) while still walking an anonymous class's constructor
+/// arguments, which belong to the enclosing scope.
+macro_rules! stop_at_inner_scopes {
+    ($ctx:ty) => {
+        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
+        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
+        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
+        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
+            if let Some(argument_list) = &node.argument_list {
+                self.walk_partial_argument_list(argument_list, context);
+            }
+        }
+    };
+}
+
 mod feature_guards;
 mod offset_guards;
 
-pub(crate) use feature_guards::{collect_compact_vars, has_get_defined_vars};
+pub(crate) use feature_guards::{
+    collect_compact_vars, collect_import_offsets, has_get_defined_vars,
+};
 use feature_guards::{has_dynamic_variables, has_extract_call};
 use offset_guards::{
-    collect_error_suppressed_offsets, collect_guarded_offsets,
+    collect_error_suppressed_offsets, collect_guarded_offsets, collect_isset_guarded_regions,
     collect_short_circuit_guarded_offsets, collect_var_annotations,
 };
 
@@ -115,9 +134,15 @@ impl Backend {
         // and method signatures.  This lets the scope collector mark
         // by-ref arguments as writes for user-defined functions, static
         // methods, and constructors — not just the hardcoded table.
-        let resolver: ByRefResolver<'_> = &|call_kind: &ByRefCallKind<'_>| {
-            self.resolve_by_ref_positions(call_kind, &file_use_map, &file_namespace)
-        };
+        let resolver: ByRefResolver<'_> =
+            &|call_kind: &ByRefCallKind<'_>, enclosing_class_name: Option<&str>| {
+                self.resolve_by_ref_positions(
+                    call_kind,
+                    enclosing_class_name,
+                    &file_use_map,
+                    &file_namespace,
+                )
+            };
 
         with_parsed_program(content, "unknown_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
@@ -142,6 +167,7 @@ impl Backend {
     fn resolve_by_ref_positions(
         &self,
         call_kind: &ByRefCallKind<'_>,
+        enclosing_class_name: Option<&str>,
         file_use_map: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<Vec<usize>> {
@@ -165,10 +191,12 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::StaticMethod(class_name, method_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
+                let cls = self.resolve_call_class(
+                    class_name,
+                    enclosing_class_name,
+                    file_use_map,
+                    file_namespace,
+                )?;
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &cls,
                     &|name| self.find_or_load_class(name),
@@ -185,10 +213,12 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::Constructor(class_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
+                let cls = self.resolve_call_class(
+                    class_name,
+                    enclosing_class_name,
+                    file_use_map,
+                    file_namespace,
+                )?;
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &cls,
                     &|name| self.find_or_load_class(name),
@@ -225,6 +255,34 @@ impl Backend {
                 Some(positions)
             }
         }
+    }
+
+    /// Resolve a `Cls::method()`/`new Cls()` class name to its
+    /// [`ClassInfo`], handling the relative names `self`, `static`, and
+    /// `parent` by resolving them against the class enclosing the call
+    /// site rather than treating them as a literal class name.
+    fn resolve_call_class(
+        &self,
+        class_name: &str,
+        enclosing_class_name: Option<&str>,
+        file_use_map: &std::collections::HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<std::sync::Arc<crate::types::ClassInfo>> {
+        if crate::class_lookup::is_class_keyword(class_name) {
+            let enclosing_name = enclosing_class_name?;
+            let enclosing_fqn =
+                crate::util::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
+            let enclosing_class = self
+                .find_or_load_class(&enclosing_fqn)
+                .or_else(|| self.find_or_load_class(enclosing_name))?;
+            let fqn =
+                crate::class_lookup::resolve_class_keyword(class_name, Some(&enclosing_class))?;
+            return self.find_or_load_class(&fqn);
+        }
+
+        let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+        self.find_or_load_class(&fqn)
+            .or_else(|| self.find_or_load_class(class_name))
     }
 }
 
@@ -418,6 +476,11 @@ fn check_scope(
     let mut guarded_offsets = collect_guarded_offsets(body);
     guarded_offsets.extend(collect_short_circuit_guarded_offsets(body));
 
+    // Collect the branch bodies a positive `isset()` check guards, so a
+    // read there is not reported just because the only write to the
+    // variable sits later in the source.
+    let isset_regions = collect_isset_guarded_regions(body);
+
     if scope.frames.is_empty() {
         return;
     }
@@ -536,6 +599,21 @@ fn check_scope(
                 .any(|(name, off)| *name == access.name && *off < access.offset);
 
             if has_prior_write {
+                continue;
+            }
+
+            // A positive `isset()` in an enclosing branch condition
+            // proves the variable exists for that whole branch.  Require
+            // a write somewhere in the scope: with none at all the
+            // `isset()` can never be true, and the read is a genuine
+            // typo rather than a write this source-ordered pass missed.
+            let written_anywhere = || frame_writes.iter().any(|(name, _)| *name == access.name);
+            if isset_regions.iter().any(|region| {
+                access.offset >= region.start
+                    && access.offset <= region.end
+                    && region.names.iter().any(|name| name == &access.name)
+            }) && written_anywhere()
+            {
                 continue;
             }
 

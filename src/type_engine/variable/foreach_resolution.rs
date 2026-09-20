@@ -88,16 +88,53 @@ pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -
 /// The type `foreach ($expr as $key => $value)` binds `$key` to, given
 /// the iterable's own resolved type.
 ///
-/// `None` when the iterable says nothing about its keys — a bare `array`
-/// carries no key information, and the caller falls back to `int|string`.
+/// `None` only when nothing about the value resolves to an iterable at
+/// all; a type that resolves but names no key type answers with the whole
+/// key domain PHP allows, and the caller falls back to the same.
 pub(crate) fn iteration_key_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
-    // `iterable_key_type` (rather than `extract_key_type`) so the implicit
-    // keys of a list, a `T[]`, and an array shape come out explicit.
-    if let Some(kt) = iter_type.iterable_key_type() {
-        return Some(kt);
+    if let Some(kt) = key_domain(iter_type) {
+        // Benevolent when part of the domain is ours rather than the
+        // array's: holding a `substr($key, …)` to the `int` branch of a
+        // union we invented is a false positive.  `is_type_compatible`
+        // implements that half; the union still narrows like any other.
+        return Some(if iter_type.has_open_key_domain() {
+            PhpType::benevolent(kt)
+        } else {
+            kt
+        });
     }
     let key_type = resolve_iterable_key_via_class(iter_type, ctx)?;
     (!is_unsubstituted_template_param(&key_type)).then_some(key_type)
+}
+
+/// The key domain of an iterable, widening the shapes that name only a
+/// value type to every key PHP allows.
+///
+/// [`PhpType::iterable_key_type`] answers `int` for `array<T>`, `T[]` and
+/// bare `array`, which is the useful guess when reading one element out of
+/// a sequential array but wrong for a `foreach`: an array whose docblock
+/// says nothing about its keys can hand out string keys just as well, and
+/// binding only the `int` half reports every one of them as a mismatch.
+/// A `list<T>` is not open — it promises `int` keys — and a spelled-out
+/// key type is reported verbatim.
+fn key_domain(ty: &PhpType) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Nullable(inner) => key_domain(inner),
+        // Member-wise, so a union that mixes an open member with a
+        // spelled-out one keeps what the latter said.
+        TypeKind::Union(members) => {
+            let keys: Vec<PhpType> = members.iter().filter_map(key_domain).collect();
+            match keys.len() {
+                0 => None,
+                1 => keys.into_iter().next(),
+                _ => Some(PhpType::join_runtime_value_types(keys)),
+            }
+        }
+        _ if ty.has_open_key_domain() => {
+            Some(PhpType::union(vec![PhpType::int(), PhpType::string()]))
+        }
+        _ => ty.iterable_key_type(),
+    }
 }
 
 /// Resolve the element type of an iterable via class inheritance.

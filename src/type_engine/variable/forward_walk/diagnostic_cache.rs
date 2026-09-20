@@ -43,6 +43,7 @@ impl Drop for DiagnosticScopeGuard {
             DIAGNOSTIC_SCOPE.with(|cell| {
                 *cell.borrow_mut() = None;
             });
+            end_unreachable_collection();
         }
     }
 }
@@ -66,6 +67,11 @@ pub(crate) fn is_building_scopes() -> bool {
 ///
 /// Returns a guard that clears the cache on drop.  If the cache is
 /// already active (nested call), the guard is a no-op.
+///
+/// The walk that populates the cache is also the walk that discovers
+/// which branches cannot run, so the collection of unreachable ranges
+/// shares this guard's lifetime: the ranges are still there when the
+/// collectors that ran against the cache hand back their diagnostics.
 pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     let already_active = DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().is_some());
     if already_active {
@@ -74,6 +80,7 @@ pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     DIAGNOSTIC_SCOPE.with(|cell| {
         *cell.borrow_mut() = Some(BTreeMap::new());
     });
+    begin_unreachable_collection();
     DiagnosticScopeGuard { owns: true }
 }
 

@@ -8,8 +8,8 @@
 //! `Factory::create()`/`make()`, which is ambiguous at every call site.
 //!
 //! This module reads the count state off the receiver chain and picks the
-//! branch the call actually produces, mirroring Larastan's conditional
-//! return type extensions.  The state reaches the `create()` two ways:
+//! branch the call actually produces, the way a PHPStan conditional return
+//! type extension does.  The state reaches the `create()` two ways:
 //! from the syntax of the chain it is written on, and from the value the
 //! receiver resolved to — every factory-returning call tags its result
 //! with a [`FactoryCount`], so a chain that travels through a variable

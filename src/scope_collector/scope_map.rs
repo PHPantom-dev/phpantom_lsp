@@ -25,10 +25,15 @@ pub(crate) enum ByRefCallKind<'a> {
 
 /// Callback that resolves by-reference parameter positions for a call.
 ///
-/// Given a [`ByRefCallKind`] describing the call, returns a list of
-/// 0-based argument positions that are by-reference.  Returns `None`
-/// if the function/method cannot be resolved.
-pub(crate) type ByRefResolver<'a> = &'a dyn Fn(&ByRefCallKind<'_>) -> Option<Vec<usize>>;
+/// Given a [`ByRefCallKind`] describing the call and the name of the
+/// class enclosing the call site (`None` outside any class), returns a
+/// list of 0-based argument positions that are by-reference.  The
+/// enclosing class name lets the resolver turn `self`/`static`/`parent`
+/// in a [`ByRefCallKind::StaticMethod`] or [`ByRefCallKind::Constructor`]
+/// into a real class before looking up the callee.  Returns `None` if
+/// the function/method cannot be resolved.
+pub(crate) type ByRefResolver<'a> =
+    &'a dyn Fn(&ByRefCallKind<'_>, Option<&str>) -> Option<Vec<usize>>;
 
 // ─── Core types ─────────────────────────────────────────────────────────────
 

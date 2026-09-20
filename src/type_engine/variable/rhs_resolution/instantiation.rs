@@ -25,12 +25,30 @@ pub(super) fn resolve_rhs_instantiation(
     let class_name = match inst.class {
         Expression::Self_(_) => Some("self".to_string()),
         Expression::Static(_) => Some("static".to_string()),
+        Expression::Parent(_) => Some("parent".to_string()),
         Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
         _ => None,
     };
     if let Some(ref name) = class_name {
         let fqn = match name.as_str() {
-            "self" | "static" => ctx.current_class.name.to_string(),
+            // The enclosing class's *fully qualified* name, not its short
+            // one: a namespaced class whose short name collides with a
+            // global class (`App\Error` vs the built-in `\Error`) would
+            // otherwise have every `new self(…)` resolve to the global one.
+            "self" | "static" => ctx.current_class.fqn().to_string(),
+            // `parent` names the class the enclosing one extends, written
+            // however the `extends` clause spelled it, so it resolves
+            // through the same import table a written name does.
+            "parent" => {
+                let Some(parent) = ctx.current_class.parent_class else {
+                    return vec![];
+                };
+                crate::util::resolve_source_class_name(
+                    parent.as_str(),
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                )
+            }
             other => crate::util::resolve_source_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),
@@ -48,6 +66,32 @@ pub(super) fn resolve_rhs_instantiation(
             ctx.all_classes,
             ctx.class_loader,
         );
+
+        // ── Reflected property construction ─────────────────────
+        // `new ReflectionProperty(C::class, 'name')` is the value
+        // `ReflectionClass::getProperty('name')` builds, written the
+        // other way, so it carries the same class and name.
+        if classes.len() == 1
+            && crate::type_engine::call_resolution::is_reflected_property_class(
+                classes[0].fqn().as_str(),
+            )
+            && let Some(ref arg_list) = inst.argument_list
+        {
+            let arg_texts =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    arg_list,
+                    ctx.content,
+                );
+            let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
+            let reflected = crate::type_engine::call_resolution::resolve_reflected_property_at_new(
+                &classes[0],
+                &arg_refs,
+                &ctx.as_resolution_ctx(),
+            );
+            if let Some(ty) = reflected {
+                return ResolvedType::from_classes_with_hint(classes, ty);
+            }
+        }
 
         // ── Constructor template inference ──────────────────────
         // When the class has `@template` params and the constructor
@@ -326,7 +370,7 @@ pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<St
 ///
 /// For example, if `FooContainer` has `@extends Container<Foo>`, calling
 /// `extract_generic_arg_from_ancestor(FooContainer, "Container", 0, ...)` returns `Foo`.
-pub(super) fn extract_generic_arg_from_ancestor(
+pub(crate) fn extract_generic_arg_from_ancestor(
     arg_type: &PhpType,
     wrapper_name: &str,
     tpl_position: usize,
@@ -352,28 +396,76 @@ pub(super) fn extract_generic_arg_from_ancestor(
     let cls = class_loader(class_name)?;
 
     let wrapper_short = crate::util::short_name(wrapper_name);
-    if let Some(arg) = find_extends_generic_arg(&cls, wrapper_short, tpl_position) {
-        return Some(arg);
+    let mut visited = Vec::new();
+    ancestor_generic_arg(
+        &cls,
+        wrapper_short,
+        tpl_position,
+        &HashMap::new(),
+        &mut visited,
+        class_loader,
+    )
+}
+
+/// Maximum ancestry depth walked while looking for an ancestor's generic
+/// argument.  A backstop against an `extends`/`implements` cycle the
+/// loader hands back; the `visited` set is what actually bounds the work.
+const MAX_ANCESTOR_GENERIC_DEPTH: usize = 15;
+
+/// The type argument `ancestor_short` receives at `position`, as seen from
+/// `cls`.
+///
+/// Walks the parent chain **and** the interface list, threading each
+/// level's `@extends`/`@implements` arguments into the next, so a class
+/// that reaches the ancestor only through an intermediate generic
+/// interface still reports a concrete argument.
+/// `X implements CollectorWithPaths<never, array{…}>` together with
+/// `CollectorWithPaths extends Collector<TNodeType, TValue>` is what says
+/// `Collector`'s value argument is that `array{…}`.
+fn ancestor_generic_arg(
+    cls: &ClassInfo,
+    ancestor_short: &str,
+    position: usize,
+    subs: &HashMap<String, PhpType>,
+    visited: &mut Vec<crate::atom::Atom>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if visited.len() > MAX_ANCESTOR_GENERIC_DEPTH {
+        return None;
+    }
+    let fqn = cls.fqn();
+    if visited.contains(&fqn) {
+        return None;
+    }
+    visited.push(fqn);
+
+    if let Some(arg) = find_extends_generic_arg(cls, ancestor_short, position) {
+        return Some(if subs.is_empty() {
+            arg
+        } else {
+            arg.substitute(subs)
+        });
     }
 
-    let mut current = cls;
-    for _ in 0..15 {
-        let parent_name = current.parent_class.as_ref()?;
-        let parent = class_loader(parent_name)?;
-
-        if let Some(arg) = find_extends_generic_arg(&parent, wrapper_short, tpl_position) {
-            // The arg might reference the parent's template params — substitute
-            // through the chain to get concrete types.
-            let subs = build_extends_sub_map(&current, &parent);
-            let resolved = if subs.is_empty() {
-                arg
-            } else {
-                arg.substitute(&subs)
-            };
-            return Some(resolved);
+    for ancestor_name in cls.parent_class.iter().chain(cls.interfaces.iter()) {
+        let Some(ancestor) = class_loader(ancestor_name) else {
+            continue;
+        };
+        let next_subs = crate::inheritance::build_substitution_map(
+            &crate::inheritance::ClassRef::Borrowed(cls),
+            &ancestor,
+            subs,
+        );
+        if let Some(arg) = ancestor_generic_arg(
+            &ancestor,
+            ancestor_short,
+            position,
+            &next_subs,
+            visited,
+            class_loader,
+        ) {
+            return Some(arg);
         }
-
-        current = parent;
     }
 
     None
@@ -396,33 +488,6 @@ pub(super) fn find_extends_generic_arg(
         }
     }
     None
-}
-
-/// Build a simple substitution map from a child class to its parent based
-/// on `@extends` generics.
-pub(super) fn build_extends_sub_map(
-    child: &ClassInfo,
-    parent: &ClassInfo,
-) -> HashMap<String, PhpType> {
-    if parent.template_params.is_empty() {
-        return HashMap::new();
-    }
-    let parent_short = crate::util::short_name(&parent.name);
-    let type_args = child
-        .extends_generics
-        .iter()
-        .chain(child.implements_generics.iter())
-        .find(|(name, _)| crate::util::short_name(name) == parent_short)
-        .map(|(_, args)| args);
-    let mut map = HashMap::new();
-    if let Some(args) = type_args {
-        for (i, param) in parent.template_params.iter().enumerate() {
-            if let Some(arg) = args.get(i) {
-                map.insert(param.to_string(), arg.clone());
-            }
-        }
-    }
-    map
 }
 
 /// Remap constructor template substitutions from ancestor param names to child
@@ -646,15 +711,8 @@ pub(super) fn build_constructor_template_subs(
                     // declared return type is an array (`getConfigs()`
                     // returning `array<string, Config>`) — those carry no
                     // class info, so the general resolver yields nothing.
-                    if let Some(elem_type) = resolved_type.extract_value_type(false) {
-                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                    } else if !resolved_type.is_array_like() {
-                        // The argument resolved to a genuine (non-array)
-                        // type — bind it directly.  A bare array-like
-                        // container whose element type can't be extracted
-                        // is left unbound so `T` falls back to its bound
-                        // (or `mixed`) rather than binding `T` to `array`.
-                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                    if let Some(elem_type) = array_element_binding(resolved_type) {
+                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type);
                     }
                 }
             }
@@ -701,6 +759,30 @@ pub(super) fn build_constructor_template_subs(
     }
 
     subs
+}
+
+/// What an `@param T[] $items` template binds to for an argument that
+/// resolved to `resolved_type`.
+///
+/// A container binds the element type iteration would yield, so `T` names
+/// one element rather than the whole array. Anything that is not a
+/// container is itself the element (`@param T[] $items` bound from a
+/// spread-like single value).
+///
+/// Returns `None` for a container whose elements cannot be read — a bare
+/// `array`, or a union whose array-like members are all opaque. Leaving
+/// `T` unbound lets it fall back to its declared bound (or `mixed`),
+/// which beats binding it to the container and typing every callback
+/// parameter as the array it iterates.
+pub(crate) fn array_element_binding(resolved_type: PhpType) -> Option<PhpType> {
+    if resolved_type
+        .union_members()
+        .iter()
+        .any(|member| member.is_array_like())
+    {
+        return resolved_type.iterable_element_type();
+    }
+    Some(resolved_type)
 }
 
 /// How a template parameter is referenced in a `@param` type annotation.

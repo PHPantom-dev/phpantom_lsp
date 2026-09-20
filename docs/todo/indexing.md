@@ -321,47 +321,76 @@ ready to implement.
 
 ---
 
-## X9. Honor editor file excludes and PHP associations during indexing
+## X12. Say when an exclude hid the class a diagnostic names
 
 **Impact: Low-Medium · Complexity: Medium-High**
 
-This task spans both the server and the IDE plugins. The server side
-teaches the directory walkers to honor a generic list of exclude globs
-and extra PHP extensions. The client side (each editor extension) must
-gather the editor's effective `files.exclude` / `files.associations`
-and forward them to the server, since only the extension has access to
-those editor settings.
+An over-broad `[indexing] exclude` makes real classes unresolvable,
+and the resulting `Class 'App\Generated\Foo' not found` is
+indistinguishable from a typo: the user's own configuration caused
+it and nothing says so, which reads as a PHPantom bug. When class
+resolution fails, the FQN maps to a PSR-4 path, and that file exists
+on disk but `is_excluded_path` matches it, extend the message with
+the cause ("defined in `src/Generated/Foo.php`, which `[indexing]
+exclude` skips"). The PSR-4 mapping makes the probe a single stat
+plus an already-compiled glob match on the failure path only;
+classmap-only projects get no probe rather than a disk walk.
 
-The workspace scanners discover files by the `.php` extension and do
-not consult any exclude list. Two pieces of information the editor
-already has are ignored:
+## X16. Composer's own class lists bypass `[indexing] exclude`
 
-- **`files.exclude` (and a PHPantom-specific exclude glob).** Large
-  generated/vendored directories that the user has hidden from the
-  editor are still walked and parsed by the indexer. Skipping them
-  would cut startup work and avoid indexing irrelevant symbols.
-- **`files.associations`.** Files mapped to PHP under a non-`.php`
-  extension (e.g. `.module`, `.inc`, `.theme` in Drupal) are not
-  discovered by the byte-level scanners, so their classes/functions
-  are missing from the index. Note that *open* associated files
-  already work, because VS Code reports them with the `php` language
-  id and the client's document selector matches on language id, not
-  extension. Only background discovery is affected.
+**Impact: Low-Medium · Complexity: Low**
 
-### Approach
+Every workspace walker honours `exclude`, but three sources write
+straight into `fqn_uri_index` without consulting it: the Composer
+classmap (`parse_autoload_classmap`, used under `strategy = "composer"`
+and `"none"`), the PSR-0 map (`parse_autoload_namespaces`), and the
+bootstrap classes `vendor/composer` requires before any autoloader
+exists. A class any of those name stays resolvable from a path the user
+excluded, so `exclude` means one thing for a file a walk found and
+another for a file a list named.
 
-The client passes the effective exclude globs and the set of
-PHP-associated extensions to the server (via `initializationOptions`,
-or by responding to `workspace/configuration` the way Intelephense's
-middleware merges VS Code's native `files.exclude` /
-`files.associations` into the server config). The directory walkers in
-`classmap_scanner/discovery.rs` and `util.rs` consult the exclude
-globs before descending, and treat the extra associated extensions as
-PHP when collecting candidate files.
+It also costs the mid-session reconciliation some precision. The
+eviction pass applies only the *change* (a file both the old and the new
+filters exclude is left alone) exactly so an unrelated settings edit
+cannot drop these entries, which leaves one asymmetry: excluding such a
+path mid-session evicts it, while a restart would index it again.
+Filtering the three where they merge into the index makes one rule out
+of two and removes the asymmetry; the cost is one already-compiled glob
+match per entry, skipped outright when no exclude is configured.
 
-### Editor-agnostic note
+## X14. Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions
 
-Excludes and associations are editor concepts. Keep the server's
-interface generic (a list of globs and a list of extensions) so any
-client (VS Code, Zed) can supply them, rather than hard-coding
-VS Code setting names in the server.
+**Impact: Low · Complexity: Low**
+
+An upstream request, not a code change here. Zed's extension API serves
+extensions only the `language`, `lsp`, and `context_servers` settings
+categories (the `category` match in `get_settings`, `extension_host`
+crate), so the PHP extension cannot read the editor's own
+`file_scan_exclusions` or `file_types` and forward them the way the VS
+Code extension forwards `files.exclude` and `files.associations`. Zed
+users therefore have to restate those two lists under
+`lsp.phpantom.initialization_options`, which
+[`editor-setup.md`](../editor-setup.md) documents as the workaround.
+
+File the request against `zed-industries/zed` for read access to those
+two settings, then link the issue from that section so users can track
+it. When it lands, the forwarding itself is a small change in Zed's
+official PHP extension, and the manual step in the docs goes away.
+
+## X13. Decide how workspace-wide edits treat excluded files
+
+**Impact: Low-Medium · Complexity: Medium**
+
+`collect_php_files_gitignore` feeds find-references and namespace
+rename, so an excluded tree is invisible to both: a rename can leave
+excluded code calling a name that no longer exists, with no warning.
+That is consistent with what an exclude means, but sharper than
+"background discovery" suggests. Options: (a) keep the behaviour and
+document it under the `exclude` setting; (b) let correctness
+operations (rename, find-references) ignore `[indexing] exclude` on
+the grounds that the setting is an index-size and startup-time tool,
+not a statement that the code does not exist; (c) keep the exclusion
+but include a warning in the rename response when excludes are
+configured. Maintainer's call on the semantics; whichever way it
+goes, the chosen behaviour needs a test and a sentence in
+[`configuration.md`](../configuration.md).

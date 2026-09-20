@@ -1,0 +1,30 @@
+// test: an inline @var above an assignment does not retype its right-hand side
+// feature: completion
+// The @var describes `$b` after the assignment; the read on the right must
+// still see the `Wrapper` the loop condition proved.
+// expect: unwrap(
+// expect: inner
+// expect_absent: base(
+---
+<?php
+
+class Base
+{
+    public function base(): void {}
+}
+
+class Wrapper
+{
+    public Base $inner;
+
+    public function unwrap(): void {}
+}
+
+/** @param Base|Wrapper $b */
+function peel($b): void
+{
+    while ($b instanceof Wrapper) {
+        /** @var Base $b */
+        $b = $b-><>;
+    }
+}

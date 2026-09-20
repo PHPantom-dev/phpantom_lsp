@@ -7,26 +7,9 @@
 //! subjects, inline assignments in the condition, and `@phpstan-assert`
 //! on property/array subjects.
 
-use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
-
-/// Run slow diagnostics (activates the forward-walker scope cache) and
-/// keep only `unknown_member` diagnostics.
-fn unknown_member_diagnostics(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
+use crate::common::{
+    create_test_backend, slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
+};
 
 /// Shared scaffolding: a wide `Expr` interface, a `StringExpr` subtype
 /// with a `value` property, an unrelated subtype, and holders.
@@ -68,7 +51,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Narrowing from the first `&&` conjunct should apply to the \
@@ -93,7 +76,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "After the `||` guard, both `$arg` and `$arg->value` should be \
@@ -119,7 +102,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "The integer-indexed element `$stmts[0]` should narrow to \
@@ -145,7 +128,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`$args[0]->value` should narrow to StringExpr after the guard, \
@@ -171,7 +154,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`$constants['C']` should narrow to StringExpr after the guard, \
@@ -195,7 +178,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "The inline-assigned `$node` should narrow to StringExpr inside \
@@ -219,7 +202,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "The repeated `$h->getReturnType()` call should carry the \
@@ -248,7 +231,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Checking a `StringExpr` return against the wider `Expr` should \
@@ -277,7 +260,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         !diags.is_empty(),
         "`first()` being a `StringExpr` says nothing about `second()`, \
@@ -300,7 +283,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`@phpstan-assert StringExpr` on `$arg->value` should narrow the \
@@ -326,7 +309,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags
             .iter()
@@ -364,7 +347,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Inside the `elseif`, `$args[0]->value` should narrow to \
@@ -413,7 +396,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Each branch's own check decides what `$f->data()` is inside it, \
@@ -442,7 +425,7 @@ class Ord {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "`if ($this->getSub())` should leave the repeated call non-null, \
@@ -469,7 +452,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert_eq!(
         diags.len(),
         1,
@@ -497,7 +480,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert_eq!(
         diags.len(),
         1,
@@ -524,7 +507,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A reassignment before the check must not disturb narrowing, \
@@ -542,17 +525,7 @@ class C {{
 
 /// Run slow diagnostics and keep only argument type mismatches.
 fn type_error_messages(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Vec<String> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(backend, uri, text, "type_mismatch_argument")
 }
 
 /// A `Holder` whose property is a `T|false` union — the shape a `T|false`
@@ -1470,5 +1443,205 @@ class Controller {{
 "
     );
     let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A property guard interleaved with a chained call still narrows, and
+/// the interleaving does not invent diagnostics.  The time this takes is
+/// guarded separately by
+/// `diag_timing::property_narrowing_beside_a_chained_call_stays_bounded`.
+#[test]
+fn a_property_guard_beside_a_chained_call_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_probe.php";
+    let text = r#"<?php
+class Work   { public function changed(string $k): bool { return true; } public function run(): void {} }
+class Holder { public function getWork(): Work { return new Work(); } }
+class Ops    { public bool $a = false; }
+
+function probe(Holder $h): void {
+  $o = new Ops();
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+}
+"#;
+    let mut diags = Vec::new();
+    backend.update_ast(uri, text);
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
+}
+
+/// An `&&` operand that pins the subject to one class outranks a later
+/// `||` operand that only lists alternatives.  The disjunction's own
+/// left-hand branch says nothing about the subject, so reading its
+/// right-hand `instanceof` as a peer of the first operand would answer
+/// `Generic|Template` and reject the `Generic` parameter.
+#[test]
+fn a_definite_conjunct_survives_an_alternatives_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///definite_conjunct.php";
+    let text = r#"<?php
+namespace Repro;
+
+class TypeNode {}
+class Generic extends TypeNode {}
+class Template extends TypeNode {}
+
+function needGeneric(Generic $b): void {}
+
+function build(TypeNode $bound, string $boundClass): void {
+    if ($bound instanceof Generic && ($boundClass === Generic::class || $bound instanceof Template)) {
+        needGeneric($bound);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// With nothing pinning the subject down, a `||` operand still narrows
+/// it to the alternatives it lists.
+#[test]
+fn an_alternatives_operand_still_narrows_an_unpinned_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///alternatives_only.php";
+    let text = r#"<?php
+namespace Repro;
+
+class TypeNode {}
+class Generic extends TypeNode {}
+class Template extends TypeNode {}
+
+function needNode(TypeNode $b): void {}
+function needGeneric(Generic $b): void {}
+
+function build(object $bound, bool $flag): void {
+    if (($bound instanceof Generic || $bound instanceof Template) && $flag) {
+        needNode($bound);
+        needGeneric($bound);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "the union must still reach both calls: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Generic|Repro\\Template") || messages[0].contains("Generic|Template"),
+        "got {messages:?}"
+    );
+}
+
+/// Entering `A || B` says one of them held, so an `instanceof` sitting
+/// beside an unrelated operand proves nothing about its subject.  Reading
+/// it as though it had held hid the `null` the guard never ruled out.
+#[test]
+fn an_instanceof_beside_an_unrelated_operand_narrows_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///or_leg_instanceof.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Variable {}
+
+function needVariable(Variable $v): void {}
+
+function f(?Variable $v, bool $flag): void {
+    if ($v instanceof Variable || $flag) {
+        needVariable($v);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("?Repro\\Variable") || messages[0].contains("?Variable"));
+}
+
+/// Two legs checking two different subjects narrow neither: whichever one
+/// let the branch in, the other was never tested.
+#[test]
+fn or_legs_on_separate_subjects_narrow_neither() {
+    let backend = create_test_backend();
+    let uri = "file:///or_legs_two_subjects.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Variable {}
+
+function needVariable(Variable $v): void {}
+
+function f(?Variable $a, ?Variable $b): void {
+    if ($a instanceof Variable || $b instanceof Variable) {
+        needVariable($a);
+        needVariable($b);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+/// The legs join, so a check the whole disjunction admits still narrows:
+/// both legs name a class, and the branch body gets their union.
+#[test]
+fn or_legs_naming_one_subject_join_to_their_union() {
+    let backend = create_test_backend();
+    let uri = "file:///or_legs_union.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Node {}
+class Name extends Node {}
+class Value extends Node {}
+
+function needNode(Node $n): void {}
+function needName(Name $n): void {}
+
+function f(object $n): void {
+    if ($n instanceof Name || $n instanceof Value) {
+        needNode($n);
+        needName($n);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the Name call may fail: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Name|Repro\\Value") || messages[0].contains("Name|Value"),
+        "got {messages:?}"
+    );
+}
+
+/// A leg the branch already ruled out describes a run that cannot happen,
+/// so what it concluded stays out of the join.  `$price` holds an `Amount`
+/// outright here, which makes the `is_null()` half unreachable; joining
+/// the `null` it writes would hand the body a type nothing could have.
+#[test]
+fn an_impossible_leg_does_not_put_back_what_the_scope_ruled_out() {
+    let backend = create_test_backend();
+    let uri = "file:///impossible_or_leg.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Amount {
+    public function isZero(): bool { return true; }
+}
+
+function needAmount(Amount $a): void {}
+
+function f(): void {
+    $price = new Amount();
+    if (is_null($price) || $price->isZero()) {
+        needAmount($price);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
     assert!(messages.is_empty(), "got {messages:?}");
 }

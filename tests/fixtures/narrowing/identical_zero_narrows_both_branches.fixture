@@ -1,0 +1,18 @@
+// test: === 0 narrows its own branch and drops the literal from the else
+// feature: hover
+// expect_hover: $narrowed => 0
+// expect_hover: $rest => string|array
+---
+<?php
+
+/** @param int|string|array<int> $value */
+function dispatch($value): void
+{
+    if ($value === 0) {
+        $narrowed = $value;
+        echo $nar<>rowed;
+    } else {
+        $rest = $value;
+        echo $rest;
+    }
+}

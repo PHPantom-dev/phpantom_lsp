@@ -37,3 +37,6 @@ pub(in crate::type_engine) use assertions::*;
 pub(in crate::type_engine) use guards::*;
 pub(in crate::type_engine) use instanceof::*;
 pub(in crate::type_engine) use resolve::*;
+// The symbol-map extractor builds the same bracket-index text the
+// narrowing keys use, so the two sides cannot drift apart.
+pub(crate) use resolve::array_index_key;

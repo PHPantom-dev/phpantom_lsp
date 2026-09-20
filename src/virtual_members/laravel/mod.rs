@@ -10,8 +10,8 @@
 //! - **Relationship properties.** Methods returning a known Eloquent
 //!   relationship type (e.g. `HasOne`, `HasMany`, `BelongsTo`) produce
 //!   a virtual property with the same name.  The property type is
-//!   inferred from the relationship's generic parameters (Larastan-style
-//!   `@return HasMany<Post, $this>` annotations) or, as a fallback,
+//!   inferred from the relationship's generic parameters (a generic
+//!   `@return HasMany<Post, $this>` annotation) or, as a fallback,
 //!   from the first `::class` argument in the method body text.
 //!
 //! - **Relationship count properties.** For each relationship method, a
@@ -117,7 +117,7 @@ mod factory;
 pub(crate) mod factory_count;
 mod folio;
 pub(crate) mod gates;
-mod helpers;
+pub(crate) mod helpers;
 mod higher_order_proxy;
 mod macros;
 mod model_extraction;
@@ -182,7 +182,8 @@ pub(crate) use route_names::{
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
-    extract_storage_driver_registrations, patch_storage_disk_type,
+    extract_storage_driver_registrations, is_storage_facade_name, patch_storage_disk_type,
+    storage_facade_local_names,
 };
 pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
@@ -214,10 +215,12 @@ pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
-    RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
+    RelationshipKind, build_property_type, count_property_name, extract_pivot_accessor_typed,
+    extract_related_type_typed,
 };
 pub(crate) use relationships::{
-    class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
+    class_declares_pivot_relationship, extract_pivot_accessor, extract_pivot_using,
+    extract_with_pivot_columns,
 };
 
 pub use scopes::build_scope_methods_for_builder;
@@ -243,7 +246,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PropertyInfo, PropertySource,
+    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -275,8 +278,9 @@ pub const VIEW_FQN: &str = "Illuminate\\View\\View";
 /// the factory always constructs the concrete `Illuminate\View\View`.
 /// Resolving to the contract loses that and reports a mismatch on the
 /// (correct) `render(): View` signature every Blade component writes.
-/// Mapping the named form to the concrete class mirrors Larastan's
-/// `view()` stub, which the ecosystem is written against.
+/// Mapping the named form to the concrete class mirrors the `view()` stub
+/// the Laravel PHPStan extensions ship, which the ecosystem is written
+/// against.
 pub(crate) fn view_helper_returns_view(func_name: &str, text_args: &str) -> bool {
     if func_name.trim_start_matches('\\') != "view" {
         return false;
@@ -342,41 +346,20 @@ pub(crate) fn try_swap_custom_collection(
         Some(name) => name.to_string(),
         None => return cls,
     };
-    let model_class = find_class_in(all_classes, &model_name)
-        .cloned()
+    let model_class = crate::class_lookup::find_class_by_name(all_classes, &model_name)
+        .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
         .or_else(|| class_loader(&model_name).map(Arc::unwrap_or_clone));
 
     if let Some(ref mc) = model_class
         && let Some(coll_type) = mc.laravel().and_then(|l| l.custom_collection.as_ref())
     {
         let coll_name = coll_type.to_string();
-        find_class_in(all_classes, &coll_name)
-            .cloned()
+        crate::class_lookup::find_class_by_name(all_classes, &coll_name)
+            .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
             .or_else(|| class_loader(&coll_name).map(Arc::unwrap_or_clone))
             .unwrap_or(cls)
     } else {
         cls
-    }
-}
-
-/// Find a class in a slice by name (short or FQN).
-///
-/// Minimal local lookup used by the collection-swap helper.  Prefers
-/// namespace-aware matching when the name contains backslashes.
-fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'a ClassInfo> {
-    let short = name.rsplit('\\').next().unwrap_or(name);
-
-    if name.contains('\\') {
-        let expected_ns = name.rsplit_once('\\').map(|(ns, _)| ns);
-        all_classes
-            .iter()
-            .find(|c| c.name == short && c.file_namespace.as_deref() == expected_ns)
-            .map(|c| c.as_ref())
-    } else {
-        all_classes
-            .iter()
-            .find(|c| c.name == short)
-            .map(|c| c.as_ref())
     }
 }
 
@@ -391,8 +374,7 @@ fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'
 /// `TModel` alone leaves `Collection<int, Audience>` where the code
 /// (correctly) declares `AudienceCollection`.
 ///
-/// This mirrors Larastan's `CollectionHelper::replaceCollectionsInType()`:
-/// the model is read off the *last* generic argument, so a builder that
+/// The model is therefore read off the *last* generic argument, so a builder that
 /// returns some other model's collection resolves to that model's
 /// collection class rather than the receiver's.
 ///
@@ -1000,21 +982,31 @@ impl VirtualMemberProvider for LaravelModelProvider {
 
             if let Some(ref th) = type_hint {
                 // Attach any pivot configuration recovered from the
-                // relationship body (`->using(...)` / `->withPivot(...)`) so
-                // hover can surface the custom pivot class and extra columns.
-                let (pivot_using, pivot_columns) = class
+                // relationship body (`->as(...)` / `->using(...)` /
+                // `->withPivot(...)`) so hover can surface the custom
+                // accessor, pivot class, and extra columns.
+                let generic_pivot_accessor = extract_pivot_accessor_typed(return_type);
+                let (body_pivot_accessor, pivot_using, pivot_columns) = class
                     .laravel()
                     .and_then(|l| {
                         l.belongs_to_many_pivots
                             .iter()
                             .find(|p| p.method == method.name.as_str())
                     })
-                    .map(|p| (p.using.clone(), p.columns.clone()))
+                    .map(|p| {
+                        let accessor = match p.accessor {
+                            PivotAccessor::Custom(name) => Some(name),
+                            PivotAccessor::Default | PivotAccessor::Unknown => None,
+                        };
+                        (accessor, p.using.clone(), p.columns.clone())
+                    })
                     .unwrap_or_default();
+                let pivot_accessor = generic_pivot_accessor.or(body_pivot_accessor);
                 properties.push(PropertyInfo {
                     source: Some(PropertySource::Relationship {
                         method: method.name.to_string(),
                         kind: relationship_kind_name(kind).to_string(),
+                        pivot_accessor,
                         pivot_using,
                         pivot_columns,
                     }),

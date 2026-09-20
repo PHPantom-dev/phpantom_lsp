@@ -99,42 +99,6 @@ pub struct ConditionalClassContext<'a> {
     pub declaring: Option<&'a str>,
 }
 
-/// Split a call-expression subject into the call body and any textual
-/// arguments.  Handles both `"app()"` → `("app", "")` and
-/// `"app(A::class)"` → `("app", "A::class")`.
-///
-/// For method / static-method calls the arguments are currently not
-/// preserved by the extractors, so they always arrive as `""`.
-pub(crate) fn split_call_subject(subject: &str) -> Option<(&str, &str)> {
-    let inner = subject.strip_suffix(')')?;
-    // Find the matching '(' for the stripped ')' by scanning backwards
-    // and tracking balanced parentheses.  This correctly handles nested
-    // calls inside the argument list (e.g. `Environment::get(self::country())`).
-    let bytes = inner.as_bytes();
-    let mut depth: u32 = 0;
-    let mut open = None;
-    for i in (0..bytes.len()).rev() {
-        match bytes[i] {
-            b')' => depth += 1,
-            b'(' => {
-                if depth == 0 {
-                    open = Some(i);
-                    break;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    }
-    let open = open?;
-    let call_body = &inner[..open];
-    let args_text = inner[open + 1..].trim();
-    if call_body.is_empty() {
-        return None;
-    }
-    Some((call_body, args_text))
-}
-
 /// Resolve a conditional return type using **textual** arguments extracted
 /// from the source code (e.g. `"SessionManager::class"`).
 ///
@@ -188,6 +152,30 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 &cond.then_type,
                 &cond.else_type,
             );
+            // A conditional that asks for proof answers an undecided
+            // condition with its else branch instead of the union of
+            // both — see [`ConditionalType::else_when_undecided`].
+            let undecided: Option<&PhpType> = cond.else_when_undecided.then_some(else_type);
+            let resolve_branch = |branch: &PhpType| {
+                resolve_conditional_with_text_args_and_defaults(
+                    branch,
+                    params,
+                    text_args,
+                    var_resolver,
+                    class_ctx,
+                    class_loader,
+                    tpl,
+                )
+            };
+            // What the conditional answers when a resolver was consulted
+            // and could not pin the argument down: the call really may take
+            // either branch, so the answer is their union unless the
+            // conditional asked for proof and named its else branch as the
+            // undecided reading.
+            let undecided_answer = || match undecided {
+                Some(branch) => resolve_branch(branch),
+                None => union_branch_types(resolve_branch(then_type), resolve_branch(else_type)),
+            };
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             let target = param.as_str();
@@ -387,17 +375,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             return choose_branch(false);
                         }
 
-                        let ty = if class_names.len() == 1 {
-                            PhpType::named(atom(&class_names.into_iter().next().unwrap()))
-                        } else {
-                            PhpType::union(
-                                class_names
-                                    .into_iter()
-                                    .map(|n| PhpType::named(atom(n.as_ref())))
-                                    .collect(),
-                            )
-                        };
-                        return Some(substitute_bound(ty));
+                        return Some(substitute_bound(named_or_union(class_names)));
                     }
                     return resolve_conditional_with_text_args_and_defaults(
                         else_type,
@@ -453,17 +431,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             return choose_branch(all_satisfy);
                         }
 
-                        let ty = if names.len() == 1 {
-                            PhpType::named(atom(&names.into_iter().next().unwrap()))
-                        } else {
-                            PhpType::union(
-                                names
-                                    .into_iter()
-                                    .map(|n| PhpType::named(atom(n.as_ref())))
-                                    .collect(),
-                            )
-                        };
-                        return Some(substitute_bound(ty));
+                        return Some(substitute_bound(named_or_union(names)));
                     }
                 }
                 // Argument isn't a ::class literal or resolvable variable → try else branch
@@ -485,6 +453,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // branches open rather than committing to one the call may
                 // not take.
                 let decided = match arg_text {
+                    // A variadic parameter has no single value to judge: it
+                    // holds every trailing argument, so the only question the
+                    // condition can be asking is whether any were passed. Its
+                    // first argument's own type says nothing about that, and
+                    // for the by-reference out-parameters this shape is used
+                    // for (`sscanf($s, $fmt, $a, $b)`) that type is usually
+                    // unresolvable anyway.
+                    _ if is_variadic => Some(arg_text_owned.is_none()),
                     None => Some(true),
                     Some(text) if text.trim().is_empty() => Some(true),
                     Some(text) => condition_result_from_text(condition, text).or_else(|| {
@@ -509,36 +485,9 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             else_type
                         }
                     }
-                    // Undecided means a resolver was consulted and could not
-                    // pin the argument down, so the call really may take
-                    // either branch.
-                    None => {
-                        let resolve_branch = |b| {
-                            resolve_conditional_with_text_args_and_defaults(
-                                b,
-                                params,
-                                text_args,
-                                var_resolver,
-                                class_ctx,
-                                class_loader,
-                                tpl,
-                            )
-                        };
-                        return union_branch_types(
-                            resolve_branch(then_type),
-                            resolve_branch(else_type),
-                        );
-                    }
+                    None => return undecided_answer(),
                 };
-                resolve_conditional_with_text_args_and_defaults(
-                    branch,
-                    params,
-                    text_args,
-                    var_resolver,
-                    class_ctx,
-                    class_loader,
-                    tpl,
-                )
+                resolve_branch(branch)
             } else if matches!(condition.kind(), TypeKind::Literal(_)) {
                 // Value condition (`$format is 0`, `$flags is 15`). A literal
                 // argument settles it outright; anything else is settled by
@@ -566,33 +515,11 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     // them rather than committing to the else, which would
                     // report a type the call can't promise.
                     None if arg_text.is_some() && tpl.arg_type_resolver.is_some() => {
-                        let resolve_branch = |b| {
-                            resolve_conditional_with_text_args_and_defaults(
-                                b,
-                                params,
-                                text_args,
-                                var_resolver,
-                                class_ctx,
-                                class_loader,
-                                tpl,
-                            )
-                        };
-                        return union_branch_types(
-                            resolve_branch(then_type),
-                            resolve_branch(else_type),
-                        );
+                        return undecided_answer();
                     }
                     None => else_type,
                 };
-                resolve_conditional_with_text_args_and_defaults(
-                    branch,
-                    params,
-                    text_args,
-                    var_resolver,
-                    class_ctx,
-                    class_loader,
-                    tpl,
-                )
+                resolve_branch(branch)
             } else if let Some((cond_class, cond_const)) = class_const_condition_parts(condition) {
                 // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
                 // Take the then-branch when the bound argument is the same
@@ -654,34 +581,12 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         // would resolve to `string[]` and falsely flag a
                         // `string` argument.
                         if arg_text.is_some() && tpl.arg_type_resolver.is_some() {
-                            let resolve_branch = |b| {
-                                resolve_conditional_with_text_args_and_defaults(
-                                    b,
-                                    params,
-                                    text_args,
-                                    var_resolver,
-                                    class_ctx,
-                                    class_loader,
-                                    tpl,
-                                )
-                            };
-                            return union_branch_types(
-                                resolve_branch(then_type),
-                                resolve_branch(else_type),
-                            );
+                            return undecided_answer();
                         }
                         else_type
                     }
                 };
-                resolve_conditional_with_text_args_and_defaults(
-                    branch,
-                    params,
-                    text_args,
-                    var_resolver,
-                    class_ctx,
-                    class_loader,
-                    tpl,
-                )
+                resolve_branch(branch)
             }
         }
         _ => {
@@ -964,6 +869,13 @@ fn condition_category(condition: &PhpType) -> Option<&'static str> {
         Some("null")
     } else if condition.is_array_like() {
         Some("array")
+    } else if condition.is_object() {
+        // The one category [`type_category`] reports that has no keyword of
+        // its own below: `is object` asks the same question it answers for
+        // every class instance, so a scalar argument refutes it outright
+        // rather than being handed to the class-hierarchy check, where the
+        // bare keyword resolves to no class at all and settles nothing.
+        Some("object")
     } else {
         None
     }
@@ -1163,7 +1075,7 @@ pub fn evaluate_nested_conditionals_text(
             tpl,
         )
     };
-    match ty.kind() {
+    match ty.raw_kind() {
         TypeKind::Conditional(_) => {
             let resolved = resolve_conditional_with_text_args_and_defaults(
                 ty,
@@ -1190,34 +1102,7 @@ pub fn evaluate_nested_conditionals_text(
                 PhpType::named(atom("mixed"))
             }
         }
-        TypeKind::Generic(g) => PhpType::generic_atom(g.name, g.args.iter().map(recurse).collect()),
-        TypeKind::Union(members) => PhpType::union(members.iter().map(recurse).collect()),
-        TypeKind::Intersection(members) => {
-            PhpType::intersection(members.iter().map(recurse).collect())
-        }
-        TypeKind::Nullable(inner) => PhpType::nullable(recurse(inner)),
-        TypeKind::Array(inner) => PhpType::array_of(recurse(inner)),
-        TypeKind::ArrayShape(entries) => PhpType::array_shape(
-            entries
-                .iter()
-                .map(|e| crate::php_type::ShapeEntry {
-                    key: e.key.clone(),
-                    value_type: recurse(&e.value_type),
-                    optional: e.optional,
-                })
-                .collect(),
-        ),
-        TypeKind::ObjectShape(entries) => PhpType::object_shape(
-            entries
-                .iter()
-                .map(|e| crate::php_type::ShapeEntry {
-                    key: e.key.clone(),
-                    value_type: recurse(&e.value_type),
-                    optional: e.optional,
-                })
-                .collect(),
-        ),
-        other => other.clone().into(),
+        _ => ty.map_children(&recurse),
     }
 }
 
@@ -1273,6 +1158,24 @@ pub fn split_text_args(text: &str) -> Vec<&str> {
         }
     }
     result
+}
+
+/// A single resolved class name, or a union of them when more than one
+/// branch contributed a name.
+///
+/// `names` must be non-empty; a lone entry is returned bare rather than
+/// wrapped in a one-member union.
+fn named_or_union(names: Vec<String>) -> PhpType {
+    let mut names = names.into_iter();
+    let first = PhpType::named(atom(&names.next().expect("names is non-empty")));
+    let rest: Vec<PhpType> = names.map(|n| PhpType::named(atom(n.as_ref()))).collect();
+    if rest.is_empty() {
+        first
+    } else {
+        let mut members = vec![first];
+        members.extend(rest);
+        PhpType::union(members)
+    }
 }
 
 /// If `name` is `"self"`, `"static"`, or `"parent"`, substitute the

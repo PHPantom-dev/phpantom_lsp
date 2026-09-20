@@ -38,7 +38,7 @@ impl Backend {
     /// task already populated) is cheap.
     pub(crate) async fn eager_populate_resolved_classes(&self) {
         let backend = self.clone_for_blocking();
-        crate::server::run_blocking_cancel_safe(move || {
+        crate::server::run_blocking_cancel_safe("eager_populate_resolved_classes", move || {
             let sorted_fqns = {
                 let uri_classes_index = backend.symbols.uri_classes_index.read();
                 crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)

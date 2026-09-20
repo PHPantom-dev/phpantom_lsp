@@ -1,0 +1,16 @@
+// test: === [] narrows to the empty array and drops it from the else
+// feature: hover
+// expect_hover: $rest => int|non-empty-array<int>
+---
+<?php
+
+/** @param int|array<int> $value */
+function dispatch($value): void
+{
+    if ($value === []) {
+        return;
+    }
+
+    $rest = $value;
+    echo $re<>st;
+}

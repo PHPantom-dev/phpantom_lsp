@@ -1,0 +1,21 @@
+// test: new parent(...) resolves to the class being extended
+// feature: completion
+// expect: fromParent(
+---
+<?php
+
+class ParentType
+{
+    public function __construct(public string $name) {}
+
+    public function fromParent(): void {}
+}
+
+class ChildType extends ParentType
+{
+    public function build(): void
+    {
+        $built = new parent('x');
+        $built-><>
+    }
+}

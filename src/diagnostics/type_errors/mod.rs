@@ -30,7 +30,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ResolvedCallableTarget;
 
@@ -326,6 +326,12 @@ impl Backend {
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
         let constant_loader_cl = self.constant_loader(&file_ctx);
+        // Read once for the whole file: `config()` clones the config
+        // behind a lock, and the flag cannot change mid-pass.
+        let downgrade_nullable_mismatch = self
+            .config()
+            .diagnostics
+            .downgrade_nullable_argument_mismatch_enabled();
 
         // Walk the AST once, collect argument expressions, and resolve
         // their types — all inside the `with_parsed_program` closure so
@@ -361,14 +367,9 @@ impl Backend {
                             }
                         };
 
-                    let config_resolver = |key: &str| self.resolve_config_type(key);
-                    let trans_resolver = |key: &str| self.resolve_trans_type(key);
-                    let loaders = Loaders {
-                        function_loader: Some(&function_loader_cl),
-                        constant_loader: Some(&constant_loader_cl),
-                        config_resolver: Some(&config_resolver),
-                        trans_resolver: Some(&trans_resolver),
-                    };
+                    let owned_loaders =
+                        self.diagnostic_loaders_over(&function_loader_cl, &constant_loader_cl);
+                    let loaders = owned_loaders.loaders();
 
                     let var_ctx = VarResolutionCtx {
                         var_name: "",
@@ -385,6 +386,7 @@ impl Backend {
                         branch_aware: true,
                         match_arm_narrowing: HashMap::new(),
                         scope_var_resolver: None,
+                        scope_proofs: None,
                     };
 
                     let mut resolved_args = Vec::with_capacity(exprs.len());
@@ -610,6 +612,22 @@ impl Backend {
                     continue;
                 }
 
+                // An out-parameter's declared type describes what the
+                // callee *writes* through the reference, not what the
+                // caller has to hand over. The value going in is whatever
+                // the variable happened to hold, and the standard library
+                // — where nearly every parameter of this shape comes from
+                // — does not check it: `preg_match_all(…, $matches,
+                // PREG_OFFSET_CAPTURE)` inside a loop is handed the
+                // previous iteration's shape, and PHP accepts a `$matches`
+                // holding a string just as readily as one that does not
+                // exist yet. There is nothing here for this check to
+                // compare against; what the *call* leaves behind is typed
+                // by the by-reference write-back instead.
+                if param.is_reference && param.defaults_to_null() {
+                    continue;
+                }
+
                 // Skip if parameter has no type hint.
                 let param_type = match &param.type_hint {
                     Some(t) if !t.is_untyped() && !t.is_mixed() => t,
@@ -826,31 +844,61 @@ impl Backend {
                 // Name the specific member(s) that broke a partially
                 // compatible union, rather than leaving the developer to
                 // work out which one out of the full union is at fault.
-                if let TypeKind::Union(members) = arg_type.kind() {
-                    let unsatisfied: Vec<String> = members
-                        .iter()
-                        .filter(|m| {
-                            !is_type_compatible(
-                                m,
-                                effective_param_type,
-                                &class_loader,
-                                strict_types,
-                            )
-                        })
-                        .map(|m| m.to_string())
-                        .collect();
-                    if !unsatisfied.is_empty() && unsatisfied.len() < members.len() {
-                        message.push_str(&format!(
-                            " ({} does not satisfy {})",
-                            unsatisfied.join("|"),
-                            effective_param_type.conditionals_as_branch_unions(),
-                        ));
+                let mut only_null_unsatisfied = false;
+                match arg_type.kind() {
+                    TypeKind::Union(members) => {
+                        let unsatisfied: Vec<&PhpType> = members
+                            .iter()
+                            .filter(|m| {
+                                !is_type_compatible(
+                                    m,
+                                    effective_param_type,
+                                    &class_loader,
+                                    strict_types,
+                                )
+                            })
+                            .collect();
+                        if !unsatisfied.is_empty() && unsatisfied.len() < members.len() {
+                            message.push_str(&format!(
+                                " ({} does not satisfy {})",
+                                unsatisfied
+                                    .iter()
+                                    .map(|m| m.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("|"),
+                                effective_param_type.conditionals_as_branch_unions(),
+                            ));
+                            only_null_unsatisfied = unsatisfied.iter().all(|m| m.is_null());
+                        }
                     }
+                    // `?T` is the same gap as `T|null`, spelled shorter, so
+                    // it has to answer the same way. It carries no union
+                    // members to name, so only the severity is at stake and
+                    // the check is worth nothing unless it can change it.
+                    TypeKind::Nullable(inner) if downgrade_nullable_mismatch => {
+                        only_null_unsatisfied = is_type_compatible(
+                            inner,
+                            effective_param_type,
+                            &class_loader,
+                            strict_types,
+                        );
+                    }
+                    _ => {}
                 }
+
+                // `null` alone failing means every non-null possibility
+                // already satisfies the parameter: a nullability gap rather
+                // than a type gap. Projects can opt into treating that
+                // narrower case as a warning.
+                let severity = if only_null_unsatisfied && downgrade_nullable_mismatch {
+                    DiagnosticSeverity::WARNING
+                } else {
+                    DiagnosticSeverity::ERROR
+                };
 
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    severity,
                     TYPE_MISMATCH_ARGUMENT_CODE,
                     message,
                 ));

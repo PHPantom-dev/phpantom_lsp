@@ -18,10 +18,13 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, atom, bytes_to_str, last_segment, literal_bytes_to_str};
 use crate::parser::DocblockCtx;
 use crate::php_type::PhpType;
-use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotRelation};
+use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotAccessor, PivotRelation};
 use crate::util::strip_fqn_prefix;
 
-use super::{extract_pivot_using, extract_with_pivot_columns, infer_relationship_from_body};
+use super::{
+    extract_pivot_accessor, extract_pivot_using, extract_with_pivot_columns,
+    infer_relationship_from_body,
+};
 
 /// Check whether a method has the `#[Scope]` attribute (Laravel 11+).
 ///
@@ -46,8 +49,8 @@ pub(crate) fn has_scope_attribute(method: &class_like::method::Method<'_>) -> bo
 /// patterns like `$this->hasMany(Post::class)`.  If found, it returns
 /// a synthesized return type string (e.g. `HasMany<Post>`).
 ///
-/// This enables relationship property synthesis on models that don't
-/// use Larastan-style `@return` annotations.
+/// This enables relationship property synthesis on models whose
+/// relationship methods carry no generic `@return` annotation.
 pub(crate) fn infer_relationship_from_method<'a>(
     method: &class_like::method::Method<'a>,
     doc_ctx: Option<&DocblockCtx<'a>>,
@@ -68,50 +71,12 @@ pub(crate) fn infer_relationship_from_method<'a>(
     infer_relationship_from_body(body_text)
 }
 
-/// Extract the custom collection class name from a `#[CollectedBy(X::class)]` attribute.
-///
-/// Scans the class's attribute lists for an attribute whose short name is
-/// `CollectedBy` and extracts the first argument's text with `::class` stripped.
-/// Returns `None` if no such attribute exists.
-fn extract_collected_by_attribute(
-    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
-    content: &str,
-) -> Option<String> {
-    for attr_list in attribute_lists.iter() {
-        for attr in attr_list.attributes.iter() {
-            let short = last_segment(attr.name.value());
-            if short != b"CollectedBy" {
-                continue;
-            }
-            let arg_list = attr.argument_list.as_ref()?;
-            let first_arg = arg_list.arguments.first()?;
-            let span = first_arg.span();
-            let start = span.start.offset as usize;
-            let end = span.end.offset as usize;
-            let text = content.get(start..end)?;
-            let class_name = text.trim_end_matches("::class").trim();
-            if !class_name.is_empty() {
-                return Some(class_name.to_string());
-            }
-        }
-    }
-    None
-}
-
 /// Extract the policy class name from a `#[UsePolicy(X::class)]` attribute.
 fn extract_use_policy_attribute(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     content: &str,
 ) -> Option<String> {
     extract_class_constant_attribute(attribute_lists, content, b"UsePolicy")
-}
-
-/// Extract the custom builder class name from a `#[UseEloquentBuilder(X::class)]` attribute.
-fn extract_use_eloquent_builder_attribute(
-    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
-    content: &str,
-) -> Option<String> {
-    extract_class_constant_attribute(attribute_lists, content, b"UseEloquentBuilder")
 }
 
 /// The `X` of the first `#[Name(X::class)]` attribute whose short name is
@@ -225,83 +190,78 @@ fn extract_custom_builder(
     methods: &[MethodInfo],
     content: &str,
 ) -> Option<PhpType> {
-    if let Some(name) = extract_use_eloquent_builder_attribute(attribute_lists, content) {
-        return Some(PhpType::named(atom(&name)));
-    }
-
-    for (trait_name, args) in use_generics {
-        let short = trait_name.rsplit('\\').next().unwrap_or(trait_name);
-        if (short == "HasBuilder" || short == "CustomizeQueryBuilder") && !args.is_empty() {
-            return Some(args[0].clone());
-        }
-    }
-
-    let method = methods.iter().find(|m| m.name == "newEloquentBuilder")?;
-    let return_type = method.return_type.as_ref()?;
-    let base = return_type.base_name()?;
-    if base == "Illuminate\\Database\\Eloquent\\Builder" || base == "Builder" || base.is_empty() {
-        return None;
-    }
-
-    Some(return_type.clone())
+    extract_customisation(
+        attribute_lists,
+        use_generics,
+        methods,
+        content,
+        b"UseEloquentBuilder",
+        &["HasBuilder", "CustomizeQueryBuilder"],
+        "newEloquentBuilder",
+        &["Illuminate\\Database\\Eloquent\\Builder", "Builder"],
+    )
 }
 
 /// Determine the custom collection class for an Eloquent model.
 ///
-/// Checks three sources in priority order:
-///
-/// 1. `#[CollectedBy(CustomCollection::class)]` attribute on the class.
-/// 2. `/** @use HasCollection<CustomCollection> */` in `use_generics`.
-/// 3. A `newCollection()` method override whose return type names the
-///    custom collection class.
-///
-/// The attribute takes priority because it is the newer Laravel API.
+/// Checks the same three sources [`extract_custom_builder`] does, in the
+/// same order: `#[CollectedBy(CustomCollection::class)]`,
+/// `/** @use HasCollection<CustomCollection> */`, and a `newCollection()`
+/// override. The attribute takes priority because it is the newer Laravel
+/// API.
 fn extract_custom_collection(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     use_generics: &[(Atom, Vec<PhpType>)],
     methods: &[MethodInfo],
     content: &str,
 ) -> Option<PhpType> {
-    if let Some(name) = extract_collected_by_attribute(attribute_lists, content) {
+    extract_customisation(
+        attribute_lists,
+        use_generics,
+        methods,
+        content,
+        b"CollectedBy",
+        &["HasCollection"],
+        "newCollection",
+        &["Illuminate\\Database\\Eloquent\\Collection", "Collection"],
+    )
+}
+
+/// The class a model substitutes for one of Eloquent's defaults, in the
+/// three ways a model can name it.
+///
+/// `attr_name` is the `#[…(X::class)]` attribute, `traits` the generic
+/// traits whose first argument names it, `factory_method` the `new…()`
+/// override that returns it, and `defaults` the base classes that method
+/// returns when nothing is customised.
+#[allow(clippy::too_many_arguments)]
+fn extract_customisation(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    use_generics: &[(Atom, Vec<PhpType>)],
+    methods: &[MethodInfo],
+    content: &str,
+    attr_name: &[u8],
+    traits: &[&str],
+    factory_method: &str,
+    defaults: &[&str],
+) -> Option<PhpType> {
+    if let Some(name) = extract_class_constant_attribute(attribute_lists, content, attr_name) {
         return Some(PhpType::named(atom(&name)));
     }
 
     for (trait_name, args) in use_generics {
-        let short = trait_name.rsplit('\\').next().unwrap_or(trait_name);
-        if short == "HasCollection" && !args.is_empty() {
+        let short = crate::util::short_name(trait_name);
+        if traits.contains(&short) && !args.is_empty() {
             return Some(args[0].clone());
         }
     }
 
-    extract_custom_collection_from_new_collection(methods)
-}
-
-/// Extract the custom collection class from a `newCollection()` method
-/// override.
-///
-/// Laravel models can override `newCollection()` to return a custom
-/// collection class.  If the method's return type is not the standard
-/// `Illuminate\Database\Eloquent\Collection` (or its short name
-/// `Collection`), it is treated as a custom collection class.
-///
-/// Returns `None` if no `newCollection` method exists, if it has no
-/// return type, or if the return type is the standard Eloquent
-/// Collection.
-fn extract_custom_collection_from_new_collection(methods: &[MethodInfo]) -> Option<PhpType> {
-    let method = methods.iter().find(|m| m.name == "newCollection")?;
+    // `base_name()` strips the leading `\` and any generic parameters,
+    // giving a name the defaults can be compared against.
+    let method = methods.iter().find(|m| m.name == factory_method)?;
     let return_type = method.return_type.as_ref()?;
-
-    // `base_name()` strips leading `\` and generic parameters, giving a
-    // clean class name suitable for comparison.
     let base = return_type.base_name()?;
-
-    // Ignore the standard Eloquent Collection — that's the default, not
-    // a custom override.
-    if base == "Illuminate\\Database\\Eloquent\\Collection" || base == "Collection" {
-        return None;
-    }
-
-    if base.is_empty() {
+    if base.is_empty() || defaults.contains(&base) {
         return None;
     }
 
@@ -461,6 +421,23 @@ fn extract_casts_definitions<'a>(
     merged
 }
 
+/// The trimmed, non-empty entries of a PHP array literal written as `[…]`.
+///
+/// Splitting on commas is safe for the arrays this reads: a model's
+/// `$casts`, `$fillable`, `$hidden`, and their siblings hold string
+/// literals and `::class` constants, never a nested array or a call whose
+/// own arguments would carry a comma. Text that is not an array literal
+/// yields nothing.
+fn array_literal_entries(text: &str) -> impl Iterator<Item = &str> {
+    text.trim()
+        .strip_prefix('[')
+        .map(|s| s.strip_suffix(']').unwrap_or(s))
+        .into_iter()
+        .flat_map(|inner| inner.split(','))
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+}
+
 /// Parse key-value pairs from a PHP array literal text.
 ///
 /// Accepts text starting with `[` and extracts `'key' => 'value'` pairs.
@@ -470,32 +447,12 @@ fn extract_casts_definitions<'a>(
 /// Returns a list of `(key, value)` string pairs.
 fn parse_casts_array(text: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
-    let trimmed = text.trim();
-
-    let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        s.strip_suffix(']').unwrap_or(s)
-    } else {
-        return results;
-    };
-
-    // Splitting on commas works here because cast arrays contain only
-    // string literals — no nested arrays or complex expressions to trip
-    // up a naive split.
-    for segment in inner.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-
+    for segment in array_literal_entries(text) {
         let Some(arrow_pos) = segment.find("=>") else {
             continue;
         };
-
-        let key_part = segment[..arrow_pos].trim();
-        let value_part = segment[arrow_pos + 2..].trim();
-
-        let key = extract_string_literal(key_part);
-        let value = extract_string_literal(value_part);
+        let key = extract_string_literal(segment[..arrow_pos].trim());
+        let value = extract_string_literal(segment[arrow_pos + 2..].trim());
 
         if let (Some(k), Some(v)) = (key, value)
             && !k.is_empty()
@@ -504,7 +461,6 @@ fn parse_casts_array(text: &str) -> Vec<(String, String)> {
             results.push((k, v));
         }
     }
-
     results
 }
 
@@ -893,19 +849,7 @@ fn extract_string_property<'a>(
 /// returns `["name", "email", "password"]`.
 fn parse_string_list(text: &str) -> Vec<String> {
     let mut results = Vec::new();
-    let trimmed = text.trim();
-
-    let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        s.strip_suffix(']').unwrap_or(s)
-    } else {
-        return results;
-    };
-
-    for segment in inner.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
+    for segment in array_literal_entries(text) {
         // Skip key-value pairs (these belong to a different kind of array).
         if segment.contains("=>") {
             continue;
@@ -916,7 +860,6 @@ fn parse_string_list(text: &str) -> Vec<String> {
             results.push(s);
         }
     }
-
     results
 }
 
@@ -924,9 +867,10 @@ fn parse_string_list(text: &str) -> Vec<String> {
 /// method bodies in a class.
 ///
 /// Scans each concrete method body for a many-to-many builder call chained
-/// with `->using(CustomPivot::class)` and/or `->withPivot('col', …)`, and
-/// returns one [`PivotRelation`] per method that declares either. Methods
-/// without a many-to-many call, or without any pivot chain, are skipped.
+/// with `->as('name')`, `->using(CustomPivot::class)`, and/or
+/// `->withPivot('col', …)`, and returns one [`PivotRelation`] per method that
+/// declares any of them. Methods without a many-to-many call, or without any
+/// pivot configuration, are skipped.
 ///
 /// Works from the method body text (via source offsets), so it covers both
 /// annotated relationships (`@return BelongsToMany<…>`) and un-annotated ones.
@@ -951,7 +895,7 @@ fn extract_pivot_relations<'a>(
         let end = content.floor_char_boundary(end);
         let body = &content[start..end];
 
-        // `using`/`withPivot` only appear on many-to-many relationships;
+        // `as`/`using`/`withPivot` only appear on many-to-many relationships;
         // require the builder call so unrelated methods are not scanned.
         if !body.contains("belongsToMany(")
             && !body.contains("morphToMany(")
@@ -960,14 +904,23 @@ fn extract_pivot_relations<'a>(
             continue;
         }
 
+        let has_accessor_call = body.contains("->as(");
+        let accessor = if has_accessor_call {
+            extract_pivot_accessor(body)
+                .map(PivotAccessor::Custom)
+                .unwrap_or(PivotAccessor::Unknown)
+        } else {
+            PivotAccessor::Default
+        };
         let using = extract_pivot_using(body);
         let columns = extract_with_pivot_columns(body);
-        if using.is_none() && columns.is_empty() {
+        if !has_accessor_call && using.is_none() && columns.is_empty() {
             continue;
         }
 
         relations.push(PivotRelation {
             method: String::from_utf8_lossy(method.name.value).into_owned(),
+            accessor,
             using,
             columns,
         });

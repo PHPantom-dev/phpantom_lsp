@@ -10,10 +10,85 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
+use crate::text_scan::{find_matching_forward_bytes, find_unmatched_close_bytes};
 use crate::types::{ClassInfo, FileContext};
 
 /// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
+
+// ── Type-checking collectors ────────────────────────────────────────────────
+
+/// What a type-checking diagnostic collector reads from the file before
+/// it walks the AST.
+///
+/// Built by [`collect_type_check`], which owns the `FileContext` and the
+/// loader closures this borrows.
+pub(crate) struct TypeCheckCtx<'a> {
+    /// Classes, use-map, namespace, and resolved names for the file.
+    pub(crate) file_ctx: &'a FileContext,
+    pub(crate) class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub(crate) function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    pub(crate) constant_loader: &'a dyn Fn(&str, u32) -> Option<Option<String>>,
+    /// Whether the file declares `strict_types=1`, which decides how
+    /// forgiving the compatibility checks are.
+    pub(crate) strict_types: bool,
+}
+
+/// Run a type-checking collector over one file.
+///
+/// `collect` walks the AST and gathers the sites it checks; `report`
+/// turns each one into a byte range and a message, or `None` for a site
+/// that turns out to be fine. Both see the same [`TypeCheckCtx`], so the
+/// loaders the walk resolves through are the ones the check reads back.
+///
+/// A site whose range has no position in the file is dropped: a Blade
+/// template is checked as the virtual PHP it lowers to, and a range in
+/// the generated prologue belongs to no line of the template.
+pub(crate) fn collect_type_check<S>(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    code: &str,
+    out: &mut Vec<Diagnostic>,
+    collect: impl FnOnce(&TypeCheckCtx<'_>) -> Vec<S>,
+    report: impl Fn(&S, &TypeCheckCtx<'_>) -> Option<(ByteRange, String)>,
+) {
+    let file_ctx = backend.file_context(uri);
+
+    // Activate the thread-local parse cache so every `with_parsed_program`
+    // in the resolution pipeline below reuses one parsed AST.
+    let _parse_guard = crate::parser::with_parse_cache(content);
+
+    let class_loader = backend.class_loader(&file_ctx);
+    let function_loader = backend.function_loader(&file_ctx);
+    let constant_loader = backend.constant_loader(&file_ctx);
+    let strict_types = crate::parser::with_parsed_program(content, "strict_types", |program, _| {
+        super::type_errors::has_strict_types(program)
+    });
+
+    let ctx = TypeCheckCtx {
+        file_ctx: &file_ctx,
+        class_loader: &class_loader,
+        function_loader: &function_loader,
+        constant_loader: &constant_loader,
+        strict_types,
+    };
+
+    for site in collect(&ctx) {
+        let Some(((start, end), message)) = report(&site, &ctx) else {
+            continue;
+        };
+        let Some(range) = backend.offset_range_to_lsp_range(uri, content, start, end) else {
+            continue;
+        };
+        out.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            code,
+            message,
+        ));
+    }
+}
 
 /// Per-file snapshot shared by the "symbol-span" diagnostic collectors
 /// (unknown class/function/member, deprecated, implementation errors,
@@ -62,15 +137,38 @@ impl FileDiagnosticContext {
     }
 }
 
-/// Compute the byte ranges of all namespace-level `use` import lines.
+// ─── `use` statement scanning ───────────────────────────────────────────────
+//
+// One scanner, several questions.  `scan_use_statements` walks the file
+// once; the wrappers below present its result in the shapes the diagnostics
+// ask for, `completion::use_edit::analyze_use_block` reads it to place a
+// *new* import, and `code_actions::cursor_on_use_import_line` to tell
+// whether the cursor rests on one.
+
+/// One `use` import statement.
+pub(crate) struct UseStatementScan {
+    /// Byte offset of the start of the statement's first line, leading
+    /// indentation included.
+    pub(crate) line_start: usize,
+    /// Byte offset of the `use` keyword itself.
+    pub(crate) keyword_start: usize,
+    /// Byte offset of the end of the statement's last line, excluding a
+    /// CRLF file's `\r`.
+    pub(crate) end: usize,
+    /// Whether the statement sits at import depth: brace depth 0, or depth
+    /// 1 inside a `namespace Foo { … }` block.  A trait `use` in a class
+    /// body is deeper, and so is the `@php use …;` a Blade template writes,
+    /// since the virtual PHP inlines an island inside the wrapper function.
+    pub(crate) top_level: bool,
+}
+
+/// Scan `content` for `use` imports.
 ///
-/// Returns a sorted list of `(line_start, line_end)` byte offset pairs.
-/// Only matches `use` lines at brace depth 0 (or depth 1 when inside a
-/// `namespace Foo { … }` block).  Trait `use` statements inside class
-/// bodies are at depth >= 1 (or >= 2 under a braced namespace) and are
-/// excluded.
-pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
-    let mut ranges = Vec::new();
+/// A statement may wrap over several lines: a group import (`use Foo\{`
+/// through its closing `};`), or a plain import split across lines without
+/// braces.  Either way it is followed until its terminating `;`.
+pub(crate) fn scan_use_statements(content: &str) -> Vec<UseStatementScan> {
+    let mut statements = Vec::new();
     let mut offset: usize = 0;
     // Track brace depth so we can distinguish namespace-level `use`
     // imports (depth 0, or depth 1 inside `namespace Foo { … }`) from
@@ -78,7 +176,8 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
     // or >= 2 under a braced namespace).
     let mut brace_depth: usize = 0;
     let mut namespace_brace_depth: Option<usize> = None;
-    let mut pending_use_start: Option<usize> = None;
+    let mut pending: Option<(usize, usize, bool)> = None;
+    let mut pending_is_group = false;
 
     for line in content.split('\n') {
         let line_brace_depth = brace_depth;
@@ -117,22 +216,66 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
         }
 
         let top_level_depth = namespace_brace_depth.map_or(0, |d| d + 1);
-        if let Some(start) = pending_use_start {
+        // A CRLF file's line still carries its `\r`; the statement ends
+        // before it.
+        let line_end = offset + line.trim_end_matches('\r').len();
+
+        if let Some((line_start, keyword_start, top_level)) = pending {
             if trimmed.contains(';') {
-                ranges.push((start, offset + line.len()));
-                pending_use_start = None;
+                statements.push(UseStatementScan {
+                    line_start,
+                    keyword_start,
+                    end: line_end,
+                    top_level,
+                });
+                pending = None;
+            } else if pending_is_group && trimmed.contains('}') {
+                // A group import closes on `};`.  A `}` on its own means
+                // the `use … {` we latched onto was a trait import with a
+                // conflict-resolution block, so stop following it rather
+                // than running on to some later statement's semicolon.
+                pending = None;
+            } else if trimmed.contains('{') {
+                pending_is_group = true;
             }
-        } else if line_brace_depth == top_level_depth && trimmed.starts_with("use ") {
+        } else if trimmed.starts_with("use ") || trimmed.starts_with("use\t") {
+            let keyword_start = offset + (line.len() - trimmed.len());
+            let top_level = line_brace_depth == top_level_depth;
             if trimmed.contains(';') {
-                ranges.push((offset, offset + line.len()));
+                statements.push(UseStatementScan {
+                    line_start: offset,
+                    keyword_start,
+                    end: line_end,
+                    top_level,
+                });
             } else {
-                pending_use_start = Some(offset);
+                pending = Some((offset, keyword_start, top_level));
+                pending_is_group = trimmed.contains('{');
             }
         }
-        offset += line.len() + 1; // +1 for '\n'
+
+        offset += line.len() + 1; // +1 for the '\n' that `split` consumed
     }
 
-    ranges
+    statements
+}
+
+/// Which byte ranges of the file are occupied by its namespace-level `use`
+/// imports.
+///
+/// Answers "is this offset part of an import statement?" for callers that
+/// need to suppress a diagnostic on the class name an import spells out.
+/// Each range starts at the beginning of the statement's first line
+/// (indentation included), so `is_offset_in_ranges` covers the whole line.
+///
+/// Deeper `use` statements are left out: a trait import inside a class body
+/// is a real reference to the trait and must keep its diagnostics.
+pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
+    scan_use_statements(content)
+        .into_iter()
+        .filter(|stmt| stmt.top_level)
+        .map(|stmt| (stmt.line_start, stmt.end))
+        .collect()
 }
 
 pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
@@ -140,6 +283,244 @@ pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
     ranges
         .iter()
         .any(|&(start, end)| offset >= start && offset < end)
+}
+
+/// Where each of the file's `use` statements begins and ends.
+///
+/// Answers "which statements are the imports?" for callers that go on to
+/// pick one apart with [`find_use_statement`].  Each span starts at the
+/// `use` keyword (leading indentation excluded) and ends at the end of the
+/// statement's last line.
+///
+/// Unlike [`compute_use_line_ranges`] this keeps the deeper statements
+/// too, because a Blade template's `@php use App\Models\Post; @endphp`
+/// lands inside the wrapper function of its virtual PHP and is still the
+/// import a rename or an unused-import fix has to edit.  Callers pair this
+/// with an alias from the file's import table, so a trait `use` in a class
+/// body is only ever reached when no real import matched.
+pub(crate) fn compute_use_statement_spans(content: &str) -> Vec<ByteRange> {
+    scan_use_statements(content)
+        .into_iter()
+        .map(|stmt| (stmt.keyword_start, stmt.end))
+        .collect()
+}
+
+/// Strip the leading `use` keyword and any `function` / `const` modifier
+/// from a `use` statement, returning the remainder.
+pub(crate) fn use_statement_body(stmt: &str) -> Option<&str> {
+    let body = stmt.strip_prefix("use ")?.trim_start();
+    Some(
+        body.strip_prefix("function ")
+            .or_else(|| body.strip_prefix("const "))
+            .unwrap_or(body)
+            .trim_start(),
+    )
+}
+
+/// Whether joining a group import's prefix and a member name yields `fqn`.
+///
+/// Compared segment-for-segment without allocating, so `App\Models` +
+/// `User` matches `App\Models\User` but not `App\Models\SuperUser`.
+pub(crate) fn joined_name_matches(prefix: &str, name: &str, fqn: &str) -> bool {
+    let name = name.trim_start_matches('\\');
+    if prefix.is_empty() {
+        return fqn == name;
+    }
+    fqn.len() == prefix.len() + 1 + name.len()
+        && fqn.starts_with(prefix)
+        && fqn.as_bytes()[prefix.len()] == b'\\'
+        && fqn.ends_with(name)
+}
+
+/// Trim whitespace and comments from both ends of a group import member,
+/// returning the span of what is left within `item`.
+///
+/// A wrapped group may carry comments between its members, as in
+/// `Nonexistent, // could be namespace`, and the comment belongs to
+/// whichever member `split(',')` happened to attach it to.
+pub(crate) fn member_content_span(item: &str) -> (usize, usize) {
+    let mut start = 0;
+
+    loop {
+        let rest = &item[start..];
+        start += rest.len() - rest.trim_start().len();
+
+        let rest = &item[start..];
+        let skipped = if rest.starts_with("//") || rest.starts_with('#') {
+            rest.find('\n').map(|i| i + 1)
+        } else if rest.starts_with("/*") {
+            rest.find("*/").map(|i| i + 2)
+        } else {
+            break;
+        };
+
+        match skipped {
+            Some(n) => start += n,
+            // An unterminated comment swallows the rest of the member.
+            None => return (item.len(), item.len()),
+        }
+    }
+
+    let tail = &item[start..];
+    let content_len = ["//", "#", "/*"]
+        .iter()
+        .filter_map(|opener| tail.find(opener))
+        .min()
+        .unwrap_or(tail.len());
+    (start, start + tail[..content_len].trim_end().len())
+}
+
+/// A match for one member of a `use` statement's import list: either a
+/// group (`use Prefix\{Bar, Baz as B};`) or a plain, brace-less list
+/// (`use Foo\Bar;` or `use Foo\Bar, Baz\Qux;`), with byte offsets relative
+/// to the `decl` text passed to [`find_use_member`].
+pub(crate) struct UseMemberMatch<'a> {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    /// How many items the statement has (a trailing comma does not add
+    /// one). Always `1` for a plain single-class import.
+    pub(crate) member_count: usize,
+    /// The group's shared prefix (`Prefix` in `use Prefix\{...}`), with no
+    /// leading or trailing `\`. Empty for a brace-less list, where each
+    /// item already spells its own full name.
+    pub(crate) prefix: &'a str,
+}
+
+/// Locate the item in a `use` statement's import list that imports `fqn`
+/// under `alias`: a group member (`use Foo\{Bar, Baz as B};`), or one item
+/// of a plain comma-separated list (including the ordinary single-import
+/// case, `use Foo\Bar;`).
+///
+/// `decl` may span several lines, since PHP allows both shapes to be
+/// wrapped.
+pub(crate) fn find_use_member<'a>(
+    decl: &'a str,
+    fqn: &str,
+    alias: &str,
+) -> Option<UseMemberMatch<'a>> {
+    let body = use_statement_body(decl)?;
+    let body_start = decl.len() - body.len();
+
+    // A group has a shared prefix ahead of its `{`; a plain list has no
+    // prefix and its items span the whole body.
+    let (prefix, items_start, items_end) = match decl.find('{') {
+        Some(brace_open) => {
+            let brace_close = decl.rfind('}')?;
+            if brace_close < brace_open {
+                return None;
+            }
+            // Everything between the `use` keyword and the `{` is the
+            // shared prefix: `use App\Models\{` → `App\Models`.
+            let prefix = decl
+                .get(body_start..brace_open)?
+                .trim()
+                .trim_end_matches('\\')
+                .trim_start_matches('\\');
+            (prefix, brace_open + 1, brace_close)
+        }
+        None => ("", body_start, decl.len()),
+    };
+
+    let fqn = fqn.trim_start_matches('\\');
+
+    let mut member_count = 0;
+    let mut found = None;
+    let mut offset = items_start;
+
+    for item in decl[items_start..items_end].split(',') {
+        let item_start = offset;
+        offset += item.len() + 1; // +1 for the comma `split` consumed
+
+        let (content_start, content_end) = member_content_span(item);
+        let entry = &item[content_start..content_end];
+        if entry.is_empty() {
+            // A trailing comma before the closing brace is legal PHP, and
+            // so is a comment sitting on a line of its own.
+            continue;
+        }
+        member_count += 1;
+
+        if found.is_some() {
+            continue;
+        }
+
+        // A mixed group spells the modifier per member:
+        // `use Foo\{function bar, const BAZ, Qux};`
+        let entry = entry
+            .strip_prefix("function ")
+            .or_else(|| entry.strip_prefix("const "))
+            .unwrap_or(entry)
+            .trim_start();
+        let (name, member_alias) = match entry.split_once(" as ") {
+            Some((n, a)) => (n.trim(), Some(a.trim())),
+            None => (entry, None),
+        };
+        let short_name = name.rsplit('\\').next().unwrap_or(name);
+
+        if joined_name_matches(prefix, name, fqn) && member_alias.unwrap_or(short_name) == alias {
+            found = Some((item_start + content_start, item_start + content_end));
+        }
+    }
+
+    let (start, end) = found?;
+    Some(UseMemberMatch {
+        start,
+        end,
+        member_count,
+        prefix,
+    })
+}
+
+/// Where a `use` import for `fqn` (imported as `alias`) sits in `content`:
+/// the whole statement, plus the specific item within its import list that
+/// names the class (which is the whole list for an ordinary single-class
+/// import).
+pub(crate) struct UseStatementLocation<'a> {
+    /// The whole statement's byte range.
+    pub(crate) statement: ByteRange,
+    /// The item's byte range within `content` (already offset from the
+    /// statement's start), covering any `as` clause.
+    pub(crate) member: ByteRange,
+    /// How many items the statement's import list has.
+    pub(crate) member_count: usize,
+    /// The group's shared prefix, with no leading or trailing `\`. Empty
+    /// when the statement has no `{}` group.
+    pub(crate) prefix: &'a str,
+}
+
+/// Find the `use` statement (and, within it, the specific list item) that
+/// imports `fqn` under `alias` in `content`.
+///
+/// `use_statement_spans` is the result of [`compute_use_statement_spans`];
+/// callers that already need it for another purpose pass it in rather than
+/// have it recomputed here.
+pub(crate) fn find_use_statement<'a>(
+    content: &'a str,
+    use_statement_spans: &[ByteRange],
+    fqn: &str,
+    alias: &str,
+) -> Option<UseStatementLocation<'a>> {
+    for &(stmt_start, stmt_end) in use_statement_spans {
+        let Some(stmt) = content.get(stmt_start..stmt_end) else {
+            continue;
+        };
+
+        // Match against the declaration only, so a trailing comment can't
+        // be mistaken for a group body.
+        let decl = stmt.split(';').next().unwrap_or(stmt);
+
+        let Some(member) = find_use_member(decl, fqn, alias) else {
+            continue;
+        };
+        return Some(UseStatementLocation {
+            statement: (stmt_start, stmt_end),
+            member: (stmt_start + member.start, stmt_start + member.end),
+            member_count: member.member_count,
+            prefix: member.prefix,
+        });
+    }
+
+    None
 }
 
 /// Compute the byte ranges of `isset(...)` and `empty(...)` argument lists.
@@ -171,7 +552,8 @@ pub(crate) fn compute_isset_empty_argument_ranges(content: &str) -> Vec<ByteRang
                 let paren_start = skip_ws(bytes, after_name);
                 if paren_start < len
                     && bytes[paren_start] == b'('
-                    && let Some(paren_end) = find_matching_paren(bytes, paren_start)
+                    && let Some(paren_end) =
+                        find_matching_forward_bytes(bytes, paren_start, b'(', b')')
                 {
                     ranges.push((paren_start + 1, paren_end));
                     i = paren_end + 1;
@@ -325,8 +707,16 @@ pub(crate) fn compute_existence_guards(content: &str) -> ExistenceGuards {
 
 /// Check if the existence call at position `start` is negated by a `!`.
 fn is_negated(bytes: &[u8], start: usize) -> bool {
-    // Scan backward from start, skipping whitespace, looking for `!`.
+    // A global function written the explicit way (`!\class_exists(…)`)
+    // carries a `\` between the `!` and the name, with no room for
+    // whitespace in between. Step over it first, or the scan below reads
+    // it as the character that ends the search and calls the check
+    // un-negated.
     let mut j = start;
+    if j > 0 && bytes[j - 1] == b'\\' {
+        j -= 1;
+    }
+    // Scan backward, skipping whitespace, looking for `!`.
     while j > 0 {
         j -= 1;
         match bytes[j] {
@@ -358,7 +748,7 @@ fn find_negated_guard_range(
         return None;
     }
 
-    let cond_end = find_matching_paren(bytes, paren_start)?;
+    let cond_end = find_matching_forward_bytes(bytes, paren_start, b'(', b')')?;
 
     let body_start_pos = skip_ws(bytes, cond_end + 1);
     if body_start_pos >= len {
@@ -367,7 +757,7 @@ fn find_negated_guard_range(
 
     // Determine end of the if-statement and check for early exit.
     let if_stmt_end = if bytes[body_start_pos] == b'{' {
-        let block_end = find_matching_brace(bytes, body_start_pos)?;
+        let block_end = find_matching_forward_bytes(bytes, body_start_pos, b'{', b'}')?;
         let body_content = &bytes[body_start_pos + 1..block_end];
         if !contains_early_exit(body_content) {
             return None;
@@ -406,36 +796,10 @@ fn contains_early_exit(body: &[u8]) -> bool {
         || trimmed.starts_with("break")
 }
 
-/// Find the end of the enclosing scope from a given position.
-/// Returns the position of the next `}` at depth 0, or EOF.
+/// Find the end of the enclosing scope from a given position: the next
+/// `}` that does not close a block opened after `from`, or EOF.
 fn find_enclosing_scope_end(bytes: &[u8], from: usize) -> usize {
-    let len = bytes.len();
-    let mut depth: u32 = 0;
-    let mut i = from;
-    while i < len {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                if depth == 0 {
-                    return i;
-                }
-                depth -= 1;
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    len
+    find_unmatched_close_bytes(bytes, from, b'{', b'}').unwrap_or(bytes.len())
 }
 
 /// Try to parse an existence-check call starting at position `i`.
@@ -575,7 +939,13 @@ fn extract_string_literal(bytes: &[u8], pos: usize) -> Option<(String, usize)> {
     if end >= len {
         return None;
     }
-    let name = String::from_utf8_lossy(&bytes[start..end]).to_string();
+    // The runtime value, not the source text: a class named in a guard is
+    // written `'Vendor\\Optional\\Config'` as often as `'Vendor\Optional\Config'`,
+    // and only one of those matches the reference it guards unless the
+    // escapes are resolved first.
+    let raw = String::from_utf8_lossy(&bytes[pos..=end]);
+    let name = crate::util::unescape_php_string_literal(&raw)
+        .unwrap_or_else(|| String::from_utf8_lossy(&bytes[start..end]).to_string());
     Some((name, end + 1))
 }
 
@@ -592,13 +962,15 @@ fn find_guarded_range(bytes: &[u8], call_start: usize, call_end: usize) -> Optio
         let paren_start = skip_ws(bytes, if_pos + 2); // skip "if"
         if paren_start < len
             && bytes[paren_start] == b'('
-            && let Some(cond_end) = find_matching_paren(bytes, paren_start)
+            && let Some(cond_end) = find_matching_forward_bytes(bytes, paren_start, b'(', b')')
         {
             let body_start_pos = skip_ws(bytes, cond_end + 1);
             if body_start_pos < len {
                 if bytes[body_start_pos] == b'{' {
                     // Block body: find matching `}`.
-                    if let Some(block_end) = find_matching_brace(bytes, body_start_pos) {
+                    if let Some(block_end) =
+                        find_matching_forward_bytes(bytes, body_start_pos, b'{', b'}')
+                    {
                         // Guard covers from start of condition (to catch && patterns
                         // in the condition itself) through the block end.
                         return Some((paren_start, block_end + 1));
@@ -647,75 +1019,6 @@ fn find_preceding_if(bytes: &[u8], pos: usize) -> Option<usize> {
         if j == 0 {
             break;
         }
-    }
-    None
-}
-
-/// Find matching `)` for `(` at `pos`.
-fn find_matching_paren(bytes: &[u8], pos: usize) -> Option<usize> {
-    let len = bytes.len();
-    if pos >= len || bytes[pos] != b'(' {
-        return None;
-    }
-    let mut depth = 0u32;
-    let mut i = pos;
-    while i < len {
-        match bytes[i] {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            b'\'' | b'"' => {
-                // Skip string literals.
-                let quote = bytes[i];
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Find matching `}` for `{` at `pos`.
-fn find_matching_brace(bytes: &[u8], pos: usize) -> Option<usize> {
-    let len = bytes.len();
-    if pos >= len || bytes[pos] != b'{' {
-        return None;
-    }
-    let mut depth = 0u32;
-    let mut i = pos;
-    while i < len {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
     }
     None
 }
@@ -779,6 +1082,70 @@ pub(crate) fn find_innermost_enclosing_class(
         .map(|(c, _)| c.as_ref())
 }
 
+/// Find the name of the method whose body contains `offset`, if any.
+///
+/// Used by the `@deprecated` usage pass to tell whether a call site sits
+/// inside a method that itself overrides/implements the deprecated
+/// member being referenced there — PHPStan's own deprecation rule
+/// (`DefaultDeprecatedScopeResolver` in phpstan/phpstan-deprecation-rules)
+/// exempts that pattern instead of flagging legacy code for calling
+/// other legacy code.
+///
+/// Offset containment is checked against the method body's braces only,
+/// so a call inside a nested closure or arrow function is still
+/// attributed to the enclosing method — matching PHPStan, which resolves
+/// `Scope::getFunction()` to the same enclosing method from inside an
+/// arrow function body.
+pub(crate) fn find_enclosing_method_name(content: &str, offset: u32) -> Option<String> {
+    crate::parser::with_parsed_program(content, "find_enclosing_method_name", |program, _| {
+        find_enclosing_method_name_in_statements(&program.statements, offset)
+    })
+}
+
+fn find_enclosing_method_name_in_statements<'a>(
+    statements: &mago_syntax::cst::Sequence<'a, mago_syntax::cst::Statement<'a>>,
+    offset: u32,
+) -> Option<String> {
+    use mago_syntax::cst::Statement;
+
+    for stmt in statements.iter() {
+        let found = match stmt {
+            Statement::Class(class) => find_method_name_in_members(class.members.iter(), offset),
+            Statement::Trait(tr) => find_method_name_in_members(tr.members.iter(), offset),
+            Statement::Enum(en) => find_method_name_in_members(en.members.iter(), offset),
+            Statement::Namespace(ns) => {
+                return find_enclosing_method_name_in_statements(ns.statements(), offset);
+            }
+            _ => None,
+        };
+        if let Some(name) = found {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn find_method_name_in_members<'a>(
+    members: impl Iterator<Item = &'a mago_syntax::cst::class_like::member::ClassLikeMember<'a>>,
+    offset: u32,
+) -> Option<&'a str> {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
+
+    for member in members {
+        if let ClassLikeMember::Method(method) = member
+            && let MethodBody::Concrete(block) = &method.body
+        {
+            let body_start = block.left_brace.start.offset;
+            let body_end = block.right_brace.end.offset;
+            if offset >= body_start && offset <= body_end {
+                return Some(crate::atom::bytes_to_str(method.name.value));
+            }
+        }
+    }
+    None
+}
+
 /// Returns `true` when a call expression's `resolve_callable_target*`
 /// result is guaranteed to be the same at every call site in a file, so
 /// it is safe to memoize by expression text alone in a per-file cache.
@@ -817,6 +1184,21 @@ pub(crate) fn make_diagnostic(
     code: &str,
     message: String,
 ) -> Diagnostic {
+    make_tagged_diagnostic(range, severity, code, message, None)
+}
+
+/// [`make_diagnostic`], carrying a `DiagnosticTag`.
+///
+/// The tag is what makes an editor render the range as dimmed
+/// ([`DiagnosticTag::UNNECESSARY`]) or struck through
+/// ([`DiagnosticTag::DEPRECATED`]) rather than underlining it.
+pub(crate) fn make_tagged_diagnostic(
+    range: Range,
+    severity: DiagnosticSeverity,
+    code: &str,
+    message: String,
+    tag: Option<DiagnosticTag>,
+) -> Diagnostic {
     Diagnostic {
         range,
         severity: Some(severity),
@@ -825,7 +1207,82 @@ pub(crate) fn make_diagnostic(
         source: Some("phpantom".to_string()),
         message,
         related_information: None,
-        tags: None,
+        tags: tag.map(|t| vec![t]),
         data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_use_line_ranges, compute_use_statement_spans, find_use_statement};
+
+    #[test]
+    fn use_line_ranges_lf() {
+        let content = "<?php\nuse App\\Foo;\nnew Foo();\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(&content[start..end], "use App\\Foo;");
+    }
+
+    /// The range lands exactly on the statement even though every line
+    /// carries a two-byte `\r\n` terminator, and it stops before the `\r`.
+    #[test]
+    fn use_line_ranges_crlf() {
+        let content = "<?php\r\nuse App\\Foo;\r\nnew Foo();\r\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(&content[start..end], "use App\\Foo;");
+    }
+
+    /// A `use` inside a class body is a trait import, not a namespace
+    /// import, and one under a braced namespace still counts.
+    #[test]
+    fn use_line_ranges_follow_brace_depth() {
+        let content = "<?php\nnamespace App {\n    use Foo\\Bar;\n    class A {\n        use SomeTrait;\n    }\n}\n";
+        let ranges = compute_use_line_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(&content[start..end], "    use Foo\\Bar;");
+    }
+
+    /// A brace-less multi-import list wrapped across lines is still
+    /// followed to its terminating `;` instead of being dropped.
+    #[test]
+    fn use_statement_spans_follow_a_wrapped_comma_list() {
+        let content = "<?php\nuse App\\Models\\User,\n    App\\Models\\Post;\nnew User();\n";
+        let spans = compute_use_statement_spans(content);
+        assert_eq!(spans.len(), 1);
+        let (start, end) = spans[0];
+        assert_eq!(
+            &content[start..end],
+            "use App\\Models\\User,\n    App\\Models\\Post;"
+        );
+    }
+
+    #[test]
+    fn find_use_statement_locates_one_item_of_a_wrapped_comma_list() {
+        let content = "<?php\nuse App\\Models\\User,\n    App\\Models\\Post;\nnew Post();\n";
+        let spans = compute_use_statement_spans(content);
+        let location =
+            find_use_statement(content, &spans, "App\\Models\\Post", "Post").expect("located");
+        assert_eq!(
+            &content[location.member.0..location.member.1],
+            "App\\Models\\Post"
+        );
+        assert_eq!(location.member_count, 2);
+        assert_eq!(location.prefix, "");
+    }
+
+    #[test]
+    fn find_use_statement_locates_a_group_member() {
+        let content = "<?php\nuse App\\Models\\{User, Post};\n";
+        let spans = compute_use_statement_spans(content);
+        let location =
+            find_use_statement(content, &spans, "App\\Models\\Post", "Post").expect("located");
+        assert_eq!(&content[location.member.0..location.member.1], "Post");
+        assert_eq!(location.member_count, 2);
+        assert_eq!(location.prefix, "App\\Models");
     }
 }

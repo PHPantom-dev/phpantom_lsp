@@ -36,6 +36,15 @@ pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     pub(in crate::type_engine) parameters: SharedVec<ParameterInfo>,
     /// The call-site argument list.
     pub(in crate::type_engine) argument_list: &'a ArgumentList<'a>,
+    /// The subject key of the object the call was made on (`"$this"`,
+    /// `"$reflection"`, …), for a method call whose receiver is a plain
+    /// variable.
+    ///
+    /// An assertion tag may name a path through the receiver rather than
+    /// an argument — `@phpstan-assert bool $this->resolved` on a method
+    /// promises something about the object it was called on. Reading the
+    /// tag at the call site means substituting this for its `$this`.
+    pub(in crate::type_engine) receiver_key: Option<String>,
     /// Template parameter names from the callee's `@template` tags.
     template_params: Vec<Atom>,
     /// Template parameter → parameter name bindings (e.g. `("T", "$class")`).
@@ -71,6 +80,7 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 assertions: func_info.type_assertions,
                 parameters: func_info.parameters,
                 argument_list: &func_call.argument_list,
+                receiver_key: None,
                 template_params: func_info.template_params,
                 template_bindings: func_info.template_bindings,
             })
@@ -81,24 +91,28 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 _ => return None,
             };
             let class_info = resolve_static_receiver_class(static_call.class, ctx)?;
-            build_method_assertion_info(&class_info, method_name, &static_call.argument_list, ctx)
+            build_method_assertion_info(
+                &class_info,
+                method_name,
+                &static_call.argument_list,
+                None,
+                ctx,
+            )
         }
-        Call::Method(method_call) => {
-            let method_name = match &method_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-                _ => return None,
-            };
-            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(&class_info, method_name, &method_call.argument_list, ctx)
-        }
-        Call::NullSafeMethod(method_call) => {
-            let method_name = match &method_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-                _ => return None,
-            };
-            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(&class_info, method_name, &method_call.argument_list, ctx)
-        }
+        // `->` and `?->` reach the same method; only the receiver's
+        // nullability differs, which says nothing about its assertions.
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        })
+        | Call::NullSafeMethod(NullSafeMethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => instance_method_assertion_info(object, method, argument_list, ctx),
     }
 }
 
@@ -151,6 +165,26 @@ fn resolve_instance_receiver_class(
     (ctx.class_loader)(&first.type_string.to_string())
 }
 
+/// The assertions an instance method call carries, for either arrow.
+fn instance_method_assertion_info<'a>(
+    object: &Expression<'_>,
+    selector: &ClassLikeMemberSelector<'_>,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallAssertionInfo<'a>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let class_info = resolve_instance_receiver_class(object, ctx)?;
+    build_method_assertion_info(
+        &class_info,
+        bytes_to_str(ident.value),
+        argument_list,
+        expr_to_subject_key(object),
+        ctx,
+    )
+}
+
 /// Build [`CallAssertionInfo`] for a method call once the receiver class
 /// has been resolved.
 ///
@@ -168,14 +202,16 @@ fn build_method_assertion_info<'a>(
     class: &ClassInfo,
     method_name: &str,
     argument_list: &'a ArgumentList<'a>,
+    receiver_key: Option<String>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallAssertionInfo<'a>> {
-    let method =
+    let (method, _) =
         find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
     Some(CallAssertionInfo {
         assertions: method.type_assertions,
         parameters: method.parameters,
         argument_list,
+        receiver_key,
         template_params: method.template_params,
         template_bindings: method.template_bindings,
     })
@@ -187,15 +223,17 @@ fn build_method_assertion_info<'a>(
 /// mutates the shared resolved-class cache.
 ///
 /// Returns an owned clone of the first matching method that has non-empty
-/// `type_assertions`.  A `visited` set and `depth` bound guard against
-/// cyclic hierarchies.
+/// `type_assertions`, paired with the FQN of the class that declared it.
+/// The declaring class is what an unqualified name in the tag resolves
+/// against, which is not necessarily the receiver's own class.  A
+/// `visited` set and `depth` bound guard against cyclic hierarchies.
 pub(in crate::type_engine) fn find_assertion_method_in_chain(
     class: &ClassInfo,
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<crate::types::MethodInfo> {
+) -> Option<(crate::types::MethodInfo, Atom)> {
     find_method_in_chain_where(
         class,
         method_name,
@@ -209,6 +247,9 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
 /// [`find_assertion_method_in_chain`] generalised over what makes a
 /// definition the interesting one: assertion tags for the assert
 /// narrowing, a conditional return type for the `never`-branch one.
+///
+/// The second element of the result is the FQN of the class the returned
+/// definition was found on.
 pub(in crate::type_engine) fn find_method_in_chain_where(
     class: &ClassInfo,
     method_name: &str,
@@ -216,7 +257,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     carries_metadata: &dyn Fn(&crate::types::MethodInfo) -> bool,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<crate::types::MethodInfo> {
+) -> Option<(crate::types::MethodInfo, Atom)> {
     if depth > 15 {
         return None;
     }
@@ -236,7 +277,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
         .find(|m| m.name.eq_ignore_ascii_case(method_name))
         && carries_metadata(method)
     {
-        return Some(method.as_ref().clone());
+        return Some((method.as_ref().clone(), fqn));
     }
 
     // Traits mixed into this class.
@@ -268,6 +309,25 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
         )
     {
         return Some(method);
+    }
+
+    // Implemented interfaces, last: a class that redeclares the method
+    // without a docblock inherits the contract's, which is where a
+    // predicate's `@phpstan-assert` tags normally live (`Scope` declares
+    // them and `MutatingScope` implements them).
+    for interface_name in &class.interfaces {
+        if let Some(interface) = class_loader(interface_name)
+            && let Some(method) = find_method_in_chain_where(
+                &interface,
+                method_name,
+                class_loader,
+                carries_metadata,
+                visited,
+                depth + 1,
+            )
+        {
+            return Some(method);
+        }
     }
 
     None
@@ -358,8 +418,7 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
         if assertion.kind != AssertionKind::Always {
             continue;
         }
-        if let Some(arg_var) =
-            find_assertion_arg_variable(info.argument_list, &assertion.param_name, &info.parameters)
+        if let Some(arg_var) = assertion_subject_key(&assertion.param_name, &info)
             && arg_var == ctx.var_name
         {
             // Resolve the asserted type.  When the type is a template
@@ -691,6 +750,36 @@ pub(in crate::type_engine) fn fold_negation_pairs<'b>(
 /// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
 /// assertion narrowing applies to non-variable subjects, not just plain
 /// variables.
+/// The subject key an assertion tag names at the call site.
+///
+/// Most tags name a parameter (`@phpstan-assert Foo $value`), so the
+/// subject is whichever argument was bound to it — that is
+/// [`find_assertion_arg_variable`]. A tag can instead reach through a
+/// member: `@phpstan-assert bool $this->resolved` promises something
+/// about the object the call was made on, and `@phpstan-assert Foo
+/// $value->inner` about a path below an argument. Both are written from
+/// inside the callee, so the leading variable is rewritten to whatever
+/// stands in its place at the call site and the rest of the path is
+/// carried over unchanged.
+///
+/// Returns `None` when the leading variable has no counterpart here (a
+/// `$this->…` tag on a static call, a receiver that is not a plain
+/// variable, an argument that was not written).
+pub(in crate::type_engine) fn assertion_subject_key(
+    param_name: &str,
+    info: &CallAssertionInfo<'_>,
+) -> Option<String> {
+    let Some(split) = param_name.find(['-', '[', ':']) else {
+        return find_assertion_arg_variable(info.argument_list, param_name, &info.parameters);
+    };
+    let (root, rest) = param_name.split_at(split);
+    let base = match root {
+        "$this" => info.receiver_key.clone()?,
+        param => find_assertion_arg_variable(info.argument_list, param, &info.parameters)?,
+    };
+    Some(format!("{base}{rest}"))
+}
+
 pub(in crate::type_engine) fn find_assertion_arg_variable(
     argument_list: &ArgumentList<'_>,
     param_name: &str,
@@ -764,31 +853,36 @@ pub(in crate::type_engine) fn extract_conditional_return_call<'a>(
                 ctx,
             )
         }
-        Call::Method(method_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &method_call.method else {
-                return None;
-            };
-            let class = resolve_instance_receiver_class(method_call.object, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &method_call.argument_list,
-                ctx,
-            )
-        }
-        Call::NullSafeMethod(method_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &method_call.method else {
-                return None;
-            };
-            let class = resolve_instance_receiver_class(method_call.object, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &method_call.argument_list,
-                ctx,
-            )
-        }
+        // `->` and `?->` reach the same method; only the receiver's
+        // nullability differs, which the conditional return does not read.
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        })
+        | Call::NullSafeMethod(NullSafeMethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => instance_conditional_return(object, method, argument_list, ctx),
     }
+}
+
+/// The conditional return an instance method call carries, for either
+/// arrow.
+fn instance_conditional_return<'a>(
+    object: &Expression<'_>,
+    selector: &ClassLikeMemberSelector<'_>,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallReturnInfo<'a>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let class = resolve_instance_receiver_class(object, ctx)?;
+    conditional_return_from_chain(&class, bytes_to_str(ident.value), argument_list, ctx)
 }
 
 /// Find the definition of `method_name` whose return type is conditional,
@@ -804,7 +898,7 @@ fn conditional_return_from_chain<'a>(
     argument_list: &'a ArgumentList<'a>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallReturnInfo<'a>> {
-    let method = find_method_in_chain_where(
+    let (method, _) = find_method_in_chain_where(
         class,
         method_name,
         ctx.class_loader,

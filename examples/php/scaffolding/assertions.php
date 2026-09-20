@@ -108,6 +108,12 @@ function runDemoAssertions(): void
         'a name the shelf does not carry yields null, so nothing is proved about that call',
     );
 
+    // ── A repeated call checked by a ternary condition ───────────────────
+    assert(
+        is_string((new CompoundNarrowingDemo())->repeatedCallInTernary(new Scaffolding\SpecimenHolder())),
+        'both ternary arms re-evaluate the checked call, and the check rules out its null',
+    );
+
     // ── A pair of `!` cancels ───────────────────────────────────────────
     $bare = new Scaffolding\Rock();
     assert((!(!$bare)) === (bool) $bare, 'double negation is the bare truthiness test');
@@ -116,13 +122,18 @@ function runDemoAssertions(): void
 
     // ── A proof lasts only as long as the state it was made about ───────
     assert(
-        (new CompoundNarrowingDemo())->callInvalidation(new Scaffolding\SpecimenHolder()) === 'specimens',
-        'a pure call leaves the checked call answering the same thing',
+        (new CompoundNarrowingDemo())->callInvalidation(new Scaffolding\SpecimenHolder()) === 'specimens1',
+        'a pure call and a value-returning one both leave the checked call answering the same thing',
     );
     $shelf = new Scaffolding\SpecimenHolder();
     assert($shelf->shelfLabel() === 'specimens', 'the pure call is genuinely side-effect free');
+    assert($shelf->shelfCount() === 1, 'the untagged accessor only reports what is on the shelf');
+    assert($shelf->item instanceof Scaffolding\Rock, 'neither of them changed what the holder carries');
     $shelf->restock();
     assert($shelf->item instanceof Scaffolding\Banana, 'restock() really does change what the holder carries');
+    $rotated = new Scaffolding\SpecimenHolder();
+    assert($rotated->rotate() === true, 'the @impure call still hands a value back');
+    assert($rotated->item instanceof Scaffolding\Banana, 'and changes what the holder carries, which is why it is tagged');
 
     // ── Two checks that both hold make one value of both types ──────────
     $compound = new CompoundNarrowingDemo();
@@ -168,6 +179,26 @@ function runDemoAssertions(): void
     assert(
         $chainDemo->bothMayBeNull($shelfForChain) === 'different',
         "lookUp('banana') is null, so the two chains are not identical",
+    );
+
+    // ── Variables filled together in one branch ─────────────────────────
+    $correlated = new CorrelatedNullDemo();
+    $shelfForPair = new Scaffolding\SpecimenHolder();
+    assert(
+        $correlated->describe($shelfForPair, 'rock') === '5kg',
+        'the branch that finds the specimen is the one that labels it',
+    );
+    assert(
+        $correlated->describe($shelfForPair, 'banana') === 'nothing on the shelf',
+        'a name the shelf has none of leaves both variables null',
+    );
+    assert(
+        $correlated->unrelated(true, false) === 'unlabelled',
+        'the specimen can be there without the label being there too',
+    );
+    assert(
+        $correlated->unrelated(true, true) === '1kg',
+        'both conditions holding fills both variables',
     );
 
     // ── Discriminating-property narrowing ───────────────────────────────
@@ -261,6 +292,13 @@ function runDemoAssertions(): void
     assert(count($writers) === 2 && $writers[0] instanceof Scaffolding\Pen, 'array_filter() with an instanceof callback keeps only that class');
     $sparse = array_filter([3, 4, 5], fn($v) => $v > 3);
     assert(array_keys($sparse) === [1, 2], 'array_filter() keeps the key of every entry it keeps, so filtering a list leaves gaps rather than another list');
+    $collected = [];
+    foreach ([['ink'], ['gel']] as $batch) {
+        $collected = array_merge($collected, $batch);
+    }
+    assert($collected === ['ink', 'gel'], 'array_merge() into an accumulator that started as [] holds everything that was merged in');
+    $merged = array_merge([0 => 'nib'], ['ink' => 'gel', 3 => 'lead']);
+    assert($merged === [0 => 'nib', 'ink' => 'gel', 1 => 'lead'], 'array_merge() renumbers integer keys as it appends and carries string keys over');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = Scaffolding\loadPensOrFail();
@@ -441,6 +479,28 @@ function runDemoAssertions(): void
         assert($specimen2 instanceof Scaffolding\Banana, 'Not Scaffolding\Rock must be Scaffolding\Banana');
     }
 
+    // ── Type narrowing: a boolean standing for a check ──────────────────
+    $stored = Scaffolding\pickRockOrBanana();
+    $isRock = $stored instanceof Scaffolding\Rock;
+    $chosen = $isRock ? $stored : new Scaffolding\Rock();
+    assert($chosen instanceof Scaffolding\Rock, 'the ternary arm a boolean check picks really yields a Scaffolding\Rock');
+    assert(Scaffolding\crushOneRock($chosen) === 'smash!', 'the value the arm yields really is what Scaffolding\crushOneRock() accepts');
+
+    $shelved = Scaffolding\pickRockOrBanana();
+    $isKnown = $shelved instanceof Scaffolding\Rock || $shelved instanceof Scaffolding\Banana;
+    assert($isKnown, 'the `||` chain really covers everything Scaffolding\pickRockOrBanana() returns');
+    assert(is_float($shelved->weigh()), 'both classes the chain lists really declare weigh()');
+
+    // ── Type narrowing: a variable a guarded branch filled ──────────────
+    $weighed = Scaffolding\pickRockOrBanana();
+    $label = null;
+    if ($weighed instanceof Scaffolding\Rock) {
+        $label = new Scaffolding\SpecimenLabel('rock');
+    }
+    if ($label !== null) {
+        assert($weighed instanceof Scaffolding\Rock, 'reaching the `!== null` test really means the branch ran');
+    }
+
     // ── Type narrowing: assert() ────────────────────────────────────────
     $target = Scaffolding\pickRockOrBanana();
     if ($target instanceof Scaffolding\Banana) {
@@ -491,6 +551,20 @@ function runDemoAssertions(): void
     assert($sedan instanceof Scaffolding\ScaffoldingMotor, 'Scaffolding\ScaffoldingSedan must extend Scaffolding\ScaffoldingMotor');
     assert(method_exists($sedan, 'cruise'), 'Scaffolding\ScaffoldingSedan must have cruise()');
     assert(method_exists($sedan, 'start'), 'Scaffolding\ScaffoldingSedan must inherit start()');
+
+    // ── Negated disjunction and subclass subtraction ────────────────────
+    $negated = new NegatedDisjunctionDemo();
+    assert($negated->demo(new Scaffolding\ScaffoldingSedan()) === 'sedan', 'Sedan must take the sedan branch');
+    assert($negated->demo(new Scaffolding\ScaffoldingCoupe()) === 'race', 'Coupe must take the coupe branch');
+    assert($negated->demo(new Scaffolding\ScaffoldingMotor()) === 'other', 'A bare motor must be ruled out by the guard');
+    assert($negated->keepsSubclass(new Scaffolding\ScaffoldingSportSedan()) === 'launch', 'A subclass must pass a check on its parent');
+    assert($negated->keepsSubclass(new Scaffolding\ScaffoldingCoupe()) === 'race', 'A failed check must leave only the coupe');
+    assert($negated->provesOneLegOnly(new Scaffolding\ScaffoldingMotor(), true) === 'motor', 'A flag leg must let a bare motor in');
+    assert($negated->provesOneLegOnly(new Scaffolding\ScaffoldingCoupe(), false) === 'motor', 'A coupe must take the instanceof leg');
+    assert(
+        (new Scaffolding\ScaffoldingSportSedan()) instanceof Scaffolding\ScaffoldingSedan,
+        'Scaffolding\ScaffoldingSportSedan must extend Scaffolding\ScaffoldingSedan'
+    );
 
     $demo = new InstanceofSelfDemo();
     assert($demo instanceof Scaffolding\ScaffoldingSedan, 'InstanceofSelfDemo must extend Scaffolding\ScaffoldingSedan');
@@ -706,6 +780,8 @@ function runDemoAssertions(): void
     $reflectedWidget = (new ReflectionInstantiationDemo())->reflectedWidget($holder);
     assert($reflectedWidget instanceof Scaffolding\ReflectedWidget, 'ReflectionProperty::getValue() must be Scaffolding\ReflectedWidget');
     assert((new ReflectionInstantiationDemo())->reflectedWidget(new Scaffolding\ReflectedHolder()) === null, 'A null private property must read back as null');
+    $directWidget = (new ReflectionInstantiationDemo())->directWidget($holder);
+    assert($directWidget === $widget, 'new \ReflectionProperty() must read the same property getProperty() does');
     $accessedWidget = (new ReflectionInstantiationDemo())->accessedWidget($holder);
     assert($accessedWidget instanceof Scaffolding\ReflectedWidget, 'An accessor must return what its arguments name');
     assert(ReflectionInstantiationDemo::fetchProperty($holder, 'widget') === $widget, 'fetchProperty() must read the property the name argument gives');
@@ -831,6 +907,21 @@ function runDemoAssertions(): void
     assert(is_string(getenv('PATH')), 'naming a variable returns its value');
     assert(abs(-7) === 7, 'abs of an int is an int');
     assert(abs(-7.5) === 7.5, 'abs of a float is a float');
+    assert(is_string(var_export(['a' => 1], true)), 'var_export renders to a string when asked to');
+    assert(var_export('x') === null, 'var_export returns nothing when it prints');
+    assert(is_string(mb_internal_encoding()), 'mb_internal_encoding with no argument reads the encoding');
+    assert(is_bool(mb_internal_encoding('UTF-8')), 'naming an encoding reports whether the write took');
+    assert(is_int(version_compare('8.2.0', '8.1.0')), 'version_compare with no operator orders the versions');
+    assert(is_bool(version_compare('8.2.0', '8.1.0', '>')), 'naming an operator asks a yes/no question');
+    assert(sscanf('12 apples', '%d %s') === [12, 'apples'], 'sscanf with no targets collects into an array');
+    assert(sscanf('12 apples', '%d %s', $scanCount, $scanFruit) === 2, 'passing targets reports how many were filled');
+    assert(range(0, 10, 2) === [0, 2, 4, 6, 8, 10], 'an all-integer range stays integral');
+    assert(range(0, 1, 0.25) === [0.0, 0.25, 0.5, 0.75, 1.0], 'a fractional step makes every element a float');
+    assert(array_reduce([1, 2, 3], static fn (int $carry, int $n): int => $carry + $n, 0) === 6, 'a seeded reduce is never null');
+    assert(array_reduce([], static fn ($carry, $n) => $carry) === null, 'an empty array with no initial value is the one null case');
+    assert(pow(2, 10) === 1024, 'two numbers raise to a number');
+    assert(is_string(ini_get('memory_limit')), 'a core directive is always set');
+    assert(get_class(new Scaffolding\Pen()) === Scaffolding\Pen::class, 'get_class names the class of the object it was handed');
 
     // ── Closure / arrow function return types ───────────────────────────
     $makePenClosure = function(): Scaffolding\Pen { return new Scaffolding\Pen(); };
@@ -1248,6 +1339,20 @@ function runDemoAssertions(): void
     assert($nPen instanceof Scaffolding\Pen, 'Nested destructured pen must be Scaffolding\Pen');
     assert($nPencil instanceof Scaffolding\Pencil, 'Nested destructured pencil must be Scaffolding\Pencil');
 
+    // ── Skipped destructuring positions ─────────────────────────────────
+    /** @var array{string, Scaffolding\Pen, Scaffolding\Pencil} $skipDestr */
+    $skipDestr = ['label', new Scaffolding\Pen(), new Scaffolding\Pencil()];
+    [, $sPen, ] = $skipDestr;
+    assert($sPen instanceof Scaffolding\Pen, 'A hole must not shift position 1 back to position 0');
+    [, , $sPencil] = $skipDestr;
+    assert($sPencil instanceof Scaffolding\Pencil, 'Two holes must land on position 2');
+
+    /** @var array<int, array{string, Scaffolding\Pen}> $skipRows */
+    $skipRows = [['blue', new Scaffolding\Pen()]];
+    foreach ($skipRows as [, $sRowPen]) {
+        assert($sRowPen instanceof Scaffolding\Pen, 'Foreach hole must not shift position 1 back to position 0');
+    }
+
     // ── Foreach destructuring ───────────────────────────────────────────
     /** @var array<int, array{tool: Scaffolding\Pen, count: int}> $foreachDestrInv */
     $foreachDestrInv = [['tool' => new Scaffolding\Pen(), 'count' => 5]];
@@ -1268,6 +1373,25 @@ function runDemoAssertions(): void
     foreach ($keyedKit as $shapeKey => $shapePen) {
         assert(is_string($shapeKey), 'A string-keyed shape foreach key must be string');
         assert($shapePen instanceof Scaffolding\Pen, 'A shape foreach value must be Scaffolding\Pen');
+    }
+    $keyedOpen = (new Scaffolding\ScaffoldingIteration())->openKeyed();
+    foreach ($keyedOpen as $openKey => $openPen) {
+        assert(is_int($openKey) || is_string($openKey),
+            'A `Pen[]` names no key type, so its foreach key is the whole array-key domain');
+        assert($openPen instanceof Scaffolding\Pen, 'An open-keyed foreach value must be Scaffolding\Pen');
+        if (is_int($openKey)) {
+            continue;
+        }
+        assert(is_string($openKey), 'Past an `is_int` guard the surviving key must be string');
+    }
+    $collectedKeys = [];
+    foreach ($keyedOpen as $collectedKey => $collectedPen) {
+        assert($collectedPen instanceof Scaffolding\Pen, 'An open-keyed foreach value must be Scaffolding\Pen');
+        $collectedKeys[] = $collectedKey;
+    }
+    foreach ($collectedKeys as $collected) {
+        assert(is_int($collected) || is_string($collected),
+            'Keys collected out of a `Pen[]` stay the whole array-key domain');
     }
 
     // ── Literal values surviving an array read ──────────────────────────
@@ -1421,6 +1545,23 @@ function runDemoAssertions(): void
     $ctorPen = null;
     new Scaffolding\PenBuilder($ctorPen);
     assert($ctorPen instanceof Scaffolding\Pen, 'new Scaffolding\PenBuilder(&$pen) must give $pen type Scaffolding\Pen');
+
+    // A callee that assigns on every path leaves nothing of the declared
+    // null behind; one that assigns on a single branch leaves it in place.
+    $writtenPen = null;
+    Scaffolding\initPen($writtenPen);
+    assert(is_string(Scaffolding\describePen($writtenPen)), 'Scaffolding\initPen(&$pen) writes on every path, so $pen is never null');
+
+    $maybePen = null;
+    Scaffolding\initPenWhen(false, $maybePen);
+    assert($maybePen === null, 'Scaffolding\initPenWhen(false, &$pen) leaves $pen null');
+
+    // The shape an out-parameter already holds is overwritten, not read.
+    $offsetMatches = null;
+    foreach (['a 1', 'b 2'] as $line) {
+        preg_match_all('/(\w+)/', $line, $offsetMatches, PREG_OFFSET_CAPTURE);
+    }
+    assert(is_int($offsetMatches[1][0][1]), 'preg_match_all() with PREG_OFFSET_CAPTURE pairs each match with its offset');
 
     // ── Interface template inheritance (class-string<T>) ────────────────
     $locator = new Scaffolding\ScaffoldingEntityLocator();
@@ -1694,6 +1835,69 @@ function runDemoAssertions(): void
         'a sentinel check beside an assignment leaves the success type behind'
     );
 
+    // ── Folding a variable number of values into one accumulator ─────────
+    $foldDemo = new LoopCarriedAssignmentDemo();
+    $foldSteps = [new Scaffolding\DrawingStep(2), new Scaffolding\DrawingStep(3), new Scaffolding\DrawingStep(4)];
+    assert(
+        $foldDemo->foldAccumulator($foldSteps) === 9,
+        'the fold seeds on the first pass and merges on the rest, so every step counts once'
+    );
+    assert(
+        $foldDemo->foldAccumulator([]) === 0,
+        'a loop that never runs leaves the accumulator null, which is what the `?->` reads'
+    );
+    assert(
+        $foldDemo->foldAccumulatorTernary($foldSteps) === 18,
+        'the if/else and ternary spellings of the fold add up to the same total each'
+    );
+
+    // ── Pre-validation loops ─────────────────────────────────────────────
+    $preValidation = new PreValidationLoopDemo();
+    $labelled = new Scaffolding\SketchGroup([
+        new Scaffolding\LabelledSketchNode('alpha'),
+        new Scaffolding\LabelledSketchNode('beta'),
+    ]);
+    $mixed = new Scaffolding\SketchGroup([new Scaffolding\LabelledSketchNode('alpha'), new Scaffolding\SketchNode()]);
+    assert(
+        $preValidation->captions([$labelled]) === 'alphabeta',
+        'every node passed the pre-validation loop, so the second loop reads all of them'
+    );
+    assert(
+        $preValidation->captions([$mixed]) === '',
+        'one failing node makes the `break 2` skip the second loop entirely'
+    );
+    assert(
+        $preValidation->firstCaption($labelled) === 'alpha',
+        'a return guard rejects the whole group, so reaching the second loop proves every node'
+    );
+    assert(
+        $preValidation->firstCaption($mixed) === '',
+        'the return guard fires on the unlabelled node before the second loop runs'
+    );
+    assert(
+        $preValidation->unproven($mixed) === 'labellednode',
+        'a plain break leaves the unchecked nodes in the list the second loop walks'
+    );
+
+    // ── By-reference captures written on the way out ─────────────────────
+    $gather = new ByRefCaptureGatherDemo();
+    assert(
+        $gather->captions($labelled) === 'alphabeta',
+        'the callback pushes and returns in the same branch, and both pushes stick'
+    );
+    assert(
+        $gather->captions($mixed) === 'alpha',
+        'the unlabelled node fails the instanceof check, so nothing is pushed for it'
+    );
+    assert(
+        $gather->firstCaption($labelled) === 'alpha',
+        'the guard clause writes the capture once and returns, keeping the first match'
+    );
+    assert(
+        $gather->firstCaption(new Scaffolding\SketchGroup()) === '',
+        'an empty group never runs the callback, so the capture is still null'
+    );
+
     // ── Loops over an array that cannot be empty ─────────────────────────
     $nonEmptyLoop = new NonEmptyLoopDemo();
     $shortest = new Scaffolding\Pen();
@@ -1821,6 +2025,77 @@ function runDemoAssertions(): void
     assert($promotedHook->seen === 'gtd', 'promotion runs the promoted property\'s set hook');
     assert($promotedHook->promoted instanceof GtdTarget, 'the promoted get hook reads through $this');
     assert($promotedHook->formatted === 'gtd', 'parent::$formatted::get() calls the overridden hook');
+
+    // ── The user-comparison sorts, and a callback narrowed by its body ──
+    $sorted = (new Scaffolding\ScaffoldingArrayFunc())->byName();
+    uasort($sorted, fn($a, $b) => strcmp($a->color(), $b->color()));
+    assert(array_keys($sorted) === ['blue', 'red'], 'uasort() hands its callback the values and keeps the keys with them');
+    uksort($sorted, fn($a, $b) => strcmp($b, $a));
+    assert(array_keys($sorted) === ['red', 'blue'], 'uksort() hands its callback the keys');
+
+    $markers = (new Scaffolding\ScaffoldingArrayFunc())->markers();
+    $renamedMarkers = array_map(fn(Scaffolding\Marker $m): Scaffolding\Pen => $m->rename('wide'), $markers);
+    assert($renamedMarkers[0] instanceof Scaffolding\Marker, 'rename() returns static, so a callback declaring Scaffolding\Pen still hands back a Scaffolding\Marker');
+
+    assert((new ClosureParamInferenceDemo())->docblockedClosure() === 'blue', 'a closure typed by the docblock above its assignment runs on the values that docblock describes');
+
+    // ── Arrays the code proved have entries ─────────────────────────────
+    $proven = new ProvenNonEmptyDemo();
+    $penList = [new Scaffolding\Pen('red'), new Scaffolding\Pen('blue')];
+    assert($proven->afterCountGuard($penList)->color() === 'blue', 'a loop guarded by count() > 0 runs, so the sentinel is gone');
+    assert($proven->afterCountGuard([])->color() === 'black', 'the empty case never enters the guarded branch');
+    assert($proven->afterEmptyGuard($penList)->color() === 'blue', 'the fall-through of a count() === 0 guard iterates at least once');
+    assert($proven->afterElementWrite(new Scaffolding\Pen('green'))->color() === 'green', 'an array an element was written to has that element to iterate');
+    assert($proven->afterConditionalWrite(new Scaffolding\Pen('gold'), true)?->color() === 'gold', 'the branch that wrote the element leaves it there');
+    assert($proven->afterConditionalWrite(new Scaffolding\Pen('gold'), false) === null, 'the branch that wrote nothing leaves the loop with no iterations');
+
+    // ── Proofs the condition never states outright ──────────────────────
+    $reconstructed = new ReconstructedProofDemo();
+    $loopNode = new Scaffolding\ScaffoldingLoopNode();
+    $loopNode->valueVar->name = 'value';
+    assert($reconstructed->keyName($loopNode) === null, 'the null leg of the guard is the one that held');
+    $loopNode->keyVar = new Scaffolding\ScaffoldingNameNode();
+    $loopNode->keyVar->name = 'key';
+    assert($reconstructed->keyName($loopNode) === 'key', 'the surviving leg proves the key name is a string');
+
+    assert($reconstructed->describeArguments(['a', 'b']) === 'a, b', 'the re-tested count guard proves the acceptor was filled');
+    assert($reconstructed->describeArguments([]) === '', 'neither branch runs when there are no arguments');
+
+    $labelled = new Scaffolding\ScaffoldingOptionalLabel();
+    assert(($reconstructed->labelPrinter($labelled))() === '', 'a null label never reaches the capturing closure');
+    $labelled->label = 'gtd';
+    assert(($reconstructed->labelPrinter($labelled))() === 'GTD', 'the closure runs on the label the guard proved');
+
+    assert($reconstructed->describeWhenFlagged(['a', 'b'], true) === 'a, b', 'the re-tested flag proves the acceptor was filled');
+    assert($reconstructed->describeWhenFlagged(['a', 'b'], false) === '', 'a flag that skipped the branch is false below it');
+
+    $plainName = new Scaffolding\ScaffoldingNameNode();
+    $qualifiedName = new Scaffolding\ScaffoldingQualifiedName();
+    $qualifiedName->namespacePrefix = 'App\\';
+    assert($reconstructed->qualifiedLabel($qualifiedName) === 'q', 'the re-tested instanceof proves the acceptor was filled');
+    assert($reconstructed->qualifiedLabel($plainName) === '', 'the path that failed the check filled nothing');
+    assert($reconstructed->eitherPrefix($plainName, $qualifiedName) === 'App\\', 'ruling the first flag out leaves what the second proved');
+    assert($reconstructed->eitherPrefix($qualifiedName, $plainName) === 'App\\', 'the first flag holding proves its own subject');
+    assert($reconstructed->eitherPrefix($plainName, $plainName) === '', 'neither flag holding leaves the guard');
+
+    // ── Member visibility ───────────────────────────────────────────────
+    // The diagnostics demo claims which members of ScaffoldingVault are out
+    // of reach from outside; reflection is what makes that claim checkable
+    // without writing code PHP would fatal on.
+    $vault = new \ReflectionClass(Scaffolding\ScaffoldingVault::class);
+    assert($vault->getProperty('pin')->isPrivate(), '$pin is private, so an outside read is fatal');
+    assert($vault->getProperty('branch')->isProtected(), '$branch is protected, so a subclass may read it');
+    assert($vault->getProperty('label')->isPublic(), '$label is public and always reachable');
+    assert($vault->getProperty('openCount')->isPrivate(), '$openCount is a private static property');
+    assert($vault->getMethod('rotate')->isPrivate(), 'rotate() is private');
+    assert($vault->getMethod('open')->isPublic(), 'open() is the public way in');
+    assert($vault->getReflectionConstant('MASTER_KEY')->isPrivate(), 'MASTER_KEY is a private constant');
+    assert($vault->getReflectionConstant('REGION')->isPublic(), 'REGION is a public constant');
+
+    $branchVault = new \ReflectionClass(Scaffolding\ScaffoldingBranchVault::class);
+    assert($branchVault->getProperty('ledger')->isPrivate(), '$ledger is private to the subclass that declares it');
+    assert($branchVault->isSubclassOf(Scaffolding\ScaffoldingVault::class), 'the branch vault descends from the vault');
+    assert(!$branchVault->hasProperty('pin') || $branchVault->getProperty('pin')->getDeclaringClass()->getName() === Scaffolding\ScaffoldingVault::class, 'a private parent property is not inherited into the subclass scope');
 
     echo "All assertions passed.\n";
 }

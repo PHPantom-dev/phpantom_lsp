@@ -1,0 +1,21 @@
+// test: a branch that narrowed to an intersection does not swallow the other path's type at the join
+// feature: hover
+// expect_hover: $joined => ?Node
+// expect_hover: $swapped => ?Node
+// expect_absent: Variable
+---
+<?php
+
+interface Node {}
+class Variable {}
+
+function thenBranchFirst(?Node $v): void {
+    if ($v instanceof Variable) { echo 1; } else { echo 2; }
+    $joined = $v;
+    $<>joined;
+}
+
+function elseBranchFirst(?Node $v): void {
+    if (!($v instanceof Variable)) { echo 1; } else { echo 2; }
+    $swapped = $v;
+}

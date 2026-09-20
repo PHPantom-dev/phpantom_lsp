@@ -1,44 +1,9 @@
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{complete_at, create_test_backend, create_test_backend_with_function_stubs};
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a file and request completion at the given line/character.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => vec![],
-    }
-}
 
 /// Verify that `find_or_load_function` can resolve a basic built-in PHP
 /// function from the embedded stubs and return its `FunctionInfo`.
@@ -1096,13 +1061,19 @@ async fn test_completion_multiple_matching_stub_functions() {
     );
 }
 
-/// User-defined function should take precedence over stub function with
-/// the same name (user version appears, stub version is deduplicated away).
+/// A project file that redeclares a global PHP function is offered once,
+/// on the stub's signature rather than its own.
+///
+/// PHP fatals on redeclaring an internal function, so such a declaration
+/// never runs: the file is a signature stub written for tooling (packages
+/// like `phpstan/php-8-stubs` ship one PHP file per builtin, and
+/// phpstorm-stubs itself is a Composer dependency of plenty of projects).
+/// Its watered-down signature would otherwise displace the stub's for the
+/// whole session.
 #[tokio::test]
-async fn test_completion_user_function_shadows_stub() {
+async fn test_completion_redeclared_builtin_keeps_the_stub_signature() {
     let backend = create_test_backend_with_function_stubs();
 
-    // Register a user-defined function with the same name as a stub
     let uri = Url::parse("file:///shadow.php").unwrap();
     let text = concat!(
         "<?php\n",
@@ -1128,13 +1099,6 @@ async fn test_completion_user_function_shadows_stub() {
             .iter()
             .map(|i| (&i.label, &i.detail))
             .collect::<Vec<_>>()
-    );
-
-    // The user-defined version should win: detail shows return type, description shows "function"
-    assert_eq!(
-        str_contains_items[0].detail.as_deref(),
-        Some("bool"),
-        "User-defined function should show return type as detail"
     );
 }
 

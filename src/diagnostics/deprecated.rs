@@ -18,17 +18,21 @@
 //! reusing this one's type.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
-use crate::types::ClassInfo;
-use crate::virtual_members::resolve_class_fully_cached;
+use crate::types::{ClassInfo, ClassLikeKind};
+use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
-use super::helpers::{FileDiagnosticContext, find_innermost_enclosing_class, resolve_to_fqn};
+use super::helpers::{
+    FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
+    make_tagged_diagnostic, resolve_to_fqn,
+};
 use super::subject_cache::SubjectCacheKey;
 
 impl Backend {
@@ -59,6 +63,16 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        // ── Parse cache for this diagnostic pass ────────────────────────
+        // Each subject resolution below re-parses the file via
+        // `with_parsed_program` unless a parse cache is active; one pass
+        // over a file with many distinct subjects must parse it once,
+        // not once per subject.
+        let _parse_guard = crate::parser::with_parse_cache(content);
+
+        // ── Chain resolution cache for this diagnostic pass ─────────────
+        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+
         // Cache of resolved variable types, keyed the same way as the
         // unknown-member pass so that all member accesses guaranteed to
         // see the same type share a single resolution pass.  This turns
@@ -88,11 +102,31 @@ impl Backend {
             function_loader: &function_loader,
         };
 
+        // A map extracted from different text than `content` describes a
+        // file this pass cannot report on: every offset it holds would
+        // land somewhere else.
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
+
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
-                SymbolKind::ClassReference { name, is_fqn, .. } => {
+                SymbolKind::ClassReference {
+                    name,
+                    is_fqn,
+                    context,
+                    ..
+                } => {
+                    // An import is not a usage: it only says which `Foo`
+                    // the names below mean.  Whatever the file does with
+                    // the class is flagged where it does it, and flagging
+                    // the import as well puts a second marker on code the
+                    // developer has already been told about.
+                    if matches!(context, ClassRefContext::UseImport) {
+                        continue;
+                    }
                     // Prefer mago-names byte-offset lookup when available —
                     // it applies PHP's full name resolution rules.  Fall
                     // back to the legacy resolve_to_fqn helper otherwise.
@@ -108,6 +142,14 @@ impl Backend {
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
+                        && !is_within_deprecated_scope(
+                            self,
+                            local_classes,
+                            &class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
@@ -135,7 +177,7 @@ impl Backend {
                     ..
                 } => {
                     // Resolve the subject type to a class.
-                    let subject_str = subject_text.as_str(content);
+                    let subject_str = subject_text.as_str(source);
                     let base_class = resolve_subject_to_class_name(
                         subject_str,
                         *is_static,
@@ -214,6 +256,14 @@ impl Backend {
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
                             && let Some(msg) = &method.deprecation_message
+                            && !is_within_deprecated_scope(
+                                self,
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -240,6 +290,14 @@ impl Backend {
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
                             && let Some(msg) = &prop.deprecation_message
+                            && !is_within_deprecated_scope(
+                                self,
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -263,6 +321,14 @@ impl Backend {
                             && let Some(constant) =
                                 resolved.constants.iter().find(|c| c.name == *member_name)
                             && let Some(msg) = &constant.deprecation_message
+                            && !is_within_deprecated_scope(
+                                self,
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -299,6 +365,14 @@ impl Backend {
                         file_use_map,
                         ctx.file.namespace_at(span.start),
                     ) && let Some(msg) = &func_info.deprecation_message
+                        && !is_within_deprecated_scope(
+                            self,
+                            local_classes,
+                            &class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
@@ -358,17 +432,76 @@ fn deprecated_diagnostic(
         format!("'{}' is deprecated: {}", display, full_message)
     };
 
-    Diagnostic {
+    make_tagged_diagnostic(
         range,
-        severity: Some(DiagnosticSeverity::HINT),
-        code: Some(NumberOrString::String("deprecated_usage".to_string())),
-        code_description: None,
-        source: Some("phpantom".to_string()),
+        DiagnosticSeverity::HINT,
+        "deprecated_usage",
         message,
-        related_information: None,
-        tags: Some(vec![DiagnosticTag::DEPRECATED]),
-        data: None,
+        Some(DiagnosticTag::DEPRECATED),
+    )
+}
+
+/// Whether `offset` sits inside a scope that PHPStan's own deprecation
+/// rule treats as deprecated: the enclosing class/trait itself, or the
+/// enclosing method.
+///
+/// The method check also covers an override that implements/overrides a
+/// deprecated interface or parent method without a `@deprecated` tag of
+/// its own — inheritance enrichment (`inheritance::enrichment`) already
+/// propagates `deprecation_message` onto such overrides, so a plain
+/// lookup on the resolved class is enough.
+///
+/// Mirrors `DefaultDeprecatedScopeResolver` in
+/// phpstan/phpstan-deprecation-rules: deprecated code calling other
+/// deprecated code isn't worth flagging (e.g. a `Type::hasProperty()`
+/// override delegating to the same deprecated method on other `Type`
+/// instances).
+fn is_within_deprecated_scope(
+    backend: &Backend,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: &ResolvedClassCache,
+    content: &str,
+    offset: u32,
+) -> bool {
+    let Some(enclosing) = find_innermost_enclosing_class(local_classes, offset) else {
+        return false;
+    };
+    if enclosing.deprecation_message.is_some() {
+        return true;
     }
+
+    let Some(method_name) = find_enclosing_method_name(content, offset) else {
+        return false;
+    };
+    let resolved = resolve_class_fully_cached(enclosing, class_loader, cache);
+    if resolved
+        .get_method(&method_name)
+        .is_some_and(|m| m.deprecation_message.is_some())
+    {
+        return true;
+    }
+
+    // A trait method never runs on the trait: PHP flattens it into every
+    // class that uses it, so whether it is the deprecated implementation
+    // of something is decided over there.  Read the bound all of its
+    // users satisfy — the same view of `$this` the type engine takes
+    // inside a trait body — and ask the question there.
+    if enclosing.kind != ClassLikeKind::Trait {
+        return false;
+    }
+    crate::type_engine::trait_context::trait_this_bounds(
+        enclosing,
+        local_classes,
+        class_loader,
+        Some(backend),
+    )
+    .iter()
+    .any(|bound| {
+        resolve_class_fully_cached(bound, class_loader, cache)
+            .get_method(&method_name)
+            .is_some_and(|m| m.deprecation_message.is_some())
+    })
 }
 
 /// Resolve a member access subject text to a class FQN.

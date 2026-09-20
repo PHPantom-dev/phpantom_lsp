@@ -18,6 +18,7 @@ pub(crate) mod forward_walk;
 pub(crate) mod raw_type_inference;
 pub(crate) mod resolution;
 pub(crate) mod rhs_resolution;
+pub(crate) mod string_func_rules;
 
 // ─── PHP array function classifications ─────────────────────────────────────
 //
@@ -38,6 +39,10 @@ pub(crate) mod rhs_resolution;
 // result comes from the stub patch in `crate::stub_patches` instead.
 // `array_chunk` is absent for a different reason: it adds a level of
 // nesting rather than rearranging entries, so it has its own rule in
+// `array_func_rules`.
+// `array_merge` is absent because it concatenates several arrays instead
+// of rearranging one, so its element type is the union of every argument's
+// and not the first argument's alone. It has its own rule in
 // `array_func_rules`.
 pub(crate) const ARRAY_PRESERVING_FUNCS: &[&str] = &[
     "array_filter",
@@ -60,7 +65,6 @@ pub(crate) const ARRAY_PRESERVING_FUNCS: &[&str] = &[
     "array_uintersect",
     "array_uintersect_assoc",
     "array_uintersect_uassoc",
-    "array_merge",
 ];
 
 /// Known array functions that extract a single element from the input

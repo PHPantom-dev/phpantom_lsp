@@ -1996,7 +1996,7 @@ function test(string $file): void {
 /// using a custom by-ref resolver callback.
 fn collect_from_function_with_resolver<F>(php: &str, resolver: F) -> ScopeMap
 where
-    F: Fn(&super::ByRefCallKind<'_>) -> Option<Vec<usize>>,
+    F: Fn(&super::ByRefCallKind<'_>, Option<&str>) -> Option<Vec<usize>>,
 {
     with_parsed_program(php, "test", |program, _content| {
         for stmt in program.statements.iter() {
@@ -2024,12 +2024,13 @@ function test(): void {
     echo $output;
 }
 "#;
-    let resolver = |kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> {
-        match kind {
-            super::ByRefCallKind::Function(name) if *name == "myFunc" => Some(vec![0]),
-            _ => None,
-        }
-    };
+    let resolver =
+        |kind: &super::ByRefCallKind<'_>, _enclosing_class: Option<&str>| -> Option<Vec<usize>> {
+            match kind {
+                super::ByRefCallKind::Function(name) if *name == "myFunc" => Some(vec![0]),
+                _ => None,
+            }
+        };
     let scope_map = collect_from_function_with_resolver(php, resolver);
     let writes = scope_map
         .accesses
@@ -2054,10 +2055,11 @@ function test(string $input): void {
     echo $match[0];
 }
 "#;
-    let resolver = |_kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> {
-        // Return None for everything — hardcoded table should still apply.
-        None
-    };
+    let resolver =
+        |_kind: &super::ByRefCallKind<'_>, _enclosing_class: Option<&str>| -> Option<Vec<usize>> {
+            // Return None for everything — hardcoded table should still apply.
+            None
+        };
     let scope_map = collect_from_function_with_resolver(php, resolver);
     let writes = scope_map
         .accesses
@@ -2080,16 +2082,17 @@ function test(): void {
     echo $errors;
 }
 "#;
-    let resolver = |kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> {
-        match kind {
-            super::ByRefCallKind::StaticMethod(class, method)
-                if *class == "Validator" && *method == "validate" =>
-            {
-                Some(vec![0])
+    let resolver =
+        |kind: &super::ByRefCallKind<'_>, _enclosing_class: Option<&str>| -> Option<Vec<usize>> {
+            match kind {
+                super::ByRefCallKind::StaticMethod(class, method)
+                    if *class == "Validator" && *method == "validate" =>
+                {
+                    Some(vec![0])
+                }
+                _ => None,
             }
-            _ => None,
-        }
-    };
+        };
     let scope_map = collect_from_function_with_resolver(php, resolver);
     let writes = scope_map
         .accesses
@@ -2112,12 +2115,13 @@ function test(): void {
     echo $warnings;
 }
 "#;
-    let resolver = |kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> {
-        match kind {
-            super::ByRefCallKind::Constructor(class) if *class == "Parser" => Some(vec![0]),
-            _ => None,
-        }
-    };
+    let resolver =
+        |kind: &super::ByRefCallKind<'_>, _enclosing_class: Option<&str>| -> Option<Vec<usize>> {
+            match kind {
+                super::ByRefCallKind::Constructor(class) if *class == "Parser" => Some(vec![0]),
+                _ => None,
+            }
+        };
     let scope_map = collect_from_function_with_resolver(php, resolver);
     let writes = scope_map
         .accesses
@@ -2139,7 +2143,9 @@ function test(): void {
     unknownFunc($var);
 }
 "#;
-    let resolver = |_kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> { None };
+    let resolver = |_kind: &super::ByRefCallKind<'_>,
+                    _enclosing_class: Option<&str>|
+     -> Option<Vec<usize>> { None };
     let scope_map = collect_from_function_with_resolver(php, resolver);
     let reads = scope_map
         .accesses
@@ -2163,12 +2169,13 @@ function test(string $input): void {
     echo $result;
 }
 "#;
-    let resolver = |kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> {
-        match kind {
-            super::ByRefCallKind::Function(name) if *name == "transform" => Some(vec![1]),
-            _ => None,
-        }
-    };
+    let resolver =
+        |kind: &super::ByRefCallKind<'_>, _enclosing_class: Option<&str>| -> Option<Vec<usize>> {
+            match kind {
+                super::ByRefCallKind::Function(name) if *name == "transform" => Some(vec![1]),
+                _ => None,
+            }
+        };
     let scope_map = collect_from_function_with_resolver(php, resolver);
 
     // $input (arg 0) should be a Read.
@@ -2201,16 +2208,17 @@ function test(): void {
     echo $output;
 }
 "#;
-    let resolver = |kind: &super::ByRefCallKind<'_>| -> Option<Vec<usize>> {
-        match kind {
-            super::ByRefCallKind::StaticMethod(class, method)
-                if *class == "self" && *method == "parse" =>
-            {
-                Some(vec![0])
+    let resolver =
+        |kind: &super::ByRefCallKind<'_>, _enclosing_class: Option<&str>| -> Option<Vec<usize>> {
+            match kind {
+                super::ByRefCallKind::StaticMethod(class, method)
+                    if *class == "self" && *method == "parse" =>
+                {
+                    Some(vec![0])
+                }
+                _ => None,
             }
-            _ => None,
-        }
-    };
+        };
     let scope_map = collect_from_function_with_resolver(php, resolver);
     let writes = scope_map
         .accesses

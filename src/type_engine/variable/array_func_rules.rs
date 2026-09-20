@@ -40,6 +40,15 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// `array_filter($a, $cb)` differ only in this.
     fn has_arg(&self, index: usize) -> bool;
 
+    /// Whether the argument at `index` is unpacked with `...`.
+    ///
+    /// A spread holds the values for *several* parameters rather than one,
+    /// so its own type describes a different level of nesting than the rules
+    /// expect: `array_merge(...$arrays)` passes a `list<list<T>>` where the
+    /// rule reads a `list<T>`. A rule that walks the argument list has to
+    /// decline as soon as it sees one.
+    fn is_spread(&self, index: usize) -> bool;
+
     /// The return type the callback at `index` declares: the `: T` hint of
     /// an inline closure or arrow function, or the declared return of the
     /// function a callable string names (`'intval'`).  `None` when the
@@ -50,6 +59,14 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// function at `index`, with its first parameter seeded to
     /// `param_type`.
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType>;
+
+    /// Whether `inferred` is a subtype of `declared`, following the class
+    /// hierarchy rather than just the two types' structure.
+    ///
+    /// A closure's real return type is the intersection of what it declares
+    /// and what its body produces (PHPStan's `intersectButNotNever`), which
+    /// for a hierarchy pair is simply the narrower of the two.
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool;
 
     /// The argument at `index` written as a bare constant name or integer
     /// literal (`ARRAY_FILTER_USE_KEY`, `2`), with any namespace prefix
@@ -81,6 +98,12 @@ pub(in crate::type_engine) fn array_func_raw_type(
     // the bare name.  Normalising here covers both the AST and the
     // text-driven caller at once.
     let func_name = func_name.trim_start_matches('\\');
+
+    // `array_merge` appends every argument instead of rearranging one, so
+    // the result describes all of them together rather than just the first.
+    if func_name.eq_ignore_ascii_case("array_merge") {
+        return array_merge_type(args);
+    }
 
     // Type-preserving functions: output array has same element type.
     if ARRAY_PRESERVING_FUNCS
@@ -138,6 +161,14 @@ pub(in crate::type_engine) fn array_func_raw_type(
         };
         // The outer array is always renumbered, whatever the inner keys do.
         return Some(PhpType::list(chunk));
+    }
+
+    // `range` builds its elements from the bounds rather than from an array
+    // it was handed, and a single fractional bound makes the whole range
+    // fractional. That is a question about every argument at once, which the
+    // conditional return type in `stub_patches` cannot ask.
+    if func_name.eq_ignore_ascii_case("range") {
+        return range_type(args);
     }
 
     // array_map: callback is first arg, array is second.
@@ -229,11 +260,29 @@ pub(in crate::type_engine) fn array_func_element_type(
     }
 
     if matches!(func_name, "array_sum" | "array_product") {
-        let element = args.arg_raw_type(0)?.iterable_element_type()?;
+        // An array nobody typed the elements of decides neither half, and
+        // the sum is then exactly what adding two `mixed` values is: the
+        // pair, benevolent, because it is a gap in what the code said
+        // rather than a value measured to be two things. Enforcing both
+        // halves reported `array_sum($bytes)` handed to an `int` parameter
+        // as a mismatch on code that is fine. PHPStan reaches the same
+        // answer by summing the element type with itself.
+        let undecided = || {
+            Some(PhpType::benevolent(PhpType::union(vec![
+                PhpType::int(),
+                PhpType::float(),
+            ])))
+        };
+        let Some(element) = args.arg_raw_type(0).and_then(|a| a.iterable_element_type()) else {
+            return undecided();
+        };
         let members: Vec<&PhpType> = match element.kind() {
             TypeKind::Union(m) => m.iter().collect(),
             _ => vec![&element],
         };
+        if members.iter().any(|m| m.is_mixed()) {
+            return undecided();
+        }
         let (int_ty, float_ty) = (PhpType::int(), PhpType::float());
         let all_int = members.iter().all(|m| m.is_subtype_of(&int_ty));
         if all_int {
@@ -280,6 +329,103 @@ pub(in crate::type_engine) fn callable_string_function_name(text: &str) -> Optio
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\');
     is_name.then_some(name)
+}
+
+/// The list a numeric `range()` builds.
+///
+/// PHP walks from `$start` to `$end` in `$step`s, and the result is integral
+/// only when all three are: one fractional bound (or step) makes every element
+/// a float. So the answer is decided by the bounds *together*, and a single
+/// argument that cannot be typed leaves the whole call undecided.
+///
+/// Declining hands the call back to the stub's own
+/// `($start is string ? list<string> : list<int|float>)`, which is the right
+/// answer both for a character range and for a numeric one whose bounds are
+/// not known — so this rule only has to recognise the two it can prove.
+///
+/// `int` is a subtype of `float` here (PHP widens it silently), so the
+/// integral case has to be tested first: `list<int>` would otherwise read as
+/// an all-float range.
+fn range_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let mut bounds = vec![args.arg_raw_type(0)?, args.arg_raw_type(1)?];
+    if args.has_arg(2) {
+        bounds.push(args.arg_raw_type(2)?);
+    }
+    let int_ty = PhpType::int();
+    if bounds.iter().all(|b| b.is_subtype_of(&int_ty)) {
+        return Some(PhpType::list(int_ty));
+    }
+    let float_ty = PhpType::float();
+    bounds
+        .iter()
+        .all(|b| b.is_subtype_of(&float_ty))
+        .then(|| PhpType::list(float_ty))
+}
+
+/// The type `array_merge` builds from its arguments.
+///
+/// PHP appends each argument in turn, so the values are the union of every
+/// argument's. This is the whole point of the rule: `array_merge` is the
+/// one member of the array family that concatenates rather than rearranges,
+/// and reading only the first argument left the accumulator idiom
+/// (`$out = []; … $out = array_merge($out, $more);`) permanently typed as
+/// the empty array it started as.
+///
+/// An empty array shape adds neither a key nor a value and is skipped,
+/// which is what lets `array_merge([], $items)` answer `list<Item>`.  Any
+/// other argument that cannot be typed could contribute anything, so the
+/// rule declines rather than claim a union that is missing a member.
+///
+/// The keys follow two different rules: an integer key is renumbered as the
+/// entry is appended, while a string key is carried over (a later argument
+/// overwriting an earlier one). So the result is a `list` exactly when
+/// every argument promises integer keys, and keeps only the string half
+/// when none of them does.
+///
+/// An argument that names just its value type (`array<T>`, `T[]`, bare
+/// `array`) promises nothing about its keys, and neither can the result:
+/// those merge to `array<V>`, the same open domain that went in. Spelling
+/// the domain out as `int|string` instead would be the honest reading of
+/// what PHP allows, but it collides with every consumer that reads the
+/// implicit `int` of a `T[]`, and turns a `T[]` a signature accepts today
+/// into an argument it rejects.
+fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let int_ty = PhpType::int();
+    let mut values: Vec<PhpType> = Vec::new();
+    let mut keys: Vec<PhpType> = Vec::new();
+    let mut open_keys = false;
+    let mut index = 0;
+    while args.has_arg(index) {
+        if args.is_spread(index) {
+            return None;
+        }
+        let raw = args.arg_raw_type(index)?;
+        if raw.is_empty_array_shape() {
+            index += 1;
+            continue;
+        }
+        let container = raw.generalized_array();
+        values.push(container.iterable_element_type()?);
+        match array_key_domain(&container) {
+            Some(key) => keys.push(key),
+            None => open_keys = true,
+        }
+        index += 1;
+    }
+
+    // Every argument was an empty shape, so there is nothing to name.
+    if values.is_empty() {
+        return None;
+    }
+    let value = PhpType::join_runtime_value_types(values);
+    if open_keys {
+        return Some(PhpType::generic_array_val(value));
+    }
+    let key = PhpType::join_runtime_value_types(keys);
+    if key.is_subtype_of(&int_ty) {
+        return Some(PhpType::list(value));
+    }
+    Some(PhpType::generic_array(key, value))
 }
 
 /// The type of `max()`/`min()`'s result.
@@ -347,7 +493,7 @@ fn widen_non_bool_scalar_literals(ty: &PhpType) -> PhpType {
 /// guess for iteration but an over-claim for anything reporting a key back
 /// to the user. Those come back as `None` here so the caller can decline
 /// rather than invent an `int` the argument never promised.
-fn array_key_domain(ty: &PhpType) -> Option<PhpType> {
+pub(crate) fn array_key_domain(ty: &PhpType) -> Option<PhpType> {
     (!ty.has_open_key_domain())
         .then(|| ty.iterable_key_type())
         .flatten()
@@ -369,9 +515,14 @@ fn array_map_container(element: PhpType, args: &dyn ArrayFuncArgs) -> PhpType {
     if is_list_type(&input) {
         return PhpType::list(element);
     }
-    match input.iterable_key_type() {
+    // Keys are carried over untouched, so an input that never named its key
+    // type produces a result that cannot name one either. Answering
+    // `array<int, T>` (or `list<T>`) here would invent the `0, 1, 2, …` an
+    // `array<T>` input never promised, and the invention then contradicts
+    // whatever the caller assigns the result to.
+    match array_key_domain(&input) {
         Some(key) => PhpType::generic_array(key, element),
-        None => PhpType::list(element),
+        None => PhpType::generic_array_val(element),
     }
 }
 
@@ -433,7 +584,7 @@ fn filter_element_type(raw: &PhpType) -> Option<PhpType> {
 
 /// Rebuild an iterable type around a new element type, keeping the
 /// container it already names.
-fn with_element_type(raw: &PhpType, element: PhpType) -> Option<PhpType> {
+pub(crate) fn with_element_type(raw: &PhpType, element: PhpType) -> Option<PhpType> {
     match raw.kind() {
         TypeKind::Array(_) => Some(PhpType::array_of(element)),
         TypeKind::Generic(g) if !g.args.is_empty() => {
@@ -552,7 +703,10 @@ fn filter_key_param_index(args: &dyn ArrayFuncArgs) -> Option<usize> {
 ///
 /// Strategy:
 /// 1. If the callback (first arg) is a closure/arrow function with a
-///    return type hint, use that.
+///    return type hint, use that — narrowed by what the body returns,
+///    since a callback may declare a supertype of what it produces
+///    (`fn (X $p): MethodReflection => $p->getTransformedMethod()` really
+///    returns the `ExtendedMethodReflection` the body hands back).
 /// 2. Otherwise infer it from the callback body, with the callback's
 ///    first parameter seeded to the input array's element type.
 /// 3. Otherwise assume the callback passes its element through.
@@ -560,7 +714,19 @@ fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     if let Some(declared) = args.callback_declared_return_type(0)
         && !declared.is_untyped()
     {
-        return Some(declared);
+        // Only a class-like declaration can be narrowed by a hierarchy
+        // relation, so a scalar one skips the body walk entirely.
+        if declared.is_scalar_leaf() {
+            return Some(declared);
+        }
+        let seed = args
+            .arg_raw_type(1)
+            .and_then(|t| t.iterable_element_type())
+            .unwrap_or_else(PhpType::mixed);
+        let narrowed = args
+            .callback_inferred_return_type(0, &seed)
+            .filter(|inferred| args.narrows(inferred, &declared));
+        return Some(narrowed.unwrap_or(declared));
     }
 
     let input_element = args.arg_raw_type(1)?.iterable_element_type()?;

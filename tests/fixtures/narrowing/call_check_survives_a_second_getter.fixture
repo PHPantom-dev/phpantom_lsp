@@ -1,0 +1,25 @@
+// test: reading another getter on the receiver leaves the check standing
+// feature: hover
+// Guard one accessor, then read a second one on the same object: ordinary
+// code, and the second read is not an event that unproves the first guard.
+// A method that computes a value is read as computing it, not as writing.
+// expect: $name = string
+// expect_absent: false
+---
+<?php
+
+class Refl {
+    /** @return string|false */
+    public function getFileName() { return false; }
+
+    /** @return string|false */
+    public function getDocComment() { return false; }
+}
+
+function run(Refl $refl): void {
+    if ($refl->getFileName() !== false) {
+        $doc = $refl->getDocComment();
+        $name = $refl->getFileName();
+        echo $na<>me;
+    }
+}

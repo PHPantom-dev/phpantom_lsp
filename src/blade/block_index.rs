@@ -497,27 +497,8 @@ impl Backend {
                 crate::text_position::byte_range_to_lsp_range(&content, span.start, span.end);
             out.push(Location {
                 uri: url.clone(),
-                range: self.blade_range_as_virtual(&entry.uri, range),
+                range: self.translate_blade_range_to_php(&entry.uri, range),
             });
-        }
-    }
-
-    /// Restate a range read off a template's own source in the coordinates
-    /// the LSP layer expects a location in a Blade file to arrive in.
-    ///
-    /// Every location that points into a template is translated from
-    /// virtual PHP back to Blade on its way out, because that is where the
-    /// symbol map puts them. A range read from the raw template has to be
-    /// mapped the other way first, or that translation would shift it. A
-    /// template nobody has open has no source map and needs no mapping.
-    fn blade_range_as_virtual(
-        &self,
-        uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> tower_lsp::lsp_types::Range {
-        tower_lsp::lsp_types::Range {
-            start: self.translate_blade_to_php(uri, range.start),
-            end: self.translate_blade_to_php(uri, range.end),
         }
     }
 }

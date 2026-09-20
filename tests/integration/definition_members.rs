@@ -2643,6 +2643,86 @@ async fn test_goto_definition_class_declaration_returns_self_location() {
     }
 }
 
+/// Regression for github #389: Ctrl+Click on a class name at its own
+/// declaration site returns the self-location even when the class
+/// extends a parent.  Jumping to the parent made usages unreachable
+/// for any subclass: editors only fall back to Find References when
+/// the returned location equals the cursor position.  The `extends`
+/// clause is the place that navigates to the parent.
+#[tokio::test]
+async fn test_goto_definition_subclass_declaration_returns_self_location() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{
+            "autoload": { "psr-4": { "App\\": "src/" } }
+        }"#,
+        &[
+            (
+                "src/ServiceEntityRepository.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class ServiceEntityRepository {}\n",
+                ),
+            ),
+            (
+                "src/UserRepository.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class UserRepository extends ServiceEntityRepository {}\n",
+                ),
+            ),
+        ],
+    );
+
+    let repo_path = dir.path().join("src/UserRepository.php");
+    let repo_uri = Url::from_file_path(&repo_path).unwrap();
+    let repo_content = std::fs::read_to_string(&repo_path).unwrap();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: repo_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: repo_content,
+            },
+        })
+        .await;
+
+    // Click on "UserRepository" in `class UserRepository extends ...`
+    // on line 2.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: repo_uri.clone(),
+            },
+            position: Position {
+                line: 2,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    let locations = match result {
+        Some(GotoDefinitionResponse::Array(locs)) => locs,
+        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+        other => panic!("Expected self-location, got: {other:?}"),
+    };
+    assert_eq!(locations.len(), 1, "should return exactly one location");
+    assert_eq!(
+        locations[0].uri, repo_uri,
+        "should return the subclass declaration's own location, not the parent class"
+    );
+    assert_eq!(
+        locations[0].range.start.line, 2,
+        "should point back to the declaration line"
+    );
+}
+
 /// Regression for github #125: "Declaration or Usages" (PHPStorm's
 /// CMD+B) on an interface declaration should surface the classes that
 /// implement it.  PHPStorm issues `textDocument/definition` and simply

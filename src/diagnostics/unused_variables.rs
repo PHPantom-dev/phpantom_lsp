@@ -16,9 +16,13 @@ use std::collections::{HashMap, HashSet};
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
+use super::helpers::make_tagged_diagnostic;
+
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::diagnostics::undefined_variables::{collect_compact_vars, has_get_defined_vars};
+use crate::diagnostics::undefined_variables::{
+    collect_compact_vars, collect_import_offsets, has_get_defined_vars,
+};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessKind, FrameKind, ScopeBody, ScopeMap, collect_function_scope_with_kind,
@@ -109,6 +113,7 @@ impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'
         let body = ScopeBody::Statements(func.body.statements.as_slice());
         let compact_vars = collect_compact_vars(body);
         let has_get_defined = has_get_defined_vars(body);
+        let imports = collect_import_offsets(body);
         let scope = collect_function_scope_with_resolver(
             &func.parameter_list,
             func.body.statements.as_slice(),
@@ -116,7 +121,7 @@ impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'
             body_end,
             None,
         );
-        check_scope(&scope, ctx, None, &compact_vars, has_get_defined);
+        check_scope(&scope, ctx, None, &compact_vars, has_get_defined, &imports);
     }
 
     fn walk_in_method(&self, method: &'ast Method<'arena>, ctx: &mut DiagnosticCtx<'a>) {
@@ -132,6 +137,7 @@ impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'
         let body = ScopeBody::Statements(block.statements.as_slice());
         let compact_vars = collect_compact_vars(body);
         let has_get_defined = has_get_defined_vars(body);
+        let imports = collect_import_offsets(body);
         let scope = collect_function_scope_with_kind(
             &method.parameter_list,
             block.statements.as_slice(),
@@ -146,6 +152,7 @@ impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'
             Some(&promoted_params),
             &compact_vars,
             has_get_defined,
+            &imports,
         );
     }
 }
@@ -169,12 +176,17 @@ fn collect_promoted_params(params: &FunctionLikeParameterList<'_>) -> HashSet<St
 ///
 /// `promoted_params` is `Some` when checking a method — it lists
 /// constructor promoted parameter names that should be skipped.
+///
+/// `import_offsets` holds the start offset of every `include`/`require` in
+/// the body; a frame containing one is left alone entirely (see
+/// [`frame_owns_import`]).
 fn check_scope(
     scope: &ScopeMap,
     ctx: &mut DiagnosticCtx<'_>,
     promoted_params: Option<&HashSet<String>>,
     compact_vars: &HashSet<String>,
     has_get_defined_vars: bool,
+    import_offsets: &[u32],
 ) {
     if scope.frames.is_empty() {
         return;
@@ -205,6 +217,16 @@ fn check_scope(
         // function/method scope. Nested closures, arrow functions, and catch
         // blocks still need their own unused-variable analysis.
         if has_get_defined_vars && matches!(frame.kind, FrameKind::Function | FrameKind::Method) {
+            continue;
+        }
+
+        // An `include`/`require` runs the target file in this frame's own
+        // variable scope, so any local here can be read from a file this
+        // analysis never sees.
+        if import_offsets
+            .iter()
+            .any(|&offset| frame_owns_import(offset, frame, &scope.frames))
+        {
             continue;
         }
 
@@ -349,17 +371,13 @@ fn check_scope(
 
             let message = format!("Unused variable '{}'", var_name);
 
-            ctx.diagnostics.push(Diagnostic {
+            ctx.diagnostics.push(make_tagged_diagnostic(
                 range,
-                severity: Some(DiagnosticSeverity::HINT),
-                code: Some(NumberOrString::String(UNUSED_VARIABLE_CODE.to_string())),
-                code_description: None,
-                source: Some("phpantom".to_string()),
+                DiagnosticSeverity::HINT,
+                UNUSED_VARIABLE_CODE,
                 message,
-                related_information: None,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                data: None,
-            });
+                Some(DiagnosticTag::UNNECESSARY),
+            ));
         }
     }
 }
@@ -428,17 +446,13 @@ fn check_catch_frame(
             None => continue,
         };
 
-        ctx.diagnostics.push(Diagnostic {
+        ctx.diagnostics.push(make_tagged_diagnostic(
             range,
-            severity: Some(DiagnosticSeverity::HINT),
-            code: Some(NumberOrString::String(UNUSED_VARIABLE_CODE.to_string())),
-            code_description: None,
-            source: Some("phpantom".to_string()),
-            message: format!("Unused variable '{}'", var_name),
-            related_information: None,
-            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-            data: None,
-        });
+            DiagnosticSeverity::HINT,
+            UNUSED_VARIABLE_CODE,
+            format!("Unused variable '{}'", var_name),
+            Some(DiagnosticTag::UNNECESSARY),
+        ));
     }
 }
 
@@ -453,6 +467,33 @@ fn has_reads_in_scope(name: &str, frame: &crate::scope_collector::Frame, scope: 
             && a.offset >= frame.start
             && a.offset <= frame.end
             && !is_in_nested_closure(a.offset, frame, &scope.frames)
+    })
+}
+
+/// Check whether the `include`/`require` at `offset` runs in `frame`'s own
+/// variable scope.
+///
+/// Catch blocks share the enclosing scope, so an import inside one exposes
+/// the enclosing frame's locals too; a closure, arrow function, or named
+/// function nested in between gets its own scope, which is where the import
+/// stops.
+fn frame_owns_import(
+    offset: u32,
+    frame: &crate::scope_collector::Frame,
+    frames: &[crate::scope_collector::Frame],
+) -> bool {
+    if offset < frame.start || offset > frame.end {
+        return false;
+    }
+    !frames.iter().any(|f| {
+        f.start > frame.start
+            && f.end < frame.end
+            && offset >= f.start
+            && offset <= f.end
+            && matches!(
+                f.kind,
+                FrameKind::Closure | FrameKind::ArrowFunction | FrameKind::Function
+            )
     })
 }
 

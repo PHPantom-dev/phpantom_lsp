@@ -8,6 +8,7 @@ use crate::Backend;
 use crate::atom::AtomMap;
 
 use crate::php_type::PhpType;
+use crate::type_engine::variable::forward_walk::ScopeProofs;
 use crate::types::*;
 
 // ─── Thread-local chain resolution cache ────────────────────────────────────
@@ -37,20 +38,7 @@ thread_local! {
 }
 
 /// RAII guard that clears the thread-local chain cache on drop.
-pub(crate) struct ChainCacheGuard {
-    /// `true` when this guard owns the cache (outermost activation).
-    owns: bool,
-}
-
-impl Drop for ChainCacheGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            CHAIN_CACHE.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
+pub(crate) type ChainCacheGuard = crate::type_engine::MemoGuard<HashMap<String, Vec<ResolvedType>>>;
 
 /// Activate the thread-local chain resolution cache.
 ///
@@ -60,14 +48,7 @@ impl Drop for ChainCacheGuard {
 ///
 /// Nested activations are no-ops — the outermost guard owns the cache.
 pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
-    let already_active = CHAIN_CACHE.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return ChainCacheGuard { owns: false };
-    }
-    CHAIN_CACHE.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    ChainCacheGuard { owns: true }
+    crate::type_engine::activate_memo(&CHAIN_CACHE)
 }
 
 /// Puts back the chain cache [`with_isolated_chain_cache`] set aside.
@@ -160,6 +141,62 @@ impl<'a> Loaders<'a> {
             constant_loader: None,
             config_resolver: None,
             trans_resolver: None,
+        }
+    }
+}
+
+/// Anything that owns the closures a [`Loaders`] borrows and can lend
+/// one out.
+///
+/// The closures a diagnostic collector passes down capture the
+/// `Backend`, which makes them unnameable, so a factory cannot return a
+/// `Loaders` directly: the references inside it would outlive the
+/// temporaries they point at. A caller binds one of these to a local
+/// instead and calls [`LendsLoaders::loaders`] on it.
+/// [`crate::Backend::diagnostic_loaders`] is the usual way to get one.
+pub(crate) trait LendsLoaders {
+    /// Borrow the owned closures as a [`Loaders`].
+    fn loaders(&self) -> Loaders<'_>;
+}
+
+/// The four closures a [`Loaders`] borrows, held by value.
+pub(crate) struct OwnedLoaders<F, C, G, T> {
+    function_loader: F,
+    constant_loader: C,
+    config_resolver: G,
+    trans_resolver: T,
+}
+
+impl<F, C, G, T> OwnedLoaders<F, C, G, T> {
+    /// Bundle four already-built loaders.
+    pub(crate) fn new(
+        function_loader: F,
+        constant_loader: C,
+        config_resolver: G,
+        trans_resolver: T,
+    ) -> Self {
+        Self {
+            function_loader,
+            constant_loader,
+            config_resolver,
+            trans_resolver,
+        }
+    }
+}
+
+impl<F, C, G, T> LendsLoaders for OwnedLoaders<F, C, G, T>
+where
+    F: Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    C: Fn(&str, u32) -> Option<Option<String>>,
+    G: Fn(&str) -> Option<crate::php_type::PhpType>,
+    T: Fn(&str) -> Option<crate::php_type::PhpType>,
+{
+    fn loaders(&self) -> Loaders<'_> {
+        Loaders {
+            function_loader: Some(&self.function_loader),
+            constant_loader: Some(&self.constant_loader),
+            config_resolver: Some(&self.config_resolver),
+            trans_resolver: Some(&self.trans_resolver),
         }
     }
 }
@@ -270,6 +307,15 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// variable's types from the forward walker's in-progress
     /// `ScopeState`.
     pub scope_var_resolver: ScopeVarResolverFn<'a>,
+    /// The proofs that scope holds which are not variable types: what a
+    /// boolean stands for, which `preg_match` outcome a variable is, and
+    /// whose null a value's null stands for.
+    ///
+    /// Set alongside `scope_var_resolver`; `None` where no walker scope
+    /// exists.  Narrowing a ternary arm or a `match` arm reads these, so
+    /// a condition that tests a boolean recording an earlier check
+    /// narrows that check's subject instead of only the boolean.
+    pub scope_proofs: Option<ScopeProofs<'a>>,
 }
 
 impl<'a> VarResolutionCtx<'a> {
@@ -338,6 +384,7 @@ impl<'a> VarResolutionCtx<'a> {
             branch_aware: self.branch_aware,
             match_arm_narrowing: self.match_arm_narrowing.clone(),
             scope_var_resolver: self.scope_var_resolver,
+            scope_proofs: self.scope_proofs,
         }
     }
 
@@ -384,6 +431,7 @@ impl<'a> VarResolutionCtx<'a> {
             branch_aware: self.branch_aware,
             match_arm_narrowing,
             scope_var_resolver: self.scope_var_resolver,
+            scope_proofs: self.scope_proofs,
         }
     }
 }

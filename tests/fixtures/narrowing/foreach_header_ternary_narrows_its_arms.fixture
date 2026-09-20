@@ -1,0 +1,20 @@
+// test: an instanceof ternary in a foreach header narrows the arm that uses it
+// feature: completion
+// expect: getTypes(
+---
+<?php
+
+interface TypeNode {}
+
+class UnionNode implements TypeNode
+{
+    /** @return list<TypeNode> */
+    public function getTypes(): array { return []; }
+}
+
+function walk(TypeNode $type): void
+{
+    foreach ($type instanceof UnionNode ? $type-><> : [$type] as $inner) {
+        echo get_class($inner);
+    }
+}

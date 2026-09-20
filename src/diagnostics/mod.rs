@@ -104,6 +104,11 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **Member visibility diagnostics** — report a `private` or
+//!   `protected` property, method, or class constant reached from a
+//!   scope PHP does not let see it.  Emitted from the unknown-member
+//!   walk, which has already resolved the subject.  Suppressed when the
+//!   class declares a magic handler that would answer for the member.
 //! - **Readonly write diagnostics** — report writes to a `readonly`
 //!   property from outside the class that declares it, and second
 //!   writes from inside it once the constructor has initialized the
@@ -213,7 +218,9 @@
 
 mod argument_count;
 mod blade_call_site;
+mod blade_component_tags;
 mod blade_directives;
+mod blade_imbalance;
 mod blade_sections;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;
@@ -229,6 +236,7 @@ mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
 mod match_type_errors;
+pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
@@ -255,6 +263,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::type_engine::resolver::LendsLoaders;
 
 /// Callback invoked after each Phase 2 collector in
 /// [`Backend::collect_slow_diagnostics_observed`]: receives the
@@ -343,6 +352,69 @@ impl Backend {
         uri_str: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
+        observe: Option<SlowDiagnosticObserver<'_>>,
+    ) {
+        // Where this pass's own diagnostics start, so the reachability
+        // filter below only judges what the collectors add and leaves any
+        // fast diagnostics the caller already collected.
+        let slow_start = out.len();
+
+        // ── Phase 2: forward-walked diagnostic scope cache ──────
+        // Walk every function/method body in the file once with the
+        // forward walker, recording scope snapshots at each statement
+        // boundary.  All subsequent `resolve_variable_types` calls
+        // from diagnostic collectors hit the cache (O(log N) lookup)
+        // instead of doing a full backward scan per member-access
+        // span.  This eliminates the O(N × depth × file_size) cost
+        // that caused multi-minute analysis times on large files.
+        //
+        // Held here rather than around the collectors alone: the same
+        // walk records which branches cannot run, and the filter below
+        // reads those ranges once the collectors are done.
+        let _scope_guard =
+            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
+
+        self.run_slow_collectors(uri_str, content, out, observe);
+
+        // ── Drop what a branch that cannot run reported ──────────────
+        // The collectors each walk spans of their own with no notion of
+        // control flow, so they judge a branch a decidable guard rules
+        // out exactly as readily as live code.  The walk that built the
+        // scope cache recorded those branches; nothing inside one is a
+        // finding.
+        let unreachable = crate::type_engine::variable::forward_walk::unreachable_ranges();
+        if !unreachable.is_empty() {
+            let dead: Vec<Range> = unreachable
+                .iter()
+                .filter_map(|&(start, end)| {
+                    offset_range_to_lsp_range(content, start as usize, end as usize)
+                })
+                .collect();
+            let mut i = slow_start;
+            while i < out.len() {
+                let start = out[i].range.start;
+                if dead
+                    .iter()
+                    .any(|range| start >= range.start && start < range.end)
+                {
+                    out.remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// Run every slow collector for `uri_str`, in order.
+    ///
+    /// Split out from [`Self::collect_slow_diagnostics_observed`] so the
+    /// observer's "stop here" can return from the collector list while
+    /// the reachability filter still runs on what was collected.
+    fn run_slow_collectors(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
         mut observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
         // Activate the chain resolution cache so that all slow
@@ -362,17 +434,6 @@ impl Backend {
         // `Product::query()->where(...)` call site in the file.
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
-        // ── Phase 2: forward-walked diagnostic scope cache ──────
-        // Walk every function/method body in the file once with the
-        // forward walker, recording scope snapshots at each statement
-        // boundary.  All subsequent `resolve_variable_types` calls
-        // from diagnostic collectors hit the cache (O(log N) lookup)
-        // instead of doing a full backward scan per member-access
-        // span.  This eliminates the O(N × depth × file_size) cost
-        // that caused multi-minute analysis times on large files.
-        let _scope_guard =
-            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
-
         // ── Shared per-file snapshot for the symbol-span collectors ────
         // Built once and reused by the forward-walker warm-up below and
         // by the six collectors that walk `SymbolMap` spans, so a single
@@ -386,22 +447,13 @@ impl Backend {
 
         if let Some(ctx) = &file_ctx {
             let class_loader = self.class_loader(&ctx.file);
-            let function_loader_cl = self.function_loader(&ctx.file);
-            let constant_loader_cl = self.constant_loader(&ctx.file);
-            let config_resolver = |key: &str| self.resolve_config_type(key);
-            let trans_resolver = |key: &str| self.resolve_trans_type(key);
-            let loaders = crate::type_engine::resolver::Loaders {
-                function_loader: Some(&function_loader_cl),
-                constant_loader: Some(&constant_loader_cl),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
+            let owned_loaders = self.diagnostic_loaders(&ctx.file);
             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,
                 &ctx.file.classes,
                 &class_loader,
                 Some(self),
-                loaders,
+                owned_loaders.loaders(),
                 Some(&self.resolved_class_cache),
             );
         }
@@ -525,6 +577,10 @@ impl Backend {
             step!(
                 "blade_directive_balance",
                 self.collect_blade_directive_diagnostics(uri_str, out)
+            );
+            step!(
+                "blade_component_tag_balance",
+                self.collect_blade_component_tag_diagnostics(uri_str, out)
             );
             step!(
                 "blade_section",
@@ -733,18 +789,39 @@ impl Backend {
         } else {
             (HashSet::new(), Vec::new(), Vec::new())
         };
-        let config_keys: HashSet<String> = if has_config {
-            self.cached_config_keys().into_iter().collect()
+        // A library is installed into an application that declares the
+        // configuration it reads, and that application is a file we never
+        // see, so none of its keys can be judged.  Only an application owns
+        // the whole of its configuration.
+        let has_config = has_config && self.is_application_project();
+        let declared_config_keys: Vec<String> = if has_config {
+            self.cached_config_keys()
+        } else {
+            Vec::new()
+        };
+        // A key that `Config::set()` or the array form of the `config()`
+        // helper establishes is as real as one a `config/` file declares; a
+        // test that configures a disk in `setUp()` before exercising it is
+        // the common shape.
+        let written_config_keys = if has_config {
+            self.runtime_config_keys()
         } else {
             HashSet::new()
         };
         // The config files we managed to enumerate keys from, by name.  A
         // key whose root segment names none of them lives in a file we
-        // cannot see (a library whose config is supplied by the host
-        // application), so nothing about it is knowable.
-        let config_roots: HashSet<&str> = config_keys
+        // cannot see, so nothing about it is knowable.  A runtime write is
+        // deliberately not a root of its own: the keys one file writes say
+        // nothing about what the rest of that namespace holds, least of all
+        // when the writes that established it were spelled dynamically.
+        let config_roots: HashSet<&str> = declared_config_keys
             .iter()
             .map(|key| key.split('.').next().unwrap_or(key.as_str()))
+            .collect();
+        let config_keys: HashSet<&str> = declared_config_keys
+            .iter()
+            .chain(written_config_keys.iter())
+            .map(String::as_str)
             .collect();
         let view_keys: HashSet<String> = if has_view {
             self.cached_view_names().into_iter().collect()
@@ -882,11 +959,18 @@ impl Backend {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.
-                    let valid = config_keys.contains(key)
+                    // which are valid even without a direct match.  The other
+                    // direction holds for a key written at runtime: the value
+                    // it stored is opaque to us, so every path under it is
+                    // beyond judging as well.
+                    let valid = config_keys.contains(key.as_str())
                         || config_keys
                             .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
+                            .any(|k| k.starts_with(&format!("{}.", key)))
+                        || written_config_keys.iter().any(|written| {
+                            key.strip_prefix(written.as_str())
+                                .is_some_and(|rest| rest.starts_with('.'))
+                        });
                     (valid, "config key", "invalid_laravel_config")
                 }
                 CheckedStringKind::View => {
@@ -998,8 +1082,8 @@ impl Backend {
         // A Blade file's symbol map is built from the preprocessed virtual
         // PHP, so every offset in it — including the subject's — indexes that
         // text rather than the template the caller handed us.
-        let virtual_php = self.blade_virtual_php(uri);
-        let content = virtual_php.as_deref().unwrap_or(content);
+        let virtual_php = self.blade_virtual_php_arc(uri);
+        let content = virtual_php.as_ref().map_or(content, |php| php.as_str());
 
         let (subject_text, is_static) = {
             let maps = self.symbol_maps.read();
@@ -1007,12 +1091,10 @@ impl Backend {
             // The subject is stored as a range into the text the map was
             // built from, so a map built from older text would slice the
             // wrong bytes (or none at all).
-            if !map.matches_source(content) {
-                return None;
-            }
+            let source = map.source(content)?;
             let subject = map.gate_subject(span_start)?;
             (
-                subject.subject_text.as_str(content).to_string(),
+                subject.subject_text.as_str(source).to_string(),
                 subject.is_static,
             )
         };
@@ -1047,10 +1129,6 @@ impl Backend {
 
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
-
-/// How long to wait for a client to acknowledge a diagnostic refresh
-/// before giving up on it.
-const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Backend {
     /// Deliver diagnostics for a single file.
@@ -1088,11 +1166,10 @@ impl Backend {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = content.to_string();
-            crate::server::run_blocking_cancel_safe(move || {
+            crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_fast_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_fast_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1121,7 +1198,7 @@ impl Backend {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = content.to_string();
-            crate::server::run_blocking_cancel_safe(move || {
+            crate::server::run_blocking_cancel_safe("slow diagnostics", move || {
                 // The resolved-class cache guard contains a thread-local raw
                 // pointer; activate it on this blocking thread for the
                 // duration of the synchronous collection only.
@@ -1129,9 +1206,8 @@ impl Backend {
                     &backend.resolved_class_cache,
                 );
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_slow_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_slow_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1355,20 +1431,34 @@ impl Backend {
     /// directly.  LSP has no per-document refresh, so this invalidates
     /// the client's whole workspace result set: only call it when
     /// something actually changed (see [`Self::assemble_and_push`]).
+    ///
+    /// The refresh is signalled to a pump task rather than sent here.
+    /// `workspace/diagnostic/refresh` is a server-to-client *request*,
+    /// and tower-lsp panics the serve loop — killing the whole server —
+    /// if the client's response arrives after the future awaiting it was
+    /// dropped, so it must never be raced against a timeout or awaited
+    /// from anything cancellable.  The pump owns each request from send
+    /// to response; callers return immediately, a busy client parks
+    /// nothing but the pump itself, and signals landing while a refresh
+    /// is in flight coalesce into a single follow-up.
     pub(crate) async fn request_diagnostic_refresh(&self) {
         if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
             return;
         }
-        if let Some(client) = &self.client {
-            // A server-to-client request, so a client that is busy (or
-            // that never answers at all) would otherwise park this task
-            // indefinitely, and the background workspace pass awaits
-            // this as it streams results.  A refresh is best-effort
-            // (the editor re-pulls on its own schedule too), so timing
-            // out costs nothing.
-            let _ =
-                tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh()).await;
+        let Some(client) = &self.client else {
+            return;
+        };
+        if !self.diag.refresh_pump_started.swap(true, Ordering::AcqRel) {
+            let client = client.clone();
+            let notify = std::sync::Arc::clone(&self.diag.refresh_notify);
+            tokio::spawn(async move {
+                loop {
+                    notify.notified().await;
+                    let _ = client.workspace_diagnostic_refresh().await;
+                }
+            });
         }
+        self.diag.refresh_notify.notify_one();
     }
 
     /// Assemble a URI's diagnostics and ask the editor to re-pull when
@@ -1699,24 +1789,11 @@ impl Backend {
         // Always push empty diagnostics to clear any Phase 1 snapshot.
         client.publish_diagnostics(uri, Vec::new(), None).await;
 
-        if self.supports_pull_diagnostics.load(Ordering::Acquire) {
-            // Tell the editor to re-pull diagnostics.  We spawn this
-            // as a detached task instead of awaiting it because
-            // workspace_diagnostic_refresh is a server-to-client
-            // *request* that blocks until the client responds.  When
-            // the editor closes many files in a burst, each didClose
-            // handler would await a response while the client is busy
-            // sending more messages, deadlocking the tower-lsp
-            // service loop.  The detached task still gets the same cap
-            // as `request_diagnostic_refresh`, so a client that never
-            // answers leaves no task parked for the session.
-            let client = client.clone();
-            tokio::spawn(async move {
-                let _ =
-                    tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh())
-                        .await;
-            });
-        }
+        // Tell the editor to re-pull diagnostics.  Signalling the pump
+        // returns immediately, so a burst of didClose notifications
+        // cannot deadlock the service loop the way awaiting each
+        // response here would.
+        self.request_diagnostic_refresh().await;
 
         // Recompute the file's workspace diagnostics from disk so the
         // closed file's entry reflects the saved state (the startup

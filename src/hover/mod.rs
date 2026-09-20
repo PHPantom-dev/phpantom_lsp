@@ -196,9 +196,10 @@ impl Backend {
                     AccessKind::Arrow
                 };
 
+                let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         access_kind,
                         &rctx,
                     ),
@@ -551,6 +552,32 @@ impl Backend {
         }
     }
 
+    /// Where a Laravel string key resolves to, with the path shortened to
+    /// start at the `dir` segment its kind is filed under.
+    ///
+    /// `config/app.php` and `lang/en/messages.php` read better in a hover
+    /// than the absolute paths they sit at. A file outside that directory
+    /// keeps its path whole rather than being cut at a segment it does
+    /// not have.
+    fn resolved_key_location(
+        &self,
+        kind: &crate::symbol_map::LaravelStringKind,
+        key: &str,
+        uri: &str,
+        dir: &str,
+    ) -> Option<(Url, String)> {
+        let location =
+            crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri)
+                .into_iter()
+                .next()?;
+        let path = location.uri.path();
+        let short_path = match path.rsplit_once(&format!("/{dir}/")) {
+            Some((_, rest)) => format!("{dir}/{rest}"),
+            None => path.to_string(),
+        };
+        Some((location.uri, short_path))
+    }
+
     /// Build hover content for a Laravel string key (route name, config
     /// key, view name, or translation key).
     fn hover_laravel_string_key(
@@ -588,19 +615,9 @@ impl Backend {
                 ("Route", detail)
             }
             LaravelStringKind::Config => {
-                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
-                    self, kind, key, uri,
-                );
-                let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/config/")
-                        .next()
-                        .map(|p| format!("config/{}", p))
-                        .unwrap_or_else(|| path.to_string());
-                    format!("Defined in `{}`", short_path)
-                } else {
-                    "Config key".to_string()
+                let detail = match self.resolved_key_location(kind, key, uri, "config") {
+                    Some((_, short_path)) => format!("Defined in `{short_path}`"),
+                    None => "Config key".to_string(),
                 };
                 ("Config", detail)
             }
@@ -622,27 +639,19 @@ impl Backend {
                 ("View", detail)
             }
             LaravelStringKind::Trans => {
-                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
-                    self, kind, key, uri,
-                );
-                let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/lang/")
-                        .next()
-                        .map(|p| format!("lang/{}", p))
-                        .unwrap_or_else(|| path.to_string());
+                let detail = match self.resolved_key_location(kind, key, uri, "lang") {
                     // The line as written: a `:placeholder` is left in
                     // place, since what it stands for is decided by the
                     // call site rather than by the translation.
-                    match crate::virtual_members::laravel::trans_line(self, key, &loc.uri) {
-                        Some(line) => {
-                            format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
+                    Some((location, short_path)) => {
+                        match crate::virtual_members::laravel::trans_line(self, key, &location) {
+                            Some(line) => {
+                                format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
+                            }
+                            None => format!("Defined in `{short_path}`"),
                         }
-                        None => format!("Defined in `{}`", short_path),
                     }
-                } else {
-                    "Translation key".to_string()
+                    None => "Translation key".to_string(),
                 };
                 ("Trans", detail)
             }

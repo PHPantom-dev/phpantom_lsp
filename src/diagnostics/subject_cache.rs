@@ -62,7 +62,7 @@ pub(crate) struct SubjectCacheKey {
     /// separate cache entries.
     var_def_offset: u32,
     /// The innermost narrowing block containing the access for variable
-    /// subjects (excluding `$this`), or `0` for non-variable subjects.
+    /// subjects, or `0` for non-variable subjects.
     /// This ensures that accesses inside different instanceof-narrowing
     /// contexts (e.g. different if-bodies) get independent cache
     /// entries.  Without this, the first access caches a narrowed type
@@ -113,13 +113,14 @@ impl SubjectCacheKey {
             0
         };
 
-        // Narrowing discrimination applies to regular variables ($var)
-        // AND property chains on $this ($this->prop), because instanceof
-        // checks and assert() calls can narrow property types just like
-        // local variables.  Bare $this is excluded because its type
-        // never changes within a method.
-        let needs_narrowing_discriminator =
-            subject_text.starts_with('$') && subject_text != "$this";
+        // Narrowing discrimination applies to every variable subject:
+        // regular variables (`$var`), property chains (`$this->prop`), and
+        // bare `$this` itself.  `if ($this instanceof GenericObjectType)`
+        // narrows `$this` exactly as an `instanceof` on a parameter
+        // narrows that, so a cache entry shared across the branch
+        // boundary hands the branch the class the method was declared on
+        // and reports every subclass member missing.
+        let needs_narrowing_discriminator = subject_text.starts_with('$');
         let (narrowing_offset, assert_offset) = if needs_narrowing_discriminator {
             (
                 symbol_map.find_narrowing_block(access_offset),

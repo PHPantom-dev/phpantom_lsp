@@ -91,53 +91,6 @@ developer arrive before vendor matches, even within a single phase.
 
 ---
 
-## F5. Call hierarchy
-
-**Impact: Medium · Complexity: Medium**
-
-Implement `callHierarchy/incomingCalls` and
-`callHierarchy/outgoingCalls` to answer "who calls this function?" and
-"what does this function call?"
-
-### Incoming calls (who calls this)
-
-Given a function or method, find all call sites across the project.
-This is conceptually similar to Find References but filtered to call
-expressions and structured as a tree (each caller is itself a callable
-with a location).
-
-The existing Find References infrastructure
-(`find_references_in_file`, cross-file scanning) provides the core
-search. The call hierarchy handler wraps the results into
-`CallHierarchyIncomingCall` items, grouping by containing function.
-
-### Outgoing calls (what does this call)
-
-Given a function or method, walk its AST body and collect all call
-expressions (function calls, method calls, static calls, `new`
-expressions). Resolve each callee to its declaration location.
-
-This is a single-file AST walk with cross-file resolution for each
-callee, similar to what go-to-definition already does.
-
-### Prepare
-
-`callHierarchy/prepare` returns a `CallHierarchyItem` for the symbol
-at the cursor. This is straightforward: resolve the symbol, return its
-name, kind, URI, range, and selection range.
-
-### Dependencies
-
-Call hierarchy benefits significantly from a full project index.
-Without an index, incoming calls can only be found via the existing
-classmap + PSR-4 scan approach (same as Find References). Now that
-full background indexing is available, the lookup can become a
-simple index query instead of relying on the scan-based approach that
-Find References uses on its own.
-
-**References:**
-- Phpactor: call hierarchy via its references index.
-
 ## F7. Evaluatable expression support (DAP integration)
 
 **Impact: Low-Medium · Complexity: Low**
@@ -571,3 +524,82 @@ but is worth a quick re-check after the migration in case the newer
 
 **Where to look:** `src/server.rs` (`initialize`, `type_hierarchy_registration`),
 `src/type_hierarchy.rs`.
+
+---
+
+## F22. Merge a namespace onto one that shares a class name
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+Renaming `App\Internal` to an `App\Support` that already exists now
+merges: the files move into the existing directory one at a time
+instead of the source directory being renamed on top of the
+destination. Where the two namespaces declare the same class name
+(`App\Internal\Helper` and `App\Support\Helper` both exist), the whole
+rename is refused with a message naming the clash, because the merge
+has no well-defined answer for that name — see
+`namespace_merge_conflict` in `src/rename/namespace.rs`.
+
+Refusing is the safe answer, not the desirable one: a user merging
+twenty files should not be blocked by one clash. What is missing is a
+partial merge that moves everything except the clashing names and
+leaves those behind *intact*. "Intact" is the hard part and the reason
+this is deferred rather than done:
+
+- The clashing class's file must keep its own `namespace` declaration,
+  so that file's namespace-declaration edit has to be suppressed while
+  its siblings' are kept. Today the namespace rename rewrites by
+  string prefix over raw text with no per-class granularity.
+- Every reference to the clashing FQN (`use App\Internal\Helper;`,
+  `\App\Internal\Helper`, and unqualified `Helper` inside the old
+  namespace) must be left pointing at the old name. Rewriting them is
+  what makes a naive partial merge worse than a refusal: the reference
+  silently resolves to the *other* class.
+- A file holding both a clashing class and a non-clashing one cannot
+  half-move, so it has to be reported as a clash too.
+- The classes that do move out of the old namespace stop being
+  namespace-siblings of the ones left behind, so the files left behind
+  need `use` imports added for them — the same rule
+  `build_class_move_edit` already applies for a single class move.
+
+The refusal message should then list only the names that could not
+move, and the response should still carry the edits for everything
+that could.
+
+**Where to look:** `src/rename/namespace.rs`
+(`namespace_merge_conflict`, `build_namespace_prefix_rename_edit`,
+`collect_merge_move_ops`), `src/rename/class.rs` (the import-adding
+rule to mirror).
+
+## F23. Rename a class through its YAML/XML occurrences
+
+**Impact: Medium · Complexity: Medium**
+
+A fully-qualified class name in a YAML or XML file is found by Find
+References and counted by the declaration CodeLens, but rename leaves
+it alone: `find_references_inner` drops resource locations in
+`ReferenceSearchMode::Rename`. Renaming the class therefore leaves the
+config pointing at a name that no longer exists, and `move` reports the
+leftover through its residual scan rather than fixing it.
+
+The blocker is that the text at such an occurrence is not always the
+PHP spelling of the name. A YAML double-quoted scalar writes
+`"App\\Handler\\Run"`, so the span covers doubled separators; an XML
+attribute may carry entity references. Rename plans a single
+replacement string per location and verifies each range spells a whole
+PHP name token before emitting anything, so an escaped occurrence both
+fails verification (dropping the *entire* rename, including its PHP
+edits, which is what the current exclusion prevents) and would be
+rewritten with single separators, corrupting the document's quoting.
+
+What is needed is a per-occurrence replacement: the scanner already
+knows the raw text it normalised, so it can record how the name was
+escaped and let the rename re-escape the replacement the same way,
+with verification asking for "a name token in this document's
+escaping" rather than a bare PHP one.
+
+**Where to look:** `src/resource_navigation.rs` (`scan_symbols`,
+`normalize_fqn`), `src/references/dispatch.rs`
+(`find_references_inner`), `src/rename/validate.rs`
+(`Expected`, `is_name_token`), `src/rename/class.rs`
+(`build_class_move_edit`).

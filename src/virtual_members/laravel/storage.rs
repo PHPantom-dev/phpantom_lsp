@@ -392,6 +392,62 @@ impl LaravelStorageDriverIndex {
     }
 }
 
+// ─── Storage facade name resolution ─────────────────────────────────────────
+
+/// The local names Laravel's `Storage` facade answers to in a file.
+///
+/// Resolution is textual because the same question has to be answered for the
+/// mid-edit buffer completion runs on and for the parsed file the symbol map
+/// walks; an AST is only available on one of those. The result is a short list
+/// (usually one name), so callers hold on to it for the file rather than
+/// re-scanning per call site.
+///
+/// A file with no `namespace` declaration reaches the facade through Laravel's
+/// global class alias, so the bare short name counts there unless another
+/// import has taken it.
+pub(crate) fn storage_facade_local_names(content: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut short_name_taken = false;
+
+    crate::text_scan::for_each_class_import(content, &mut |imported, local| {
+        if imported.eq_ignore_ascii_case(STORAGE_FACADE_FQN) {
+            names.push(local.to_string());
+        } else if local.eq_ignore_ascii_case("Storage") {
+            short_name_taken = true;
+        }
+    });
+
+    if !short_name_taken
+        && !names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("Storage"))
+        && !crate::text_scan::source_declares_namespace(content)
+    {
+        names.push("Storage".to_string());
+    }
+    names
+}
+
+/// Whether a written class name is Laravel's `Storage` facade, given the
+/// local names [`storage_facade_local_names`] found for the file.
+pub(crate) fn is_storage_facade_name(class_name: &str, local_names: &[String]) -> bool {
+    let is_root_qualified = class_name.starts_with('\\');
+    let class_name = class_name.trim_start_matches('\\');
+    if class_name.eq_ignore_ascii_case(STORAGE_FACADE_FQN) {
+        return true;
+    }
+    if class_name.contains('\\') {
+        return false;
+    }
+    if is_root_qualified {
+        // `\Storage` names the global alias whatever the file imports.
+        return class_name.eq_ignore_ascii_case("Storage");
+    }
+    local_names
+        .iter()
+        .any(|local| local.eq_ignore_ascii_case(class_name))
+}
+
 #[cfg(test)]
 #[path = "storage_tests.rs"]
 mod tests;
