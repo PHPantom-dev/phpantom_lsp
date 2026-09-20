@@ -863,3 +863,34 @@ fn relation_chain_details_keep_the_terminal_declaring_model() {
         );
     }
 }
+
+#[test]
+fn relation_chain_instantiates_generic_related_models() {
+    let mut owner = make_class("Owner");
+    owner.methods.push(Arc::new(make_method(
+        "holder",
+        Some("HasOne<Holder<Item>, $this>"),
+    )));
+    let mut holder = make_class("Holder");
+    holder.template_params = vec!["TItem".into()];
+    holder
+        .methods
+        .push(Arc::new(make_method("item", Some("HasOne<TItem, $this>"))));
+    let classes = [
+        Arc::new(owner),
+        Arc::new(holder),
+        Arc::new(make_class("Item")),
+    ];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    let relation =
+        resolve_relation_chain_details(&classes[0], "holder", &loader, Some(&cache)).unwrap();
+    assert_eq!(
+        relation.models[0].get_method("item").unwrap().return_type,
+        Some(PhpType::parse("HasOne<Item, $this>"))
+    );
+    assert_eq!(
+        resolve_relation_chain(&classes[0], "holder.item", &loader, Some(&cache)).as_deref(),
+        Some("Item")
+    );
+}

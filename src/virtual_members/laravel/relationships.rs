@@ -642,8 +642,8 @@ fn walk_relation_chain<T>(
     // substituted members, so it is read as given rather than resolved again.
     let mut current = vec![crate::inheritance::ClassRef::Borrowed(model)];
     let mut segments = chain.split('.').peekable();
-    while let Some(segment) = segments.next() {
-        let segment = segment.trim();
+    loop {
+        let segment = segments.next()?.trim();
         if segment.is_empty() {
             return None;
         }
@@ -683,8 +683,6 @@ fn walk_relation_chain<T>(
             .map(crate::inheritance::ClassRef::Owned)
             .collect();
     }
-
-    None
 }
 
 /// Call `visit` with each relationship a return type names: the type
