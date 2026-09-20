@@ -247,32 +247,6 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L56. Preserve custom builders in relation callbacks
-
-**Impact: Medium · Complexity: Medium-High**
-
-Two sides of the relation override discard custom-builder context:
-
-- `Team::query()->whereHas('stocks.warehouse', …)` fails to identify the
-  receiver's model when `Team` uses `TeamBuilder`. The callback in the
-  assertion fixture becomes `Builder<string>` instead of
-  `Builder<Warehouse>`.
-- `Stock::whereHas('team', …)` resolves the related model but always builds
-  `Builder<Team>`, losing `TeamBuilder` and its custom methods. An explicit
-  bare `Builder` parameter has the same problem.
-
-**Reproducer:** The custom-builder callback assertions in `relations()`
-in `tests/phpstan_nsrt/laravel-builder-relations.php`. Expected types follow
-[Larastan's relation callback assertions](https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/tests/Type/data/relationship-query-callbacks.php).
-
-**Where to change:** `find_model_from_receivers` and
-`try_relation_query_override` in
-`type_engine/variable/closure_resolution.rs`, using the receiver's resolved
-generic context and the existing custom-builder metadata/selection. Keep
-this in the shared callable inference path so completion, hover, and
-diagnostics agree. Refining a bare `Builder` hint to its custom subclass
-must preserve the inferred generic arguments too.
-
 #### L57. Bind named relation callback arguments before inference
 
 **Impact: Medium · Complexity: Medium**

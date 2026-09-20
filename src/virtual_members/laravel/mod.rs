@@ -232,6 +232,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use builder::build_builder_forwarded_methods;
+pub(crate) use builder::model_builder_type;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;

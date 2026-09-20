@@ -232,6 +232,18 @@ check(
     $callbackModels === [\App\Models\BlogPost::class]
 );
 
+$relatedBuilders = [];
+\App\Models\Bakery::whereHas('baguettes', function (\Illuminate\Database\Eloquent\Builder $query) use (&$relatedBuilders) {
+    $relatedBuilders[] = get_class($query->stale());
+});
+\App\Models\Bakery::query()->whereHas('headBaker', function ($query) use (&$relatedBuilders) {
+    $relatedBuilders[] = get_class($query->active());
+});
+check(
+    'Relation constraints select each related model custom builder',
+    $relatedBuilders === [\App\Models\LoafBuilder::class, \App\Models\BakerBuilder::class]
+);
+
 $callbackModels = [];
 \App\Models\BlogAuthor::has('posts.author', '>=', 1, 'and', function ($query) use (&$callbackModels) {
     $callbackModels[] = get_class($query->active()->getModel());

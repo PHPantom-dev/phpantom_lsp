@@ -22,6 +22,47 @@ use crate::virtual_members::ResolvedClassCache;
 
 use super::ELOQUENT_BUILDER_FQN;
 
+/// Select a model's builder using the same inherited configuration as
+/// static forwarding. Missing custom classes fall back to Eloquent's builder.
+fn model_builder_class(
+    model: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Arc<ClassInfo>> {
+    let mut current = crate::inheritance::ClassRef::Borrowed(model);
+    for _ in 0..MAX_INHERITANCE_DEPTH {
+        if let Some(name) = current
+            .laravel()
+            .and_then(|metadata| metadata.custom_builder.as_ref())
+            .and_then(PhpType::base_name)
+        {
+            return class_loader(name).or_else(|| class_loader(ELOQUENT_BUILDER_FQN));
+        }
+        let Some(parent) = current
+            .parent_class
+            .as_ref()
+            .and_then(|name| class_loader(name))
+        else {
+            break;
+        };
+        current = crate::inheritance::ClassRef::Owned(parent);
+    }
+    class_loader(ELOQUENT_BUILDER_FQN)
+}
+
+/// The concrete query type constructed for a model, including custom builders
+/// that do not declare their own template parameter.
+pub(crate) fn model_builder_type(
+    model: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    let builder = model_builder_class(model, class_loader);
+    let name = builder.as_ref().map_or_else(
+        || crate::atom::atom(ELOQUENT_BUILDER_FQN),
+        |builder| builder.fqn(),
+    );
+    PhpType::generic_atom(name, vec![PhpType::named(model.fqn())])
+}
+
 /// Build static virtual methods by forwarding Eloquent Builder's public
 /// instance methods onto the model class. See the module docs for the
 /// return-type mapping.
@@ -30,39 +71,10 @@ pub(super) fn build_builder_forwarded_methods(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
-    // Walk the parent chain to find a custom builder definition.
-    // Laravel's #[UseEloquentBuilder] and HasBuilder are effectively inherited.
-    let mut requested_builder_fqn = ELOQUENT_BUILDER_FQN.to_string();
-    let mut current = Some(class.clone());
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        let Some(curr) = current else { break };
-        if let Some(name) = curr
-            .laravel()
-            .and_then(|l| l.custom_builder.as_ref())
-            .and_then(|b| b.base_name())
-        {
-            requested_builder_fqn = name.to_string();
-            break;
-        }
-        current = curr
-            .parent_class
-            .as_ref()
-            .and_then(|p| class_loader(p))
-            .map(Arc::unwrap_or_clone);
-    }
-
-    // Load the Eloquent Builder class (or custom builder).
-    let (builder_class, builder_fqn) = match class_loader(&requested_builder_fqn) {
-        Some(c) => (c, requested_builder_fqn),
-        // Fallback to standard builder if custom builder fails to load.
-        None if requested_builder_fqn != ELOQUENT_BUILDER_FQN => {
-            match class_loader(ELOQUENT_BUILDER_FQN) {
-                Some(c) => (c, ELOQUENT_BUILDER_FQN.to_string()),
-                None => return Vec::new(),
-            }
-        }
-        None => return Vec::new(),
+    let Some(builder_class) = model_builder_class(class, class_loader) else {
+        return Vec::new();
     };
+    let builder_fqn = builder_class.fqn();
 
     // Fully resolve Builder (own + traits + parents + virtual members
     // including @mixin Query\Builder).  This is safe because Builder
@@ -82,7 +94,7 @@ pub(super) fn build_builder_forwarded_methods(
 
     // Build a substitution map: TModel → concrete model class name,
     // and static/$this/self → Builder<ConcreteModel>.
-    let builder_self_type = PhpType::generic(&builder_fqn, vec![PhpType::named(class.fqn())]);
+    let builder_self_type = PhpType::generic(builder_fqn, vec![PhpType::named(class.fqn())]);
     let mut subs = super::self_ref_subs(builder_self_type.clone());
     insert_builder_template_substitutions(
         &mut subs,

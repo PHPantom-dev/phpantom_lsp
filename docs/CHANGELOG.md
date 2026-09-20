@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Relation callbacks retain custom builders.** Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare `Builder` parameter hints. Contributed by @shuvroroy.
 - **Model instance queries keep custom builders.** Starting a query with `newQuery()`, `newModelQuery()`, or `newQueryWithoutScopes()` now retains the model’s custom builder and its model type through subsequent calls. Contributed by @shuvroroy.
 - **Hover, completion, go-to-definition, signature help, and inlay hints parse the document once per request.** The type engine reads the syntax tree from several places while resolving an expression, and only diagnostics and code actions were sharing one parse between them; every other request re-parsed the whole file once per resolution step, which on a large file made a hover noticeably slower than the diagnostics for the same line.
 - **A Blade template deleted or renamed on disk no longer keeps its lowered PHP in memory.** The template's generated PHP and source map were only released when the editor closed the file, so a template removed by a rename or a branch switch stayed resident for the rest of the session and kept being visited by every Blade refresh pass.

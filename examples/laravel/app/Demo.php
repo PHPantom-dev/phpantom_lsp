@@ -27,6 +27,7 @@ use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
@@ -480,6 +481,12 @@ class Demo
         // has() takes its callback in the fifth argument; arrow functions
         // receive the final related model's builder too.
         BlogAuthor::has('posts.author', '>=', 1, 'and', fn ($q) => $q->active()); // → Builder<BlogAuthor>
+
+        // The related model chooses the builder, including with a bare hint.
+        Bakery::whereHas('baguettes', function (Builder $q) {
+            $q->stale();                     // → LoafBuilder<Loaf>
+        });
+        Bakery::query()->whereHas('headBaker', fn ($q) => $q->active()); // → BakerBuilder<Baker>
     }
 
 

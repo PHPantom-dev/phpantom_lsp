@@ -14826,6 +14826,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 class Team extends Model {
+    public function newEloquentBuilder($query): TeamBuilder { return new TeamBuilder(); }
     /** @return HasMany<Stock, $this> */
     public function stocks(): HasMany {}
     public function scopeTeamOnly(Builder $query): void {}
@@ -14843,6 +14844,7 @@ class Stock extends Model {
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
 class Warehouse extends Model {
+    public function newEloquentBuilder($query): WarehouseBuilder { return new WarehouseBuilder(); }
     public function scopeWarehouseOnly(Builder $query): void {}
     public function warehouseName(): string { return ''; }
 }"#;
@@ -14850,6 +14852,23 @@ class Warehouse extends Model {
         ("src/Models/Team.php", model),
         ("src/Models/Stock.php", stock),
         ("src/Models/Warehouse.php", warehouse),
+        (
+            "src/Models/TeamBuilder.php",
+            r#"<?php namespace App\Models;
+class TeamBuilder extends \Illuminate\Database\Eloquent\Builder {}"#,
+        ),
+        (
+            "src/Models/WarehouseBuilder.php",
+            r#"<?php namespace App\Models;
+/**
+ * @template TModel of \Illuminate\Database\Eloquent\Model
+ * @extends \Illuminate\Database\Eloquent\Builder<TModel>
+ */
+class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
+    /** @return $this */
+    public function warehouseCustom() { return $this; }
+}"#,
+        ),
     ]);
     for call in [
         "Team::whereHas('stocks.warehouse', function ($q) { BODY });",
@@ -14857,6 +14876,7 @@ class Warehouse extends Model {
         "Team::has('stocks.warehouse', '>=', 1, 'and', function ($q) { BODY });",
         "Team::has('stocks.warehouse', '>=', 1, 'and', fn ($q) => BODY);",
         "Stock::query()->whereHas('warehouse', function ($q) { BODY });",
+        "Team::query()->where('id', 1)->whereHas('stocks.warehouse', function ($q) { BODY });",
         "Team::whereHas('stocks.warehouse', function (Builder $q) { BODY });",
     ] {
         let header = "<?php namespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Builder;\n";
@@ -14873,6 +14893,7 @@ class Warehouse extends Model {
         .await;
         let methods = method_names(&items);
         assert!(methods.contains(&"warehouseOnly"), "{call}: {methods:?}");
+        assert!(methods.contains(&"warehouseCustom"), "{call}: {methods:?}");
         assert!(
             !methods.contains(&"stockOnly"),
             "{call}: intermediate model leaked"
@@ -14880,9 +14901,9 @@ class Warehouse extends Model {
         assert!(!methods.contains(&"teamOnly"), "{call}: outer model leaked");
 
         let body = if call.contains("fn (") {
-            "$q->warehouseOnly()->firstOrFail()->warehouseName()"
+            "$q->warehouseCustom()->warehouseOnly()->firstOrFail()->warehouseName()"
         } else {
-            "$q->warehouseOnly()->firstOrFail()->warehouseName();"
+            "$q->warehouseCustom()->warehouseOnly()->firstOrFail()->warehouseName();"
         };
         let content = format!("{header}{}", call.replace("BODY", body));
         let uri = Url::from_file_path(dir.path().join("audit.php")).unwrap();
