@@ -15983,3 +15983,37 @@ namespace BuilderRelationAudit {{
         }
     }
 }
+
+#[tokio::test]
+async fn test_dynamic_callback_calls_preserve_explicit_parameter_types() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///dynamic-callbacks.php").unwrap();
+    for call in [
+        "$callable(function (Item $item) { BODY });",
+        "$object->{$method}(function (Item $item) { BODY });",
+        "$object?->{$method}(function (Item $item) { BODY });",
+        "Item::{$method}(function (Item $item) { BODY });",
+    ] {
+        let source = format!(
+            "<?php class Item {{ public function label(): string {{ return ''; }} }}\nfunction run(object $object, callable $callable, string $method): void {{ {call} }}"
+        );
+        let content = source.replace("BODY", "$item->");
+        let position = crate::common::position_after(&content, "$item->");
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        assert!(method_names(&items).contains(&"label"), "{call}: {items:?}");
+        for (body, errors) in [("$item->label();", 0), ("$item->missing();", 1)] {
+            let content = source.replace("BODY", body);
+            let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+                &backend,
+                uri.as_str(),
+                &content,
+            );
+            assert_eq!(diagnostics.len(), errors, "{call}: {diagnostics:?}");
+            if errors != 0 {
+                assert!(diagnostics[0].message.contains("missing"));
+            }
+        }
+    }
+}

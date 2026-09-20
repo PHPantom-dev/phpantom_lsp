@@ -153,3 +153,76 @@ fn ancestor_name_matches(actual: &str, target: &str) -> bool {
         crate::util::short_name(actual).eq_ignore_ascii_case(target)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::atom::atom;
+    use crate::test_fixtures::{make_class, no_loader};
+
+    #[test]
+    fn projection_combines_union_bindings_and_ignores_non_classes() {
+        for (input, expected) in [
+            ("Container<Left>|Container<Right>|int", Some("Left|Right")),
+            ("int|string", None),
+            ("array{item: Container<Left>}", None),
+        ] {
+            assert_eq!(
+                extract_generic_arg_from_ancestor(
+                    &PhpType::parse(input),
+                    "Container",
+                    0,
+                    &no_loader
+                ),
+                expected.map(PhpType::parse),
+                "{input}",
+            );
+        }
+        assert!(
+            extract_generic_arg_from_ancestor(
+                &PhpType::parse("Container<Left>"),
+                "Container",
+                1,
+                &no_loader
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn projection_survives_missing_ancestors_and_cycles() {
+        let mut first = make_class("First");
+        first.parent_class = Some(atom("Second"));
+        first.interfaces = vec![atom("Missing"), atom("Values")];
+        let mut second = make_class("Second");
+        second.parent_class = Some(atom("First"));
+        let mut values = make_class("Values");
+        values.extends_generics = vec![("Container".into(), vec![PhpType::parse("Item")])];
+        let classes = [Arc::new(first), Arc::new(second), Arc::new(values)];
+        let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+        assert_eq!(
+            extract_generic_arg_from_ancestor(&PhpType::parse("First"), "Container", 0, &loader),
+            Some(PhpType::parse("Item")),
+        );
+        assert!(
+            extract_generic_arg_from_ancestor(&PhpType::parse("First"), "Unknown", 0, &loader)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn projection_bounds_deep_ancestry() {
+        let classes: Vec<_> = (0..=MAX_ANCESTOR_GENERIC_DEPTH + 2)
+            .map(|index| {
+                let mut class = make_class(&format!("Level{index}"));
+                class.parent_class = Some(atom(&format!("Level{}", index + 1)));
+                Arc::new(class)
+            })
+            .collect();
+        let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+        assert!(
+            extract_generic_arg_from_ancestor(&PhpType::parse("Level0"), "Container", 0, &loader)
+                .is_none()
+        );
+    }
+}

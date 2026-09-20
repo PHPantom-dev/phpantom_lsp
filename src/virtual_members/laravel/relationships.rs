@@ -534,8 +534,8 @@ pub(crate) fn resolve_relation_chain_details(
 ) -> Option<ResolvedRelation> {
     let mut segments = chain.split('.').peekable();
     let mut current = vec![crate::inheritance::ClassRef::Borrowed(model)];
-    while let Some(segment) = segments.next() {
-        let segment = segment.trim();
+    loop {
+        let segment = segments.next()?.trim();
         if segment.is_empty() {
             return None;
         }
@@ -578,7 +578,6 @@ pub(crate) fn resolve_relation_chain_details(
             .map(crate::inheritance::ClassRef::Owned)
             .collect();
     }
-    None
 }
 
 fn collect_relation_models(

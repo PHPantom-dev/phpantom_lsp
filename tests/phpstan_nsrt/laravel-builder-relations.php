@@ -523,6 +523,11 @@ namespace BuilderRelationAudit {
     }
 
     function eagerRelations(): void {
+        Stock::query()->with(['team' => function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
+        }], function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $query);
+        });
         Team::withWhereHas('stocks', function ($query) {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $query);
         });
@@ -617,6 +622,13 @@ namespace BuilderRelationAudit {
     }
 
     function morphs(): void {
+        Comment::whereHasMorph('missing', '*', function ($query, $type) {
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
+            assertType('string', $type);
+        });
+        Comment::whereHasMorph('missing', Team::class, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
         Comment::whereHasMorph('commentable', Warehouse::class, function ($query, $type) {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
             assertType('string', $type);
@@ -762,7 +774,7 @@ namespace BuilderRelationAudit {
     }
 
     function nestedEagerClosure(): void {
-        Stock::with(['team' => function ($related) {
+        Stock::with(['warehouse', 'team' => function ($related) {
             assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $related);
         }]);
     }
@@ -860,6 +872,15 @@ namespace BuilderRelationAudit {
         SpecialStock::with(['custom' => function ($q) {
             assertType('BuilderRelationAudit\ReorderedRelation<BuilderRelationAudit\SpecialStock, BuilderRelationAudit\Team>', $q);
         }]);
+        Team::with(['stocks' => [$name => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $q);
+        }]]);
+        Stock::with([$name => ['stocks' => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $q);
+        }]]);
+        Stock::with([$unknown => ['stocks' => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $q);
+        }]]);
     }
 }
 

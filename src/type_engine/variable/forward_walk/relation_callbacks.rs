@@ -209,10 +209,10 @@ pub(crate) fn eager_callback_arguments<'a>(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<EagerCallbackArgument<'a>>> {
-    let (selector, arguments) = match call {
-        Call::Method(call) => (&call.method, &call.argument_list),
-        Call::NullSafeMethod(call) => (&call.method, &call.argument_list),
-        Call::StaticMethod(call) => (&call.method, &call.argument_list),
+    let (selector, arguments, receiver, is_static) = match call {
+        Call::Method(call) => (&call.method, &call.argument_list, call.object, false),
+        Call::NullSafeMethod(call) => (&call.method, &call.argument_list, call.object, false),
+        Call::StaticMethod(call) => (&call.method, &call.argument_list, call.class, true),
         _ => return None,
     };
     let ClassLikeMemberSelector::Identifier(name) = selector else {
@@ -238,36 +238,24 @@ pub(crate) fn eager_callback_arguments<'a>(
         Some(scope.proofs()),
     );
     let rctx = var_ctx.as_resolution_ctx();
-    let receivers = match call {
-        Call::Method(call) => {
-            let span = call.object.span();
-            super::super::closure_resolution::resolve_receiver_types(
-                span.start.offset,
-                span.end.offset,
-                &rctx,
-            )
-        }
-        Call::NullSafeMethod(call) => {
-            let span = call.object.span();
-            super::super::closure_resolution::resolve_receiver_types(
-                span.start.offset,
-                span.end.offset,
-                &rctx,
-            )
-        }
-        Call::StaticMethod(call) => {
-            let name = super::super::closure_resolution::static_receiver_class_name(
-                call.class,
-                Some(ctx.current_class),
-            )?;
-            let owner = super::super::closure_resolution::find_owner_by_name(
-                &name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )?;
-            vec![ResolvedType::from_class(owner)]
-        }
-        _ => return None,
+    let receivers = if is_static {
+        let name = super::super::closure_resolution::static_receiver_class_name(
+            receiver,
+            Some(ctx.current_class),
+        )?;
+        let owner = super::super::closure_resolution::find_owner_by_name(
+            &name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )?;
+        vec![ResolvedType::from_class(owner)]
+    } else {
+        let span = receiver.span();
+        super::super::closure_resolution::resolve_receiver_types(
+            span.start.offset,
+            span.end.offset,
+            &rctx,
+        )
     };
     let receivers: Vec<_> = receivers
         .into_iter()
@@ -410,3 +398,7 @@ fn join_relation_path(prefix: Option<&PhpType>, key: &PhpType) -> PhpType {
         _ => PhpType::named(atom("string")),
     }
 }
+
+#[cfg(test)]
+#[path = "relation_callbacks_tests.rs"]
+mod tests;

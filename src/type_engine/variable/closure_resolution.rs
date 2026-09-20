@@ -1173,3 +1173,7 @@ pub(in crate::type_engine) fn inferred_type_is_more_specific_pub(
 ) -> bool {
     inferred_type_is_more_specific(explicit_hint, inferred, class_loader)
 }
+
+#[cfg(test)]
+#[path = "closure_resolution_tests.rs"]
+mod tests;
