@@ -163,6 +163,38 @@ namespace Illuminate\Database\Eloquent {
          * @return $this
          */
         public function orWhereDoesntHaveMorph($relation, $types, ?\Closure $callback = null) { return $this; }
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\MorphTo<TRelatedModel, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function whereMorphRelation($relation, $types, $column, $operator = null, $value = null) { return $this; }
+
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\MorphTo<TRelatedModel, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function orWhereMorphRelation($relation, $types, $column, $operator = null, $value = null) { return $this; }
+
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\MorphTo<TRelatedModel, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function whereMorphDoesntHaveRelation($relation, $types, $column, $operator = null, $value = null) { return $this; }
+
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\MorphTo<TRelatedModel, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function orWhereMorphDoesntHaveRelation($relation, $types, $column, $operator = null, $value = null) { return $this; }
+
     }
 }
 
@@ -378,48 +410,102 @@ namespace BuilderRelationAudit {
         assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', Team::withWhereHas('stocks', null));
     }
 
+    /**
+     * @param class-string<Team> $teamClass
+     * @param list<class-string<Team|Warehouse>> $classes
+     * @param list<string> $unknownClasses
+     */
+    function morphCandidates(string $teamClass, array $classes, array $unknownClasses, string $unknown): void {
+        Comment::whereHasMorph('commentable', $teamClass, function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Comment::whereHasMorph('commentable', $classes, function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
+        Comment::whereHasMorph('commentable', [Team::class, $unknown], function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
+        });
+        TeamComment::whereHasMorph('commentable', $unknownClasses, function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Comment::whereHasMorph('commentable', [Warehouse::class, Warehouse::class], function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
+        Comment::whereHasMorph('commentable', UnrelatedQuery::class, function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
+        });
+        Comment::whereHasMorph('commentable', PlainTeam::class, function (Builder $query) {
+            assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', $query);
+        });
+        Comment::whereHasMorph('commentable', 'BuilderRelationAudit\\Team', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Comment::whereHasMorph('commentable', MissingModel::class, function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
+        });
+        $assigned = Team::class;
+        Comment::whereHasMorph('commentable', $assigned, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Comment::whereHasMorph('commentable', Team::class, function (Warehouse $query) {
+            assertType('BuilderRelationAudit\Warehouse', $query);
+        });
+        Comment::whereMorphRelation(column: function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        }, types: Team::class, relation: 'commentable');
+        Comment::orWhereMorphRelation(column: function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        }, types: Team::class, relation: 'commentable');
+        Comment::whereMorphDoesntHaveRelation(column: function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        }, types: Team::class, relation: 'commentable');
+        Comment::orWhereMorphDoesntHaveRelation(column: function (Builder $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        }, types: Team::class, relation: 'commentable');
+    }
+
     function morphs(): void {
         Comment::whereHasMorph('commentable', Warehouse::class, function ($query, $type) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
             assertType('string', $type);
         });
         Comment::whereHasMorph('commentable', [Team::class, Warehouse::class], function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
             assertType('string', $type);
         });
         Comment::query()->orWhereHasMorph('commentable', Team::class, function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
             assertType('string', $type);
         });
         Comment::hasMorph('commentable', Team::class, '>=', 1, 'and', function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
             assertType('string', $type);
         });
         Comment::doesntHaveMorph('commentable', Team::class, 'and', function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
             assertType('string', $type);
         });
         Comment::whereDoesntHaveMorph('commentable', Team::class, function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
             assertType('string', $type);
         });
         Comment::orWhereDoesntHaveMorph('commentable', Team::class, function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
             assertType('string', $type);
         });
         Comment::whereHasMorph(callback: function ($query, $type) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
             assertType('string', $type);
         }, relation: 'commentable', types: Team::class);
         Comment::whereHasMorph('commentable', '*', function ($query, $type) {
-            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
             assertType('string', $type);
         });
         Comment::whereHasMorph('commentable', [], function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
         });
         TeamComment::whereHasMorph('commentable', '*', function ($query) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
         });
         assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Comment>', Comment::whereHasMorph('commentable', [Team::class], null));
     }

@@ -286,6 +286,22 @@ check(
     ]
 );
 
+$morphCandidate = \App\Models\Loaf::class;
+foreach (['hasMorph', 'doesntHaveMorph', 'whereHasMorph', 'orWhereHasMorph', 'whereDoesntHaveMorph', 'orWhereDoesntHaveMorph'] as $method) {
+    $seen = [];
+    \App\Models\Review::$method(callback: function ($query, $type) use (&$seen) {
+        $seen[] = [get_class($query->stale()), $type];
+    }, types: $morphCandidate, relation: 'reviewable');
+    check("$method binds named candidates and preserves the custom builder", $seen === [[\App\Models\LoafBuilder::class, $morphCandidate]]);
+}
+foreach (['whereMorphRelation', 'orWhereMorphRelation', 'whereMorphDoesntHaveRelation', 'orWhereMorphDoesntHaveRelation'] as $method) {
+    $seen = [];
+    \App\Models\Review::$method(column: function ($query) use (&$seen) {
+        $seen[] = get_class($query->stale()->getModel());
+    }, types: $morphCandidate, relation: 'reviewable');
+    check("$method passes the candidate builder to its column closure", $seen === [$morphCandidate]);
+}
+
 // Model::fresh() on instance (non-existing model returns null)
 $result = $bakery->fresh();
 check(

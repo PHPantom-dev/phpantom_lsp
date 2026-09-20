@@ -14938,6 +14938,61 @@ class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
 }
 
 #[tokio::test]
+async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///morph-callbacks.php").unwrap();
+    for call in [
+        "Comment::whereHasMorph('commentable', Team::class, function ($morphQuery, $type) { BODY });",
+        "Comment::hasMorph('commentable', Team::class, '>=', 1, 'and', fn ($morphQuery, $type) => BODY);",
+        "Comment::doesntHaveMorph(callback: function ($morphQuery, $type) { BODY }, types: Team::class, relation: 'commentable');",
+        "Comment::query()->orWhereHasMorph('commentable', $candidate, fn ($morphQuery, $type) => BODY);",
+        "Comment::query()?->whereDoesntHaveMorph('commentable', [Team::class], function (Builder $morphQuery) { BODY });",
+        "Comment::orWhereDoesntHaveMorph('commentable', Team::class, fn ($morphQuery) => BODY);",
+        "Comment::whereMorphRelation(column: fn ($morphQuery) => BODY, relation: 'commentable', types: Team::class);",
+        "Comment::orWhereMorphRelation('commentable', Team::class, fn ($morphQuery) => BODY);",
+        "Comment::whereMorphDoesntHaveRelation('commentable', Team::class, function ($morphQuery) { BODY });",
+        "Comment::orWhereMorphDoesntHaveRelation('commentable', Team::class, fn ($morphQuery) => BODY);",
+        "TeamComment::whereHasMorph('commentable', '*', fn ($morphQuery) => BODY);",
+    ] {
+        let source = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; $candidate = Team::class; {call} }}"
+        );
+        let content = source.replace("BODY", "$morphQuery->");
+        let position = crate::common::position_after(&content, "$morphQuery->");
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"active"), "{call}: {methods:?}");
+        assert!(methods.contains(&"where"), "{call}: {methods:?}");
+        let body = if call.contains("fn (") {
+            "$morphQuery->active()->getModel()->stocks()"
+        } else {
+            "$morphQuery->active()->getModel()->stocks();"
+        };
+        let content = source.replace("BODY", body);
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+        let content = content.replace(
+            "getModel()->stocks()",
+            "getModel()->missingMorphModelMethod()",
+        );
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("missingMorphModelMethod"));
+    }
+}
+
+#[tokio::test]
 async fn test_where_has_closure_resolves_to_related_model() {
     // Brand::whereHas('orders', function ($q) { $q-> })
     //   => $q should be Builder<Order> (the related model), not Builder<Brand>.

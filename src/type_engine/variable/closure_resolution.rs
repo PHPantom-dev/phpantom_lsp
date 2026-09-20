@@ -22,8 +22,8 @@ use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::{
-    ELOQUENT_BUILDER_FQN, RELATION_QUERY_METHODS, extends_eloquent_model, model_builder_type,
-    resolve_relation_chain,
+    ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
+    model_builder_type, resolve_relation_chain,
 };
 
 thread_local! {
@@ -750,6 +750,11 @@ fn inferred_type_is_more_specific(
     inferred: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
+    if let TypeKind::Union(parts) = inferred.kind() {
+        return parts
+            .iter()
+            .all(|part| inferred_type_is_more_specific(explicit_hint, part, class_loader));
+    }
     // The explicit hint must be a bare name (no generic args).
     let explicit_base = match explicit_hint.kind() {
         TypeKind::Named(name) => name.as_str(),
@@ -819,6 +824,7 @@ fn try_relation_query_override(
     receivers: &[ResolvedType],
     method_name: &str,
     relation_name: Option<&str>,
+    candidates: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
     if !RELATION_QUERY_METHODS.contains(&method_name) {
@@ -835,13 +841,85 @@ fn try_relation_query_override(
     // `Builder<Model>` instance.
     let model = find_model_from_receivers(receivers, class_loader)?;
 
-    // Walk the dot-separated relation chain to find the final related model.
-    let related_fqn = resolve_relation_chain(&model, relation_name, class_loader, None)?;
+    let related = resolve_relation_chain(&model, relation_name, class_loader, None)
+        .and_then(|name| class_loader(&name));
+    if let Some(candidates) = candidates {
+        let fallback = related
+            .as_ref()
+            .map(|model| model_builder_type(model, class_loader))
+            .unwrap_or_else(|| {
+                PhpType::generic(
+                    ELOQUENT_BUILDER_FQN,
+                    vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
+                )
+            });
+        return Some(vec![morph_candidate_builders(
+            candidates,
+            &fallback,
+            class_loader,
+        )]);
+    }
+    Some(vec![model_builder_type(related.as_deref()?, class_loader)])
+}
 
-    let related = class_loader(&related_fqn)?;
-    let builder_type = model_builder_type(&related, class_loader);
+/// Map candidate class-strings through the same builder selector as model
+/// queries. Unknown candidates contribute the declared relation's fallback;
+/// they must not erase known candidates from a mixed array.
+fn morph_candidate_builders(
+    candidates: &PhpType,
+    fallback: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    match candidates.kind() {
+        TypeKind::Union(parts) => PhpType::union(
+            parts
+                .iter()
+                .map(|part| morph_candidate_builders(part, fallback, class_loader))
+                .collect(),
+        ),
+        TypeKind::ClassString(Some(model)) => morph_model_builders(model, fallback, class_loader),
+        TypeKind::Literal(value) => value
+            .string_content()
+            .and_then(|name| {
+                class_loader(&name).filter(|model| {
+                    model
+                        .fqn()
+                        .eq_ignore_ascii_case(name.trim_start_matches('\\'))
+                })
+            })
+            .filter(|model| {
+                model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
+            })
+            .map(|model| model_builder_type(&model, class_loader))
+            .unwrap_or_else(|| fallback.clone()),
+        _ => candidates
+            .iterable_element_type()
+            .map(|element| morph_candidate_builders(&element, fallback, class_loader))
+            .unwrap_or_else(|| fallback.clone()),
+    }
+}
 
-    Some(vec![builder_type])
+fn morph_model_builders(
+    model: &PhpType,
+    fallback: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    if let TypeKind::Union(parts) = model.kind() {
+        return PhpType::union(
+            parts
+                .iter()
+                .map(|part| morph_model_builders(part, fallback, class_loader))
+                .collect(),
+        );
+    }
+    model
+        .base_name()
+        .and_then(class_loader)
+        .filter(|model| {
+            model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
+        })
+        .map(|model| model_builder_type(&model, class_loader))
+        .unwrap_or_else(|| fallback.clone())
 }
 
 /// Build a `PhpType` representing the receiver class for `$this`/`static`
@@ -1010,9 +1088,16 @@ pub(in crate::type_engine) fn try_relation_query_override_pub(
     receivers: &[ResolvedType],
     method_name: &str,
     relation_name: Option<&str>,
+    candidates: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
-    try_relation_query_override(receivers, method_name, relation_name, class_loader)
+    try_relation_query_override(
+        receivers,
+        method_name,
+        relation_name,
+        candidates,
+        class_loader,
+    )
 }
 
 pub(in crate::type_engine) fn build_receiver_self_type_pub(

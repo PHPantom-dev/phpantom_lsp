@@ -106,9 +106,14 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
 
     // For relation-query methods (whereHas, etc.), override the closure
     // parameter type with Builder<RelatedModel>.
-    if let Some(override_params) =
-        infer_relation_callback_params(&resolved_types, method_name, arg_idx, argument_list, ctx)
-    {
+    if let Some(override_params) = infer_relation_callback_params(
+        &resolved_types,
+        method_name,
+        arg_idx,
+        argument_list,
+        scope,
+        ctx,
+    ) {
         return override_params;
     }
 
@@ -351,6 +356,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
             method_name,
             arg_idx,
             argument_list,
+            scope,
             ctx,
         ) {
             return override_params;
@@ -527,12 +533,13 @@ fn infer_relation_callback_params(
     method_name: &str,
     arg_idx: usize,
     argument_list: &ArgumentList<'_>,
+    scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<PhpType>> {
     if !crate::virtual_members::laravel::RELATION_QUERY_METHODS.contains(&method_name) {
         return None;
     }
-    let callback_name = if method_name == "whereRelation" {
+    let callback_name = if method_name.ends_with("Relation") {
         "column"
     } else {
         "callback"
@@ -571,12 +578,35 @@ fn infer_relation_callback_params(
         else {
             return None;
         };
-        return super::super::closure_resolution::try_relation_query_override_pub(
+        let candidates = if method_name.contains("Morph") {
+            let types = bound[param_index("types")?]?;
+            let scope_resolver =
+                |name: &str| scope.locals.get(&atom(name)).cloned().unwrap_or_default();
+            let var_ctx = ctx.var_ctx_for_with_scope(
+                "$__infer",
+                types.span().start.offset,
+                &scope_resolver,
+                Some(scope.proofs()),
+            );
+            Some(
+                super::super::resolution::resolve_arg_raw_type(types, &var_ctx)
+                    .unwrap_or_else(PhpType::mixed),
+            )
+        } else {
+            None
+        };
+        let mut inferred = super::super::closure_resolution::try_relation_query_override_pub(
             receivers,
             method_name,
             relation.value.map(bytes_to_str),
+            candidates.as_ref(),
             ctx.class_loader,
-        );
+        )?;
+        // Refine the query parameter without losing Laravel's second morph
+        // callback parameter (the candidate's class-string).
+        let declared = extract_callable_params_at_fw(&method.parameters, argument_list, arg_idx);
+        inferred.extend(declared.into_iter().skip(1));
+        return Some(inferred);
     }
     None
 }

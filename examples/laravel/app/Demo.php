@@ -490,6 +490,12 @@ class Demo
             $q->stale();                     // → LoafBuilder<Loaf>
         });
         Bakery::query()->whereHas('headBaker', fn ($q) => $q->active()); // → BakerBuilder<Baker>
+
+        // Morph candidates choose the callback builder and keep the type string.
+        Review::whereHasMorph('reviewable', Loaf::class, function (Builder $q, string $type) {
+            $q->stale();                     // → LoafBuilder<Loaf>
+            echo $type;                     // → string
+        });
     }
 
 
